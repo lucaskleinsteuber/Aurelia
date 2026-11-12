@@ -13,6 +13,12 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+### Added
+
+- Server, Mac, browser and Linux: screen time for children's profiles. Edit Profile › Screen Time sets a bedtime, a wake time and a daily limit for school nights (Sunday to Thursday) and the weekend. It also chooses whether only playback or the whole profile closes, and whether a playing title may finish (within a set number of minutes) or stops at once. The server decides in its own time zone and counts only time that actually played.
+- Server, Mac, browser and Linux: Today in Screen Time shows the time watched and offers +15, +30 or +60 minutes, No Bedtime Tonight and One More Episode, until the next wake time.
+- Mac, browser, Linux, Apple TV and iPhone & iPad: five minutes before the time, the player says it is the last episode and offers no Up Next. When time is up, a good-night screen shows the profile's name and when Aurelia opens again, instead of the next episode or an error. "Who's watching?" shows a closed profile with a moon and "Good night · back at 07:00".
+
 ## [Linux app 2.4.0 (29), Apple TV 2.4.0 (39) and iPhone & iPad 2.7.0 (23)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/linux-app-2.4.0-29) - 12.11.2026
 
 ### Added

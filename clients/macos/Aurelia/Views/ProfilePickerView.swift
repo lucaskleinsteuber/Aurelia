@@ -86,8 +86,11 @@ struct ProfilePickerView: View {
             startUnlock(profile, submittedPIN: "")
           }
         } label: {
+          let asleep = ScreenTimeText.closedLabel(profile.closedUntil)
           VStack(spacing: 12) {
             ProfileAvatar(profile: profile)
+              .opacity(asleep == nil ? 1 : 0.45)
+              .saturation(asleep == nil ? 1 : 0.4)
             HStack(spacing: 5) {
               Text(profile.name).font(.headline).lineLimit(2)
                 .multilineTextAlignment(.center)
@@ -101,6 +104,10 @@ struct ProfilePickerView: View {
             if profile.needsPinSetup {
               Text("Set up PIN").font(.caption).foregroundStyle(.secondary)
             }
+            // Screen time closes a children's profile until its wake time.
+            if let asleep {
+              Label(asleep, systemImage: "moon.fill").font(.caption).foregroundStyle(.secondary)
+            }
           }
           .frame(width: CenteredProfileLayout.entryWidth)
           .frame(maxHeight: .infinity, alignment: .top)
@@ -108,11 +115,12 @@ struct ProfilePickerView: View {
           .aureliaRiseIn(index + 1)
         }
         .buttonStyle(ProfileAvatarButtonStyle())
-        .disabled(profile.needsPinSetup || isSubmitting)
+        .disabled(profile.needsPinSetup || profile.closedUntil != nil || isSubmitting)
         .accessibilityLabel(profile.name)
         .accessibilityValue(
-          profile.needsPinSetup
-            ? "PIN setup required" : (profile.pinProtectionEnabled ? "PIN protected" : "No PIN")
+          ScreenTimeText.closedLabel(profile.closedUntil)
+            ?? (profile.needsPinSetup
+              ? "PIN setup required" : (profile.pinProtectionEnabled ? "PIN protected" : "No PIN"))
         )
         .accessibilityIdentifier("watching-profile-\(profile.id.uuidString)")
       }

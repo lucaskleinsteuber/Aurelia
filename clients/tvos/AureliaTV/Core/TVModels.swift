@@ -39,8 +39,10 @@ enum TVCoreError: LocalizedError, Equatable, Sendable {
   /// a title this profile may not watch, and is shown where it happened.
   var endsSession: Bool {
     self == .identityMismatch || statusCode == 401
-      || ["profile_session_expired", "profile_session_revoked", "device_session_revoked"].contains(
-        code ?? "")
+      || [
+        "profile_session_expired", "profile_session_revoked", "device_session_revoked",
+        "profile_screen_time_closed",
+      ].contains(code ?? "")
   }
   /// The server's own explanation, when it sent one.
   var serverMessage: String? {
@@ -250,12 +252,15 @@ struct TVWatchingProfile: Codable, Identifiable, Equatable, Sendable {
   var pictureKey: String? = nil
   var pictureRevision: Int64 = 0
   var ageLimit: Int? = nil
+  /// Screen time closes this whole profile until then ("Good night · back at 07:00").
+  var closedUntil: String? = nil
 
   init(
     id: UUID, name: String, role: String, needsPinSetup: Bool,
     pinProtectionEnabled: Bool = true, pictureKey: String? = nil, pictureRevision: Int64 = 0,
-    ageLimit: Int? = nil
+    ageLimit: Int? = nil, closedUntil: String? = nil
   ) {
+    self.closedUntil = closedUntil
     self.id = id
     self.name = name
     self.role = role
@@ -268,6 +273,7 @@ struct TVWatchingProfile: Codable, Identifiable, Equatable, Sendable {
 
   private enum CodingKeys: String, CodingKey {
     case id, name, role, needsPinSetup, pinProtectionEnabled, pictureKey, pictureRevision, ageLimit
+    case closedUntil
   }
   init(from decoder: Decoder) throws {
     let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -280,6 +286,7 @@ struct TVWatchingProfile: Codable, Identifiable, Equatable, Sendable {
     pictureKey = try values.decodeIfPresent(String.self, forKey: .pictureKey)
     pictureRevision = try values.decodeIfPresent(Int64.self, forKey: .pictureRevision) ?? 0
     ageLimit = try values.decodeIfPresent(Int.self, forKey: .ageLimit)
+    closedUntil = try values.decodeIfPresent(String.self, forKey: .closedUntil)
   }
 }
 
@@ -633,6 +640,8 @@ struct TVPlaybackTicket: Codable, Equatable, Sendable {
   let progress: TVPlaybackProgress
   /// Intro and credits times found by the server ("media-segments-v2"); older servers send none.
   var segments: TVMediaSegments? = nil
+  /// A children's profile's screen time ("screen-time-v1"); nil when it has none.
+  var screenTime: TVScreenTimeStatus? = nil
 }
 
 /// Where the intro and the credits of the playing title are, in milliseconds from its start.

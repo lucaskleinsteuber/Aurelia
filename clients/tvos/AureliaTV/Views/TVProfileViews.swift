@@ -32,13 +32,16 @@ struct TVProfilesView: View {
             TVProfileEntry(profile: profile)
           }
           .buttonStyle(TVAvatarButtonStyle(ringDiameter: TVProfileEntry.avatarSize + 20))
-          .disabled(model.isBusy || profile.needsPinSetup)
+          // Screen time closes a children's profile until its wake time.
+          .disabled(model.isBusy || profile.needsPinSetup || profile.closedUntil != nil)
+          .opacity(profile.closedUntil != nil ? 0.5 : 1)
           .accessibilityIdentifier("profile-\(profile.id)")
           .accessibilityLabel(profile.name)
           .accessibilityValue(
-            profile.needsPinSetup
-              ? "PIN setup required"
-              : profile.pinProtectionEnabled ? "PIN protected" : "No PIN")
+            TVScreenTimeText.closedLabel(profile.closedUntil)
+              ?? (profile.needsPinSetup
+                ? "PIN setup required"
+                : profile.pinProtectionEnabled ? "PIN protected" : "No PIN"))
         }
       }.frame(maxWidth: 1500).focusSection()
       VStack(spacing: 26) {
@@ -73,6 +76,9 @@ private struct TVProfileEntry: View {
           Image(systemName: "lock.fill").font(.system(size: 18, weight: .semibold))
             .foregroundStyle(.secondary)
         }
+      }
+      if let asleep = TVScreenTimeText.closedLabel(profile.closedUntil) {
+        Label(asleep, systemImage: "moon.fill").font(.system(size: 20)).foregroundStyle(.secondary)
       }
       if profile.needsPinSetup {
         Text("Set up a PIN on the server computer").font(.system(size: 20)).foregroundStyle(.secondary)

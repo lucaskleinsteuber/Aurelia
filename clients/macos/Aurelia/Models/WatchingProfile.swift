@@ -10,11 +10,13 @@ struct WatchingProfile: Decodable, Identifiable, Equatable, Sendable {
   let pictureKey: String?
   let pictureRevision: Int64
   let ageLimit: Int?
+  /// Screen time closes this whole profile until then ("Good night · back at 07:00").
+  var closedUntil: String? = nil
 
   init(
     id: UUID, name: String, role: UserRole, needsPinSetup: Bool,
     pinProtectionEnabled: Bool = true, pictureKey: String? = nil, pictureRevision: Int64 = 0,
-    ageLimit: Int? = nil
+    ageLimit: Int? = nil, closedUntil: String? = nil
   ) {
     self.id = id
     self.name = name
@@ -24,10 +26,12 @@ struct WatchingProfile: Decodable, Identifiable, Equatable, Sendable {
     self.pictureKey = pictureKey
     self.pictureRevision = pictureRevision
     self.ageLimit = ageLimit
+    self.closedUntil = closedUntil
   }
 
   private enum CodingKeys: String, CodingKey {
     case id, name, role, needsPinSetup, pinProtectionEnabled, pictureKey, pictureRevision, ageLimit
+    case closedUntil
   }
 
   init(from decoder: Decoder) throws {
@@ -41,6 +45,7 @@ struct WatchingProfile: Decodable, Identifiable, Equatable, Sendable {
     pictureKey = try values.decodeIfPresent(String.self, forKey: .pictureKey)
     pictureRevision = try values.decodeIfPresent(Int64.self, forKey: .pictureRevision) ?? 0
     ageLimit = try values.decodeIfPresent(Int.self, forKey: .ageLimit)
+    closedUntil = try values.decodeIfPresent(String.self, forKey: .closedUntil)
   }
 }
 

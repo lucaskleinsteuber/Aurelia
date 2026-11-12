@@ -32,6 +32,7 @@ Aurelia from source or write their own client.
 | [Aurelia Server with Docker](DOCKER.md) | Running the server on a NAS or any Docker host |
 | [Backups and recovery](DATABASE_RECOVERY.md) | The daily database backup and how to restore it |
 | [Security model](SECURITY_MODEL.md) | Profiles, roles, PINs, pairing and what administrators can and cannot see |
+| [Screen time](SCREEN_TIME.md) | Bedtime, a daily limit and "one more episode" for children's profiles |
 | [Audio processing](AUDIO_PROCESSING.md) | Dialogue Boost and Volume Leveling: what they do and their limits |
 
 ## Building and contributing

@@ -5,6 +5,8 @@ import { loadAllPages } from "./api.js";
 import { libraryPayload, managementPermissions, metadataPayload, profilePayload, waitForLibraryOperation, artworkUrl } from "./logic.js";
 import { createMetadataExtras } from "./metadata-extras.js";
 import { segmentsSection, SEGMENTS_FEATURE } from "./segments-view.js";
+import { SCREEN_TIME_CAPABILITY, sameRules } from "./screen-time.js";
+import { screenTimeSection } from "./screen-time-view.js";
 
 const input = (value = "", attributes = {}) => h("input", { class: "text-field", value: String(value ?? ""), ...attributes });
 const field = (title, control, note) => h("label", { class: "editor-field" }, h("span", { class: "editor-field-title" }, title), control,
@@ -178,6 +180,16 @@ export function createManagementEditors(app) {
     let collect;
     let collectAge = () => null;
     const agesOffered = Boolean(state.server?.capabilities?.includes("age-limits-v1"));
+    const screenTimeOffered = Boolean(state.server?.capabilities?.includes(SCREEN_TIME_CAPABILITY));
+    let screenTimeSnapshot = null;
+    let collectScreenTime = () => null;
+    // Screen time is saved after the profile, so a new profile has an id and a role change came first.
+    const saveScreenTime = async (userId, wanted, signal) => {
+      if (!wanted) return;
+      const current = screenTimeSnapshot ?? await api.profileScreenTime(userId, { signal });
+      if (sameRules(current?.rules, wanted)) return;
+      await api.setProfileScreenTime(userId, { rules: wanted, revision: current?.revision ?? 0 }, { signal });
+    };
     // A children's profile is set apart from the rest, as on the Mac: it ends before a role
     // change, and starts once the profile exists.
     const saveAge = async (userId, wanted, signal) => {
@@ -189,23 +201,29 @@ export function createManagementEditors(app) {
     const context = editor(existing ? "Edit Profile" : "Create Profile", existing ? "Save" : "Create Profile", async ({ signal }) => {
       const body = profilePayload(snapshot, collect());
       const age = agesOffered ? collectAge() : undefined;
+      const screen = screenTimeOffered ? collectScreenTime() : null;
+      if (screen?.error) throw new Error(screen.error);
       if (existing) {
         if (age === null && ageSnapshot?.ageLimit != null) await saveAge(existing.user.id, null, signal);
         await api.updateProfile(existing.user.id, body, { signal });
         if (age != null) await saveAge(existing.user.id, age, signal);
+        await saveScreenTime(existing.user.id, screen?.rules, signal);
       } else {
         const created = await api.createProfile(body, { signal });
         const createdId = created?.user?.id ?? created?.id;
         if (age != null && createdId) await saveAge(createdId, age, signal);
+        if (screen?.rules?.enabled && createdId) await saveScreenTime(createdId, screen.rules, signal);
       }
       app.toast(existing ? "Profile saved." : "Profile created.");
     });
     const load = async () => {
-      const [loaded, titles, age] = await Promise.all([existing ? api.profileEditor(existing.user.id, { signal: context.signal }) : null, profileTitles(context.signal),
-        existing && agesOffered ? api.profileAgeLimit(existing.user.id, { signal: context.signal }).catch(() => null) : null]);
+      const [loaded, titles, age, screenTime] = await Promise.all([existing ? api.profileEditor(existing.user.id, { signal: context.signal }) : null, profileTitles(context.signal),
+        existing && agesOffered ? api.profileAgeLimit(existing.user.id, { signal: context.signal }).catch(() => null) : null,
+        existing && screenTimeOffered ? api.profileScreenTime(existing.user.id, { signal: context.signal }).catch(() => null) : null]);
       if (!context.alive()) return;
       snapshot = loaded;
       ageSnapshot = age;
+      screenTimeSnapshot = screenTime;
       clear(context.body);
       const user = snapshot?.user;
       const name = input(user?.username ?? "", { minlength: 3, maxlength: 64, required: true, disabled: Boolean(existing) });
@@ -232,6 +250,9 @@ export function createManagementEditors(app) {
       const ageField = field("Age", ageChoice, "Only titles up to this FSK rating show. Titles without a rating stay hidden until you allow them on the Mac.");
       const childSection = agesOffered ? h("div", {}, h("h3", {}, "Children's Profile"),
         field("Children's Profile", child, "A profile for a child: it sees only titles for its age."), ageField) : null;
+      const screen = screenTimeOffered ? screenTimeSection({ input, field, choice, button }, screenTime,
+        existing ? { grant: async (body) => (screenTimeSnapshot = await api.grantScreenTime(existing.user.id, body)) } : {}) : null;
+      collectScreenTime = () => (screen && role.value === "user" ? screen.collect() : null);
       const redraw = () => {
         clear(list);
         const matches = titles.filter((item) => item.title.toLocaleLowerCase().includes(query.value.toLocaleLowerCase()));
@@ -253,6 +274,7 @@ export function createManagementEditors(app) {
           childSection.hidden = role.value !== "user";
           ageField.hidden = !child.checked;
         }
+        if (screen) screen.element.hidden = role.value !== "user";
         access.disabled = role.value === "owner";
         if (role.value === "owner") access.value = "entireLibrary";
         picker.hidden = access.value !== "selectedTitles";
@@ -267,7 +289,7 @@ export function createManagementEditors(app) {
         protectionFields, h("p", { class: "muted small" }, user?.pinProtectionEnabled && !user.needsPinSetup
           ? "Leave both PIN fields empty to keep the current PIN. Changing it locks active sessions."
           : "Use 4–8 digits and enter the same PIN in both fields when protection is enabled."),
-        childSection, h("h3", {}, "Content Access"), field("Can watch", access), accessNote, picker);
+        childSection, screen?.element ?? null, h("h3", {}, "Content Access"), field("Can watch", access), accessNote, picker);
       collect = () => ({ username: name.value, role: role.value, isEnabled: enabled.checked, pinProtectionEnabled: protection.checked,
         pin: pin.value, pinConfirmation: confirm.value, accessMode: access.value, titleIds: [...selected] });
       redraw(); update(); context.clean(); context.ready();

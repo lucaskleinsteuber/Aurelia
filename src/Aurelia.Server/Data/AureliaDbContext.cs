@@ -28,6 +28,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public DbSet<UserTitleGrant> UserTitleGrants => Set<UserTitleGrant>();
     public DbSet<UserTitleRule> UserTitleRules => Set<UserTitleRule>();
     public DbSet<ProfilePhoto> ProfilePhotos => Set<ProfilePhoto>();
+    public DbSet<ScreenTimeRule> ScreenTimeRules => Set<ScreenTimeRule>();
+    public DbSet<ScreenTimeDay> ScreenTimeDays => Set<ScreenTimeDay>();
     public DbSet<ServerAdministrationCredential> AdministrationCredentials => Set<ServerAdministrationCredential>();
     public DbSet<ServerUser> Users => Set<ServerUser>();
 
@@ -231,6 +233,22 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.HasOne(photo => photo.User).WithOne().HasForeignKey<ProfilePhoto>(photo => photo.UserId).OnDelete(DeleteBehavior.Cascade);
             entity.Property(photo => photo.Jpeg).IsRequired();
         });
+        modelBuilder.Entity<ScreenTimeRule>(entity =>
+        {
+            entity.HasKey(rule => rule.UserId);
+            entity.HasOne(rule => rule.User).WithOne().HasForeignKey<ScreenTimeRule>(rule => rule.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.Property(rule => rule.LockScope).HasConversion<string>().HasMaxLength(32);
+            entity.Property(rule => rule.Ending).HasConversion<string>().HasMaxLength(32);
+            entity.Property(rule => rule.SchoolBedtime).HasMaxLength(5);
+            entity.Property(rule => rule.SchoolWakeTime).HasMaxLength(5);
+            entity.Property(rule => rule.WeekendBedtime).HasMaxLength(5);
+            entity.Property(rule => rule.WeekendWakeTime).HasMaxLength(5);
+        });
+        modelBuilder.Entity<ScreenTimeDay>(entity =>
+        {
+            entity.HasKey(day => new { day.UserId, day.Day });
+            entity.HasOne(day => day.User).WithMany().HasForeignKey(day => day.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<LibraryImportAssignment>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
             || LibraryRoots.Any(root => root.Id == item.LibraryRootId));
         modelBuilder.Entity<LibraryImportPreview>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
@@ -378,6 +396,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             value => value.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(value.Value) : null);
         modelBuilder.Entity<MediaSegment>().Property(segment => segment.UpdatedAt).HasConversion(dateTimeOffsetConverter);
         modelBuilder.Entity<MediaSegment>().Property(segment => segment.AnalyzedFileModifiedAt).HasConversion(nullableDateTimeOffsetConverter);
+        modelBuilder.Entity<ScreenTimeDay>().Property(day => day.LimitReachedAt).HasConversion(nullableDateTimeOffsetConverter);
+        modelBuilder.Entity<ScreenTimeDay>().Property(day => day.LastReportAt).HasConversion(nullableDateTimeOffsetConverter);
         modelBuilder.Entity<MediaKeywords>(entity =>
         {
             entity.HasKey(keywords => keywords.MediaItemId);
@@ -618,6 +638,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.Property(ticket => ticket.ExpiresAt).HasConversion(dateTimeOffsetConverter);
             entity.Property(ticket => ticket.RevokedAt)
                 .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(ticket => ticket.ScreenTimeExtraEndsAt).HasConversion(nullableDateTimeOffsetConverter);
             entity.HasIndex(ticket => ticket.TokenHash).IsUnique();
             entity.HasIndex(ticket => new { ticket.UserId, ticket.ExpiresAt });
             entity.HasIndex(ticket => new { ticket.DeviceSessionId, ticket.ExpiresAt });

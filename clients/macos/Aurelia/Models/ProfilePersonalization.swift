@@ -134,6 +134,8 @@ enum ProfileAgeSteps {
 enum ServerFeatureNames {
   static let profilePersonalization = "profile-personalization-v1"
   static let ageLimits = "age-limits-v1"
+  /// Bedtime, a daily limit and "one more episode" for children's profiles.
+  static let screenTime = "screen-time-v1"
   /// Trailers of films not watched yet, for cinema mode's pre-show.
   static let cinemaTrailers = "cinema-trailers-v1"
   /// Movie Night: the household swipes one deck until everyone likes a title.

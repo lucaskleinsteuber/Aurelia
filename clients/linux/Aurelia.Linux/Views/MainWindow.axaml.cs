@@ -703,7 +703,9 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
             PlayerHost.IsVisible = false;
             view.Dispose();
             if (WindowState == WindowState.FullScreen) WindowState = WindowState.Normal;
-            _ = library.RefreshHomeAsync();
+            // Screen time closed the whole profile: after the good-night screen, "Who's watching?".
+            if (player.GoodNightEndsProfile) _ = Session.SwitchProfileAsync();
+            else _ = library.RefreshHomeAsync();
         });
         PlayerHost.Content = view;
         PlayerHost.IsVisible = true;

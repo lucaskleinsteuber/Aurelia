@@ -103,8 +103,11 @@ public sealed class ProfilePickerModel : ObservableObject
         }
     }
 
-    /// <summary>A profile that still needs a PIN set up on the server cannot be opened here.</summary>
-    public static bool CanChoose(WatchingProfile profile) => !profile.NeedsPinSetup;
+    /// <summary>
+    /// A profile that still needs a PIN set up on the server cannot be opened here, nor one that screen time
+    /// closed until its wake time.
+    /// </summary>
+    public static bool CanChoose(WatchingProfile profile) => !profile.NeedsPinSetup && profile.ClosedUntil is null;
 
     public static bool NeedsPin(WatchingProfile profile) =>
         profile.PinProtectionEnabled || profile.Role is UserRole.Owner or UserRole.Admin;

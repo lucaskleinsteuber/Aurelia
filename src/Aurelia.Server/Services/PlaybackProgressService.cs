@@ -6,7 +6,7 @@ using System.Text;
 
 namespace Aurelia.Server.Services;
 
-public sealed class PlaybackProgressService(AureliaDbContext database)
+public sealed class PlaybackProgressService(AureliaDbContext database, ScreenTimeService? screenTime = null)
 {
     private const long MeaningfulProgressMilliseconds = 10_000;
     private const long CompletionWindowMilliseconds = 45_000;
@@ -94,6 +94,8 @@ public sealed class PlaybackProgressService(AureliaDbContext database)
             || request.PositionMilliseconds >= completionThreshold;
         var reset = !completed
             && request.PositionMilliseconds <= MeaningfulProgressMilliseconds;
+
+        if (screenTime is not null) await screenTime.RecordProgressAsync(userId, media.Id, request.PositionMilliseconds, cancellationToken);
 
         var newPosition = completed || reset ? 0 : request.PositionMilliseconds;
         var changed = progress.PositionMilliseconds != newPosition || progress.IsCompleted != completed;

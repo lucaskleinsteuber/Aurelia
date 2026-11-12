@@ -20,6 +20,7 @@ import { createSceneNotes } from "./player-notes.js";
 import { createTrackChoices, matchingTrack } from "./track-choices.js";
 import { LiveSource, MediaSourceType, isTypeSupported, liveSupported } from "./live.js";
 import { HlsSource } from "./hls.js";
+import { SCREEN_TIME_REFRESH_MS, goodNight, isScreenTimeCode, lastTitleNote, noMoreTitles } from "./screen-time.js";
 import { QUALITY_KEY, normalizeQuality, qualityLabel, startsAdaptive, stallsCallForAdaptive } from "./hls-logic.js";
 import { codecSupport, liveProblem, mimeType, selectSubtitle, startTrack, subtitleLabel, subtitleUrl, trackLabel, triesDirectPlay, videoFamily } from "./live-logic.js";
 
@@ -91,11 +92,13 @@ export class Player {
    * @param {() => void} [options.onShowShortcuts]
    * @param {() => void} options.onClose
    * @param {(error: ApiError) => void} [options.onSessionEnded]
+   * @param {string} [options.profileName] the watching profile's name, for the good-night screen
+   * @param {(status: object) => void} [options.onGoodNight] Done on the good-night screen
    * @param {string} [options.preferenceScope] server/profile identity for private track choices
    * @param {boolean} [options.canConvert]  the server reports live conversion
    * @param {boolean} [options.canStreamAdaptive]  the server streams in several qualities over HLS
    */
-  constructor({ api, item, next, previous, intent = "play", suggestions, onPlaySuggestion, onPlayNext, onMediaMenu, onShowShortcuts, onClose, onSessionEnded, onFinished, canConvert = false, canScrubPreview = canConvert, canStreamAdaptive = false, preferenceScope, together }) {
+  constructor({ api, item, next, previous, intent = "play", suggestions, onPlaySuggestion, onPlayNext, onMediaMenu, onShowShortcuts, onClose, onSessionEnded, onFinished, profileName = "", onGoodNight, canConvert = false, canScrubPreview = canConvert, canStreamAdaptive = false, preferenceScope, together }) {
     this.api = api;
     // Watch Together: { session(), start(player), leave() } from the app, or undefined.
     this.together = together;
@@ -116,6 +119,11 @@ export class Player {
     // Cinema mode's trailers: the end hands over to the next part instead of Up Next.
     this.onFinished = onFinished;
     this.onSessionEnded = onSessionEnded;
+    // A children's profile's screen time, from the ticket and then every minute (docs/SCREEN_TIME.md).
+    this.profileName = profileName;
+    this.onGoodNight = onGoodNight;
+    this.screenTime = null;
+    this.lastTitleNoted = false;
     this.canConvert = canConvert && liveSupported();
     this.canStreamAdaptive = this.canConvert && Boolean(canStreamAdaptive);
     this.quality = this.canStreamAdaptive ? readQuality() : "original";
@@ -263,6 +271,8 @@ export class Player {
       return;
     }
     if (this.closed) return this.revoke();
+    this.screenTime = this.source.screenTime ?? null;
+    if (this.screenTime) this.every(() => this.refreshScreenTime(), SCREEN_TIME_REFRESH_MS);
     this.saver = new ProgressSaver({
       mediaId: this.item.id,
       revision: this.source.progress?.revision ?? 0,
@@ -1191,7 +1201,7 @@ export class Player {
   async updateSuggestion() {
     const video = this.video;
     const duration = Number.isFinite(video.duration) ? video.duration : 0;
-    if (!this.suggestions || this.closed) return;
+    if (!this.suggestions || this.closed || noMoreTitles(this.screenTime)) return;
     if (this.upNextItem === undefined && this.next && duration >= 300 && video.currentTime >= duration / 2) {
       this.upNextItem = null;
       this.upNextItem = await this.next().catch(() => null);
@@ -1286,10 +1296,15 @@ export class Player {
       this.upNextItem = await this.next().catch(() => null);
     }
     const lead = this.preferences.upNextCountdownSeconds;
+    const last = noMoreTitles(this.screenTime);
+    if (last && !this.lastTitleNoted) {
+      this.lastTitleNoted = true;
+      this.showNotice(lastTitleNote(this.screenTime), false, "moon");
+    }
     const visible = showsUpNext({
       position: video.currentTime,
       duration,
-      hasNext: Boolean(this.upNextItem),
+      hasNext: Boolean(this.upNextItem) && !last,
       autoplay: this.preferences.automaticallyPlayNextEpisode,
       stopsAtEnd: this.sleep.mode === "end",
       dismissed: this.upNextDismissed,
@@ -1356,6 +1371,10 @@ export class Player {
     const video = this.video;
     if (this.saver && Number.isFinite(video.duration)) await this.saver.save(video.duration * 1000, video.duration * 1000, true);
     if (this.closed) return;
+    // Screen time is over: no next episode, no suggestion, no trailer chain; the good-night screen instead.
+    if (this.screenTime) await this.refreshScreenTime();
+    if (this.closed) return;
+    if (noMoreTitles(this.screenTime)) return this.showGoodNight();
     if (this.onFinished) {
       const finished = this.onFinished;
       this.onFinished = null;
@@ -1409,6 +1428,12 @@ export class Player {
   async videoFailed() {
     if (this.closed || !this.source || !this.video.error) return;
     const code = this.video.error.code;
+    // "Stop now" ends the stream at bedtime; that is the good-night screen, not a problem.
+    if (this.screenTime) {
+      await this.refreshScreenTime();
+      if (this.closed) return;
+      if (this.screenTime?.state === "closed") return this.showGoodNight();
+    }
     if (this.live) {
       this.showNotice(UNPLAYABLE, true);
       return;
@@ -1447,9 +1472,9 @@ export class Player {
     }, 4000);
   }
 
-  showNotice(text, blocking) {
+  showNotice(text, blocking, symbol = "warning") {
     clear(this.notice);
-    this.notice.append(icon("warning", { size: 22 }), h("span", {}, text));
+    this.notice.append(icon(symbol, { size: 22 }), h("span", {}, text));
     if (blocking) {
       this.live?.destroy();
       this.video.pause();
@@ -1465,6 +1490,10 @@ export class Player {
   }
 
   fail(error) {
+    if (error instanceof ApiError && isScreenTimeCode(error.code) && !sessionRefused(error.status, error.code)) {
+      this.api.ownScreenTime?.().then((own) => this.showGoodNight(own?.status ?? null), () => this.showGoodNight(null));
+      return;
+    }
     if (error instanceof ApiError && sessionRefused(error.status, error.code)) {
       this.close();
       this.onSessionEnded?.(error);
@@ -1474,6 +1503,44 @@ export class Player {
       ? error.offline ? "The server isn’t answering. Check that it is switched on, then try again." : error.message
       : "This title couldn’t be opened.";
     this.showNotice(message, true);
+  }
+
+  // MARK: Screen time
+
+  async refreshScreenTime() {
+    try {
+      const own = await this.api.ownScreenTime();
+      if (!this.closed) this.screenTime = own?.status ?? null;
+    } catch {
+      // The last known state stays; a refused session is handled by the next request that needs it.
+    }
+  }
+
+  /** The friendly end of the day: a moon, the profile's name and when Aurelia opens again. */
+  showGoodNight(status = this.screenTime) {
+    if (this.closed) return;
+    this.saveNow({ keepalive: true });
+    this.video.pause();
+    this.upNext.hidden = true;
+    this.suggestionCard.hidden = true;
+    this.notice.hidden = true;
+    this.startScreen.hidden = true;
+    const words = goodNight(status, this.profileName);
+    clear(this.endScreen);
+    this.endScreen.setAttribute("aria-label", words.title);
+    this.endScreen.setAttribute("class", "suggestion-end good-night");
+    this.endScreen.append(h("div", { class: "suggestion-end-panel good-night-panel" },
+      h("div", { class: "good-night-moon", "aria-hidden": "true" }, icon("moonFill", { size: 72 })),
+      h("h2", {}, words.title),
+      h("p", { class: "good-night-text" }, words.text),
+      h("button", { class: "primary-button", onclick: () => this.goodNightDone(status) }, "Done")));
+    this.endScreen.hidden = false;
+    this.endScreen.querySelector("button")?.focus();
+  }
+
+  goodNightDone(status) {
+    this.close();
+    this.onGoodNight?.(status);
   }
 
   // MARK: Lifetime

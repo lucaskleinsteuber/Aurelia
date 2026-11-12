@@ -292,6 +292,59 @@ public sealed class PlaybackControllerTests : IAsyncDisposable
         Assert.Equal(1, closed);
     }
 
+    private static ScreenTimeStatus ScreenTime(ScreenTimeState state) => new(state, state == ScreenTimeState.Open ? ScreenTimeReason.None : ScreenTimeReason.Bedtime,
+        40, null, null, DateTimeOffset.UtcNow.AddMinutes(3), DateTimeOffset.UtcNow.AddMinutes(33),
+        state == ScreenTimeState.Open ? null : DateTimeOffset.UtcNow.AddHours(10), ScreenTimeLockScope.WholeProfile, ScreenTimeEnding.FinishTitle, false);
+
+    private void AddScreenTimeTicket(Guid media, string ticket, ScreenTimeStatus status) =>
+        server.Replace("POST", $"/api/v1/media/{media}/playback", JsonSerializer.Serialize(new PlaybackSourceResponse(Guid.NewGuid(), media,
+            $"/api/v1/streams/{ticket}", "video/x-matroska", 1000, DateTimeOffset.UtcNow.AddHours(4),
+            new PlaybackProgressResponse(media, 0, 3_600_000, false, null, null, 1), null, status), AureliaJson.Options));
+
+    [Fact]
+    public async Task ScreenTimeEndsWithTheGoodNightScreenInsteadOfTheNextEpisode()
+    {
+        AddScreenTimeTicket(FakeLibrary.EpisodeOne, "ticket-episode-1", ScreenTime(ScreenTimeState.Open));
+        server.Replace("GET", "/api/v1/profile/screen-time", JsonSerializer.Serialize(new OwnScreenTimeResponse(ScreenTime(ScreenTimeState.Closed)), AureliaJson.Options));
+        var player = Controller();
+        await player.StartAsync(FakeLibrary.Item(FakeLibrary.SeriesId, MediaKind.Series, "Cobalt Station", 2024, []), resume: false);
+        engines.Last.Advance(3_600_000);
+        engines.Last.End();
+        await Settle();
+        Assert.True(player.ShowsGoodNight);
+        Assert.True(player.GoodNightEndsProfile);
+        Assert.Null(player.Error);
+        Assert.Equal(FakeLibrary.EpisodeOne, player.Item?.Id);
+        Assert.DoesNotContain($"POST /api/v1/media/{FakeLibrary.EpisodeTwo}/playback", server.Requests);
+        Assert.Equal(0, closed);
+    }
+
+    [Fact]
+    public async Task TheLastTitleOfTheDayHasNoUpNext()
+    {
+        AddScreenTimeTicket(FakeLibrary.EpisodeOne, "ticket-episode-1", ScreenTime(ScreenTimeState.LastTitle));
+        var player = Controller();
+        await player.StartAsync(FakeLibrary.Item(FakeLibrary.SeriesId, MediaKind.Series, "Cobalt Station", 2024, []), resume: false);
+        engines.Last.Advance(3_595_000);
+        time.Advance(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        Assert.Null(player.UpNext);
+        Assert.Equal("This is the last episode before bedtime.", player.LastTitleNote);
+    }
+
+    [Fact]
+    public async Task AScreenTimeRefusalShowsTheGoodNightScreenNotAnError()
+    {
+        server.Replace("POST", $"/api/v1/media/{Movie}/playback",
+            """{"code":"screen_time_bedtime","message":"It's bedtime. Aurelia opens again at 07:00."}""", HttpStatusCode.Forbidden);
+        server.Replace("GET", "/api/v1/profile/screen-time", JsonSerializer.Serialize(new OwnScreenTimeResponse(ScreenTime(ScreenTimeState.Closed)), AureliaJson.Options));
+        var player = Controller();
+        await player.StartAsync(Item(Movie), resume: false);
+        await Settle();
+        Assert.True(player.ShowsGoodNight);
+        Assert.Null(player.Error);
+        Assert.NotEqual(PlayerState.Failed, player.State);
+    }
+
     [Fact]
     public async Task EndOfEpisodeSleepsInsteadOfPlayingOn()
     {

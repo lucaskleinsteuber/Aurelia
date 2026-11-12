@@ -337,6 +337,26 @@ struct APIClient: Sendable {
         path: "/api/v1/users/\(user.uuidString)/age-limit", method: "PUT",
         body: JSONEncoder().encode(value)))
   }
+  func screenTime(user: UUID) async throws -> ProfileScreenTime {
+    try await get("/api/v1/users/\(user.uuidString)/screen-time")
+  }
+  func setScreenTime(user: UUID, _ value: ProfileScreenTimeUpdate) async throws -> ProfileScreenTime {
+    try Self.decode(
+      ProfileScreenTime.self,
+      from: await perform(
+        path: "/api/v1/users/\(user.uuidString)/screen-time", method: "PUT",
+        body: JSONEncoder().encode(value)))
+  }
+  func grantScreenTime(user: UUID, _ grant: ScreenTimeGrant) async throws -> ProfileScreenTime {
+    try Self.decode(
+      ProfileScreenTime.self,
+      from: await perform(
+        path: "/api/v1/users/\(user.uuidString)/screen-time/today", method: "POST",
+        body: JSONEncoder().encode(grant)))
+  }
+  func ownScreenTime() async throws -> OwnScreenTime {
+    try await get("/api/v1/profile/screen-time")
+  }
   func unlockManagement(password: String) async throws -> String {
     struct Payload: Encodable { let password: String }
     struct Response: Decodable { let expiresAt: String }

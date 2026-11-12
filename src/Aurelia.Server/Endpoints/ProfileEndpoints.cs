@@ -94,6 +94,15 @@ public static class ProfileEndpoints
             service.AgeLimitAsync(id, token)).RequireAuthorization("Owner");
         app.MapPut("/api/v1/users/{id:guid}/age-limit", (Guid id, UpdateProfileAgeLimitRequest request, ProfileService service, HttpContext context) =>
             service.UpdateAgeLimitAsync(context.User.RequireUserId(), id, request, context.RequestAborted)).RequireAuthorization("Owner");
+        // Screen time of a children's profile (docs/SCREEN_TIME.md): rules, and exceptions for today.
+        app.MapGet("/api/v1/users/{id:guid}/screen-time", (Guid id, ScreenTimeService service, CancellationToken token) =>
+            service.ProfileAsync(id, token)).RequireAuthorization("Owner");
+        app.MapPut("/api/v1/users/{id:guid}/screen-time", (Guid id, UpdateProfileScreenTimeRequest request, ScreenTimeService service, CancellationToken token) =>
+            service.UpdateAsync(id, request, token)).RequireAuthorization("Owner");
+        app.MapPost("/api/v1/users/{id:guid}/screen-time/today", (Guid id, GrantScreenTimeRequest request, ScreenTimeService service, CancellationToken token) =>
+            service.GrantAsync(id, request, token)).RequireAuthorization("Owner");
+        app.MapGet("/api/v1/profile/screen-time", async (ScreenTimeService service, HttpContext context) =>
+            new OwnScreenTimeResponse(await service.StatusAsync(context.User.RequireUserId(), context.RequestAborted))).RequireAuthorization();
         app.MapGet("/api/v1/users/{id:guid}/titles", (Guid id, ProfileService service, CancellationToken token) => service.AccessAsync(id, token)).RequireAuthorization("Owner");
         app.MapPut("/api/v1/users/{id:guid}/enabled", async (Guid id, SetProfileEnabledRequest request, ProfileService service, HttpContext context) =>
         { await service.SetEnabledAsync(context.User.RequireUserId(), id, request.IsEnabled, context.RequestAborted); return Results.NoContent(); }).RequireAuthorization("Owner");

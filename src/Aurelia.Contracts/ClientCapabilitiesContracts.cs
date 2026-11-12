@@ -10,6 +10,7 @@ public static class ServerFeatures
         "library-state-v1", "server-readiness-v1", "device-authorization-v1", "artwork-variants-v1",
         "catalog-pages-500-v1", PreviewStreams, WebApp, ProfilePersonalization, AgeLimits,
         WebPairingCode, CinemaTrailers, MovieNight, YearWrapped, MonthlyWrapped, MediaSegments, ServerSpeech, Suggestions,
+        ScreenTime,
     });
 
     /// <summary>
@@ -60,6 +61,9 @@ public static class ServerFeatures
 
     /// <summary>Children's profiles limited by FSK age, with per-title exceptions ("age-limits-v1").</summary>
     public const string AgeLimits = "age-limits-v1";
+
+    /// <summary>Bedtime, a daily limit and "one more episode" for children's profiles ("screen-time-v1", docs/SCREEN_TIME.md).</summary>
+    public const string ScreenTime = "screen-time-v1";
 
     /// <summary>
     /// User-created collections, smart lists, franchises, and collection management ("collections-v2").

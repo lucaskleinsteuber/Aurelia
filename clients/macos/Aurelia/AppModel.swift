@@ -517,6 +517,9 @@ final class AppModel: ObservableObject {
   var supportsAgeLimits: Bool {
     libraryCapabilities.contains(ServerFeatureNames.ageLimits)
   }
+  var supportsScreenTime: Bool {
+    libraryCapabilities.contains(ServerFeatureNames.screenTime)
+  }
   var supportsMovieNight: Bool { libraryCapabilities.contains(ServerFeatureNames.movieNight) }
   var supportsWrapped: Bool { libraryCapabilities.contains(ServerFeatureNames.yearWrapped) }
   var supportsMonthlyWrapped: Bool {

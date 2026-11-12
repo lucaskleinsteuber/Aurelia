@@ -1,9 +1,12 @@
 namespace Aurelia.Contracts;
 
 public enum ProfileAccessMode { LegacyLibraries, EntireLibrary, SelectedTitles }
-/// <summary>A profile in "Who's watching?". <paramref name="Name"/> is the name to show (the display name when one is set).</summary>
+/// <summary>
+/// A profile in "Who's watching?". <paramref name="Name"/> is the name to show (the display name when one is set).
+/// <paramref name="ClosedUntil"/> is set while screen time closes the whole profile ("Good night").
+/// </summary>
 public sealed record WatchingProfile(Guid Id, string Name, UserRole Role, bool NeedsPinSetup, bool PinProtectionEnabled = true,
-    string? PictureKey = null, long PictureRevision = 0, int? AgeLimit = null);
+    string? PictureKey = null, long PictureRevision = 0, int? AgeLimit = null, DateTimeOffset? ClosedUntil = null);
 public sealed record ProfilePickerResponse(int FormatVersion, string MinimumClientVersion, bool ManagementSetupRequired, IReadOnlyList<WatchingProfile> Profiles);
 public sealed record InitializeProfilesRequest(string Password, string Pin);
 public sealed record UnlockProfileRequest(string? Pin = null);

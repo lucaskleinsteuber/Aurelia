@@ -335,7 +335,8 @@ public sealed record PlaybackSourceResponse(
     long ContentLength,
     DateTimeOffset ExpiresAt,
     PlaybackProgressResponse Progress,
-    MediaSegmentsDto? Segments = null);
+    MediaSegmentsDto? Segments = null,
+    ScreenTimeStatus? ScreenTime = null);
 
 public sealed record UpdatePlaybackProgressRequest(
     long PositionMilliseconds,

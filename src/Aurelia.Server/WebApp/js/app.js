@@ -10,6 +10,7 @@ import { createWatchTogether } from "./watch-together.js";
 import { createMovieNightView } from "./movie-night-view.js";
 import { openWrapped, readyMonth, readyMonths, wrappedYears, monthIsNew, MONTHS } from "./wrapped.js";
 import { Player } from "./player.js";
+import { clockTime, closedLabel } from "./screen-time.js";
 import { LIVE_FEATURE } from "./live-logic.js";
 import { ADAPTIVE_FEATURE } from "./hls-logic.js";
 import { createSettings } from "./settings.js";
@@ -345,10 +346,17 @@ async function showProfiles(note) {
   }
   if (token !== state.renderToken) return;
   const firstPin = picker.managementSetupRequired;
-  const list = h("div", { class: "profile-grid" }, picker.profiles.map((profile) =>
-    h("button", { class: "profile-entry", onclick: () => firstPin && profile.role === "owner" ? showFirstPin(profile) : chooseProfile(profile) },
+  const list = h("div", { class: "profile-grid" }, picker.profiles.map((profile) => {
+    // Screen time closes a children's profile until its wake time ("Good night · back at 07:00").
+    const asleep = closedLabel(profile);
+    return h("button", { class: `profile-entry${asleep ? " asleep" : ""}`,
+      onclick: () => asleep ? showProfiles(`${profile.name} is asleep. Aurelia opens again at ${clockTime(profile.closedUntil)}.`)
+        : firstPin && profile.role === "owner" ? showFirstPin(profile) : chooseProfile(profile) },
       profilePicture(profile, "large"),
-      h("span", { class: "profile-name" }, profile.name, profile.pinProtectionEnabled ? icon("lock", { size: 14, label: "PIN protected" }) : null))));
+      h("span", { class: "profile-name" }, profile.name, asleep ? icon("moonFill", { size: 14, label: "Good night" })
+        : profile.pinProtectionEnabled ? icon("lock", { size: 14, label: "PIN protected" }) : null),
+      asleep ? h("span", { class: "profile-asleep muted small" }, asleep) : null);
+  }));
   const message = h("p", { class: "error-text", role: "alert" }, note ?? "");
   if (firstPin && !note) message.textContent = picker.profiles.some((profile) => profile.role === "owner")
     ? "Choose the owner’s profile to give it a viewing PIN."
@@ -1960,6 +1968,9 @@ async function playTitle(item, seasons, { intent = "play", skipCinema = false, o
       if (state.profile) renderRoute({ quiet: true });
     },
     onSessionEnded: () => sessionEnded(),
+    profileName: logic.shownName(state.profile),
+    // A whole-profile lock ends the profile after the good-night screen.
+    onGoodNight: (status) => { if (status?.lockScope === "wholeProfile") switchProfile(); },
     onMediaMenu: (anchor, item) => openMenu(anchor, catalog.mediaMenu(item, {
       seasons, onGoToSeries: (id) => { closePlayer(); navigate({ name: "title", id }); },
     })),

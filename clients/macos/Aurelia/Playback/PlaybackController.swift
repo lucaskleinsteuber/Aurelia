@@ -22,10 +22,13 @@ protocol PlaybackClientProtocol: AnyObject {
   func streamSubtitles(ticket: UUID) async throws -> [LiveSubtitleTrack]
   /// Tells the server a sleep timer ended, so a server in sleep mode can sleep if nothing plays.
   func sleepTimerEnded() async
+  /// The watching profile's screen time now; nil when it has none.
+  func ownScreenTime() async throws -> ScreenTimeStatus?
 }
 
 extension PlaybackClientProtocol {
   func streamSubtitles(ticket: UUID) async throws -> [LiveSubtitleTrack] { [] }
+  func ownScreenTime() async throws -> ScreenTimeStatus? { nil }
 }
 
 extension PlaybackClientProtocol {
@@ -61,6 +64,10 @@ final class APIPlaybackClient: PlaybackClientProtocol {
 
   func createPlayback(mediaId: UUID) async throws -> PlaybackSourceResponse {
     try await api.createPlayback(mediaId: mediaId)
+  }
+
+  func ownScreenTime() async throws -> ScreenTimeStatus? {
+    try await api.ownScreenTime().status
   }
 
   func playbackProgress(mediaId: UUID) async throws -> PlaybackProgressResponse {
@@ -171,6 +178,12 @@ final class PlaybackController: ObservableObject {
   @Published private(set) var sleepTimer: PlaybackSleepTimer = .off
   /// The sleep timer ran out: the player closes, so nothing keeps the Mac or the server awake.
   @Published private(set) var sleepTimerFinished = false
+  /// A children's profile's screen time, from the ticket and then every minute (docs/SCREEN_TIME.md).
+  @Published private(set) var screenTime: ScreenTimeStatus?
+  /// Screen time is over: the good-night screen shows instead of the next title or an error.
+  @Published private(set) var showsGoodNight = false
+  /// The quiet "last episode" note, once per title.
+  @Published private(set) var lastTitleNote: String?
   @Published var volume: Double = 1
   @Published var isMuted = false
   @Published var errorMessage: String?
@@ -228,6 +241,8 @@ final class PlaybackController: ObservableObject {
   private var autoplayCancelled = false
   private var resumePositionMilliseconds: Int64 = 0
   private var lastPeriodicSave = Date.distantPast
+  private var lastScreenTimeCheck = Date()
+  private var screenTimeTask: Task<Void, Never>?
   private var queuedItems: [PlaybackQueueItem]
   private var previousItems: [PlaybackQueueItem]
   private var sleepTask: Task<Void, Never>?
@@ -464,6 +479,7 @@ final class PlaybackController: ObservableObject {
       try await begin(source)
     } catch {
       guard !stopped, !Task.isCancelled, operation == lifecycleID else { return }
+      if screenTimeRefused(error) { return }
       let context = PlaybackFailureContext(error: error, phase: .ticketAuthorization)
       record(.failureObserved, cause: context.cause, context: context)
       if PlaybackRecoveryPolicy.isRecoverable(error) {
@@ -515,6 +531,7 @@ final class PlaybackController: ObservableObject {
       try await begin(source, resumeOverride: position)
     } catch {
       guard !stopped, !Task.isCancelled, operation == lifecycleID else { return }
+      if screenTimeRefused(error) { return }
       let context = PlaybackFailureContext(error: error, phase: .ticketAuthorization)
       record(.failureObserved, cause: context.cause, context: context)
       if PlaybackRecoveryPolicy.isRecoverable(error) {
@@ -877,6 +894,8 @@ final class PlaybackController: ObservableObject {
     _ source: PlaybackSourceResponse, resumeOverride: Int64? = nil
   ) async throws {
     guard !stopped, !Task.isCancelled else { throw CancellationError() }
+    screenTime = source.screenTime
+    lastScreenTimeCheck = Date()
     let relay: any PlaybackRelayProtocol
     let sourceURL: URL
     do {
@@ -1060,6 +1079,15 @@ final class PlaybackController: ObservableObject {
       lastPeriodicSave = Date()
       enqueueProgressSave(isFinished: false)
     }
+    if isPlaying, screenTime != nil, screenTimeTask == nil,
+      Date().timeIntervalSince(lastScreenTimeCheck) >= ScreenTimeText.refreshInterval
+    {
+      lastScreenTimeCheck = Date()
+      screenTimeTask = Task { [weak self] in
+        await self?.refreshScreenTime()
+        self?.screenTimeTask = nil
+      }
+    }
   }
 
   private func assignIfChanged<Value: Equatable>(_ value: inout Value, _ newValue: Value) {
@@ -1093,6 +1121,22 @@ final class PlaybackController: ObservableObject {
     upNext = nil
     showsSkipIntro = false
     showsSuggestionCard = false
+    // Screen time may have ended while this title played: ask before anything else starts.
+    guard screenTime != nil else { return continueAfterEnd() }
+    nextItemTask = Task { [weak self] in
+      guard let self else { return }
+      await self.refreshScreenTime()
+      self.nextItemTask = nil
+      guard !self.stopped else { return }
+      if self.screenTime?.noMoreTitles == true {
+        self.showGoodNight()
+      } else {
+        self.continueAfterEnd()
+      }
+    }
+  }
+
+  private func continueAfterEnd() {
     if sleepTimer != .endOfEpisode, queuedItems.isEmpty, let first = suggestions.first {
       // After a movie or a series' last episode: the suggestion starts by itself only when the
       // person asked for that; otherwise the end screen shows it with two more.
@@ -1248,8 +1292,11 @@ final class PlaybackController: ObservableObject {
     let next = queuedItems.first
     let leadMs = Int64(preferences.upNextCountdownSeconds) * 1_000
     let creditsStart = preferences.upNextAtCredits ? currentSegments?.creditsStartMilliseconds : nil
+    let lastTitle = screenTime?.noMoreTitles == true
+    if lastTitle, lastTitleNote == nil { lastTitleNote = ScreenTimeText.lastTitleNote(screenTime) }
     let shown = UpNextPolicy.shows(
-      position: currentTimeMilliseconds, duration: durationMilliseconds, hasNext: next != nil,
+      position: currentTimeMilliseconds, duration: durationMilliseconds,
+      hasNext: next != nil && !lastTitle,
       autoplay: preferences.automaticallyPlayNextEpisode, stopsAtEnd: sleepTimer == .endOfEpisode,
       dismissed: upNextDismissed, lead: leadMs, creditsStart: creditsStart)
     let duringCredits =
@@ -1351,6 +1398,7 @@ final class PlaybackController: ObservableObject {
     showsStartScreen = true
     upNext = nil
     upNextDismissed = false
+    lastTitleNote = nil
     autoplayCancelled = false
     suggestions = []
     wantsSuggestions = false
@@ -1483,6 +1531,55 @@ final class PlaybackController: ObservableObject {
     }
   }
 
+  // MARK: Screen time
+
+  private func refreshScreenTime() async {
+    // The last known state stays when the server does not answer.
+    guard let status = try? await client.ownScreenTime() else { return }
+    guard !stopped else { return }
+    screenTime = status
+  }
+
+  /// Screen time refused the title: the good-night screen, not an error or an ended session.
+  private func screenTimeRefused(_ error: Error) -> Bool {
+    let code = (error as? APIClientError)?.problemCode
+    guard ScreenTimeText.isScreenTimeCode(code), code != "profile_screen_time_closed" else {
+      return false
+    }
+    Task { [weak self] in
+      await self?.refreshScreenTime()
+      self?.showGoodNight()
+    }
+    return true
+  }
+
+  /// The friendly end of the day; nothing else starts, and the view shows the moon.
+  private func showGoodNight() {
+    guard !stopped, !showsGoodNight else { return }
+    terminalFailure = true
+    wantsPlayback = false
+    recovering = false
+    recoveryTask?.cancel()
+    recoveryTask = nil
+    recoveryMessage = nil
+    errorMessage = nil
+    isPreparing = false
+    showsStartScreen = false
+    upNext = nil
+    showsSuggestionCard = false
+    showsSuggestionEndScreen = false
+    suggestionToStart = nil
+    renewalTask?.cancel()
+    renewalTask = nil
+    watchdogTask?.cancel()
+    watchdogTask = nil
+    if isPlaying { enqueueProgressSave(isFinished: false) }
+    isPlaying = false
+    engine.pause()
+    endPlaybackActivity()
+    showsGoodNight = true
+  }
+
   private func stopUnauthorizedPlayback(
     _ message: String, cause: PlaybackRecoveryCause = .accessDenied
   ) {
@@ -1598,6 +1695,15 @@ final class PlaybackController: ObservableObject {
 
   private func recoverPlayback(message: String) {
     guard !stopped, !authorizationFailed, !terminalFailure, !recovering else { return }
+    // "Stop now" ends the stream at bedtime; that is the good-night screen, not a problem.
+    if screenTime != nil, screenTimeTask == nil {
+      screenTimeTask = Task { [weak self] in
+        guard let self else { return }
+        await self.refreshScreenTime()
+        self.screenTimeTask = nil
+        if self.screenTime?.state == .closed { self.showGoodNight() }
+      }
+    }
     // Before authorization/relay setup there is no input clock to override the requested
     // Play/Resume intent. A chosen but unapplied resume position must survive an early failure.
     let position = preservedInputPosition
@@ -1663,6 +1769,7 @@ final class PlaybackController: ObservableObject {
           guard !Task.isCancelled, !self.stopped, self.lifecycleID == operation,
             self.recoveryID == recovery
           else { return }
+          if self.screenTimeRefused(error) { return }
           let context = PlaybackFailureContext(error: error, phase: .ticketAuthorization)
           self.record(.failureObserved, cause: context.cause, context: context)
           self.recoveryCause = context.cause

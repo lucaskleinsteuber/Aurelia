@@ -18,7 +18,8 @@ public sealed class PlaybackService(
     PlaybackProgressService progressService,
     PlaybackTicketPolicy? ticketPolicy = null,
     ProfileSessionStore? profiles = null,
-    MediaSegmentService? segments = null)
+    MediaSegmentService? segments = null,
+    ScreenTimeService? screenTime = null)
 {
     private const int CleanupBatchSize = 100;
 
@@ -64,6 +65,10 @@ public sealed class PlaybackService(
                 StatusCodes.Status409Conflict);
         }
 
+        // A children's profile's bedtime or daily limit may refuse a new title (docs/SCREEN_TIME.md).
+        var (screenTimeStatus, screenTimeExtraEndsAt) = screenTime is null ? (null, null)
+            : await screenTime.AdmitTitleAsync(userId, media.Id, cancellationToken);
+
         // Scanner availability is a catalog hint, not a live I/O guarantee. A
         // reconnected drive must be playable before the next monitoring pass.
         // The access-filtered lookup above still precedes this secure handle open.
@@ -84,6 +89,7 @@ public sealed class PlaybackService(
             TokenHash = tokenService.Hash(rawToken),
             CreatedAt = now,
             ExpiresAt = expiresAt,
+            ScreenTimeExtraEndsAt = screenTimeExtraEndsAt,
         };
         database.PlaybackTickets.Add(ticket);
         await database.SaveChangesAsync(cancellationToken);
@@ -99,7 +105,8 @@ public sealed class PlaybackService(
                 userId,
                 media.Id,
                 cancellationToken),
-            segments is null ? null : await segments.ForPlaybackAsync(media.Id, cancellationToken));
+            segments is null ? null : await segments.ForPlaybackAsync(media.Id, cancellationToken),
+            screenTimeStatus);
     }
 
     public async Task RevokeAsync(
@@ -153,6 +160,11 @@ public sealed class PlaybackService(
                     && database.MediaItems.Any(item => item.Id == candidate.MediaItemId),
                 cancellationToken);
         if (ticket is null || ticket.MediaItem.Kind == MediaKind.Series)
+        {
+            return null;
+        }
+        if (screenTime is not null
+            && !await screenTime.StreamAllowedAsync(userId, ticket.CreatedAt, ticket.ScreenTimeExtraEndsAt, cancellationToken))
         {
             return null;
         }

@@ -50,6 +50,12 @@ final class TVPlaybackController: ObservableObject {
   @Published private(set) var showsSuggestionEndScreen = false
   /// Set when the suggestion should start: Watch Now, or Play Suggestions Automatically at the end.
   @Published private(set) var suggestionToStart: TVCatalogItem?
+  /// A children's profile's screen time, from the ticket and then every minute (docs/SCREEN_TIME.md).
+  @Published private(set) var screenTime: TVScreenTimeStatus?
+  /// Screen time is over: the good-night screen shows instead of the next title or an error.
+  @Published private(set) var showsGoodNight = false
+  private var lastScreenTimeCheck = Date()
+  private var screenTimeTask: Task<Void, Never>?
   /// A separate local relay for timeline previews; its reads are marked as previews, which
   /// the server counts apart from playback, and its failures never touch playback.
   @Published private(set) var previewSourceURL: URL?
@@ -615,6 +621,33 @@ final class TVPlaybackController: ObservableObject {
     close()
   }
 
+  // MARK: Screen time
+
+  /// The quiet "last episode" note while the last title of the day plays.
+  var lastTitleNote: String? {
+    screenTime?.noMoreTitles == true && !showsGoodNight
+      ? TVScreenTimeText.lastTitleNote(screenTime) : nil
+  }
+
+  private func refreshScreenTime() async {
+    lastScreenTimeCheck = Date()
+    // The last known state stays when the server does not answer.
+    guard let status = try? await api.ownScreenTime(), !closed else { return }
+    screenTime = status
+  }
+
+  /// The friendly end of the day; nothing else starts, and the view shows the moon.
+  private func showGoodNight() {
+    guard !closed, !showsGoodNight else { return }
+    engine.pause()
+    upNext = nil
+    showsSuggestion = false
+    showsSuggestionEndScreen = false
+    suggestionToStart = nil
+    controlsVisible = false
+    showsGoodNight = true
+  }
+
   func close() {
     guard !closed else { return }
     // Capture while the engine still owns the input. Queueing only waits for
@@ -663,6 +696,8 @@ final class TVPlaybackController: ObservableObject {
       guard !closed, operation == generation, !Task.isCancelled else { return }
       let created = try await api.createTicket(mediaID: mediaID)
       unclaimedTicketID = created.id
+      screenTime = created.screenTime
+      lastScreenTimeCheck = Date()
       guard !closed, operation == generation, !Task.isCancelled else { return }
       let url = try api.validatedStreamURL(path: created.streamPath)
       let secureRelay = try runtime.makeRelay(url, connection.fingerprint, session.token)
@@ -732,7 +767,13 @@ final class TVPlaybackController: ObservableObject {
       userInteracted()
     } catch {
       guard !closed, operation == generation, !Task.isCancelled else { return }
-      if let core = error as? TVCoreError, core.endsSession {
+      if let core = error as? TVCoreError, TVScreenTimeText.refusesTitle(core.problemCode) {
+        // Screen time refused the title: the good-night screen, not an error.
+        Task { [weak self] in
+          await self?.refreshScreenTime()
+          self?.showGoodNight()
+        }
+      } else if let core = error as? TVCoreError, core.endsSession {
         sessionFailed(core)
       } else if let core = error as? TVCoreError, let refusal = TVPlayerPolicy.refusal(core) {
         fail(refusal, canRetry: false)
@@ -789,8 +830,17 @@ final class TVPlaybackController: ObservableObject {
   private func updateUpNext() {
     let next = queue.first
     let credits = creditsStart
+    if isPlaying, screenTime != nil, screenTimeTask == nil,
+      Date().timeIntervalSince(lastScreenTimeCheck) >= TVScreenTimeText.refreshInterval
+    {
+      screenTimeTask = Task { [weak self] in
+        await self?.refreshScreenTime()
+        self?.screenTimeTask = nil
+      }
+    }
     let shown = TVPlayerPolicy.showsUpNext(
-      position: position, duration: duration, hasNext: next?.isPlayable == true,
+      position: position, duration: duration,
+      hasNext: next?.isPlayable == true && screenTime?.noMoreTitles != true,
       autoplay: preferences.automaticallyPlayNextEpisode, stopsAtEnd: sleepTimer == .endOfEpisode,
       dismissed: upNextDismissed || finished, creditsStart: credits)
     let duringCredits =
@@ -858,28 +908,42 @@ final class TVPlaybackController: ObservableObject {
       finished = true
       upNext = nil
       showsSuggestion = false
-      if sleepTimer != .endOfEpisode, preferences.automaticallyPlayNextEpisode,
-        !autoplayCancelled, let next = queue.first
-      {
-        advanceTask = Task { [weak self] in await self?.advance(to: next) }
-      } else if sleepTimer != .endOfEpisode, queue.isEmpty, let first = suggestions.first {
-        // After a movie or a series' last episode: only the viewer's own setting starts the
-        // suggestion; otherwise the end screen offers it with two more.
-        if preferences.playSuggestionsAutomatically, !autoplayCancelled {
-          suggestionToStart = first.item
-        } else {
-          controlsVisible = false
-          showsSuggestionEndScreen = true
+      // Screen time may have ended while this title played: ask before anything else starts.
+      guard screenTime == nil else {
+        advanceTask = Task { [weak self] in
+          guard let self else { return }
+          await self.refreshScreenTime()
+          guard !self.closed else { return }
+          if self.screenTime?.noMoreTitles == true { self.showGoodNight() } else { self.continueAfterEnd() }
         }
-      } else {
-        if sleepTimer == .endOfEpisode {
-          let api = api
-          Task { try? await api.sleepTimerEnded() }
-        }
-        close()
+        return
       }
+      continueAfterEnd()
     } else {
       recover(message: "The stream was interrupted. Reconnecting…")
+    }
+  }
+
+  private func continueAfterEnd() {
+    if sleepTimer != .endOfEpisode, preferences.automaticallyPlayNextEpisode,
+      !autoplayCancelled, let next = queue.first
+    {
+      advanceTask = Task { [weak self] in await self?.advance(to: next) }
+    } else if sleepTimer != .endOfEpisode, queue.isEmpty, let first = suggestions.first {
+      // After a movie or a series' last episode: only the viewer's own setting starts the
+      // suggestion; otherwise the end screen offers it with two more.
+      if preferences.playSuggestionsAutomatically, !autoplayCancelled {
+        suggestionToStart = first.item
+      } else {
+        controlsVisible = false
+        showsSuggestionEndScreen = true
+      }
+    } else {
+      if sleepTimer == .endOfEpisode {
+        let api = api
+        Task { try? await api.sleepTimerEnded() }
+      }
+      close()
     }
   }
 
@@ -896,7 +960,16 @@ final class TVPlaybackController: ObservableObject {
   }
 
   private func recover(message: String) {
-    guard !closed else { return }
+    guard !closed, !showsGoodNight else { return }
+    // "Stop now" ends the stream at bedtime; that is the good-night screen, not a problem.
+    if screenTime != nil, screenTimeTask == nil {
+      screenTimeTask = Task { [weak self] in
+        guard let self else { return }
+        await self.refreshScreenTime()
+        self.screenTimeTask = nil
+        if self.screenTime?.state == .closed { self.showGoodNight() }
+      }
+    }
     guard let delay = recoveryBudget.takeAttempt() else {
       fail("Playback could not reconnect. Try again or return to the library.")
       return

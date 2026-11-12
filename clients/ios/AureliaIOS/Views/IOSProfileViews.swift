@@ -34,14 +34,16 @@ struct IOSProfilesView: View {
               IOSProfileEntry(profile: profile)
             }
             .buttonStyle(IOSContentButtonStyle())
-            .disabled(model.isBusy || profile.needsPinSetup)
-            .opacity(profile.needsPinSetup ? 0.5 : 1)
+            // Screen time closes a children's profile until its wake time.
+            .disabled(model.isBusy || profile.needsPinSetup || profile.closedUntil != nil)
+            .opacity(profile.needsPinSetup || profile.closedUntil != nil ? 0.5 : 1)
             .accessibilityIdentifier("profile-\(profile.id)")
             .accessibilityLabel(profile.name)
             .accessibilityValue(
-              profile.needsPinSetup
-                ? "PIN setup required"
-                : profile.pinProtectionEnabled ? "PIN protected" : "No PIN")
+              IOSScreenTimeText.closedLabel(profile.closedUntil)
+                ?? (profile.needsPinSetup
+                  ? "PIN setup required"
+                  : profile.pinProtectionEnabled ? "PIN protected" : "No PIN"))
           }
         }
         .frame(maxWidth: 560)
@@ -123,6 +125,9 @@ private struct IOSProfileEntry: View {
           Image(systemName: "lock.fill").font(.caption2.weight(.semibold))
             .foregroundStyle(.secondary)
         }
+      }
+      if let asleep = IOSScreenTimeText.closedLabel(profile.closedUntil) {
+        Label(asleep, systemImage: "moon.fill").font(.caption).foregroundStyle(.secondary)
       }
       if profile.needsPinSetup {
         Text("Set up a PIN on the server computer").font(.caption2).foregroundStyle(.secondary)

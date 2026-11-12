@@ -1077,6 +1077,102 @@ final class PlaybackControllerTests: XCTestCase {
     await controller.shutdown(saveProgress: false)
   }
 
+  private static func screenTime(_ state: ScreenTimeState) -> ScreenTimeStatus {
+    ScreenTimeStatus(
+      state: state, reason: state == .open ? .none : .bedtime, watchedMinutesToday: 40,
+      limitMinutes: nil, remainingMinutes: nil, closesAt: "2027-11-09T19:30:00Z",
+      titleEndsBy: "2027-11-09T20:00:00Z", opensAt: state == .open ? nil : "2027-11-10T07:00:00Z",
+      lockScope: .playbackOnly, ending: .finishTitle, oneMoreTitleAvailable: false)
+  }
+
+  func testScreenTimeEndsWithTheGoodNightScreenInsteadOfTheNextEpisode() async throws {
+    var source = Self.source(position: 0, completed: false)
+    source.screenTime = Self.screenTime(.open)
+    let client = FakePlaybackClient(source: source)
+    client.ownScreenTimeStatus = Self.screenTime(.closed)
+    let engine = FakePlaybackEngine()
+    let relay = FakePlaybackRelay()
+    var preferences = PlaybackPreferences.defaultValue
+    preferences.preventSleepDuringPlayback = false
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(
+        mediaId: source.mediaId, title: "Episode 1", subtitle: nil,
+        queue: [PlaybackQueueItem(mediaId: UUID(), title: "Episode 2", subtitle: nil)]),
+      engine: engine, preferences: preferences, relayFactory: { _, _ in relay })
+
+    await controller.start()
+    XCTAssertEqual(controller.screenTime?.state, .open)
+    engine.currentTimeMilliseconds = engine.durationMilliseconds
+    engine.isPlaying = false
+    engine.onEnded?()
+    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+    while !controller.showsGoodNight && ContinuousClock.now < deadline {
+      try await Task.sleep(for: .milliseconds(5))
+    }
+
+    XCTAssertTrue(controller.showsGoodNight)
+    XCTAssertEqual(client.createdMediaIDs, [source.mediaId], "The next episode must not start.")
+    XCTAssertNil(controller.errorMessage)
+    XCTAssertNil(controller.upNext)
+    await controller.shutdown()
+  }
+
+  func testAnOpenProfileStillPlaysTheNextEpisode() async throws {
+    var source = Self.source(position: 0, completed: false)
+    source.screenTime = Self.screenTime(.open)
+    let client = FakePlaybackClient(source: source)
+    client.ownScreenTimeStatus = Self.screenTime(.open)
+    let engine = FakePlaybackEngine()
+    let relay = FakePlaybackRelay()
+    var preferences = PlaybackPreferences.defaultValue
+    preferences.preventSleepDuringPlayback = false
+    let nextID = UUID()
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(
+        mediaId: source.mediaId, title: "Episode 1", subtitle: nil,
+        queue: [PlaybackQueueItem(mediaId: nextID, title: "Episode 2", subtitle: nil)]),
+      engine: engine, preferences: preferences, relayFactory: { _, _ in relay })
+
+    await controller.start()
+    engine.currentTimeMilliseconds = engine.durationMilliseconds
+    engine.isPlaying = false
+    engine.onEnded?()
+    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+    while controller.presentation.mediaId != nextID && ContinuousClock.now < deadline {
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    XCTAssertEqual(controller.presentation.mediaId, nextID)
+    XCTAssertFalse(controller.showsGoodNight)
+    await controller.shutdown()
+  }
+
+  func testAScreenTimeRefusalShowsTheGoodNightScreenNotAnError() async throws {
+    let source = Self.source(position: 0, completed: false)
+    let client = FakePlaybackClient(source: source)
+    client.ownScreenTimeStatus = Self.screenTime(.closed)
+    client.nextCreationError = APIClientError.httpFailure(
+      status: 403, retryAfter: nil, code: "screen_time_bedtime",
+      message: "It's bedtime. Aurelia opens again at 07:00.")
+    let engine = FakePlaybackEngine()
+    let relay = FakePlaybackRelay()
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(mediaId: source.mediaId, title: "Episode 1", subtitle: nil),
+      engine: engine, relayFactory: { _, _ in relay })
+
+    await controller.start()
+    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+    while !controller.showsGoodNight && ContinuousClock.now < deadline {
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    XCTAssertTrue(controller.showsGoodNight)
+    XCTAssertNil(controller.errorMessage)
+    XCTAssertEqual(controller.screenTime?.state, .closed)
+    await controller.shutdown()
+  }
+
   func testEndOfEpisodeSleepTimerStopsQueueAdvance() async throws {
     let source = Self.source(position: 0, completed: false)
     let client = FakePlaybackClient(source: source)
@@ -1324,6 +1420,10 @@ private final class FakePlaybackClient: PlaybackClientProtocol {
   var beforeProgressReturn: (() async -> Void)?
 
   func sleepTimerEnded() async { sleepTimerSignals += 1 }
+
+  /// What the server says about the profile's screen time when the player asks.
+  var ownScreenTimeStatus: ScreenTimeStatus?
+  func ownScreenTime() async throws -> ScreenTimeStatus? { ownScreenTimeStatus }
 
   init(source: PlaybackSourceResponse) {
     self.source = source

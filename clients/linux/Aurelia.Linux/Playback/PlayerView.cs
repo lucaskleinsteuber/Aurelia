@@ -69,6 +69,19 @@ public sealed class PlayerView : UserControl, IDisposable
     private readonly Border endScreen = new() { Background = new SolidColorBrush(Color.FromArgb(0xC8, 0, 0, 0)), IsVisible = false };
     private Guid? shownSuggestion;
     private bool endScreenBuilt;
+    /// <summary>Screen time is over (docs/SCREEN_TIME.md): a calm moon, the profile's name and when Aurelia opens.</summary>
+    private readonly Border goodNight = new()
+    {
+        IsVisible = false,
+        Background = new RadialGradientBrush
+        {
+            GradientStops = { new GradientStop(Color.FromArgb(0xF0, 0x28, 0x34, 0x60), 0), new GradientStop(Color.FromArgb(0xF6, 0x04, 0x06, 0x10), 1) },
+        },
+    };
+    private bool goodNightBuilt;
+    /// <summary>The quiet "last episode" note while the last title of the day plays.</summary>
+    private readonly Border lastTitle = new() { Classes = { "playerMaterial", "playerPill" }, IsVisible = false, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 96, 0, 0), IsHitTestVisible = false };
+    private readonly TextBlock lastTitleText = new() { Foreground = Brushes.White, FontSize = 13 };
     /// <summary>"Skip Intro" while an episode's intro plays; it stays when the controls hide.</summary>
     private readonly Button skipIntro = new() { Classes = { "skipIntro" }, IsVisible = false, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom };
     private readonly Border status = new() { Classes = { "playerMaterial", "playerPanel" }, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
@@ -272,7 +285,8 @@ public sealed class PlayerView : UserControl, IDisposable
         chrome.Children.Add(transport);
         chrome.Children.Add(bottom);
         chrome.Children.Add(conflict);
-        Content = new Grid { Children = { surface, chrome, status, skipIntro, upNext, suggestionCard, endScreen, noteCues, togetherNotice } };
+        lastTitle.Child = lastTitleText;
+        Content = new Grid { Children = { surface, chrome, status, skipIntro, upNext, suggestionCard, endScreen, lastTitle, goodNight, noteCues, togetherNotice } };
         if (together is not null) together.WatchPartyChanged += ShowTogetherNotice;
 
         controller.PropertyChanged += OnControllerChanged;
@@ -513,6 +527,35 @@ public sealed class PlayerView : UserControl, IDisposable
             };
         }
         if (!endScreen.IsVisible) endScreenBuilt = false;
+        UpdateGoodNight();
+    }
+
+    private void UpdateGoodNight()
+    {
+        lastTitleText.Text = controller.LastTitleNote ?? "";
+        lastTitle.IsVisible = controller.LastTitleNote is not null && chrome.IsVisible;
+        goodNight.IsVisible = controller.ShowsGoodNight;
+        if (!goodNight.IsVisible || goodNightBuilt) return;
+        goodNightBuilt = true;
+        var words = ScreenTimeText.GoodNight(controller.ScreenTime, Aurelia.Linux.Core.ProfileVisuals.ShownName(controller.Client.Library.Profile.User));
+        var done = new Button { Content = "Done", Classes = { "primary" }, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 8, 0, 0) };
+        done.Click += (_, _) => _ = controller.CloseAsync();
+        AutomationProperties.SetName(goodNight, words.Title);
+        goodNight.Child = new StackPanel
+        {
+            Spacing = 16,
+            Margin = new Thickness(16),
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Children =
+            {
+                new PathIcon { Data = Application.Current?.FindResource("IconSleep") as Geometry, Width = 80, Height = 80, Foreground = new SolidColorBrush(Color.FromRgb(0xF3, 0xE3, 0xA8)), HorizontalAlignment = HorizontalAlignment.Center },
+                new TextBlock { Text = words.Title, FontSize = 32, FontWeight = FontWeight.Bold, Foreground = Brushes.White, HorizontalAlignment = HorizontalAlignment.Center, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center },
+                new TextBlock { Text = words.Text, FontSize = 18, Foreground = Secondary, HorizontalAlignment = HorizontalAlignment.Center },
+                done,
+            },
+        };
+        done.AttachedToVisualTree += (_, _) => done.Focus();
     }
 
     private Border Poster(CatalogItemSummary item, double width) => new()

@@ -25,6 +25,8 @@ struct ServerProfileEditor: View {
   @State private var allowedTitles: Set<UUID> = []
   @State private var hiddenTitles: Set<UUID> = []
   @State private var exceptionQuery = ""
+  @State private var screenTime = ScreenTimeRules.default
+  @State private var screenTimeSnapshot: ProfileScreenTime?
   @State private var working = false
   @State private var saveTask: Task<Void, Never>?
   @State private var error: String?
@@ -100,6 +102,13 @@ struct ServerProfileEditor: View {
           protectionSection.disabled(working || (!creating && snapshot == nil))
           if model.supportsAgeLimits && role == .user {
             childSection.disabled(working || (!creating && snapshot == nil))
+          }
+          if model.supportsScreenTime && role == .user {
+            ScreenTimeSection(
+              rules: $screenTime, current: screenTimeSnapshot,
+              grant: existing.map { profile in { grant in await grantScreenTime(profile.id, grant) } }
+            )
+            .disabled(working || (!creating && snapshot == nil))
           }
           if !childActive {
             contentSection.disabled(working || (!creating && snapshot == nil))
@@ -385,6 +394,15 @@ struct ServerProfileEditor: View {
           return try await client.ageLimit(user: existing.id)
         } : nil
       guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
+      let screen: ProfileScreenTime? =
+        model.supportsScreenTime
+        ? try await model.currentAdministration {
+          guard model.isCurrentAdministration(generation) else { throw CancellationError() }
+          return try await client.screenTime(user: existing.id)
+        } : nil
+      guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
+      screenTimeSnapshot = screen
+      if let screen { screenTime = screen.rules }
       ageSnapshot = age
       if let age {
         isChild = age.ageLimit != nil
@@ -404,6 +422,25 @@ struct ServerProfileEditor: View {
     } catch is CancellationError {
     } catch {
       guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
+      if reportManagementFailure(error, generation: generation) { return }
+      self.error = error.localizedDescription
+    }
+  }
+
+  /// Today's exceptions apply at once, without saving the rest of the editor.
+  private func grantScreenTime(_ user: UUID, _ grant: ScreenTimeGrant) async {
+    let generation = model.administrationGeneration
+    do {
+      let updated = try await model.currentAdministration {
+        guard model.isCurrentAdministration(generation) else { throw CancellationError() }
+        return try await client.grantScreenTime(user: user, grant)
+      }
+      guard model.isCurrentAdministration(generation) else { return }
+      screenTimeSnapshot = updated
+      error = nil
+    } catch is CancellationError {
+    } catch {
+      guard model.isCurrentAdministration(generation) else { return }
       if reportManagementFailure(error, generation: generation) { return }
       self.error = error.localizedDescription
     }
@@ -439,6 +476,14 @@ struct ServerProfileEditor: View {
           && (Set(allowed) != Set(ageSnapshot?.allowedTitleIds ?? [])
             || Set(hidden) != Set(ageSnapshot?.hiddenTitleIds ?? []))))
     let chosenAge = ageLimit
+    let chosenScreenTime = screenTime
+    let screenTimeChanged =
+      model.supportsScreenTime && role == .user
+      && chosenScreenTime != (screenTimeSnapshot?.rules ?? .default)
+    if screenTimeChanged, let problem = ScreenTimeText.problem(chosenScreenTime) {
+      error = problem
+      return
+    }
     working = true
     saveTask = Task {
       defer {
@@ -482,6 +527,12 @@ struct ServerProfileEditor: View {
               }
             }
             if let user { model.updateProfileUser(user) }
+            if screenTimeChanged {
+              let current = try await client.screenTime(user: existing.id)
+              _ = try await client.setScreenTime(
+                user: existing.id,
+                ProfileScreenTimeUpdate(rules: chosenScreenTime, revision: current.revision))
+            }
           } else {
             let created = try await client.createProfile(
               request: ProfileCreateRequest(
@@ -493,6 +544,10 @@ struct ServerProfileEditor: View {
                 ageLimit: child ? chosenAge : nil))
             if let upload, model.supportsProfilePersonalization {
               _ = try await client.uploadProfilePhoto(id: created.id, image: upload)
+            }
+            if screenTimeChanged {
+              _ = try await client.setScreenTime(
+                user: created.id, ProfileScreenTimeUpdate(rules: chosenScreenTime, revision: 0))
             }
           }
         }

@@ -9,15 +9,29 @@ namespace Aurelia.Server.Services;
 
 public sealed class ProfileService(AureliaDbContext database, IPasswordHasher<ServerUser> hasher,
     CredentialAttemptGuard passwords, ProfilePinAttemptGuard pins, ProfileSessionStore sessions,
-    CatalogMutationGate mutations, ActiveStreamRegistry streams)
+    CatalogMutationGate mutations, ActiveStreamRegistry streams, ScreenTimeService? screenTime = null)
 {
-    public async Task<ProfilePickerResponse> PickerAsync(CancellationToken token) => new(2, "1.5.1",
-        !await database.AdministrationCredentials.AnyAsync(token),
-        (await database.Users.AsNoTracking().Where(user => user.IsEnabled)
+    public async Task<ProfilePickerResponse> PickerAsync(CancellationToken token)
+    {
+        var profiles = await database.Users.AsNoTracking().Where(user => user.IsEnabled)
             .Select(user => new WatchingProfile(user.Id, user.DisplayName ?? user.Username, user.Role,
                 user.PinProtectionEnabled && user.PinHash == null, user.PinProtectionEnabled, user.PictureKey, user.PictureRevision,
-                user.Role == UserRole.User ? user.AgeLimit : null)).ToListAsync(token))
-            .OrderBy(profile => profile.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
+                user.Role == UserRole.User ? user.AgeLimit : null, null)).ToListAsync(token);
+        if (screenTime is not null)
+            for (var index = 0; index < profiles.Count; index++)
+                if (profiles[index].Role == UserRole.User && await screenTime.ProfileClosedUntilAsync(profiles[index].Id, token) is { } until)
+                    profiles[index] = profiles[index] with { ClosedUntil = until };
+        return new(2, "1.5.1", !await database.AdministrationCredentials.AnyAsync(token),
+            profiles.OrderBy(profile => profile.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
+    }
+
+    /// <summary>A whole-profile screen time lock keeps a children's profile closed until its wake time.</summary>
+    private async Task RequireOpenAsync(Guid userId, CancellationToken token)
+    {
+        if (screenTime is not null && await screenTime.ProfileClosedUntilAsync(userId, token) is { } until)
+            throw new AccountException(ScreenTimeCodes.ProfileClosed,
+                $"Good night! This profile opens again at {screenTime.LocalClock(until)}.", 403);
+    }
 
     public async Task InitializeAsync(Guid deviceId, InitializeProfilesRequest request, CancellationToken token)
     {
@@ -48,6 +62,7 @@ public sealed class ProfileService(AureliaDbContext database, IPasswordHasher<Se
         using var lease = await mutations.EnterAsync(token);
         pins.Check(deviceId, userId);
         var user = await database.Users.SingleOrDefaultAsync(user => user.Id == userId && user.IsEnabled, token);
+        if (user is { Role: UserRole.User }) await RequireOpenAsync(user.Id, token);
         if (user is { Role: UserRole.User, PinProtectionEnabled: false })
         {
             // Even an unprotected profile receives a volatile, user-bound session.

@@ -54,6 +54,10 @@ public sealed class PlaybackClient(AureliaApi api, LibraryClient library)
         (await Send<MediaSuggestionsResponse>(HttpMethod.Get,
             $"/api/v1/media/{mediaId}/suggestions?limit={limit.ToString(CultureInfo.InvariantCulture)}", null, cancellation)).Suggestions;
 
+    /// <summary>The open profile's screen time now; null when it has none (servers with "screen-time-v1").</summary>
+    public async Task<ScreenTimeStatus?> ScreenTimeAsync(CancellationToken cancellation) =>
+        (await Send<OwnScreenTimeResponse>(HttpMethod.Get, "/api/v1/profile/screen-time", null, cancellation)).Status;
+
     public Task SleepTimerEndedAsync(CancellationToken cancellation) =>
         Send<AureliaApi.NoContent>(HttpMethod.Post, "/api/v1/playback/sleep-timer-ended", null, cancellation);
 

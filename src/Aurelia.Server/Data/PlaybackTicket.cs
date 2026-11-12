@@ -24,4 +24,10 @@ public sealed class PlaybackTicket
     public DateTimeOffset ExpiresAt { get; set; }
 
     public DateTimeOffset? RevokedAt { get; set; }
+
+    /// <summary>
+    /// A ticket created after a children's profile closed, for one more title or for the title that was already
+    /// playing: when that title must have ended.
+    /// </summary>
+    public DateTimeOffset? ScreenTimeExtraEndsAt { get; set; }
 }

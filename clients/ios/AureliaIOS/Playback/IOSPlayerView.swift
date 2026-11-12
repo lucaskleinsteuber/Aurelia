@@ -73,6 +73,8 @@ struct IOSPlayerView: View {
       if controller.showsSuggestionEndScreen, !controller.suggestions.isEmpty {
         suggestionEndScreen.transition(.opacity)
       }
+      if let note = controller.lastTitleNote, controller.controlsVisible { lastTitleNote(note) }
+      if controller.showsGoodNight { goodNightScreen.transition(.opacity) }
       // Skip Intro while the intro plays; above the bottom controls while they show.
       if controller.showsSkipIntro, controller.upNext == nil, controller.trackMenu == nil,
         controller.errorMessage == nil, !controller.isStarting
@@ -554,6 +556,55 @@ struct IOSPlayerView: View {
   }
 
   /// When the file ended: the suggestion and two more, and Done.
+  /// Screen time is over (docs/SCREEN_TIME.md): a calm moon, the profile's name and when Aurelia
+  /// opens again. Done closes the player; a whole-profile lock then returns to "Who's watching?".
+  private var goodNightScreen: some View {
+    let words = IOSScreenTimeText.goodNight(
+      controller.screenTime, name: model.session?.user.shownName ?? "")
+    return ZStack {
+      RadialGradient(
+        colors: [Color(red: 0.16, green: 0.2, blue: 0.38), Color(red: 0.02, green: 0.02, blue: 0.06)],
+        center: .init(x: 0.5, y: 0.35), startRadius: 20, endRadius: 600
+      )
+      .ignoresSafeArea()
+      VStack(spacing: 16) {
+        Image(systemName: "moon.stars.fill")
+          .font(.system(size: 64))
+          .foregroundStyle(Color(red: 0.95, green: 0.89, blue: 0.66))
+          .shadow(color: Color(red: 0.95, green: 0.89, blue: 0.66).opacity(0.45), radius: 20)
+          .accessibilityHidden(true)
+        Text(words.title).font(.largeTitle.weight(.bold)).foregroundStyle(.white)
+        Text(words.text).font(.title3).foregroundStyle(.white.opacity(0.75))
+        Button("Done") { goodNightDone() }
+          .buttonStyle(.glassProminent)
+          .controlSize(.large)
+          .padding(.top, 8)
+          .accessibilityIdentifier("player-good-night-done")
+      }
+      .multilineTextAlignment(.center)
+      .padding(32)
+    }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("player-good-night")
+  }
+
+  private func goodNightDone() {
+    let wholeProfile = controller.screenTime?.closesWholeProfile == true
+    controller.close()
+    if wholeProfile { Task { await model.switchProfile() } }
+  }
+
+  private func lastTitleNote(_ note: String) -> some View {
+    Label(note, systemImage: "moon.fill")
+      .font(.callout.weight(.medium)).foregroundStyle(.white)
+      .padding(.horizontal, 14).padding(.vertical, 8)
+      .background(.black.opacity(0.55), in: Capsule())
+      .frame(maxHeight: .infinity, alignment: .top)
+      .padding(.top, 72)
+      .allowsHitTesting(false)
+      .accessibilityIdentifier("player-last-title-note")
+  }
+
   private var suggestionEndScreen: some View {
     let list = Array(controller.suggestions.prefix(3))
     return ZStack {

@@ -279,7 +279,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     public bool HasPrevious => previous.Count > 0;
 
     /// <summary>The Up Next card's title while it shows, else null.</summary>
-    public CatalogItemSummary? UpNext => NextItem is { } next
+    public CatalogItemSummary? UpNext => NextItem is { } next && ScreenTime?.NoMoreTitles != true
         && PlayerPolicy.ShowsUpNext(Position, Duration, true, Preferences.AutoplayNextEpisode, SleepTimer.EndOfEpisode, upNextDismissed, Preferences.UpNextCountdownSeconds,
             CreditsStart)
         ? next
@@ -294,7 +294,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     public IReadOnlyList<MediaSuggestion> Suggestions => suggestions ?? [];
 
     /// <summary>The suggestion card from the credits on, without a countdown.</summary>
-    public bool ShowsSuggestion => !showsEndScreen && UpNext is null
+    public bool ShowsSuggestion => !showsEndScreen && UpNext is null && ScreenTime?.NoMoreTitles != true
         && PlayerPolicy.ShowsSuggestion(Position, Duration, NextItem is not null, Suggestions.Count > 0, suggestionDismissed,
             Segments?.CreditsStartMilliseconds, Preferences.UpNextCountdownSeconds);
 
@@ -304,6 +304,37 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         get => showsEndScreen;
         private set => SetProperty(ref showsEndScreen, value);
     }
+
+    private ScreenTimeStatus? screenTime;
+    private bool showsGoodNight;
+    private DateTimeOffset lastScreenTimeCheck;
+    private bool checkingScreenTime;
+
+    /// <summary>A children's profile's screen time, from the ticket and then every minute (docs/SCREEN_TIME.md).</summary>
+    public ScreenTimeStatus? ScreenTime
+    {
+        get => screenTime;
+        private set
+        {
+            if (!SetProperty(ref screenTime, value)) return;
+            OnPropertyChanged(nameof(LastTitleNote));
+            OnPropertyChanged(nameof(UpNext));
+            OnPropertyChanged(nameof(ShowsSuggestion));
+        }
+    }
+
+    /// <summary>The quiet "last episode" note while the last title of the day plays.</summary>
+    public string? LastTitleNote => ScreenTime?.NoMoreTitles == true && !ShowsGoodNight ? ScreenTimeText.LastTitleNote(ScreenTime) : null;
+
+    /// <summary>Screen time is over: the good-night screen shows instead of the next title or an error.</summary>
+    public bool ShowsGoodNight
+    {
+        get => showsGoodNight;
+        private set { if (SetProperty(ref showsGoodNight, value)) OnPropertyChanged(nameof(LastTitleNote)); }
+    }
+
+    /// <summary>Done on the good-night screen should end the profile: its whole profile is closed.</summary>
+    public bool GoodNightEndsProfile => ShowsGoodNight && ScreenTime?.LockScope == ScreenTimeLockScope.WholeProfile;
 
     /// <summary>Raised after the player closed for a suggestion that should play now.</summary>
     public event Action<CatalogItemSummary>? SuggestionChosen;
@@ -696,6 +727,8 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
             else
             {
                 if (!keepTicket || ticket is null) ticket = await client.StartAsync(title.Id, CancellationToken.None);
+                ScreenTime = ticket.ScreenTime;
+                lastScreenTimeCheck = time.GetUtcNow();
                 revision = ticket.Progress.Revision;
                 progress = ticket.Progress;
             }
@@ -741,6 +774,12 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
             StartClock();
         }
         catch (InvalidOperationException failure) { Fail(failure.Message); }
+        catch (AureliaApiException failure) when (failure.Code is ScreenTimeCodes.Bedtime or ScreenTimeCodes.Limit)
+        {
+            // Screen time refused the title: the good-night screen, not an error.
+            await RefreshScreenTimeAsync();
+            await ShowGoodNightAsync();
+        }
         catch (AureliaApiException failure)
         {
             Record(PlaybackDiagnosticKind.Failed, failure: failure);
@@ -840,6 +879,8 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         if (engine is null || closed) return;
         var now = time.GetUtcNow();
         if (State == PlayerState.Playing && now - lastSave >= ProgressInterval) _ = SaveProgressAsync(finished: false);
+        if (State == PlayerState.Playing && ScreenTime is not null && !checkingScreenTime && now - lastScreenTimeCheck >= ScreenTimeText.RefreshInterval)
+            _ = RefreshScreenTimeAsync();
         if (sleepAt is { } at)
         {
             OnPropertyChanged(nameof(SleepRemaining));
@@ -890,6 +931,16 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     {
         Record(PlaybackDiagnosticKind.Ended);
         await SaveProgressAsync(finished: true);
+        // Screen time may have ended while this title played: no next episode, no suggestion.
+        if (ScreenTime is not null)
+        {
+            await RefreshScreenTimeAsync();
+            if (ScreenTime?.NoMoreTitles == true)
+            {
+                await ShowGoodNightAsync();
+                return;
+            }
+        }
         if (SleepTimer.EndOfEpisode)
         {
             await SleepAsync();
@@ -956,7 +1007,17 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     /// <summary>Restarts at the last real position with a new ticket, with growing waits, for at most two minutes.</summary>
     private async Task RecoverAsync(string reason)
     {
-        if (closed || Item is not { } current || State == PlayerState.Failed) return;
+        if (closed || Item is not { } current || State == PlayerState.Failed || ShowsGoodNight) return;
+        // "Stop now" ends the stream at bedtime; that is the good-night screen, not a problem.
+        if (ScreenTime is not null)
+        {
+            await RefreshScreenTimeAsync();
+            if (ScreenTime?.State == ScreenTimeState.Closed)
+            {
+                await ShowGoodNightAsync();
+                return;
+            }
+        }
         var now = time.GetUtcNow();
         recoveryStarted ??= now;
         if (now - recoveryStarted > RecoveryBudget || recoveryAttempt >= RecoveryDelays.Length)
@@ -979,6 +1040,42 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         }
         if (closed || Item != current) return;
         await LoadAsync(current, resumeAt);
+    }
+
+    private async Task RefreshScreenTimeAsync()
+    {
+        if (offline is not null || checkingScreenTime) return;
+        checkingScreenTime = true;
+        lastScreenTimeCheck = time.GetUtcNow();
+        try
+        {
+            var status = await client.ScreenTimeAsync(CancellationToken.None);
+            if (!closed) ScreenTime = status;
+        }
+        catch (AureliaApiException)
+        {
+            // The last known state stays; a refused session shows on the next request that needs it.
+        }
+        catch (HttpRequestException)
+        {
+        }
+        finally { checkingScreenTime = false; }
+    }
+
+    /// <summary>The friendly end of the day: nothing else starts; the view shows the moon and when Aurelia opens.</summary>
+    private async Task ShowGoodNightAsync()
+    {
+        if (closed || ShowsGoodNight) return;
+        if (State == PlayerState.Playing) await SaveProgressAsync(finished: false);
+        engine?.Pause();
+        State = PlayerState.Paused;
+        Error = null;
+        recoveryStarted = null;
+        ShowsEndScreen = false;
+        ShowsGoodNight = true;
+        system.KeepAwake(false);
+        OnPropertyChanged(nameof(UpNext));
+        OnPropertyChanged(nameof(ShowsSuggestion));
     }
 
     private void Fail(string reason)

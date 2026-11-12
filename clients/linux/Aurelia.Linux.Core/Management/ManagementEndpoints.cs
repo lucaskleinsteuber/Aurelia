@@ -167,6 +167,14 @@ public sealed partial class ManagementClient
     public Task<ProfileAgeLimitResponse> SaveAgeLimitAsync(Guid id, UpdateProfileAgeLimitRequest request) =>
         SendAsync<ProfileAgeLimitResponse>(HttpMethod.Put, $"/api/v1/users/{id}/age-limit", request);
 
+    public Task<ProfileScreenTimeResponse> ScreenTimeAsync(Guid id) => GetAsync<ProfileScreenTimeResponse>($"/api/v1/users/{id}/screen-time");
+
+    public Task<ProfileScreenTimeResponse> SaveScreenTimeAsync(Guid id, UpdateProfileScreenTimeRequest request) =>
+        SendAsync<ProfileScreenTimeResponse>(HttpMethod.Put, $"/api/v1/users/{id}/screen-time", request);
+
+    public Task<ProfileScreenTimeResponse> GrantScreenTimeAsync(Guid id, GrantScreenTimeRequest request) =>
+        SendAsync<ProfileScreenTimeResponse>(HttpMethod.Post, $"/api/v1/users/{id}/screen-time/today", request);
+
     public Task<UserSummary> CreateProfileAsync(CreateUserRequest request) => SendAsync<UserSummary>(HttpMethod.Post, "/api/v1/users", request);
 
     public Task ResetPinAsync(Guid id, string pin) => SendAsync<JsonNode>(HttpMethod.Put, $"/api/v1/users/{id}/pin", new ResetProfilePinRequest(pin));

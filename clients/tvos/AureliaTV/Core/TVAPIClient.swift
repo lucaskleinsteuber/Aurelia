@@ -375,6 +375,12 @@ struct TVAPIClient: Sendable {
     _ = try await send("/api/v1/playback/sleep-timer-ended", method: "POST")
   }
 
+  /// The watching profile's screen time now; nil when it has none.
+  func ownScreenTime() async throws -> TVScreenTimeStatus? {
+    let own: TVOwnScreenTime = try await get("/api/v1/profile/screen-time")
+    return own.status
+  }
+
   func sendPlayerHeartbeat(
     deviceId: String, deviceName: String, clientType: String, isPlaying: Bool, mediaId: UUID? = nil,
     title: String? = nil, positionSeconds: Double? = nil, durationSeconds: Double? = nil,

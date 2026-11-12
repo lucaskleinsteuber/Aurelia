@@ -283,6 +283,10 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     /** A children's profile: the highest FSK age it may watch, or null for a normal profile. */
     profileAgeLimit: (userId, options = {}) => request(`/api/v1/users/${id(userId)}/age-limit`, options),
     setProfileAgeLimit: (userId, body, options = {}) => request(`/api/v1/users/${id(userId)}/age-limit`, { ...options, method: "PUT", body }),
+    profileScreenTime: (userId, options = {}) => request(`/api/v1/users/${id(userId)}/screen-time`, options),
+    setProfileScreenTime: (userId, body, options = {}) => request(`/api/v1/users/${id(userId)}/screen-time`, { ...options, method: "PUT", body }),
+    grantScreenTime: (userId, body, options = {}) => request(`/api/v1/users/${id(userId)}/screen-time/today`, { ...options, method: "POST", body }),
+    ownScreenTime: (options = {}) => request("/api/v1/profile/screen-time", options),
     /** The owner's server policy: sign-in and streaming limits, library maintenance, backups, events. */
     serverSettings: (options = {}) => request("/api/v1/server/settings", options),
     saveServerSettings: (body, options = {}) => request("/api/v1/server/settings", { ...options, method: "PUT", body }),

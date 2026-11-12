@@ -41,6 +41,12 @@ public sealed class ActiveStreamRegistry(TimeProvider? clock = null)
         }
     }
 
+    /// <summary>A playback read or a running conversion of this user is open now.</summary>
+    public bool HasPlayback(Guid userId)
+    {
+        lock (gate) return streams.Any(stream => !stream.IsPreview && stream.UserId == userId) || watchers.Any(watch => watch.UserId == userId);
+    }
+
     public void RevokeUser(Guid userId) => Cancel(stream => stream.UserId == userId, watch => watch.UserId == userId);
     public void RevokeSession(Guid sessionId) => Cancel(stream => stream.SessionId == sessionId, watch => watch.SessionId == sessionId);
     public void RevokeMedia(IReadOnlyCollection<Guid> ids) =>

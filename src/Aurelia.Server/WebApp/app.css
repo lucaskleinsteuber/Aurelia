@@ -212,6 +212,8 @@ img { display: block; }
 }
 .profile-entry:focus-visible { outline: none; }
 .profile-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 16px; }
+.profile-entry.asleep .profile-picture { opacity: 0.45; filter: saturate(0.4); }
+.profile-asleep { display: block; text-align: center; }
 
 .profile-picture {
   display: inline-grid;
@@ -1115,6 +1117,10 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .suggestion-end { position: absolute; inset: 0; z-index: 6; display: grid; place-items: center; background: rgba(0, 0, 0, 0.78); padding: 16px; overflow-y: auto; }
 .suggestion-end-panel { display: grid; justify-items: center; gap: 22px; max-width: 100%; }
 .suggestion-end-panel h2 { margin: 0; font-size: 34px; }
+.suggestion-end.good-night { background: radial-gradient(circle at 50% 35%, rgba(40, 52, 96, 0.92), rgba(4, 6, 16, 0.96)); }
+.good-night-panel { text-align: center; }
+.good-night-moon { color: #f3e3a8; filter: drop-shadow(0 0 24px rgba(243, 227, 168, 0.45)); }
+.good-night-text { margin: 0; font-size: 18px; color: rgba(255, 255, 255, 0.78); }
 .suggestion-end-items { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 28px; }
 .suggestion-end-item { display: grid; gap: 8px; width: 150px; }
 .suggestion-end-item.first { width: 200px; }

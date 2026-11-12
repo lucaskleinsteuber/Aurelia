@@ -1419,6 +1419,9 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<long?>("RevokedAt")
                         .HasColumnType("INTEGER");
 
+                    b.Property<long?>("ScreenTimeExtraEndsAt")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("TokenHash")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -1492,6 +1495,99 @@ namespace Aurelia.Server.Data.Migrations
                     b.HasIndex("UserId", "MediaItemId", "StartMilliseconds");
 
                     b.ToTable("SceneNotes");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.ScreenTimeDay", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("Day")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("BedtimeLifted")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ExtraMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("LastMediaId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("LastPositionMilliseconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("LastReportAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("LimitReachedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("OneMoreTitleGranted")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("OneMoreTitleUsed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("WatchedSeconds")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("UserId", "Day");
+
+                    b.ToTable("ScreenTimeDays");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.ScreenTimeRule", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Ending")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LockScope")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MaxOvertimeMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SchoolBedtime")
+                        .HasMaxLength(5)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("SchoolLimitMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SchoolWakeTime")
+                        .IsRequired()
+                        .HasMaxLength(5)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WeekendBedtime")
+                        .HasMaxLength(5)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("WeekendLimitMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("WeekendWakeTime")
+                        .IsRequired()
+                        .HasMaxLength(5)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("ScreenTimeRules");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.ServerAdministrationCredential", b =>
@@ -2083,6 +2179,28 @@ namespace Aurelia.Server.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("MediaItem");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.ScreenTimeDay", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.ServerUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.ScreenTimeRule", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.ServerUser", "User")
+                        .WithOne()
+                        .HasForeignKey("Aurelia.Server.Data.ScreenTimeRule", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("User");
                 });

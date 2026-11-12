@@ -212,6 +212,10 @@ Subtitles from Speech** in the spoken language and **Sync to Speech** for one of
 subtitle tracks. The server does the listening in the background; the page shows how far it is
 and can stop it.
 
+Edit Profile has **Screen Time** for children's profiles, as on the Mac: a bedtime and a daily
+limit, today's exceptions, and a good-night screen in the player when time is up (see
+[Screen time](SCREEN_TIME.md)).
+
 Name and Picture crops a chosen photo in the browser: drag the circle and zoom, then Use Photo
 draws a square JPEG that is uploaded on Save.
 

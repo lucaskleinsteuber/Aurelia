@@ -1,6 +1,7 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
 using Aurelia.Contracts;
+using Aurelia.Linux.Core.Playback;
 using Aurelia.Linux.Controls;
 using Aurelia.Linux.Core.Flow;
 using Avalonia;
@@ -184,7 +185,7 @@ public sealed class ProfilePickerView : UserControl
         grid.Children.Clear();
         foreach (var profile in model.Profiles)
         {
-            var locked = ProfilePickerModel.NeedsPin(profile) || !ProfilePickerModel.CanChoose(profile);
+            var locked = ProfilePickerModel.NeedsPin(profile) || profile.NeedsPinSetup;
             var name = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -194,7 +195,13 @@ public sealed class ProfilePickerView : UserControl
             };
             if (locked) name.Children.Add(ScreenParts.Symbol("IconLock", 11, new SolidColorBrush(Color.FromArgb(0xA6, 0xFF, 0xFF, 0xFF))).Also(l => l.VerticalAlignment = VerticalAlignment.Center));
             var tile = new StackPanel { Spacing = 12, Children = { new ProfileAvatar(profile, 96).Also(a => a.HorizontalAlignment = HorizontalAlignment.Center), name } };
-            if (!ProfilePickerModel.CanChoose(profile)) tile.Children.Add(new TextBlock { Text = "Set up PIN", Classes = { "subdued" }, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center });
+            // Screen time closes a children's profile until its wake time.
+            if (ScreenTimeText.ClosedLabel(profile.ClosedUntil) is { } asleep)
+            {
+                tile.Opacity = 0.6;
+                tile.Children.Add(new TextBlock { Text = asleep, Classes = { "subdued" }, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center });
+            }
+            else if (!ProfilePickerModel.CanChoose(profile)) tile.Children.Add(new TextBlock { Text = "Set up PIN", Classes = { "subdued" }, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center });
             var button = new Button
             {
                 Classes = { "profile" },

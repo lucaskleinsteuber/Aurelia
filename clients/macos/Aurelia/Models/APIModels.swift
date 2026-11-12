@@ -1091,6 +1091,8 @@ struct PlaybackSourceResponse: Codable, Equatable, Sendable {
   let progress: PlaybackProgressResponse
   /// Intro and credits times found by the server ("media-segments-v2"); older servers send none.
   var segments: MediaSegments? = nil
+  /// A children's profile's screen time ("screen-time-v1"); nil when it has none.
+  var screenTime: ScreenTimeStatus? = nil
 }
 
 /// Where the intro and the credits of the playing title are, in milliseconds from its start.

@@ -136,13 +136,15 @@ public sealed class PeoplePage : StackPanel
     {
         ProfileEditorResponse? snapshot = null;
         ProfileAgeLimitResponse? ageLimit = null;
+        ProfileScreenTimeResponse? screenTime = null;
         if (existing is not null && !await scope.RunAsync(async () =>
             {
                 snapshot = await Client.ProfileAsync(existing.User.Id);
                 // Servers before children's profiles have no age limits; the editor then hides that section.
                 if (scope.Session.Capabilities.Contains(ServerFeatures.AgeLimits)) ageLimit = await Client.AgeLimitAsync(existing.User.Id);
+                if (scope.Session.Capabilities.Contains(ServerFeatures.ScreenTime)) screenTime = await Client.ScreenTimeAsync(existing.User.Id);
             }, message)) return;
-        var editor = new ProfileEditorSheet(scope, snapshot, scope.Session.Library?.Catalog ?? [], ageLimit);
+        var editor = new ProfileEditorSheet(scope, snapshot, scope.Session.Library?.Catalog ?? [], ageLimit, screenTime);
         if (await scope.Sheets.ShowAsync(editor)) await ReloadAsync();
     }
 
@@ -313,6 +315,8 @@ public sealed class ProfileEditorSheet : UserControl
     private readonly ProfilePicturePicker picture;
     private readonly ToggleSwitch child = new() { OnContent = "", OffContent = "" };
     private readonly StackPanel childOptions = new() { Spacing = 10 };
+    private readonly ScreenTimeEditor? screenTimeEditor;
+    private readonly ProfileScreenTimeResponse? screenTimeSnapshot;
     private readonly HashSet<Guid> allowed;
     private readonly HashSet<Guid> hidden;
     private UserRole role;
@@ -330,9 +334,21 @@ public sealed class ProfileEditorSheet : UserControl
         (16, "16 or 17 · up to FSK 16"),
     ];
 
-    public ProfileEditorSheet(AdminScope scope, ProfileEditorResponse? snapshot, IReadOnlyList<CatalogItemSummary> catalog, ProfileAgeLimitResponse? ageLimit = null)
+    public ProfileEditorSheet(AdminScope scope, ProfileEditorResponse? snapshot, IReadOnlyList<CatalogItemSummary> catalog, ProfileAgeLimitResponse? ageLimit = null,
+        ProfileScreenTimeResponse? screenTime = null)
     {
         this.scope = scope;
+        screenTimeSnapshot = screenTime;
+        if (scope.Session.Capabilities.Contains(ServerFeatures.ScreenTime))
+        {
+            // Today's exceptions apply at once, without saving the rest of the editor.
+            screenTimeEditor = new ScreenTimeEditor(screenTime, snapshot is null ? null : async request =>
+            {
+                ProfileScreenTimeResponse? updated = null;
+                await scope.RunAsync(async () => updated = await scope.Client.GrantScreenTimeAsync(snapshot.User.Id, request), problem);
+                return updated;
+            });
+        }
         this.snapshot = snapshot;
         ageSnapshot = ageLimit;
         ageLimits = scope.Session.Capabilities.Contains(ServerFeatures.AgeLimits);
@@ -368,6 +384,7 @@ public sealed class ProfileEditorSheet : UserControl
             role = roles.SelectedIndex switch { 1 => UserRole.Admin, 2 => UserRole.Owner, _ => UserRole.User };
             if (role != UserRole.User) pinProtected.IsChecked = true;
             if (role != UserRole.User) child.IsChecked = false;
+            if (screenTimeEditor is not null) screenTimeEditor.Section.IsVisible = role == UserRole.User;
             ShowPin();
             ShowChild();
             ShowAccess();
@@ -400,6 +417,11 @@ public sealed class ProfileEditorSheet : UserControl
             },
         };
         if (ageLimits) sections.Children.Add(Section("Children's Profile", Row("Children's Profile", "Shows only what is approved for the child's age.", child), Block(childOptions)));
+        if (screenTimeEditor is not null)
+        {
+            screenTimeEditor.Section.IsVisible = role == UserRole.User;
+            sections.Children.Add(screenTimeEditor.Section);
+        }
         sections.Children.Add(Section("Content Access", Block(access)));
         Content = new DockPanel
         {
@@ -598,6 +620,18 @@ public sealed class ProfileEditorSheet : UserControl
             problem.IsVisible = true;
             return;
         }
+        ScreenTimeRules? screenRules = null;
+        if (screenTimeEditor is not null && role == UserRole.User)
+        {
+            var (rules, screenProblem) = screenTimeEditor.Collect();
+            if (screenProblem is not null)
+            {
+                problem.Text = screenProblem;
+                problem.IsVisible = true;
+                return;
+            }
+            if (rules != (screenTimeSnapshot?.Rules ?? ScreenTimeRules.Default)) screenRules = rules;
+        }
         var ids = selected.Order().ToList();
         var shownName = name.Text!.Trim();
         var isChild = IsChild;
@@ -634,6 +668,11 @@ public sealed class ProfileEditorSheet : UserControl
                     var current = await scope.Client.AgeLimitAsync(id);
                     await scope.Client.SaveAgeLimitAsync(id, new UpdateProfileAgeLimitRequest(limit, [.. allowed.Where(_ => isChild)], [.. hidden.Where(_ => isChild)], current.Revision));
                 }
+            }
+            if (screenRules is not null)
+            {
+                var current = await scope.Client.ScreenTimeAsync(id);
+                await scope.Client.SaveScreenTimeAsync(id, new UpdateProfileScreenTimeRequest(screenRules, current.Revision));
             }
         }, problem);
         pin.Text = confirm.Text = "";
