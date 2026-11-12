@@ -194,6 +194,8 @@ struct TVCapabilities: Codable, Equatable, Sendable {
   var supportsScrubPreviews: Bool { capabilities?.contains("scrub-previews-v1") == true }
   /// Movie Night: the household swipes one deck until everyone likes a title.
   var supportsMovieNight: Bool { capabilities?.contains("movie-night-v1") == true }
+  var supportsWrapped: Bool { capabilities?.contains("year-wrapped-v1") == true }
+  var supportsMonthlyWrapped: Bool { capabilities?.contains("monthly-wrapped-v1") == true }
   /// Cinema mode's trailers before a film.
   var supportsCinema: Bool { capabilities?.contains(TVCinemaPlan.feature) == true }
   /// HLS in several qualities, converted live by the server.

@@ -307,6 +307,16 @@ struct TVConnectionMenu: View {
             Label("Playback Settings", systemImage: "play.rectangle").frame(width: 560)
           }.accessibilityIdentifier("profile-playback-settings")
           NavigationLink {
+            TVWatchHistoryView()
+          } label: {
+            Label("Watch History", systemImage: "clock.arrow.circlepath").frame(width: 560)
+          }.accessibilityIdentifier("profile-history")
+          NavigationLink {
+            TVStatisticsView()
+          } label: {
+            Label("Statistics and Wrapped", systemImage: "chart.bar").frame(width: 560)
+          }.accessibilityIdentifier("profile-statistics")
+          NavigationLink {
             TVAboutView()
           } label: {
             Label("About Aurelia", systemImage: "info.circle").frame(width: 560)

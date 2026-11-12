@@ -15,6 +15,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
+- Apple TV: Watch History, Statistics and Wrapped on the profile page, as on the iPhone: the history by day with removing and clearing, watch time, streaks, a chart of the last weeks, top titles and genres, a year in review and Wrapped as slides driven by the remote.
 - iPhone & iPad: chapters as a menu and marks on the timeline, scene notes in the player (add, edit, delete, shown at their moment), Movie Night's *Tonight's program* card with era and length, collections to create, rename, fill and delete, and a crop for an own profile photo.
 - Browser: an own profile photo is cropped to a circle before it is uploaded.
 - Linux, Apple TV and iPhone & iPad: Cinema Mode, as on the Mac and in the browser. Before a film that starts from its beginning comes one of Aurelia's made-up ads, trailers of films nobody has watched yet and the curtain, which opens once the film plays behind it; Settings › Playback turns it on and chooses ads and up to three trailers. The Apple TV and iPhone & iPad show the Mac's own ads and curtain.

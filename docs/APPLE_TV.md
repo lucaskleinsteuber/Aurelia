@@ -69,6 +69,11 @@ the focus: Select skips, Back lets the intro play. When the credits begin, Up Ne
 with **Watch Credits**. Settings › Playback › Intros and Offer Next Episode When Credits Begin
 choose how.
 
+The profile page opens **Watch History** (grouped by day; press and hold a title to remove it, or
+clear it all) and **Statistics and Wrapped**: watch time, streaks, the last weeks as a chart, top
+titles and genres, a year in review and Wrapped as full-screen slides (right and left move,
+Play/Pause holds, Back leaves).
+
 **Cinema Mode** (Settings › Playback) plays one of Aurelia's made-up ads, trailers of films
 nobody has watched yet and the curtain before a film that starts from its beginning, as on the
 Mac. Skip and Start Film take the focus; Back leaves the player.

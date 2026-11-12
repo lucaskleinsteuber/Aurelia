@@ -342,6 +342,30 @@ struct TVAPIClient: Sendable {
     _ = try validatedStreamURL(path: ticket.streamPath)
     return ticket
   }
+  /// What this profile watched, newest first ("watch-history-v1").
+  func history(offset: Int = 0, limit: Int = 50) async throws -> TVWatchHistoryPage {
+    try Self.decode(
+      TVWatchHistoryPage.self,
+      data: await send(
+        "/api/v1/history",
+        query: [
+          URLQueryItem(name: "offset", value: String(offset)),
+          URLQueryItem(name: "limit", value: String(limit)),
+        ]))
+  }
+  func deleteHistoryItem(id: UUID) async throws {
+    _ = try await send("/api/v1/history/\(id.uuidString.lowercased())", method: "DELETE")
+  }
+  func clearHistory() async throws { _ = try await send("/api/v1/history", method: "DELETE") }
+  func statistics() async throws -> TVUserStatistics { try await get("/api/v1/statistics") }
+  func yearInReview(year: Int) async throws -> TVYearInReview {
+    try await get("/api/v1/statistics/year/\(year)")
+  }
+  func wrapped(year: Int, month: Int? = nil) async throws -> TVYearWrapped {
+    if let month { return try await get("/api/v1/statistics/year/\(year)/month/\(month)/wrapped") }
+    return try await get("/api/v1/statistics/year/\(year)/wrapped")
+  }
+
   /// Trailers of films nobody in this profile has watched yet, for cinema mode before `mediaID`.
   func cinemaTrailers(mediaID: UUID, count: Int) async throws -> [TVCinemaTrailer] {
     let response: TVCinemaTrailersResponse = try await get(
