@@ -108,3 +108,13 @@ enum IOSDetailPresentation {
       .prefix(limit).map { ($0, grouped[$0] ?? []) }
   }
 }
+
+/// When the search page may say that nothing matched.
+enum IOSSearchPresentation {
+  /// Nothing typed shows nothing; a typed search says "No Results" only once the server answered
+  /// exactly that text. Other pages say "No Titles" when their view is empty.
+  static func showsEmptyResult(isSearch: Bool, search: String, answered: String?) -> Bool {
+    guard isSearch else { return true }
+    return !search.isEmpty && answered == search
+  }
+}

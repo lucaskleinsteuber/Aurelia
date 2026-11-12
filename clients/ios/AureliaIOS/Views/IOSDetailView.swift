@@ -172,7 +172,8 @@ struct IOSDetailView: View {
             .accessibilityLabel(item.isFavorite ? "Remove from Favorites" : "Add to Favorites")
           }
           Menu {
-            if plan?.action == .resume, plan?.target?.isPlayable == true {
+            // Movies only: a series continues with its episodes and has no Start Over.
+            if item.kind == .movie, plan?.action == .resume, plan?.target?.isPlayable == true {
               Button("Start Over", systemImage: "arrow.counterclockwise") {
                 playTarget(startOver: true)
               }

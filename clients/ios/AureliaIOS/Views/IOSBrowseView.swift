@@ -25,6 +25,9 @@ struct IOSLibraryGrid: View {
   @State private var restoredScope: String?
   @State private var lastKey: IOSBrowseLoadKey?
   @State private var scrollAnchor: UUID?
+  /// The search text the server has answered; "No Results" waits for it, so typing "br" on the
+  /// way to "Breaking Bad" never says that nothing was found.
+  @State private var answeredSearch: String?
   @StateObject private var actions = IOSLibraryActions()
   private var querySummary: String {
     var labels = [query.summary]
@@ -53,7 +56,10 @@ struct IOSLibraryGrid: View {
               .font(.footnote.weight(.semibold)).accessibilityIdentifier("browse-clear")
           }
         }
-        if listing.items.isEmpty && !listing.loading && listing.error == nil {
+        if listing.items.isEmpty && !listing.loading && listing.error == nil
+          && IOSSearchPresentation.showsEmptyResult(
+            isSearch: listing.section == .search, search: search, answered: answeredSearch)
+        {
           ContentUnavailableView(
             search.isEmpty ? "No Titles" : "No Results",
             systemImage: search.isEmpty ? "film" : "magnifyingglass",
@@ -132,6 +138,7 @@ struct IOSLibraryGrid: View {
         }
         guard !Task.isCancelled, listing.items.isEmpty, let api = model.client else { return }
         await listing.loadNext(api: api, onFailure: model.handleSessionFailure)
+        if !Task.isCancelled { answeredSearch = request.search }
       }
       .sheet(isPresented: $filters) { IOSBrowseFilters(query: $query, section: listing.section) }
       .modifier(IOSLibraryActionPresentation(actions: actions))
@@ -232,3 +239,4 @@ private struct IOSSearchField: ViewModifier {
     }
   }
 }
+

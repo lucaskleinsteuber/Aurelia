@@ -106,4 +106,13 @@ struct IOSDetailPresentationTests {
         studios: ["Synthetic Studio", "Second Studio"], countries: ["", "US"], fskAge: 16),
       seasons: seasons, supplements: [])
   }
+
+  @Test func searchSaysNoResultsOnlyForAnAnsweredSearch() {
+    #expect(!IOSSearchPresentation.showsEmptyResult(isSearch: true, search: "", answered: ""))
+    #expect(!IOSSearchPresentation.showsEmptyResult(isSearch: true, search: "br", answered: "b"))
+    #expect(!IOSSearchPresentation.showsEmptyResult(isSearch: true, search: "br", answered: nil))
+    #expect(IOSSearchPresentation.showsEmptyResult(isSearch: true, search: "brx", answered: "brx"))
+    #expect(IOSSearchPresentation.showsEmptyResult(isSearch: false, search: "", answered: nil))
+  }
+
 }

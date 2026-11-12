@@ -154,23 +154,6 @@ struct TVAPIClient: Sendable {
       "/api/v1/profiles/\(id.uuidString)/picture",
       query: [URLQueryItem(name: "rev", value: String(revision))], authentication: .device)
   }
-  /// Renames the signed-in profile. An owner keeps signing in with the original name.
-  func renameProfile(_ name: String) async throws -> TVUser {
-    struct Payload: Encodable { let name: String }
-    return try Self.decode(
-      TVUser.self,
-      data: await send(
-        "/api/v1/profile/name", method: "PUT", body: JSONEncoder().encode(Payload(name: name))))
-  }
-  /// A built-in picture (`symbol:palette`) for the signed-in profile, or nil for the initial.
-  func setPicture(builtin: String?) async throws -> TVUser {
-    struct Payload: Encodable { let builtin: String? }
-    return try Self.decode(
-      TVUser.self,
-      data: await send(
-        "/api/v1/profile/picture", method: "PUT",
-        body: JSONEncoder().encode(Payload(builtin: builtin))))
-  }
   func endProfile() async throws { _ = try await send("/api/v1/profile/end", method: "POST") }
   func disconnectDevice() async throws {
     _ = try await send("/api/v1/device", method: "DELETE", authentication: .device)

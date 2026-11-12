@@ -22,6 +22,16 @@ struct TVCoreTests {
     #expect(TVLiveSubtitleTrack.sidecarFiles(tracks).map(\.index) == [1000])
   }
 
+  @Test func picturesUseTheirOwnConnectionsBesideTheData() {
+    #expect(TVConnectionLane(path: "/api/v1/artwork/0f0e") == .artwork)
+    #expect(TVConnectionLane(path: "/api/v1/media/0f0e/playback-plan") == .api)
+    let pool = TVPinnedSessionPool()
+    let data = pool.lease(host: "tv.local", fingerprint: "aa")
+    let pictures = pool.lease(host: "tv.local", fingerprint: "aa", lane: .artwork)
+    #expect(data.session !== pictures.session)
+    #expect(pool.lease(host: "tv.local", fingerprint: "AA", lane: .artwork).session === pictures.session)
+  }
+
   @Test func pinnedSessionsAreReusedPerIdentityAndBounded() {
     let pool = TVPinnedSessionPool()
     let first = pool.lease(host: "tv.local", fingerprint: "aa")

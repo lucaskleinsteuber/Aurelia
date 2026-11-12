@@ -294,13 +294,6 @@ struct TVConnectionMenu: View {
             .foregroundStyle(.secondary)
         }
         VStack(spacing: 22) {
-          if model.supportsProfilePersonalization {
-            NavigationLink {
-              TVNameAndPictureView()
-            } label: {
-              Label("Name and Picture", systemImage: "person.crop.circle").frame(width: 560)
-            }.accessibilityIdentifier("profile-name-picture")
-          }
           NavigationLink {
             TVPlaybackSettingsView()
           } label: {

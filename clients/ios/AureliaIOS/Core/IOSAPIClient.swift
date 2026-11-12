@@ -295,18 +295,6 @@ struct IOSAPIClient: Sendable {
     return values
   }
   /// Shared collections and this profile's own ("collections-v2").
-  func editableCollections() async throws -> [IOSCollection] {
-    try Self.decode([IOSCollection].self, data: await send("/api/v1/collections"))
-  }
-
-  func createCollection(name: String, mediaIDs: [UUID]) async throws -> IOSCollection {
-    try Self.decode(
-      IOSCollection.self,
-      data: await send(
-        "/api/v1/collections", method: "POST",
-        body: JSONEncoder().encode(IOSSaveCollection(name: name, mediaIds: mediaIDs))))
-  }
-
   func updateCollection(_ collection: IOSCollection, name: String, mediaIDs: [UUID]) async throws
     -> IOSCollection
   {

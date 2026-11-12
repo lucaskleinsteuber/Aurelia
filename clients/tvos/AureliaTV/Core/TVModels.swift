@@ -186,10 +186,6 @@ struct TVCapabilities: Codable, Equatable, Sendable {
     else { throw TVCoreError.unsupportedServer }
   }
   var supportsArtworkVariants: Bool { capabilities?.contains("artwork-variants-v1") == true }
-  /// Names and pictures for profiles.
-  var supportsProfilePersonalization: Bool {
-    capabilities?.contains("profile-personalization-v1") == true
-  }
   var supportsWatchlistAndPeople: Bool { capabilities?.contains("watchlist-people-v1") == true }
   var supportsScrubPreviews: Bool { capabilities?.contains("scrub-previews-v1") == true }
   /// Movie Night: the household swipes one deck until everyone likes a title.

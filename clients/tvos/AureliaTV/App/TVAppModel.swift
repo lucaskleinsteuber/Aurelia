@@ -131,26 +131,6 @@ final class TVAppModel: ObservableObject {
     }
   }
 
-  var supportsProfilePersonalization: Bool {
-    capabilities?.supportsProfilePersonalization ?? false
-  }
-
-  /// The signed-in profile was renamed or got a new picture.
-  func updateProfileUser(_ user: TVUser) {
-    if let session, session.user.id == user.id {
-      self.session = TVProfileSession(
-        user: user, sessionId: session.sessionId, token: session.token,
-        expiresAt: session.expiresAt)
-    }
-    if let index = profiles.firstIndex(where: { $0.id == user.id }) {
-      let old = profiles[index]
-      profiles[index] = TVWatchingProfile(
-        id: old.id, name: user.shownName, role: old.role, needsPinSetup: old.needsPinSetup,
-        pinProtectionEnabled: old.pinProtectionEnabled, pictureKey: user.pictureKey,
-        pictureRevision: user.pictureRevision ?? 0, ageLimit: user.ageLimit)
-    }
-  }
-
   func start() async {
     guard !started else { return }
     started = true

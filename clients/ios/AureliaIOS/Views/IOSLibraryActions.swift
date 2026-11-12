@@ -13,8 +13,6 @@ final class IOSLibraryActions: ObservableObject {
   }
   @Published var pending: Pending?
   @Published var error: String?
-  /// The title whose collections are being chosen ("Add to Collection…").
-  @Published var collecting: IOSCatalogItem?
   @Published private(set) var busy = false
 
   func favorite(_ item: IOSCatalogItem, model: IOSAppModel) async {
@@ -136,11 +134,9 @@ struct IOSLibraryActionPresentation: ViewModifier {
     } message: {
       Text(actions.error ?? "")
     }
-    .sheet(item: $actions.collecting) { item in IOSAddToCollectionSheet(item: item) }
     .onChange(of: model.session?.sessionId) { _, _ in
       actions.pending = nil
       actions.error = nil
-      actions.collecting = nil
     }
   }
 }
@@ -176,106 +172,6 @@ struct IOSMediaContextActions: View {
         Task { await actions.continuation(item, hidden: !hidden, model: model) }
       }.disabled(actions.busy)
     }
-    if model.supportsCollections, item.kind == .movie || item.kind == .series {
-      Button("Add to Collection…") { actions.collecting = item }
-    }
     IOSDownloadMenuItems(item: item, store: model.offline)
-  }
-}
-
-/// Chooses which of the editable collections hold a title, or starts a new one with it.
-struct IOSAddToCollectionSheet: View {
-  @EnvironmentObject private var model: IOSAppModel
-  @Environment(\.dismiss) private var dismiss
-  let item: IOSCatalogItem
-  @State private var collections: [IOSCollection] = []
-  @State private var loading = true
-  @State private var newName = ""
-  @State private var error: String?
-  @State private var working = false
-
-  private var editable: [IOSCollection] {
-    collections.filter {
-      IOSCollectionRules.canEdit(
-        $0, userID: model.session?.user.id, role: model.session?.user.role)
-    }
-  }
-
-  var body: some View {
-    NavigationStack {
-      List {
-        Section {
-          HStack {
-            TextField("New Collection", text: $newName)
-              .accessibilityIdentifier("collection-new-name")
-            Button("Create") { Task { await create() } }
-              .disabled(IOSCollectionRules.cleanedName(newName) == nil || working)
-          }
-        } footer: {
-          Text("A new collection is yours alone; it starts with \(item.title).")
-        }
-        Section("Your Collections") {
-          if loading { ProgressView() }
-          if !loading && editable.isEmpty { Text("No collections yet.").foregroundStyle(.secondary) }
-          ForEach(editable) { collection in
-            let included = collection.items.contains { $0.id == item.id }
-            Button {
-              Task { await toggle(collection, included: !included) }
-            } label: {
-              HStack {
-                Text(collection.name).foregroundStyle(.primary)
-                Spacer()
-                if included { Image(systemName: "checkmark").foregroundStyle(.tint) }
-              }
-            }
-            .disabled(working)
-            .accessibilityAddTraits(included ? .isSelected : [])
-          }
-        }
-        if let error { Section { IOSErrorText(message: error) } }
-      }
-      .navigationTitle("Add to Collection")
-      .navigationBarTitleDisplayMode(.inline)
-      .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-      .task { await reload() }
-    }
-  }
-
-  private func reload() async {
-    guard let api = model.client else { return }
-    defer { loading = false }
-    do {
-      collections = try await api.editableCollections()
-      error = nil
-    } catch {
-      self.error = error.localizedDescription
-    }
-  }
-
-  private func create() async {
-    guard let api = model.client, let name = IOSCollectionRules.cleanedName(newName) else { return }
-    working = true
-    defer { working = false }
-    do {
-      _ = try await api.createCollection(name: name, mediaIDs: [item.id])
-      newName = ""
-      model.scheduleLibraryRefresh()
-      await reload()
-    } catch {
-      self.error = error.localizedDescription
-    }
-  }
-
-  private func toggle(_ collection: IOSCollection, included: Bool) async {
-    guard let api = model.client else { return }
-    working = true
-    defer { working = false }
-    do {
-      try await api.setCollectionItem(collectionID: collection.id, mediaID: item.id, included: included)
-      model.scheduleLibraryRefresh()
-      await reload()
-    } catch {
-      self.error = error.localizedDescription
-    }
   }
 }

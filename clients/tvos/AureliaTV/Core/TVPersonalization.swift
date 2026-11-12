@@ -15,8 +15,6 @@ enum TVProfilePictures {
   /// In the order of the existing profile gradients, plus red.
   static let palettes = ["blue", "purple", "pink", "orange", "teal", "green", "indigo", "red"]
 
-  static func builtin(symbol: String, palette: String) -> String { "\(symbol):\(palette)" }
-
   static func parse(_ key: String?) -> (symbol: String, palette: String)? {
     guard let parts = key?.split(separator: ":", omittingEmptySubsequences: false),
       parts.count == 2

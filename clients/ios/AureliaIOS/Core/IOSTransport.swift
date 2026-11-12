@@ -36,7 +36,7 @@ struct IOSURLSessionTransport: IOSHTTPTransport {
           delegateQueue: nil), delegate: delegate)
       ownsSession = true
     case .pinned(let fingerprint):
-      lease = pool.lease(host: host, fingerprint: fingerprint)
+      lease = pool.lease(host: host, fingerprint: fingerprint, lane: IOSConnectionLane(path: url.path))
       ownsSession = false
     }
     defer { if ownsSession { lease.session.invalidateAndCancel() } }
@@ -49,6 +49,7 @@ struct IOSURLSessionTransport: IOSHTTPTransport {
       if lease.delegate.didRejectTrust {
         if case .pinned(let fingerprint) = trust {
           pool.discard(host: host, fingerprint: fingerprint)
+          pool.discard(host: host, fingerprint: fingerprint, lane: .artwork)
         }
         throw IOSCoreError.identityMismatch
       }
@@ -64,6 +65,17 @@ struct IOSURLSessionTransport: IOSHTTPTransport {
   }
 }
 
+/// Which connections a request uses. Pictures have their own, so the many posters a screen
+/// loads at once never keep a title's details or its Play button waiting behind them.
+enum IOSConnectionLane: String, Sendable {
+  case api
+  case artwork
+
+  init(path: String) {
+    self = path.hasPrefix("/api/v1/artwork/") ? .artwork : .api
+  }
+}
+
 /// Long-lived sessions for already trusted servers. Every new TLS connection is
 /// still checked against the pinned fingerprint by its delegate; a rejected
 /// identity discards the session so nothing is reused after a mismatch.
@@ -73,7 +85,8 @@ final class IOSPinnedSessionPool: @unchecked Sendable {
     let delegate: IOSTLSTrustDelegate
   }
   static let shared = IOSPinnedSessionPool()
-  static let capacity = 4
+  /// Two lanes for each of up to four servers.
+  static let capacity = 8
   private let lock = NSLock()
   private var leases: [String: Lease] = [:]
   private var order: [String] = []
@@ -89,8 +102,8 @@ final class IOSPinnedSessionPool: @unchecked Sendable {
     return configuration
   }
 
-  func lease(host: String, fingerprint: String) -> Lease {
-    let key = Self.key(host: host, fingerprint: fingerprint)
+  func lease(host: String, fingerprint: String, lane: IOSConnectionLane = .api) -> Lease {
+    let key = Self.key(host: host, fingerprint: fingerprint, lane: lane)
     return lock.withLock {
       if let existing = leases[key] { return existing }
       let delegate = IOSTLSTrustDelegate(mode: .pinned(fingerprint), allowedHost: host)
@@ -107,8 +120,8 @@ final class IOSPinnedSessionPool: @unchecked Sendable {
     }
   }
 
-  func discard(host: String, fingerprint: String) {
-    let key = Self.key(host: host, fingerprint: fingerprint)
+  func discard(host: String, fingerprint: String, lane: IOSConnectionLane = .api) {
+    let key = Self.key(host: host, fingerprint: fingerprint, lane: lane)
     lock.withLock {
       order.removeAll { $0 == key }
       leases.removeValue(forKey: key)?.session.invalidateAndCancel()
@@ -117,7 +130,7 @@ final class IOSPinnedSessionPool: @unchecked Sendable {
 
   var count: Int { lock.withLock { leases.count } }
 
-  private static func key(host: String, fingerprint: String) -> String {
-    "\(IOSServerAddress.trustHost(host))|\(fingerprint.uppercased())"
+  private static func key(host: String, fingerprint: String, lane: IOSConnectionLane) -> String {
+    "\(IOSServerAddress.trustHost(host))|\(fingerprint.uppercased())|\(lane.rawValue)"
   }
 }

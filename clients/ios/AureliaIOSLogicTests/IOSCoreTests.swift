@@ -34,6 +34,16 @@ struct IOSCoreTests {
     #expect(pool.lease(host: "tv.local", fingerprint: "aa").session !== first.session)
   }
 
+  @Test func picturesUseTheirOwnConnectionsBesideTheData() {
+    #expect(IOSConnectionLane(path: "/api/v1/artwork/0f0e") == .artwork)
+    #expect(IOSConnectionLane(path: "/api/v1/media/0f0e/playback-plan") == .api)
+    let pool = IOSPinnedSessionPool()
+    let data = pool.lease(host: "tv.local", fingerprint: "aa")
+    let pictures = pool.lease(host: "tv.local", fingerprint: "aa", lane: .artwork)
+    #expect(data.session !== pictures.session)
+    #expect(pool.lease(host: "tv.local", fingerprint: "AA", lane: .artwork).session === pictures.session)
+  }
+
   @Test func aGenericDeviceNameGetsAStableTag() {
     let tag = UUID(uuidString: "AB12CD34-0000-4000-8000-000000000001")!
     #expect(IOSDeviceName.display(systemName: "iPhone", model: "iPhone", tag: tag) == "iPhone AB12")
