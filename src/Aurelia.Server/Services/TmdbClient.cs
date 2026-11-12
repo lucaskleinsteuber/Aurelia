@@ -37,9 +37,18 @@ public interface ITmdbClient
     /// <summary>How many seasons and episodes TMDB lists for a show, to tell same-named shows apart.</summary>
     Task<TmdbShowShape> GetShowShapeAsync(string token, string providerId, CancellationToken cancellationToken) =>
         Task.FromResult(new TmdbShowShape(null, null));
+
+    /// <summary>Fetches TMDB collection overview and artwork paths for a film series.</summary>
+    Task<TmdbCollectionDetail?> GetCollectionAsync(
+        string token,
+        string language,
+        string providerId,
+        CancellationToken cancellationToken) =>
+        Task.FromResult<TmdbCollectionDetail?>(null);
 }
 
 public sealed record TmdbShowShape(int? Seasons, int? Episodes);
+public sealed record TmdbCollectionDetail(string ProviderId, string Name, string? Overview, string? PosterPath, string? BackdropPath);
 
 public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : ITmdbClient
 {
@@ -148,7 +157,8 @@ public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : 
             ? new TmdbCollectionInfo(
                 collectionElement.GetProperty("id").GetInt32().ToString(CultureInfo.InvariantCulture),
                 GetString(collectionElement, "name") ?? "Collection",
-                GetString(collectionElement, "poster_path"))
+                GetString(collectionElement, "poster_path"),
+                GetString(collectionElement, "backdrop_path"))
             : null;
         return new TmdbMetadata(
             providerId,
@@ -204,6 +214,26 @@ public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : 
             GetNullableInt(episode, "runtime"),
             GetNullableDouble(episode, "vote_average"),
             GetString(episode, "still_path"))).ToList();
+    }
+
+    public async Task<TmdbCollectionDetail?> GetCollectionAsync(
+        string token,
+        string language,
+        string providerId,
+        CancellationToken cancellationToken)
+    {
+        if (!int.TryParse(providerId, NumberStyles.None, CultureInfo.InvariantCulture, out _)) return null;
+        using var response = await SendAsync(token, $"collection/{providerId}?language={language}", cancellationToken, allowNotFound: true);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+        await EnsureSuccessAsync(response, cancellationToken);
+        using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        var root = document.RootElement;
+        return new TmdbCollectionDetail(
+            providerId,
+            GetString(root, "name") ?? "Collection",
+            GetString(root, "overview"),
+            GetString(root, "poster_path"),
+            GetString(root, "backdrop_path"));
     }
 
     public async Task<byte[]> DownloadImageAsync(
@@ -813,7 +843,7 @@ public sealed record TmdbMetadata(
     IReadOnlyList<string>? Keywords = null);
 
 public sealed record TmdbCredit(string ProviderId, string Name, string Department, string? Job, string? Character, int Order, string? ProfilePath);
-public sealed record TmdbCollectionInfo(string ProviderId, string Name, string? PosterPath);
+public sealed record TmdbCollectionInfo(string ProviderId, string Name, string? PosterPath, string? BackdropPath = null);
 public sealed record TmdbEpisodeMetadata(string ProviderId, int SeasonNumber, int EpisodeNumber, string Title, string? Overview, string? AirDate, int? RuntimeMinutes, double? Rating, string? StillPath);
 
 public static class ArtworkFile

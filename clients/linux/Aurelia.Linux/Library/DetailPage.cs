@@ -288,6 +288,8 @@ public sealed class DetailPage : LibraryPageBase
             menuItems.Add(MenuItem("Mark Series as Watched", () => _ = MediaMenu.MarkAsync(Context, Item.Id, WatchStateScope.Series, true)));
             menuItems.Add(MenuItem("Mark Series as Unwatched", () => _ = MediaMenu.MarkAsync(Context, Item.Id, WatchStateScope.Series, false)));
         }
+        menuItems.Add(new Separator());
+        menuItems.Add(MediaMenu.CollectionsMenu(Context, Item, current.Number));
         var picker = new Button
         {
             Classes = { "seasonMenu" },

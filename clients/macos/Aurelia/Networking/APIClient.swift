@@ -1012,29 +1012,50 @@ struct APIClient: Sendable {
     try await get("/api/v1/catalog/collections?offset=0&limit=200")
   }
 
+  func collection(id: UUID) async throws -> CollectionDetail {
+    try await get("/api/v1/collections/\(id.uuidString.lowercased())")
+  }
+
+  func collectionNext(id: UUID) async throws -> CollectionNextResponse {
+    try await get("/api/v1/collections/\(id.uuidString.lowercased())/next")
+  }
+
   func createCollection(
-    name: String, mediaIds: [UUID], isSmart: Bool = false, isShared: Bool = false,
-    rulesJson: String? = nil
+    name: String, mediaIds: [UUID]? = nil, isSmart: Bool = false, isShared: Bool = false,
+    rulesJson: String? = nil, overview: String? = nil, sortMode: String? = nil,
+    members: [CollectionMemberInput]? = nil
   ) async throws -> CollectionSummary {
     let body = try JSONEncoder().encode(
       SaveCollectionRequest(
-        name: name, mediaIds: mediaIds, isSmart: isSmart, isShared: isShared, rulesJson: rulesJson))
+        name: name, mediaIds: members == nil ? mediaIds : nil, isSmart: isSmart, isShared: isShared,
+        rulesJson: rulesJson, overview: overview, sortMode: sortMode, members: members))
     let data = try await perform(path: "/api/v1/collections", method: "POST", body: body)
     return try Self.decode(CollectionSummary.self, from: data)
   }
 
   func updateCollection(
-    id: UUID, name: String, mediaIds: [UUID], isSmart: Bool = false, isShared: Bool = false,
-    rulesJson: String? = nil
+    id: UUID, name: String, mediaIds: [UUID]? = nil, isSmart: Bool = false, isShared: Bool = false,
+    rulesJson: String? = nil, overview: String? = nil, sortMode: String? = nil,
+    members: [CollectionMemberInput]? = nil
   ) async throws
     -> CollectionSummary
   {
     let body = try JSONEncoder().encode(
       SaveCollectionRequest(
-        name: name, mediaIds: mediaIds, isSmart: isSmart, isShared: isShared, rulesJson: rulesJson))
+        name: name, mediaIds: members == nil ? mediaIds : nil, isSmart: isSmart, isShared: isShared,
+        rulesJson: rulesJson, overview: overview, sortMode: sortMode, members: members))
     let data = try await perform(
       path: "/api/v1/collections/\(id.uuidString.lowercased())", method: "PUT", body: body)
     return try Self.decode(CollectionSummary.self, from: data)
+  }
+
+  func updateCollectionOrder(
+    id: UUID, members: [CollectionMemberInput], sortMode: String? = "custom"
+  ) async throws -> CollectionDetail {
+    let body = try JSONEncoder().encode(CollectionOrderRequest(members: members, sortMode: sortMode))
+    let data = try await perform(
+      path: "/api/v1/collections/\(id.uuidString.lowercased())/order", method: "PUT", body: body)
+    return try Self.decode(CollectionDetail.self, from: data)
   }
 
   func deleteCollection(id: UUID) async throws {
@@ -1042,27 +1063,66 @@ struct APIClient: Sendable {
       path: "/api/v1/collections/\(id.uuidString.lowercased())", method: "DELETE")
   }
 
-  func addCollectionItem(collectionId: UUID, mediaId: UUID) async throws {
+  func addCollectionItem(collectionId: UUID, mediaId: UUID, seasonNumber: Int? = nil) async throws {
+    let query = seasonNumber.map { "?seasonNumber=\($0)" } ?? ""
     _ = try await perform(
       path:
-        "/api/v1/collections/\(collectionId.uuidString.lowercased())/items/\(mediaId.uuidString.lowercased())",
+        "/api/v1/collections/\(collectionId.uuidString.lowercased())/items/\(mediaId.uuidString.lowercased())\(query)",
       method: "POST")
   }
 
-  func removeCollectionItem(collectionId: UUID, mediaId: UUID) async throws {
+  func removeCollectionItem(collectionId: UUID, mediaId: UUID, seasonNumber: Int? = nil) async throws {
+    let query = seasonNumber.map { "?seasonNumber=\($0)" } ?? ""
     _ = try await perform(
       path:
-        "/api/v1/collections/\(collectionId.uuidString.lowercased())/items/\(mediaId.uuidString.lowercased())",
+        "/api/v1/collections/\(collectionId.uuidString.lowercased())/items/\(mediaId.uuidString.lowercased())\(query)",
       method: "DELETE")
   }
 
+  func uploadCollectionEditorImage(id: UUID, png: Data) async throws -> EditorUploadSummary {
+    try Self.decode(
+      EditorUploadSummary.self,
+      from: await perform(
+        path: "/api/v1/collections/\(id.uuidString.lowercased())/editor/uploads", method: "POST",
+        body: png, timeout: 120))
+  }
+
+  func collectionEditorImage(id: UUID, uploadId: UUID) async throws -> Data {
+    try await perform(
+      path:
+        "/api/v1/collections/\(id.uuidString.lowercased())/editor/uploads/\(uploadId.uuidString.lowercased())"
+    )
+  }
+
+  func discardCollectionEditorImage(id: UUID, uploadId: UUID) async throws {
+    _ = try await perform(
+      path:
+        "/api/v1/collections/\(id.uuidString.lowercased())/editor/uploads/\(uploadId.uuidString.lowercased())",
+      method: "DELETE")
+  }
+
+  func saveCollectionArtwork(id: UUID, kind: String, request: SaveCollectionArtworkRequest)
+    async throws -> ArtworkSummary
+  {
+    let body = try JSONEncoder().encode(request)
+    let data = try await perform(
+      path: "/api/v1/collections/\(id.uuidString.lowercased())/artwork/\(kind)", method: "POST",
+      body: body)
+    return try Self.decode(ArtworkSummary.self, from: data)
+  }
+
+  func deleteCollectionArtwork(id: UUID, kind: String) async throws {
+    _ = try await perform(
+      path: "/api/v1/collections/\(id.uuidString.lowercased())/artwork/\(kind)", method: "DELETE")
+  }
+
   func franchises() async throws -> [CollectionSummary] {
-    try await get("/api/v1/franchises")
+    try await get("/api/v1/catalog/franchises")
   }
 
   func createCollectionFromFranchise(franchiseId: String) async throws -> CollectionSummary {
     let data = try await perform(
-      path: "/api/v1/franchises/\(franchiseId)/collection",
+      path: "/api/v1/collections/from-franchise/\(franchiseId)",
       method: "POST")
     return try Self.decode(CollectionSummary.self, from: data)
   }
@@ -1352,11 +1412,31 @@ struct APIClient: Sendable {
     else {
       return false
     }
-    let identifier = String(components.path.dropFirst("/api/v1/artwork/".count))
-    guard UUID(uuidString: identifier) != nil else { return false }
-    guard let query = components.queryItems else { return true }
-    return query.count == 1 && query[0].name == "width"
-      && ["320", "640", "1280", "1920"].contains(query[0].value ?? "")
+    let suffix = String(components.path.dropFirst("/api/v1/artwork/".count))
+    let parts = suffix.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+    if parts.count == 1, UUID(uuidString: parts[0]) != nil {
+      guard let query = components.queryItems else { return true }
+      return query.count == 1 && query[0].name == "width"
+        && ["320", "640", "1280", "1920"].contains(query[0].value ?? "")
+    }
+    if parts.count >= 2, parts.count <= 3, parts[0] == "collection", UUID(uuidString: parts[1]) != nil {
+      if parts.count == 3, !["poster", "backdrop"].contains(parts[2]) { return false }
+      guard let query = components.queryItems else { return true }
+      for item in query {
+        switch item.name {
+        case "kind":
+          guard ["poster", "backdrop"].contains(item.value ?? "") else { return false }
+        case "width":
+          guard ["320", "640", "1280", "1920"].contains(item.value ?? "") else { return false }
+        case "rev":
+          guard let val = item.value, !val.isEmpty, val.allSatisfy(\.isNumber) else { return false }
+        default:
+          return false
+        }
+      }
+      return true
+    }
+    return false
   }
 
   static func query(name: String, value: String) throws -> String {
@@ -2064,7 +2144,7 @@ struct APIClient: Sendable {
         response = "[]"
       case let p where p.hasPrefix("/api/v1/library/health/unmatched"):
         response = "[]"
-      case "/api/v1/franchises":
+      case "/api/v1/catalog/franchises":
         response = "[]"
       case let p where p.hasPrefix("/api/v1/history"):
         response = "{\"items\":[],\"totalCount\":0,\"offset\":0,\"limit\":50}"

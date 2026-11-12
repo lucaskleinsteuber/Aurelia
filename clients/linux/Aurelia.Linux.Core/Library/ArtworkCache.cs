@@ -130,7 +130,7 @@ public sealed class ArtworkCache
 
     private static string Key(LibraryClient client, ArtworkSummary artwork, int width)
     {
-        var text = $"{client.Server.ServerId}:{client.Profile.User.Id}:{artwork.Id}:r{artwork.Revision}:w{width}";
+        var text = $"{client.Server.ServerId}:{client.Profile.User.Id}:{artwork.Id}:{artwork.Path}:r{artwork.Revision}:w{width}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     }
 }

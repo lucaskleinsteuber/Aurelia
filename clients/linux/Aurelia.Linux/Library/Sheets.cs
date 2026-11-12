@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using Aurelia.Contracts;
+using Aurelia.Linux.Core.Api;
 using Aurelia.Linux.Core.Library;
+using Aurelia.Linux.Management;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
@@ -9,6 +11,7 @@ using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 
 namespace Aurelia.Linux.Library;
 
@@ -104,7 +107,7 @@ internal static class VisualExtensions
         Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(visual).OfType<T>();
 }
 
-/// <summary>The collection editor sheet: name, standard or smart, the titles or rules, sharing and delete.</summary>
+/// <summary>The collection editor sheet: metadata, artwork upload/crop, sort mode, members (movies, series, seasons, episodes) or smart rules.</summary>
 public sealed class CollectionEditorSheet : UserControl
 {
     private readonly CollectionEditorModel model;
@@ -113,24 +116,52 @@ public sealed class CollectionEditorSheet : UserControl
     private readonly StackPanel body = new() { Spacing = 12 };
     private readonly TextBlock problem = new() { Foreground = new SolidColorBrush(Color.Parse("#FF8A8A")) };
     private readonly TextBlock preview = new() { Classes = { "subdued" } };
+    private readonly TextBlock artworkStatus = new() { Classes = { "subdued" }, FontSize = 12 };
+    private readonly ComboBox sortBox = new() { MinWidth = 180 };
     private readonly Button save = new() { Content = "Save", Classes = { "primary" }, IsDefault = true };
+    private readonly Dictionary<Guid, CatalogDetailPresentation> expandedSeries = [];
+    private readonly HashSet<Guid> openSeriesIds = [];
     private string filter = "";
 
-    public CollectionEditorSheet(LibraryContext context, SheetHost host, CollectionSummary? existing, CatalogItemSummary? preselected)
+    public CollectionEditorSheet(LibraryContext context, SheetHost host, CollectionSummary? existing, CatalogItemSummary? preselected, int? preselectedSeasonNumber = null)
     {
         this.context = context;
         this.host = host;
-        model = new CollectionEditorModel(context.Store.Catalog, existing, preselected, context.Store.CanManageMedia);
+        model = new CollectionEditorModel(context.Store.Catalog, existing, preselected, context.Store.CanManageMedia, preselectedSeasonNumber);
         DataContext = model;
-        Width = 720;
-        Height = 640;
+        Width = 760;
+        Height = 720;
+
         var nameBox = new TextBox { PlaceholderText = "Name" };
         nameBox[!TextBox.TextProperty] = new Binding(nameof(CollectionEditorModel.Name)) { Mode = BindingMode.TwoWay };
         AutomationProperties.SetName(nameBox, "Collection Name");
-        var standard = new ToggleButton { Content = "Standard Collection", Classes = { "chip" }, IsChecked = !model.IsSmart };
+
+        var overviewBox = new TextBox
+        {
+            PlaceholderText = "Optional description of this collection…",
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            MinHeight = 56,
+            MaxHeight = 110,
+        };
+        overviewBox[!TextBox.TextProperty] = new Binding(nameof(CollectionEditorModel.Overview)) { Mode = BindingMode.TwoWay };
+        AutomationProperties.SetName(overviewBox, "Description");
+
+        var standard = new ToggleButton { Content = "Box Set", Classes = { "chip" }, IsChecked = !model.IsSmart };
         var smart = new ToggleButton { Content = "Smart List", Classes = { "chip" }, IsChecked = model.IsSmart };
-        standard.Click += (_, _) => { model.IsSmart = false; smart.IsChecked = false; standard.IsChecked = true; BuildBody(); };
-        smart.Click += (_, _) => { model.IsSmart = true; standard.IsChecked = false; smart.IsChecked = true; BuildBody(); };
+        ConfigureSortBox();
+        standard.Click += (_, _) => { model.IsSmart = false; smart.IsChecked = false; standard.IsChecked = true; ConfigureSortBox(); BuildBody(); };
+        smart.Click += (_, _) => { model.IsSmart = true; standard.IsChecked = false; smart.IsChecked = true; ConfigureSortBox(); BuildBody(); };
+
+        var chooseCover = new Button { Content = "Choose Cover (2:3)…", Classes = { "chip" } };
+        var clearCover = new Button { Content = "Automatic Cover", Classes = { "chip" } };
+        var chooseBackdrop = new Button { Content = "Choose Backdrop (16:9)…", Classes = { "chip" } };
+        var clearBackdrop = new Button { Content = "Automatic Backdrop", Classes = { "chip" } };
+        chooseCover.Click += async (_, _) => await PickArtworkAsync("poster", 2.0 / 3.0);
+        clearCover.Click += (_, _) => { model.RemovePoster = true; UpdateArtworkStatus(); };
+        chooseBackdrop.Click += async (_, _) => await PickArtworkAsync("backdrop", 16.0 / 9.0);
+        clearBackdrop.Click += (_, _) => { model.RemoveBackdrop = true; UpdateArtworkStatus(); };
+
         var shared = new CheckBox { Content = "Shared Collection (visible to all profiles)", IsVisible = model.CanShare };
         shared[!ToggleButton.IsCheckedProperty] = new Binding(nameof(CollectionEditorModel.IsShared)) { Mode = BindingMode.TwoWay };
         var cancel = new Button { Content = "Cancel", Classes = { "chip" }, IsCancel = true };
@@ -158,12 +189,15 @@ public sealed class CollectionEditorSheet : UserControl
             {
                 new StackPanel
                 {
-                    Spacing = 12,
+                    Spacing = 10,
                     Children =
                     {
                         new TextBlock { Text = existing is null ? "New Collection" : "Edit Collection", FontSize = 20, FontWeight = FontWeight.Bold },
                         nameBox,
-                        new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { standard, smart } },
+                        overviewBox,
+                        new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { standard, smart, sortBox } },
+                        new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { chooseCover, clearCover, chooseBackdrop, clearBackdrop } },
+                        artworkStatus,
                     },
                 }.Also(p => DockPanel.SetDock(p, Dock.Top)),
                 new StackPanel { Spacing = 8, Margin = new Thickness(0, 10, 0, 0), Children = { shared, problem, footer } }.Also(p => DockPanel.SetDock(p, Dock.Bottom)),
@@ -171,18 +205,105 @@ public sealed class CollectionEditorSheet : UserControl
             },
         };
         model.PropertyChanged += OnModelChanged;
+        UpdateArtworkStatus();
         BuildBody();
         Update();
+        if (existing is not null)
+        {
+            AttachedToVisualTree += async (_, _) => await LoadDetailAsync(existing.Id);
+        }
     }
 
     internal CollectionEditorModel Model => model;
 
     private void OnModelChanged(object? sender, PropertyChangedEventArgs e) => Update();
 
+    private void ConfigureSortBox()
+    {
+        var options = model.IsSmart
+            ? new (string Value, string Label)[] { ("release", "Release Date"), ("title", "Title") }
+            : [("custom", "Custom Order"), ("release", "Release Date"), ("title", "Title")];
+        sortBox.ItemsSource = options.Select(o => o.Label).ToList();
+        var index = Math.Max(0, Array.FindIndex(options, o => o.Value == model.SortMode));
+        sortBox.SelectedIndex = index;
+        sortBox.SelectionChanged += (_, _) =>
+        {
+            if (sortBox.SelectedIndex >= 0 && sortBox.SelectedIndex < options.Length)
+            {
+                model.SortMode = options[sortBox.SelectedIndex].Value;
+            }
+        };
+    }
+
+    private void UpdateArtworkStatus()
+    {
+        var coverText = model.PosterDraft is not null ? "Custom Cover" : (model.RemovePoster ? "Automatic Cover" : (model.Existing?.Poster is not null ? "Server Cover" : "Automatic Cover"));
+        var bgText = model.BackdropDraft is not null ? "Custom Backdrop" : (model.RemoveBackdrop ? "Automatic Backdrop" : (model.Existing?.Backdrop is not null ? "Server Backdrop" : "Automatic Backdrop"));
+        artworkStatus.Text = $"{coverText} · {bgText}";
+    }
+
+    private async Task LoadDetailAsync(Guid collectionId)
+    {
+        var loaded = await context.Store.CollectionAsync(collectionId);
+        if (loaded is null) return;
+        model.LoadDetail(loaded);
+        ConfigureSortBox();
+        BuildBody();
+    }
+
+    private async Task PickArtworkAsync(string kind, double aspect)
+    {
+        var storage = TopLevel.GetTopLevel(this)?.StorageProvider;
+        if (storage is null) return;
+        var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            AllowMultiple = false,
+            Title = kind == "poster" ? "Choose Collection Cover" : "Choose Collection Backdrop",
+            FileTypeFilter = [new FilePickerFileType("Images") { Patterns = ["*.jpg", "*.jpeg", "*.png", "*.heic", "*.webp"] }],
+        });
+        if (files.Count == 0) return;
+        byte[] bytes;
+        await using (var stream = await files[0].OpenReadAsync())
+        {
+            if (stream.CanSeek && stream.Length > 20 * 1024 * 1024)
+            {
+                problem.Text = "Choose an image up to 20 MB.";
+                problem.IsVisible = true;
+                return;
+            }
+            using var copy = new MemoryStream();
+            await stream.CopyToAsync(copy);
+            bytes = copy.ToArray();
+        }
+        var crop = new CropSheet(host, bytes, aspect, null, kind == "poster" ? "Crop Collection Cover" : "Crop Collection Backdrop", "Use Crop");
+        var confirmed = await host.ShowAsync(crop);
+        if (!confirmed) return;
+
+        Guid? uploadId = null;
+        if (model.Existing is { } existing)
+        {
+            try
+            {
+                var uploaded = await context.Store.Client.UploadCollectionEditorImageAsync(existing.Id, bytes, CancellationToken.None);
+                uploadId = uploaded.Id;
+            }
+            catch (AureliaApiException failure)
+            {
+                problem.Text = failure.Message;
+                problem.IsVisible = true;
+                return;
+            }
+        }
+        var draft = new CollectionArtworkDraft(uploadId, bytes, crop.Result);
+        if (kind == "poster") model.PosterDraft = draft;
+        else model.BackdropDraft = draft;
+        UpdateArtworkStatus();
+    }
+
     private void Update()
     {
         problem.Text = model.Problem;
-        problem.IsVisible = model.Problem is not null && (model.Name.Length > 0 || model.Selected.Count > 0);
+        problem.IsVisible = model.Problem is not null && (model.Name.Length > 0 || model.SelectedMembers.Count > 0);
         save.IsEnabled = model.CanSave;
         preview.Text = model.MatchingCount == 1 ? "Matching 1 title" : $"Matching {model.MatchingCount} titles";
     }
@@ -196,42 +317,97 @@ public sealed class CollectionEditorSheet : UserControl
 
     private void BuildTitles()
     {
-        var search = new TextBox { PlaceholderText = "Find titles", Text = filter };
+        var search = new TextBox { PlaceholderText = "Find titles, seasons, or episodes…", Text = filter };
         AutomationProperties.SetName(search, "Find Titles");
-        var list = new StackPanel { Spacing = 2 };
+        var list = new StackPanel { Spacing = 4 };
         void Fill()
         {
             list.Children.Clear();
-            foreach (var selected in model.Selected.ToList())
+            for (var index = 0; index < model.SelectedMembers.Count; index++)
             {
-                var up = new Button { Content = "▲", Classes = { "link" } };
-                var down = new Button { Content = "▼", Classes = { "link" } };
-                AutomationProperties.SetName(up, "Move Up, " + selected.Title);
-                AutomationProperties.SetName(down, "Move Down, " + selected.Title);
-                up.Click += (_, _) => { model.Move(selected, -1); Fill(); };
-                down.Click += (_, _) => { model.Move(selected, 1); Fill(); };
-                list.Children.Add(Row(selected, true, Fill, up, down));
+                var currentIndex = index;
+                var member = model.SelectedMembers[currentIndex];
+                var up = new Button { Content = "▲", Classes = { "link" }, IsEnabled = currentIndex > 0 };
+                var down = new Button { Content = "▼", Classes = { "link" }, IsEnabled = currentIndex < model.SelectedMembers.Count - 1 };
+                var remove = new Button { Content = "✕", Classes = { "link" } };
+                AutomationProperties.SetName(up, "Move Up, " + member.Title);
+                AutomationProperties.SetName(down, "Move Down, " + member.Title);
+                up.Click += (_, _) => { model.MoveMember(currentIndex, -1); ConfigureSortBox(); Fill(); };
+                down.Click += (_, _) => { model.MoveMember(currentIndex, 1); ConfigureSortBox(); Fill(); };
+                remove.Click += (_, _) => { model.RemoveMemberAt(currentIndex); Fill(); };
+                var row = new DockPanel();
+                row.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { new TextBlock { Text = member.TypeLabel, Classes = { "subdued" }, FontSize = 11, VerticalAlignment = VerticalAlignment.Center }, up, down, remove } }.Also(p => DockPanel.SetDock(p, Dock.Right)));
+                row.Children.Add(new TextBlock { Text = $"{currentIndex + 1}. {member.Title}", VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
+                list.Children.Add(row);
             }
-            if (model.Selected.Count > 0) list.Children.Add(new Separator { Margin = new Thickness(0, 6) });
-            foreach (var candidate in model.Candidates.Where(c => !model.Contains(c) && (filter.Length == 0 || c.Title.Contains(filter, StringComparison.CurrentCultureIgnoreCase))).Take(200))
+            if (model.SelectedMembers.Count > 0) list.Children.Add(new Separator { Margin = new Thickness(0, 6) });
+            foreach (var candidate in model.Candidates.Where(c => filter.Length == 0 || c.Title.Contains(filter, StringComparison.CurrentCultureIgnoreCase)).Take(200))
             {
-                list.Children.Add(Row(candidate, false, Fill));
+                var check = new CheckBox
+                {
+                    IsChecked = model.ContainsMember(candidate.Id, null),
+                    Content = $"{candidate.Title}{(candidate.Year is { } y ? $" ({y})" : "")} · {(candidate.Kind == MediaKind.Movie ? "Movie" : "TV Show")}",
+                };
+                check.IsCheckedChanged += (_, _) => { model.Toggle(candidate); Fill(); };
+                var row = new DockPanel();
+                if (candidate.Kind == MediaKind.Series)
+                {
+                    var expand = new Button { Content = openSeriesIds.Contains(candidate.Id) ? "Hide Seasons" : "Seasons…", Classes = { "link" } };
+                    expand.Click += async (_, _) =>
+                    {
+                        if (!openSeriesIds.Add(candidate.Id)) openSeriesIds.Remove(candidate.Id);
+                        else if (!expandedSeries.ContainsKey(candidate.Id))
+                        {
+                            try
+                            {
+                                expandedSeries[candidate.Id] = await context.Store.Client.DetailAsync(candidate.Id, CancellationToken.None);
+                            }
+                            catch (AureliaApiException)
+                            {
+                            }
+                        }
+                        Fill();
+                    };
+                    row.Children.Add(expand.Also(e => DockPanel.SetDock(e, Dock.Right)));
+                }
+                row.Children.Add(check);
+                list.Children.Add(row);
+
+                if (candidate.Kind == MediaKind.Series && openSeriesIds.Contains(candidate.Id) && expandedSeries.TryGetValue(candidate.Id, out var seriesDetail))
+                {
+                    foreach (var season in seriesDetail.Seasons)
+                    {
+                        var seasonTitle = $"{candidate.Title} · {(season.Number == 0 ? "Specials" : $"Season {season.Number}")}";
+                        var seasonCheck = new CheckBox
+                        {
+                            Margin = new Thickness(24, 0, 0, 0),
+                            IsChecked = model.ContainsMember(candidate.Id, season.Number),
+                            Content = $"{(season.Number == 0 ? "Specials (Season 0)" : $"Season {season.Number}")} ({season.Episodes.Count} episodes)",
+                        };
+                        seasonCheck.IsCheckedChanged += (_, _) => { model.ToggleMember(candidate.Id, season.Number, seasonTitle, MediaKind.Series); Fill(); };
+                        list.Children.Add(seasonCheck);
+
+                        foreach (var episode in season.Episodes)
+                        {
+                            var epCode = $"S{episode.SeasonNumber:00}E{episode.EpisodeNumber:00}";
+                            var epTitle = $"{candidate.Title} · {epCode} · {episode.Item.Title}";
+                            var epCheck = new CheckBox
+                            {
+                                Margin = new Thickness(44, 0, 0, 0),
+                                IsChecked = model.ContainsMember(episode.Item.Id, null),
+                                Content = $"{epCode} · {episode.Item.Title}",
+                            };
+                            epCheck.IsCheckedChanged += (_, _) => { model.ToggleMember(episode.Item.Id, null, epTitle, MediaKind.Episode, episode.Item); Fill(); };
+                            list.Children.Add(epCheck);
+                        }
+                    }
+                }
             }
         }
         search.TextChanged += (_, _) => { filter = search.Text ?? ""; Fill(); };
         Fill();
         body.Children.Add(search);
         body.Children.Add(list);
-    }
-
-    private DockPanel Row(CatalogItemSummary item, bool chosen, Action refill, params Button[] extra)
-    {
-        var check = new CheckBox { IsChecked = chosen, Content = $"{item.Title}{(item.Year is { } y ? $" ({y})" : "")}" };
-        check.IsCheckedChanged += (_, _) => { model.Toggle(item); refill(); };
-        var row = new DockPanel();
-        if (extra.Length > 0) row.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Children = { extra[0], extra[1] } }.Also(p => DockPanel.SetDock(p, Dock.Right)));
-        row.Children.Add(check);
-        return row;
     }
 
     private void BuildRules()
@@ -280,7 +456,13 @@ public sealed class CollectionEditorSheet : UserControl
     {
         if (!model.CanSave) return;
         save.IsEnabled = false;
-        var saved = await context.Store.SaveCollectionAsync(model.Existing?.Id, model.Request());
+        var saved = await context.Store.SaveCollectionAsync(
+            model.Existing?.Id,
+            model.Request(),
+            model.PosterDraft,
+            model.BackdropDraft,
+            model.RemovePoster,
+            model.RemoveBackdrop);
         if (saved is not null) host.Close(true);
         else save.IsEnabled = true;
     }

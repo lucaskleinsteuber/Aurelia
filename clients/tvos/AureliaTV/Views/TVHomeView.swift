@@ -143,7 +143,8 @@ struct TVHomeView: View {
                 guard model.session?.sessionId == session.sessionId else { return }
                 model.handleSessionFailure(failure)
                 playback = nil
-              })
+              },
+              startOver: request.startOver)
           })
         }
       }
@@ -451,27 +452,45 @@ struct TVContinueCard: View {
 
 struct TVCollectionCard: View {
   let collection: TVCollection
+  private var previewArtwork: TVArtwork? {
+    collection.poster ?? collection.backdrop ?? collection.items.lazy.compactMap(\.poster).first
+  }
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
-      ZStack(alignment: .topLeading) {
-        TVArtworkView(artwork: collection.poster, width: 640, symbol: "rectangle.stack")
-          .aspectRatio(2 / 3, contentMode: .fit)
-          .clipShape(RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous))
-          .hoverEffect(.highlight)
-        if collection.isSmart {
-          Text("Smart")
-            .font(.system(size: 16, weight: .bold))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(.ultraThinMaterial, in: Capsule())
-            .padding(12)
+      ZStack(alignment: .top) {
+        RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous)
+          .fill(Color.white.opacity(0.08))
+          .padding(.horizontal, 18)
+          .offset(y: -12)
+        RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous)
+          .fill(Color.white.opacity(0.14))
+          .padding(.horizontal, 9)
+          .offset(y: -6)
+        ZStack(alignment: .topLeading) {
+          TVArtworkView(artwork: previewArtwork, width: 640, symbol: "rectangle.stack")
+            .aspectRatio(2 / 3, contentMode: .fit)
+            .overlay(alignment: .bottom) {
+              if let fraction = collection.progressFraction, fraction < 1 {
+                TVProgressBar(fraction: fraction).padding(.horizontal, 14).padding(.bottom, 14)
+              }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous))
+            .hoverEffect(.highlight)
+          if let badge = TVCollectionPresentation.providerLabel(for: collection) {
+            Text(badge)
+              .font(.system(size: 16, weight: .bold))
+              .padding(.horizontal, 10)
+              .padding(.vertical, 4)
+              .background(.ultraThinMaterial, in: Capsule())
+              .padding(12)
+          }
         }
       }
+      .padding(.top, 12)
       VStack(alignment: .leading, spacing: 6) {
         Text(collection.name).font(.system(size: 24, weight: .semibold)).lineLimit(1)
-        let count = collection.totalCount > 0 ? collection.totalCount : collection.items.count
-        Text(count == 1 ? "1 title" : "\(count) titles")
-          .font(.system(size: 20)).foregroundStyle(.secondary)
+        Text(TVCollectionPresentation.cardSubtitle(collection))
+          .font(.system(size: 20)).foregroundStyle(.secondary).lineLimit(1)
       }
     }
   }
@@ -493,6 +512,7 @@ struct TVShowAllTile: View {
 struct TVCollectionsView: View {
   @EnvironmentObject private var model: TVAppModel
   @State private var collections: [TVCollection] = []
+  @State private var franchises: [TVCollection] = []
   @State private var loading = false
   @State private var complete = false
   @State private var error: String?
@@ -500,7 +520,7 @@ struct TVCollectionsView: View {
   @FocusState private var focused: UUID?
   var body: some View {
     ScrollView {
-      LazyVStack(alignment: .leading, spacing: 24) {
+      LazyVStack(alignment: .leading, spacing: 36) {
         TVSectionHeader(title: "Collections", count: collections.isEmpty ? nil : collections.count)
         LazyVGrid(
           columns: Array(repeating: GridItem(.flexible(), spacing: 48), count: 6), spacing: 56
@@ -515,12 +535,26 @@ struct TVCollectionsView: View {
             }
           }
         }.defaultFocus($focused, collections.first?.id, priority: .userInitiated).focusSection()
+        if !franchises.isEmpty {
+          TVSectionHeader(title: "Universes", count: franchises.count).padding(.top, 12)
+          LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(), spacing: 48), count: 6), spacing: 56
+          ) {
+            ForEach(franchises) { franchise in
+              NavigationLink {
+                TVCollectionView(collection: franchise)
+              } label: {
+                TVCollectionCard(collection: franchise)
+              }.buttonStyle(.borderless).focused($focused, equals: franchise.id)
+            }
+          }.focusSection()
+        }
         if loading { ProgressView() }
         if let error {
           TVErrorText(message: error)
           Button("Try Again") { Task { await next() } }.buttonStyle(TVButtonStyle())
         }
-        if complete && collections.isEmpty {
+        if complete && collections.isEmpty && franchises.isEmpty {
           Text("No collections available.").foregroundStyle(.secondary)
         }
       }.padding(.horizontal, TVDesign.pagePadding).padding(.vertical, 40)
@@ -540,18 +574,27 @@ struct TVCollectionsView: View {
     loading = true
     defer { if generation == run { loading = false } }
     do {
-      let values = try await api.collections(offset: replacing ? 0 : collections.count)
-      guard !Task.isCancelled, generation == run, model.session?.sessionId == session else {
-        return
-      }
       if replacing {
+        async let loadedCollections = api.collections(offset: 0)
+        let loadedFranchises = (try? await api.franchises()) ?? []
+        let values = try await loadedCollections
+        guard !Task.isCancelled, generation == run, model.session?.sessionId == session else {
+          return
+        }
         collections = values
+        franchises = loadedFranchises
+        complete = values.count < 60
+        error = nil
       } else {
+        let values = try await api.collections(offset: collections.count)
+        guard !Task.isCancelled, generation == run, model.session?.sessionId == session else {
+          return
+        }
         let old = Set(collections.map(\.id))
         collections += values.filter { !old.contains($0.id) }
+        complete = values.count < 60
+        error = nil
       }
-      complete = values.count < 60
-      error = nil
     } catch {
       guard generation == run, model.session?.sessionId == session else { return }
       self.error = error.localizedDescription
@@ -564,62 +607,408 @@ struct TVCollectionView: View {
   @EnvironmentObject private var model: TVAppModel
   let collection: TVCollection
   @StateObject private var actions = TVLibraryActions()
-  @State private var current: TVCollection?
+  @State private var detail: TVCollectionDetail?
   @State private var loading = false
+  @State private var launching = false
   @State private var unavailable = false
+  @State private var unavailableItem: TVCatalogItem?
   @State private var error: String?
+  @State private var playback: TVHomePlayback?
+  @State private var selectedSeasonMemberID: UUID?
   @State private var requestID = UUID()
-  @FocusState private var focused: UUID?
+  @FocusState private var focused: CollectionFocus?
+
+  private enum CollectionFocus: Hashable {
+    case play
+    case member(UUID)
+    case episode(UUID)
+    case openShow(UUID)
+  }
+
+  private var resolvedDetail: TVCollectionDetail { detail ?? TVCollectionDetail(collection: collection) }
+  private var members: [TVCollectionMember] { resolvedDetail.resolvedMembers }
+  private var playableItems: [TVCatalogItem] { TVCollectionPresentation.playableItems(in: resolvedDetail) }
+  private var selectedSeasonMember: TVCollectionMember? {
+    members.first { $0.id == selectedSeasonMemberID && !($0.episodes ?? []).isEmpty }
+  }
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 32) {
-        TVSectionHeader(title: current?.name ?? "Collection", count: current?.items.count)
-        if let current {
-          LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 48), count: 6), spacing: 56
-          ) {
-            ForEach(current.items) { original in
-              let item = model.overlay(original)
-              NavigationLink {
-                TVDetailView(id: item.detailID, initial: item)
-              } label: {
-                TVPosterLabel(item: item)
-              }
-              .buttonStyle(.borderless).focused($focused, equals: item.id)
-              .accessibilityIdentifier("collection-item-\(item.id)")
-              .contextMenu { TVMediaContextActions(item: item, actions: actions) }
-            }
-          }.defaultFocus($focused, current.items.first?.id, priority: .userInitiated)
-            .focusSection()
-          if current.items.isEmpty {
-            ContentUnavailableView("No Titles Available", systemImage: "rectangle.stack")
+      VStack(alignment: .leading, spacing: 44) {
+        if let detail {
+          hero(detail)
+          membersGrid(detail)
+          if let seasonMember = selectedSeasonMember {
+            seasonEpisodesShelf(seasonMember, in: detail)
           }
+        } else {
+          Text(collection.name)
+            .font(.system(size: 52, weight: .bold))
+            .padding(.horizontal, TVDesign.pagePadding)
+            .padding(.top, 120)
         }
-        if loading { ProgressView().accessibilityIdentifier("collection-loading") }
+        if loading {
+          ProgressView()
+            .padding(.horizontal, TVDesign.pagePadding)
+            .accessibilityIdentifier("collection-loading")
+        }
         if unavailable {
           ContentUnavailableView("Collection Unavailable", systemImage: "rectangle.stack")
             .accessibilityIdentifier("collection-unavailable")
         }
         if let error {
-          TVErrorText(message: error)
-          Button("Try Again") { Task { await reload() } }.buttonStyle(TVButtonStyle())
+          VStack(alignment: .leading, spacing: 20) {
+            TVErrorText(message: error)
+            Button("Try Again") { Task { await reload() } }.buttonStyle(TVButtonStyle())
+          }
+          .padding(.horizontal, TVDesign.pagePadding)
         }
-      }.padding(.horizontal, TVDesign.pagePadding).padding(.vertical, 40)
-    }.background(TVDesign.canvas.ignoresSafeArea())
-      .task(id: model.libraryRefresh) { await reload() }
-      .modifier(TVLibraryActionPresentation(actions: actions))
+      }
+      .padding(.bottom, 80)
+    }
+    .ignoresSafeArea(edges: .top)
+    .background(TVDesign.canvas.ignoresSafeArea())
+    .defaultFocus($focused, defaultFocusTarget, priority: .userInitiated)
+    .task(id: model.libraryRefresh) { await reload() }
+    .onChange(of: model.session?.sessionId) { _, _ in playback = nil }
+    .onChange(of: model.remoteStopRequests) { _, _ in playback = nil }
+    .modifier(TVLibraryActionPresentation(actions: actions))
+    .fullScreenCover(
+      item: $playback,
+      onDismiss: {
+        model.playerPresented = false
+        Task { await reload() }
+      },
+      content: { request in
+        if let connection = model.connection, let session = model.session {
+          TVPlayerView(makeController: {
+            TVPlaybackController(
+              connection: connection, session: session, mediaID: request.target.id,
+              title: request.title, outbox: model.environment.outbox,
+              api: model.makeClient(connection: connection, session: session),
+              runtime: model.environment.makePlaybackRuntime(),
+              queue: request.queue,
+              seriesID: request.target.kind == .episode ? request.target.parentId : nil,
+              preferencesStore: model.environment.preferences,
+              adaptiveStreaming: model.supportsAdaptiveStreaming,
+              supportsSuggestions: model.supportsSuggestions,
+              onClose: { playback = nil },
+              onSessionFailure: { failure in
+                guard model.session?.sessionId == session.sessionId else { return }
+                model.handleSessionFailure(failure)
+                playback = nil
+              },
+              startOver: request.startOver)
+          })
+        }
+      }
+    )
+    .alert(
+      "Not Available",
+      isPresented: Binding(get: { unavailableItem != nil }, set: { if !$0 { unavailableItem = nil } }),
+      presenting: unavailableItem
+    ) { _ in
+      Button("OK", role: .cancel) { unavailableItem = nil }
+    } message: { item in
+      Text(
+        "\(item.availabilityMessage ?? "This title can't be played right now.") Connect the drive on your Mac, then try again."
+      )
+    }
+  }
+
+  private var defaultFocusTarget: CollectionFocus? {
+    if !playableItems.isEmpty { return .play }
+    return members.first.map { .member($0.id) }
+  }
+
+  private func hero(_ detail: TVCollectionDetail) -> some View {
+    let summary = detail.summary
+    let firstItem = members.compactMap { $0.item ?? $0.episodes?.first }.first ?? detail.items.first
+    let heroArtwork = detail.backdrop ?? detail.poster ?? firstItem?.backdrop ?? firstItem?.poster
+    let coverArtwork = detail.poster ?? detail.backdrop ?? firstItem?.poster ?? firstItem?.backdrop
+    return ZStack(alignment: .bottomLeading) {
+      TVHeroBackdrop(artwork: heroArtwork)
+      HStack(alignment: .bottom, spacing: 42) {
+        TVArtworkView(artwork: coverArtwork, width: 640, symbol: "rectangle.stack")
+          .frame(width: 210, height: 315)
+          .clipShape(RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous))
+          .shadow(color: .black.opacity(0.45), radius: 22, y: 12)
+        VStack(alignment: .leading, spacing: 16) {
+          TVEyebrow(
+            text: [
+              TVCollectionPresentation.providerLabel(for: summary) ?? "Collection",
+              detail.yearRange,
+            ].compactMap { $0 }.joined(separator: " · "))
+          Text(detail.name)
+            .font(.system(size: 68, weight: .bold))
+            .tracking(-0.8)
+            .lineLimit(2)
+          if let genres = detail.genres, !genres.isEmpty {
+            Text(genres.prefix(4).joined(separator: " · "))
+              .font(.system(size: 24, weight: .semibold))
+          }
+          if let stats = TVCollectionPresentation.statsLine(detail) {
+            Text(stats)
+              .font(.system(size: 22, weight: .semibold))
+              .foregroundStyle(.white.opacity(0.8))
+          }
+          if let fraction = summary.progressFraction, fraction < 1 {
+            TVProgressBar(fraction: fraction).frame(maxWidth: 420)
+          }
+          if let overview = TVCollectionPresentation.cleanedOverview(detail.overview) {
+            Text(overview)
+              .font(.system(size: 25))
+              .lineLimit(3)
+              .frame(maxWidth: 1020, alignment: .leading)
+              .foregroundStyle(.white.opacity(0.88))
+          }
+          if !playableItems.isEmpty {
+            HStack(spacing: 22) {
+              Button {
+                playBoxSet(detail)
+              } label: {
+                Label(TVCollectionPresentation.playLabel(for: detail), systemImage: "play.fill")
+              }
+              .buttonStyle(TVButtonStyle(kind: .primary))
+              .disabled(launching)
+              .focused($focused, equals: .play)
+              .accessibilityIdentifier("collection-play")
+            }
+            .padding(.top, 6)
+          }
+        }
+      }
+      .padding(.horizontal, TVDesign.pagePadding)
+      .padding(.bottom, 54)
+      .focusSection()
+    }
+    .frame(maxWidth: .infinity, minHeight: 620, alignment: .bottomLeading)
+  }
+
+  @ViewBuilder
+  private func membersGrid(_ detail: TVCollectionDetail) -> some View {
+    VStack(alignment: .leading, spacing: 26) {
+      TVSectionHeader(
+        title: "Titles", count: members.isEmpty ? nil : members.count
+      )
+      .padding(.horizontal, TVDesign.pagePadding)
+      if members.isEmpty {
+        ContentUnavailableView("No Titles Available", systemImage: "rectangle.stack")
+          .padding(.horizontal, TVDesign.pagePadding)
+      } else {
+        LazyVGrid(
+          columns: Array(repeating: GridItem(.flexible(), spacing: 48), count: 6), spacing: 56
+        ) {
+          ForEach(Array(members.enumerated()), id: \.element.id) { index, member in
+            memberCard(member, index: index)
+          }
+        }
+        .padding(.horizontal, TVDesign.pagePadding)
+        .focusSection()
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func memberCard(_ member: TVCollectionMember, index: Int) -> some View {
+    let rawItem = member.item.map { model.overlay($0) }
+    let firstEpisode = member.episodes?.first.map { model.overlay($0) }
+    if member.kind == .series, member.seasonNumber != nil, !(member.episodes ?? []).isEmpty {
+      let isSelected = selectedSeasonMemberID == member.id
+      Button {
+        selectedSeasonMemberID = member.id
+      } label: {
+        memberCardLabel(
+          member: member, index: index, item: rawItem, fallback: firstEpisode, selected: isSelected)
+      }
+      .buttonStyle(.borderless)
+      .focused($focused, equals: .member(member.id))
+      .accessibilityIdentifier("collection-item-\(member.mediaId)")
+    } else if let target = rawItem ?? firstEpisode {
+      NavigationLink {
+        TVDetailView(
+          id: target.detailID, initial: target,
+          selectedEpisodeID: member.kind == .episode ? target.id : nil)
+      } label: {
+        memberCardLabel(member: member, index: index, item: rawItem, fallback: firstEpisode)
+      }
+      .buttonStyle(.borderless)
+      .focused($focused, equals: .member(member.id))
+      .accessibilityIdentifier("collection-item-\(member.mediaId)")
+      .contextMenu { TVMediaContextActions(item: target, actions: actions) }
+    }
+  }
+
+  private func memberCardLabel(
+    member: TVCollectionMember, index: Int, item: TVCatalogItem?, fallback: TVCatalogItem?,
+    selected: Bool = false
+  ) -> some View {
+    let artwork = item?.poster ?? fallback?.poster ?? fallback?.backdrop
+    let fraction: Double? = {
+      if let f = item?.progressFraction { return f }
+      if let wc = member.watchedCount, let ic = member.itemCount, ic > 1, wc > 0, wc < ic {
+        return Double(wc) / Double(ic)
+      }
+      return nil
+    }()
+    return VStack(alignment: .leading, spacing: 14) {
+      TVArtworkView(artwork: artwork, width: 640, symbol: member.kind == .movie ? "film" : "tv")
+        .aspectRatio(2 / 3, contentMode: .fit)
+        .overlay(alignment: .topTrailing) {
+          if let item { TVItemBadges(item: item).padding(10) }
+        }
+        .overlay(alignment: .bottom) {
+          if let fraction { TVProgressBar(fraction: fraction).padding(.horizontal, 14).padding(.bottom, 14) }
+        }
+        .overlay {
+          if selected {
+            RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous)
+              .stroke(Color.white.opacity(0.9), lineWidth: 3)
+          }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous))
+        .hoverEffect(.highlight)
+      VStack(alignment: .leading, spacing: 4) {
+        Text("\(index + 1). \(member.displayTitle)")
+          .font(.system(size: 24, weight: .semibold))
+          .lineLimit(2)
+        if let subtitle = memberSubtitle(member, item: item) {
+          Text(subtitle).font(.system(size: 20)).foregroundStyle(.secondary).lineLimit(1)
+        }
+      }
+    }
+  }
+
+  private func memberSubtitle(_ member: TVCollectionMember, item: TVCatalogItem?) -> String? {
+    var parts: [String] = []
+    if member.kind == .episode, let label = item?.episodeLabel {
+      parts.append(label)
+    } else if let year = item?.year {
+      parts.append(String(year))
+    }
+    if let wc = member.watchedCount, let ic = member.itemCount, ic > 1 {
+      parts.append("\(wc) of \(ic) watched")
+    } else if (member.watchedCount ?? 0) > 0 {
+      parts.append("Watched")
+    }
+    return parts.isEmpty ? nil : parts.joined(separator: " · ")
+  }
+
+  private func seasonEpisodesShelf(_ member: TVCollectionMember, in detail: TVCollectionDetail)
+    -> some View
+  {
+    let episodes = (member.episodes ?? []).map { model.overlay($0) }
+    return VStack(alignment: .leading, spacing: 24) {
+      HStack(spacing: 24) {
+        TVSectionHeader(title: member.displayTitle, count: episodes.count)
+        if let show = member.item {
+          NavigationLink {
+            TVDetailView(id: show.detailID, initial: show)
+          } label: {
+            Label("Open Show", systemImage: "tv")
+          }
+          .buttonStyle(TVButtonStyle())
+          .focused($focused, equals: .openShow(member.id))
+        }
+      }
+      .padding(.horizontal, TVDesign.pagePadding)
+      ScrollView(.horizontal) {
+        LazyHStack(alignment: .top, spacing: 44) {
+          ForEach(episodes) { episode in
+            Button {
+              playEpisode(episode, in: detail)
+            } label: {
+              TVCollectionEpisodeCard(episode: episode)
+            }
+            .buttonStyle(.borderless)
+            .disabled(launching)
+            .focused($focused, equals: .episode(episode.id))
+            .contextMenu { TVMediaContextActions(item: episode, actions: actions) }
+          }
+        }
+        .padding(.horizontal, TVDesign.pagePadding)
+        .padding(.vertical, 16)
+      }
+      .scrollIndicators(.hidden)
+      .scrollClipDisabled()
+      .focusSection()
+    }
+  }
+
+  private func playBoxSet(_ detail: TVCollectionDetail) {
+    guard !launching, playback == nil, let api = model.client else { return }
+    launching = true
+    let sessionID = model.session?.sessionId
+    Task {
+      defer { launching = false }
+      let next = try? await api.collectionNext(id: detail.id)
+      guard !Task.isCancelled, model.session?.sessionId == sessionID, playback == nil else { return }
+      let fallback = TVCollectionPresentation.playableItems(in: detail).first
+      guard let rawTarget = next?.item ?? fallback else { return }
+      let target = model.overlay(rawTarget)
+      guard target.isPlayable else {
+        unavailableItem = target
+        return
+      }
+      let queue = TVCollectionPresentation.playbackQueue(in: detail, startingAt: target.id)
+      let startOver = next.map { !$0.resume } ?? false
+      launchPlayback(target: target, queue: queue, startOver: startOver, fallbackTitle: detail.name)
+    }
+  }
+
+  private func playEpisode(_ episode: TVCatalogItem, in detail: TVCollectionDetail) {
+    guard episode.isPlayable else {
+      unavailableItem = episode
+      return
+    }
+    guard playback == nil else { return }
+    let queue = TVCollectionPresentation.playbackQueue(in: detail, startingAt: episode.id)
+    launchPlayback(target: episode, queue: queue, startOver: false, fallbackTitle: detail.name)
+  }
+
+  private func launchPlayback(
+    target: TVCatalogItem, queue: [TVCatalogItem], startOver: Bool, fallbackTitle: String
+  ) {
+    let title: String = {
+      if let label = target.episodeLabel {
+        return "\(target.parentTitle ?? fallbackTitle) · \(label)"
+      }
+      return target.title
+    }()
+    model.playerPresented = true
+    playback = TVHomePlayback(target: target, queue: queue, title: title, startOver: startOver)
   }
 
   private func reload() async {
     guard let api = model.client, let sessionID = model.session?.sessionId else { return }
     let request = UUID()
     requestID = request
-    loading = current == nil
+    loading = detail == nil
     unavailable = false
     error = nil
     defer {
       if requestID == request, model.session?.sessionId == sessionID { loading = false }
+    }
+    if var loaded = try? await api.collectionDetail(id: collection.id) {
+      guard !Task.isCancelled, requestID == request, model.session?.sessionId == sessionID else {
+        return
+      }
+      for item in loaded.items { model.updateSummary(item) }
+      for member in loaded.resolvedMembers {
+        if let item = member.item { model.updateSummary(item) }
+        for episode in member.episodes ?? [] { model.updateSummary(episode) }
+      }
+      if loaded.nextItem == nil, model.supportsCollectionsV3 {
+        loaded.nextItem = try? await api.collectionNext(id: collection.id)
+      }
+      guard !Task.isCancelled, requestID == request, model.session?.sessionId == sessionID else {
+        return
+      }
+      detail = loaded
+      if selectedSeasonMemberID == nil {
+        selectedSeasonMemberID = loaded.resolvedMembers.first { !($0.episodes ?? []).isEmpty }?.id
+      }
+      return
     }
     do {
       var offset = 0
@@ -630,7 +1019,7 @@ struct TVCollectionView: View {
         }
         if let value = page.first(where: { $0.id == collection.id }) {
           for item in value.items { model.updateSummary(item) }
-          current = value
+          detail = TVCollectionDetail(collection: value)
           return
         }
         if page.count < 60 {
@@ -649,6 +1038,35 @@ struct TVCollectionView: View {
   }
 }
 
+private struct TVCollectionEpisodeCard: View {
+  let episode: TVCatalogItem
+  private let width: CGFloat = 420
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      TVArtworkView(artwork: episode.backdrop ?? episode.poster, width: 1280, symbol: "play.rectangle")
+        .frame(width: width, height: width * 9 / 16)
+        .overlay(alignment: .topTrailing) { TVItemBadges(item: episode).padding(10) }
+        .overlay(alignment: .bottom) {
+          if let fraction = episode.progressFraction {
+            TVProgressBar(fraction: fraction).padding(.horizontal, 14).padding(.bottom, 14)
+          }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous))
+        .hoverEffect(.highlight)
+      Text("\(episode.episodeLabel ?? "Episode") · \(episode.title)")
+        .font(.system(size: 23, weight: .semibold))
+        .lineLimit(2)
+      if let message = episode.availabilityMessage {
+        Text(message).font(.system(size: 19, weight: .semibold)).foregroundStyle(.orange)
+      } else if let overview = episode.overview {
+        Text(overview).font(.system(size: 19)).foregroundStyle(.secondary).lineLimit(2)
+      }
+    }
+    .frame(width: width, alignment: .leading)
+    .opacity(episode.isPlayable ? 1 : 0.55)
+  }
+}
+
 private struct TVHomeDetail: Hashable {
   let item: TVCatalogItem
   static func == (lhs: Self, rhs: Self) -> Bool { lhs.item.id == rhs.item.id }
@@ -659,6 +1077,7 @@ private struct TVHomePlayback: Identifiable {
   let target: TVCatalogItem
   let queue: [TVCatalogItem]
   let title: String
+  var startOver: Bool = false
   var id: UUID { target.id }
 }
 

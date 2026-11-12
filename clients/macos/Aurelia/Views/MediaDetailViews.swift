@@ -430,6 +430,8 @@ struct MediaDetailView: View {
             MediaWatchMenuItems(
               item: detail.item, controller: watchActions, scope: .series,
               includeContinueWatching: false, subjectPrefix: "Series")
+            Divider()
+            AddToCollectionMenu(item: detail.item, seasonNumber: season.number)
           }
         } label: {
           HStack(spacing: 6) {
@@ -455,6 +457,8 @@ struct MediaDetailView: View {
             MediaWatchMenuItems(
               item: detail.item, controller: watchActions, scope: .series,
               includeContinueWatching: false, subjectPrefix: "Series")
+            Divider()
+            AddToCollectionMenu(item: detail.item, seasonNumber: season.number)
           }
         }
         Spacer()

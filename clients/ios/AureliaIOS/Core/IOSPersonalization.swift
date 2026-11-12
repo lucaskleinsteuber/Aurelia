@@ -149,6 +149,68 @@ enum IOSPhotoCrop {
   }
 }
 
+/// Cropping an image to a rectangular aspect ratio (`2:3` poster or `16:9` backdrop) with
+/// normalized server crop coordinates `[0, 1]`.
+enum IOSRectCrop {
+  static let maximumZoom: CGFloat = 4
+  static let maximumArtworkUploadBytes = 24 * 1024 * 1024
+
+  static func clamped(
+    offset: CGSize, imageSize: CGSize, frameSize: CGSize, zoom: CGFloat
+  ) -> CGSize {
+    guard imageSize.width > 0, imageSize.height > 0, frameSize.width > 0, frameSize.height > 0
+    else { return .zero }
+    let baseScale = max(frameSize.width / imageSize.width, frameSize.height / imageSize.height)
+    let scale = baseScale * min(max(zoom, 1), maximumZoom)
+    let spareX = max(0, (imageSize.width * scale - frameSize.width) / 2)
+    let spareY = max(0, (imageSize.height * scale - frameSize.height) / 2)
+    return CGSize(
+      width: min(max(offset.width, -spareX), spareX),
+      height: min(max(offset.height, -spareY), spareY))
+  }
+
+  static func normalizedCrop(
+    imageSize: CGSize, frameSize: CGSize, zoom: CGFloat, offset: CGSize
+  ) -> IOSArtworkCrop {
+    guard imageSize.width > 0, imageSize.height > 0, frameSize.width > 0, frameSize.height > 0
+    else { return IOSArtworkCrop(x: 0, y: 0, width: 1, height: 1) }
+    let clampedZoom = min(max(zoom, 1), maximumZoom)
+    let baseScale = max(frameSize.width / imageSize.width, frameSize.height / imageSize.height)
+    let scale = baseScale * clampedZoom
+    let clampedOffset = clamped(
+      offset: offset, imageSize: imageSize, frameSize: frameSize, zoom: clampedZoom)
+    let cropWidthPx = min(imageSize.width, frameSize.width / scale)
+    let cropHeightPx = min(imageSize.height, frameSize.height / scale)
+    let xPx = min(
+      max(imageSize.width / 2 - clampedOffset.width / scale - cropWidthPx / 2, 0),
+      imageSize.width - cropWidthPx)
+    let yPx = min(
+      max(imageSize.height / 2 - clampedOffset.height / scale - cropHeightPx / 2, 0),
+      imageSize.height - cropHeightPx)
+    return IOSArtworkCrop(
+      x: Double(xPx / imageSize.width),
+      y: Double(yPx / imageSize.height),
+      width: Double(cropWidthPx / imageSize.width),
+      height: Double(cropHeightPx / imageSize.height))
+  }
+
+  /// Encodes `image` cleanly as JPEG for `/api/v1/collections/{id}/editor/uploads`.
+  static func jpegUploadData(_ image: CGImage) -> Data? {
+    let output = NSMutableData()
+    guard
+      let destination = CGImageDestinationCreateWithData(
+        output, UTType.jpeg.identifier as CFString, 1, nil)
+    else { return nil }
+    CGImageDestinationAddImage(
+      destination, image, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
+    guard CGImageDestinationFinalize(destination),
+      output.length > 0,
+      output.length <= maximumArtworkUploadBytes
+    else { return nil }
+    return output as Data
+  }
+}
+
 /// "Children's profile · up to FSK 6" for a profile with an age limit.
 enum IOSAgeLimit {
   static func summary(for limit: Int?) -> String? {

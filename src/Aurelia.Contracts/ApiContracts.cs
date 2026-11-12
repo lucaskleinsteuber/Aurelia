@@ -636,14 +636,77 @@ public sealed record CollectionSummary(
     int TotalCount = 0,
     bool IsShared = true,
     Guid? UserId = null,
-    string? RulesJson = null);
+    string? RulesJson = null,
+    string? Overview = null,
+    ArtworkSummary? Backdrop = null,
+    string? Provider = null,
+    bool CanEdit = false,
+    int ItemCount = 0,
+    int WatchedCount = 0,
+    string? YearRange = null,
+    string? SortMode = null);
+
+public sealed record CollectionMemberInput(
+    Guid MediaId,
+    int? SeasonNumber = null);
+
+public sealed record CollectionMember(
+    Guid Id,
+    Guid MediaId,
+    MediaKind Kind,
+    string Title,
+    int? SeasonNumber,
+    CatalogItemSummary? Item,
+    IReadOnlyList<CatalogItemSummary>? Episodes,
+    int? WatchedCount = null,
+    int? ItemCount = null,
+    long? TotalRuntimeSeconds = null);
+
+public sealed record CollectionNextResponse(
+    CatalogItemSummary Item,
+    bool Resume,
+    long PositionMilliseconds,
+    int ItemIndex,
+    int TotalItems);
+
+public sealed record CollectionDetail(
+    Guid Id,
+    string Name,
+    string? Overview,
+    ArtworkSummary? Poster,
+    ArtworkSummary? Backdrop,
+    string? Provider,
+    bool CanEdit,
+    bool IsSmart,
+    bool IsShared,
+    Guid? UserId,
+    string? RulesJson,
+    string SortMode,
+    int ItemCount,
+    int WatchedCount,
+    string? YearRange,
+    long TotalRuntimeSeconds,
+    IReadOnlyList<string> Genres,
+    IReadOnlyList<CollectionMember> Members,
+    CollectionNextResponse? NextItem = null);
+
+public sealed record CollectionOrderRequest(
+    IReadOnlyList<CollectionMemberInput> Members,
+    string? SortMode = null);
+
+public sealed record SaveCollectionArtworkRequest(
+    Guid? UploadId = null,
+    ArtworkCrop? Crop = null);
 
 public sealed record SaveCollectionRequest(
     string Name,
-    IReadOnlyList<Guid> MediaIds,
+    IReadOnlyList<Guid>? MediaIds = null,
     bool IsSmart = false,
     bool IsShared = false,
-    string? RulesJson = null);
+    string? RulesJson = null,
+    string? Overview = null,
+    string? SortMode = null,
+    IReadOnlyList<CollectionMemberInput>? Members = null);
 
 public sealed record SmartCollectionRules(
     string? Kind = null,

@@ -28,7 +28,7 @@ actor TVArtworkPipeline {
       throw TVCoreError.profileRequired
     }
     let key =
-      "\(connection.serverID):\(session.sessionId):\(artwork.id):\(artwork.revision ?? 0):\(width)"
+      "\(connection.serverID):\(session.sessionId):\(artwork.cacheIdentity):\(artwork.revision ?? 0):\(width)"
     if let cached = cache.object(forKey: key as NSString) { return cached }
     if let pending = requests[key] { return try await waitFor(pending, key: key).image }
     let run = generation

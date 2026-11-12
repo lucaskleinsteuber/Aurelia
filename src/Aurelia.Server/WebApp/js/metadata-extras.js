@@ -72,7 +72,7 @@ export function createMetadataExtras({ api, app, kit }) {
           context.run(async () => {
             const upload = await api.uploadEditorImage(item.id, chosen, { signal: context.signal });
             const draft = { uploadId: upload.id };
-            const crop = await cropPicture(pictureAddress(item.id, draft), picture, null);
+            const crop = await cropPicture(pictureAddress(item.id, draft), picture, null, kit);
             if (!crop) return api.discardEditorImage(item.id, upload.id).catch(() => {});
             changes[picture.key] = { ...draft, crop };
             automatic.delete(picture.key);
@@ -85,7 +85,7 @@ export function createMetadataExtras({ api, app, kit }) {
           h("div", { class: "button-row" },
             button("Choose Image…", () => file.click()),
             address ? button("Crop…", async () => {
-              const crop = await cropPicture(address, picture, selection?.crop ?? null);
+              const crop = await cropPicture(address, picture, selection?.crop ?? null, kit);
               if (!crop) return;
               changes[picture.key] = { ...(selection.uploadId ? { uploadId: selection.uploadId } : { assetId: selection.assetId }), crop };
               automatic.delete(picture.key);
@@ -104,66 +104,6 @@ export function createMetadataExtras({ api, app, kit }) {
     };
     draw();
     return block("Artwork", h("p", { class: "muted small" }, "Upload a picture from this computer or crop the current one. The original file stays untouched."), grid);
-  }
-
-  /**
-   * Shows the picture with a frame in the shape of a poster or background that can be moved and
-   * zoomed. Resolves with the crop in 0…1, or null when cancelled.
-   */
-  function cropPicture(address, picture, startCrop) {
-    return new Promise((resolve) => {
-      const image = h("img", { class: "crop-image", src: address, alt: "", draggable: "false" });
-      const frame = h("div", { class: "crop-frame", "aria-hidden": "true" });
-      const stage = h("div", { class: "crop-stage" }, image, frame);
-      const zoom = h("input", { type: "range", min: "1", max: "4", step: "0.01", value: "1", "aria-label": "Zoom" });
-      let result = null;
-      let state = { zoom: 1, centerX: 0.5, centerY: 0.5 };
-      if (startCrop) state = { zoom: 1, centerX: startCrop.x + startCrop.width / 2, centerY: startCrop.y + startCrop.height / 2 };
-      const place = () => {
-        if (!image.naturalWidth) return;
-        const crop = cropFrame({ imageWidth: image.naturalWidth, imageHeight: image.naturalHeight, aspect: picture.aspect, ...state });
-        state.centerX = crop.x + crop.width / 2;
-        state.centerY = crop.y + crop.height / 2;
-        Object.assign(frame.style, { left: `${crop.x * 100}%`, top: `${crop.y * 100}%`, width: `${crop.width * 100}%`, height: `${crop.height * 100}%` });
-        result = crop;
-      };
-      image.addEventListener("load", () => {
-        if (startCrop) {
-          const full = cropFrame({ imageWidth: image.naturalWidth, imageHeight: image.naturalHeight, aspect: picture.aspect });
-          state.zoom = Math.min(4, Math.max(1, full.width / startCrop.width));
-          zoom.value = String(state.zoom);
-        }
-        place();
-      }, { once: true });
-      zoom.addEventListener("input", () => { state.zoom = Number(zoom.value); place(); });
-      let drag = null;
-      frame.addEventListener("pointerdown", (event) => {
-        drag = { x: event.clientX, y: event.clientY, centerX: state.centerX, centerY: state.centerY };
-        frame.setPointerCapture?.(event.pointerId);
-      });
-      frame.addEventListener("pointermove", (event) => {
-        if (!drag) return;
-        const box = stage.getBoundingClientRect();
-        state.centerX = drag.centerX + (event.clientX - drag.x) / box.width;
-        state.centerY = drag.centerY + (event.clientY - drag.y) / box.height;
-        place();
-      });
-      const end = () => { drag = null; };
-      frame.addEventListener("pointerup", end);
-      frame.addEventListener("pointercancel", end);
-      const sheet = h("dialog", { class: "sheet crop-sheet", "aria-label": `Crop ${picture.label}` },
-        h("h2", {}, `Crop ${picture.label}`),
-        h("p", { class: "muted small" }, "Drag the frame and zoom until it shows the part you want."),
-        stage, field("Zoom", zoom),
-        h("div", { class: "button-row end" },
-          button("Cancel", () => { result = null; sheet.close(); }),
-          button("Use Crop", () => sheet.close(), "primary-button")));
-      sheet.addEventListener("cancel", () => { result = null; });
-      sheet.addEventListener("close", () => { sheet.remove(); resolve(result); }, { once: true });
-      document.body.append(sheet);
-      sheet.showModal();
-      if (image.complete && image.naturalWidth) image.dispatchEvent(new Event("load"));
-    });
   }
 
   // MARK: Cast and Crew
@@ -411,5 +351,68 @@ export function createMetadataExtras({ api, app, kit }) {
     return h("section", { class: "editor-section settings-section metadata-section danger-zone" }, h("h3", {}, "Remove Title"), area);
   }
 
-  return { sections, cropPicture };
+  return { sections, cropPicture: (address, picture, startCrop) => cropPicture(address, picture, startCrop, kit) };
+}
+
+/**
+ * Shows the picture with a frame in the shape of a poster or background that can be moved and
+ * zoomed. Resolves with the crop in 0…1, or null when cancelled.
+ */
+export function cropPicture(address, picture, startCrop, {
+  button = (label, onclick, className = "secondary-button") => h("button", { type: "button", class: className, onclick }, label),
+  field = (label, control) => h("label", { class: "editor-field" }, h("span", { class: "editor-field-title" }, label), control),
+} = {}) {
+  return new Promise((resolve) => {
+    const image = h("img", { class: "crop-image", src: address, alt: "", draggable: "false" });
+    const frame = h("div", { class: "crop-frame", "aria-hidden": "true" });
+    const stage = h("div", { class: "crop-stage" }, image, frame);
+    const zoom = h("input", { type: "range", min: "1", max: "4", step: "0.01", value: "1", "aria-label": "Zoom" });
+    let result = null;
+    let state = { zoom: 1, centerX: 0.5, centerY: 0.5 };
+    if (startCrop) state = { zoom: 1, centerX: startCrop.x + startCrop.width / 2, centerY: startCrop.y + startCrop.height / 2 };
+    const place = () => {
+      if (!image.naturalWidth) return;
+      const crop = cropFrame({ imageWidth: image.naturalWidth, imageHeight: image.naturalHeight, aspect: picture.aspect, ...state });
+      state.centerX = crop.x + crop.width / 2;
+      state.centerY = crop.y + crop.height / 2;
+      Object.assign(frame.style, { left: `${crop.x * 100}%`, top: `${crop.y * 100}%`, width: `${crop.width * 100}%`, height: `${crop.height * 100}%` });
+      result = crop;
+    };
+    image.addEventListener("load", () => {
+      if (startCrop) {
+        const full = cropFrame({ imageWidth: image.naturalWidth, imageHeight: image.naturalHeight, aspect: picture.aspect });
+        state.zoom = Math.min(4, Math.max(1, full.width / startCrop.width));
+        zoom.value = String(state.zoom);
+      }
+      place();
+    }, { once: true });
+    zoom.addEventListener("input", () => { state.zoom = Number(zoom.value); place(); });
+    let drag = null;
+    frame.addEventListener("pointerdown", (event) => {
+      drag = { x: event.clientX, y: event.clientY, centerX: state.centerX, centerY: state.centerY };
+      frame.setPointerCapture?.(event.pointerId);
+    });
+    frame.addEventListener("pointermove", (event) => {
+      if (!drag) return;
+      const box = stage.getBoundingClientRect();
+      state.centerX = drag.centerX + (event.clientX - drag.x) / box.width;
+      state.centerY = drag.centerY + (event.clientY - drag.y) / box.height;
+      place();
+    });
+    const end = () => { drag = null; };
+    frame.addEventListener("pointerup", end);
+    frame.addEventListener("pointercancel", end);
+    const sheet = h("dialog", { class: "sheet crop-sheet", "aria-label": `Crop ${picture.label}` },
+      h("h2", {}, `Crop ${picture.label}`),
+      h("p", { class: "muted small" }, "Drag the frame and zoom until it shows the part you want."),
+      stage, field("Zoom", zoom),
+      h("div", { class: "button-row end" },
+        button("Cancel", () => { result = null; sheet.close(); }),
+        button("Use Crop", () => sheet.close(), "primary-button")));
+    sheet.addEventListener("cancel", () => { result = null; });
+    sheet.addEventListener("close", () => { sheet.remove(); resolve(result); }, { once: true });
+    document.body.append(sheet);
+    sheet.showModal();
+    if (image.complete && image.naturalWidth) image.dispatchEvent(new Event("load"));
+  });
 }

@@ -39,6 +39,7 @@ final class TVAppModel: ObservableObject {
   var supportsMovieNight: Bool { capabilities?.supportsMovieNight ?? false }
   var supportsSuggestions: Bool { capabilities?.supportsSuggestions ?? false }
   var supportsAdaptiveStreaming: Bool { capabilities?.supportsAdaptiveStreaming ?? false }
+  var supportsCollectionsV3: Bool { capabilities?.supportsCollectionsV3 ?? false }
   @Published private(set) var homeLoading = false
   @Published private(set) var homeError: String?
   @Published private(set) var libraryRefresh = UUID()

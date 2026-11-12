@@ -149,9 +149,15 @@ public sealed class MediaCollectionRecord
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string? Overview { get; set; }
+    public string? SortMode { get; set; }
     public string? Provider { get; set; }
     public string? ProviderCollectionId { get; set; }
+    public string? ProviderPosterPath { get; set; }
+    public string? ProviderBackdropPath { get; set; }
     public string? SourceKey { get; set; }
+    public Guid? PosterAssetId { get; set; }
+    public Guid? BackdropAssetId { get; set; }
     public bool IsManual { get; set; }
     public Guid? UserId { get; set; }
     public ServerUser? User { get; set; }
@@ -160,13 +166,33 @@ public sealed class MediaCollectionRecord
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public List<MediaCollectionMember> Members { get; set; } = [];
+    public List<CollectionArtworkAsset> Artwork { get; set; } = [];
+}
+
+public sealed class CollectionArtworkAsset
+{
+    public Guid Id { get; set; }
+    public Guid CollectionId { get; set; }
+    public MediaCollectionRecord Collection { get; set; } = null!;
+    public ArtworkKind Kind { get; set; }
+    public string ProviderPath { get; set; } = string.Empty;
+    public string RelativeFilePath { get; set; } = string.Empty;
+    public string ContentType { get; set; } = string.Empty;
+    public long ContentLength { get; set; }
+    public long Revision { get; set; } = 1;
+    public bool IsManual { get; set; }
+    public string? OriginalFilePath { get; set; }
+    public string? CropJson { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
 }
 
 public sealed class MediaCollectionMember
 {
+    public Guid Id { get; set; } = Guid.NewGuid();
     public Guid CollectionId { get; set; }
     public MediaCollectionRecord Collection { get; set; } = null!;
     public Guid MediaItemId { get; set; }
     public MediaItem MediaItem { get; set; } = null!;
+    public int? SeasonNumber { get; set; }
     public int SortOrder { get; set; }
 }

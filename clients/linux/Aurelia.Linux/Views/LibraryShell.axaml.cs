@@ -257,7 +257,12 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
     /// <summary>Raised when a page asks to play a title; the window opens the player.</summary>
     public event Action<CatalogItemSummary, bool>? PlayRequested;
 
+    public event Action<IReadOnlyList<CatalogItemSummary>, CatalogItemSummary, bool>? PlayCollectionRequested;
+
     public void Play(CatalogItemSummary item, bool fromLastPosition) => PlayRequested?.Invoke(item, fromLastPosition);
+
+    public void PlayCollection(IReadOnlyList<CatalogItemSummary> playlist, CatalogItemSummary target, bool fromLastPosition) =>
+        PlayCollectionRequested?.Invoke(playlist, target, fromLastPosition);
 
     /// <summary>The window that keeps this computer's Watch Together party.</summary>
     public MainWindow? Together { get; set; }
@@ -290,10 +295,13 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
 
     public void PlayOffline(Aurelia.Linux.Core.Playback.OfflineTitle title) => Together?.PlayOffline(title);
 
-    public void EditCollection(CollectionSummary? collection, CatalogItemSummary? preselected)
+    public void EditCollection(CollectionSummary? collection, CatalogItemSummary? preselected) =>
+        EditCollection(collection, preselected, null);
+
+    public void EditCollection(CollectionSummary? collection, CatalogItemSummary? preselected, int? seasonNumber)
     {
         if (context is null) return;
-        _ = Sheets.ShowAsync(new CollectionEditorSheet(context, Sheets, collection, preselected));
+        _ = Sheets.ShowAsync(new CollectionEditorSheet(context, Sheets, collection, preselected, seasonNumber));
     }
 
     public Task<bool> ConfirmAsync(string title, string message, string confirmLabel, bool destructive) =>

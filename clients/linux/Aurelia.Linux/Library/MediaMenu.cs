@@ -134,20 +134,26 @@ internal static class MediaMenu
         await context.Store.SetWatchedAsync(state, watched);
     }
 
-    private static MenuItem CollectionsMenu(LibraryContext context, CatalogItemSummary item)
+    internal static MenuItem CollectionsMenu(LibraryContext context, CatalogItemSummary item, int? seasonNumber = null)
     {
         var store = context.Store;
-        var menu = new MenuItem { Header = "Add to Collection", Icon = IconFor("IconCollections") };
-        var children = new List<Control>();
-        foreach (var collection in store.Collections.Where(c => !c.IsSmart && (c.UserId == store.Client.Profile.User.Id || (c.IsShared && store.CanManageMedia))))
+        var menu = new MenuItem
         {
-            var contains = collection.Items.Any(candidate => candidate.Id == item.Id);
+            Header = seasonNumber is null ? "Add to Collection" : "Add Season to Collection",
+            Icon = IconFor("IconCollections"),
+        };
+        var children = new List<Control>();
+        foreach (var collection in store.Collections.Where(c => !c.IsSmart && BoxSetPresentation.CanEditCollection(c, store)))
+        {
+            var contains = seasonNumber is null && collection.Items.Any(candidate => candidate.Id == item.Id);
             var entry = new MenuItem { Header = collection.Name, ToggleType = MenuItemToggleType.CheckBox, IsChecked = contains };
-            entry.Click += (_, _) => _ = contains ? store.RemoveFromCollectionAsync(collection.Id, item.Id) : store.AddToCollectionAsync(collection.Id, item.Id);
+            entry.Click += (_, _) => _ = contains
+                ? store.RemoveFromCollectionAsync(collection.Id, item.Id, seasonNumber)
+                : store.AddToCollectionAsync(collection.Id, item.Id, seasonNumber);
             children.Add(entry);
         }
         if (children.Count > 0) children.Add(new Separator());
-        children.Add(Item("New Collection…", "IconPlus", () => context.Navigator.EditCollection(null, item)));
+        children.Add(Item("New Collection…", "IconPlus", () => context.Navigator.EditCollection(null, item, seasonNumber)));
         menu.ItemsSource = children;
         return menu;
     }

@@ -37,6 +37,8 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
     /// <summary>HLS in several qualities, converted live by the server.</summary>
     public bool SupportsAdaptiveStreaming => Supports(ServerFeatures.AdaptiveStreaming);
 
+    public bool SupportsCollectionsV3 => Supports(ServerFeatures.CollectionsV3);
+
     public Task<HomeResponse> HomeAsync(CancellationToken cancellation) => Get<HomeResponse>("/api/v1/home", cancellation);
 
     /// <summary>
@@ -88,14 +90,55 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
     public Task<CollectionSummary> UpdateCollectionAsync(Guid id, SaveCollectionRequest request, CancellationToken cancellation) =>
         Send<CollectionSummary>(HttpMethod.Put, $"/api/v1/collections/{id}", request, cancellation);
 
+    public Task<CollectionDetail> CollectionAsync(Guid id, CancellationToken cancellation) =>
+        Get<CollectionDetail>($"/api/v1/collections/{id}", cancellation);
+
+    public Task<CollectionNextResponse> CollectionNextAsync(Guid id, CancellationToken cancellation) =>
+        Get<CollectionNextResponse>($"/api/v1/collections/{id}/next", cancellation);
+
+    public Task<CollectionDetail> UpdateCollectionOrderAsync(Guid id, CollectionOrderRequest request, CancellationToken cancellation) =>
+        Send<CollectionDetail>(HttpMethod.Put, $"/api/v1/collections/{id}/order", request, cancellation);
+
     public Task DeleteCollectionAsync(Guid id, CancellationToken cancellation) =>
         Send<AureliaApi.NoContent>(HttpMethod.Delete, $"/api/v1/collections/{id}", null, cancellation);
 
     public Task AddToCollectionAsync(Guid collectionId, Guid mediaId, CancellationToken cancellation) =>
-        Send<AureliaApi.NoContent>(HttpMethod.Post, $"/api/v1/collections/{collectionId}/items/{mediaId}", null, cancellation);
+        AddToCollectionAsync(collectionId, mediaId, null, cancellation);
+
+    public Task AddToCollectionAsync(Guid collectionId, Guid mediaId, int? seasonNumber, CancellationToken cancellation)
+    {
+        var query = seasonNumber is { } season ? "?seasonNumber=" + season.ToString(CultureInfo.InvariantCulture) : "";
+        return Send<AureliaApi.NoContent>(HttpMethod.Post, $"/api/v1/collections/{collectionId}/items/{mediaId}{query}", null, cancellation);
+    }
 
     public Task RemoveFromCollectionAsync(Guid collectionId, Guid mediaId, CancellationToken cancellation) =>
-        Send<AureliaApi.NoContent>(HttpMethod.Delete, $"/api/v1/collections/{collectionId}/items/{mediaId}", null, cancellation);
+        RemoveFromCollectionAsync(collectionId, mediaId, null, cancellation);
+
+    public Task RemoveFromCollectionAsync(Guid collectionId, Guid mediaId, int? seasonNumber, CancellationToken cancellation)
+    {
+        var query = seasonNumber is { } season ? "?seasonNumber=" + season.ToString(CultureInfo.InvariantCulture) : "";
+        return Send<AureliaApi.NoContent>(HttpMethod.Delete, $"/api/v1/collections/{collectionId}/items/{mediaId}{query}", null, cancellation);
+    }
+
+    public Task<EditorUploadSummary> UploadCollectionEditorImageAsync(Guid id, byte[] image, CancellationToken cancellation)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/collections/{id}/editor/uploads")
+        {
+            Content = new ByteArrayContent(image),
+        };
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Profile.Token);
+        return AureliaApi.SendRequestAsync<EditorUploadSummary>(api.Pinned(Server.Address, Server.Fingerprint), request, inspecting: false, cancellation);
+    }
+
+    public Task DiscardCollectionEditorImageAsync(Guid id, Guid uploadId, CancellationToken cancellation) =>
+        Send<AureliaApi.NoContent>(HttpMethod.Delete, $"/api/v1/collections/{id}/editor/uploads/{uploadId}", null, cancellation);
+
+    public Task<ArtworkSummary> SaveCollectionArtworkAsync(Guid id, string kind, SaveCollectionArtworkRequest request, CancellationToken cancellation) =>
+        Send<ArtworkSummary>(HttpMethod.Post, $"/api/v1/collections/{id}/artwork/{kind}", request, cancellation);
+
+    public Task DeleteCollectionArtworkAsync(Guid id, string kind, CancellationToken cancellation) =>
+        Send<AureliaApi.NoContent>(HttpMethod.Delete, $"/api/v1/collections/{id}/artwork/{kind}", null, cancellation);
 
     public Task<WatchlistResponse> WatchlistAsync(CancellationToken cancellation) => Get<WatchlistResponse>("/api/v1/watchlist", cancellation);
 
@@ -149,8 +192,13 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
     /// </summary>
     public async Task<byte[]> ArtworkAsync(ArtworkSummary artwork, int? width, CancellationToken cancellation)
     {
-        var path = $"/api/v1/artwork/{artwork.Id}";
-        if (width is { } requested && SupportsArtworkVariants && artwork.Revision is not null) path += "?width=" + requested.ToString(CultureInfo.InvariantCulture);
+        var path = artwork.Path is { Length: > 0 } p && p.StartsWith("/api/v1/artwork/", StringComparison.Ordinal)
+            ? p
+            : $"/api/v1/artwork/{artwork.Id}";
+        if (width is { } requested && SupportsArtworkVariants && artwork.Revision is not null && !path.Contains("width=", StringComparison.Ordinal))
+        {
+            path += (path.Contains('?', StringComparison.Ordinal) ? "&width=" : "?width=") + requested.ToString(CultureInfo.InvariantCulture);
+        }
         using var request = new HttpRequestMessage(HttpMethod.Get, path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Profile.Token);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("image/*"));

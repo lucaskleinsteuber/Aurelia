@@ -239,19 +239,82 @@ public sealed partial class LibraryStore(LibraryClient client, ArtworkCache artw
             new SetContinueWatchingRequest(hidden, state.StateToken, Guid.NewGuid()), CancellationToken.None), reloadCatalog: false);
     }
 
-    public Task<bool> AddToCollectionAsync(Guid collectionId, Guid mediaId) =>
-        MutateAsync(() => Client.AddToCollectionAsync(collectionId, mediaId, CancellationToken.None), reloadCatalog: false, reloadCollections: true);
+    public async Task<CollectionDetail?> CollectionAsync(Guid id)
+    {
+        try
+        {
+            return await Client.CollectionAsync(id, CancellationToken.None);
+        }
+        catch (AureliaApiException failure)
+        {
+            Report(failure);
+            return null;
+        }
+    }
 
-    public Task<bool> RemoveFromCollectionAsync(Guid collectionId, Guid mediaId) =>
-        MutateAsync(() => Client.RemoveFromCollectionAsync(collectionId, mediaId, CancellationToken.None), reloadCatalog: false, reloadCollections: true);
+    public async Task<CollectionDetail?> UpdateCollectionOrderAsync(Guid id, IReadOnlyList<CollectionMemberInput> members, string? sortMode = "custom")
+    {
+        try
+        {
+            var updated = await Client.UpdateCollectionOrderAsync(id, new CollectionOrderRequest(members, sortMode), CancellationToken.None);
+            await RefreshCollectionsAsync();
+            await RefreshHomeAsync();
+            return updated;
+        }
+        catch (AureliaApiException failure)
+        {
+            Report(failure);
+            return null;
+        }
+    }
 
-    public async Task<CollectionSummary?> SaveCollectionAsync(Guid? id, SaveCollectionRequest request)
+    public Task<bool> AddToCollectionAsync(Guid collectionId, Guid mediaId, int? seasonNumber = null) =>
+        MutateAsync(() => Client.AddToCollectionAsync(collectionId, mediaId, seasonNumber, CancellationToken.None), reloadCatalog: false, reloadCollections: true);
+
+    public Task<bool> RemoveFromCollectionAsync(Guid collectionId, Guid mediaId, int? seasonNumber = null) =>
+        MutateAsync(() => Client.RemoveFromCollectionAsync(collectionId, mediaId, seasonNumber, CancellationToken.None), reloadCatalog: false, reloadCollections: true);
+
+    public Task<CollectionSummary?> SaveCollectionAsync(Guid? id, SaveCollectionRequest request) =>
+        SaveCollectionAsync(id, request, poster: null, backdrop: null, removePoster: false, removeBackdrop: false);
+
+    public async Task<CollectionSummary?> SaveCollectionAsync(
+        Guid? id,
+        SaveCollectionRequest request,
+        CollectionArtworkDraft? poster = null,
+        CollectionArtworkDraft? backdrop = null,
+        bool removePoster = false,
+        bool removeBackdrop = false)
     {
         try
         {
             var saved = id is { } existing
                 ? await Client.UpdateCollectionAsync(existing, request, CancellationToken.None)
                 : await Client.CreateCollectionAsync(request, CancellationToken.None);
+
+            foreach (var (kind, draft, remove) in new[]
+            {
+                ("poster", poster, removePoster),
+                ("backdrop", backdrop, removeBackdrop),
+            })
+            {
+                if (remove && id is not null)
+                {
+                    await Client.DeleteCollectionArtworkAsync(saved.Id, kind, CancellationToken.None);
+                }
+                else if (draft is not null)
+                {
+                    var uploadId = draft.UploadId;
+                    if (uploadId is null && draft.Bytes is { Length: > 0 } bytes)
+                    {
+                        uploadId = (await Client.UploadCollectionEditorImageAsync(saved.Id, bytes, CancellationToken.None)).Id;
+                    }
+                    if (uploadId is { } resolvedId)
+                    {
+                        await Client.SaveCollectionArtworkAsync(saved.Id, kind, new SaveCollectionArtworkRequest(resolvedId, draft.Crop), CancellationToken.None);
+                    }
+                }
+            }
+
             await RefreshCollectionsAsync();
             await RefreshHomeAsync();
             return saved;

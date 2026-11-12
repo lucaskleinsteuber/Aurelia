@@ -84,43 +84,104 @@ internal static class MediaCards
         return card;
     }
 
-    /// <summary>A collection (210 × 280) with its poster, name, size and a "Smart" badge for smart lists.</summary>
+    /// <summary>A collection Box Set card (210 × 280) with stacked layers, badge, progress bar, and subtitle.</summary>
     public static Button Collection(LibraryContext context, CollectionSummary collection, double width = 210)
     {
         var poster = collection.Poster ?? (collection.Items.Count > 0 ? collection.Items[0].Poster : null);
-        var picture = new Grid
+        var height = width * 4 / 3;
+        var total = collection.ItemCount > 0 ? collection.ItemCount : collection.TotalCount > 0 ? collection.TotalCount : collection.Items.Count;
+        var posterGrid = new Grid
         {
             Width = width,
-            Height = width * 4 / 3,
+            Height = height,
             Children = { Rounded(new ArtworkImage(context.Store, poster, width), 18) },
         };
-        if (collection.IsSmart)
+        if (total > 0 && collection.WatchedCount > 0)
         {
-            picture.Children.Add(new Border
+            var fraction = Math.Clamp((double)collection.WatchedCount / total, 0, 1);
+            posterGrid.Children.Add(new Grid
             {
-                Background = new SolidColorBrush(Color.FromArgb(0xB3, 0x14, 0x16, 0x1A)),
-                CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(8, 3),
-                Margin = new Thickness(10),
-                HorizontalAlignment = HorizontalAlignment.Right,
-                VerticalAlignment = VerticalAlignment.Top,
-                Child = new TextBlock { Text = "Smart", FontSize = 11, FontWeight = FontWeight.SemiBold, Foreground = Brushes.White },
+                Height = 4,
+                Margin = new Thickness(10, 0, 10, 10),
+                VerticalAlignment = VerticalAlignment.Bottom,
+                ColumnDefinitions = new ColumnDefinitions($"{fraction.ToString(System.Globalization.CultureInfo.InvariantCulture)}*,{(1 - fraction).ToString(System.Globalization.CultureInfo.InvariantCulture)}*"),
+                Children =
+                {
+                    new Rectangle { Fill = Brushes.White, RadiusX = 2, RadiusY = 2 }.Also(r => Grid.SetColumn(r, 0)),
+                    new Rectangle { Fill = new SolidColorBrush(Color.FromArgb(0x59, 0xFF, 0xFF, 0xFF)), RadiusX = 2, RadiusY = 2 }.Also(r => Grid.SetColumn(r, 1)),
+                },
             });
         }
-        var count = collection.TotalCount > 0 ? collection.TotalCount : collection.Items.Count;
+        if (BoxSetPresentation.ProviderLabel(collection.Provider) is { } providerBadge)
+        {
+            posterGrid.Children.Add(CollectionPill(providerBadge));
+        }
+        else if (collection.IsSmart)
+        {
+            posterGrid.Children.Add(CollectionPill("Smart"));
+        }
+
+        var stack = new Grid
+        {
+            Width = width + 10,
+            Height = height + 10,
+            Children =
+            {
+                new Border
+                {
+                    Width = width - 14,
+                    Height = height - 14,
+                    CornerRadius = new CornerRadius(18),
+                    Background = new SolidColorBrush(Color.FromArgb(0x16, 0xFF, 0xFF, 0xFF)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF)),
+                    BorderThickness = new Thickness(1),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Top,
+                },
+                new Border
+                {
+                    Width = width - 7,
+                    Height = height - 7,
+                    CornerRadius = new CornerRadius(18),
+                    Background = new SolidColorBrush(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(0x28, 0xFF, 0xFF, 0xFF)),
+                    BorderThickness = new Thickness(1),
+                    Margin = new Thickness(0, 5, 5, 0),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Top,
+                },
+                posterGrid.Also(g =>
+                {
+                    g.HorizontalAlignment = HorizontalAlignment.Left;
+                    g.VerticalAlignment = VerticalAlignment.Bottom;
+                }),
+            },
+        };
+
         var card = Card(new StackPanel
         {
             Spacing = 8,
             Children =
             {
-                picture,
+                stack,
                 new TextBlock { Text = collection.Name, Width = width, FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis },
-                new TextBlock { Text = count == 1 ? "1 title" : $"{count} titles", Classes = { "subdued" }, FontSize = 12 },
+                new TextBlock { Text = BoxSetPresentation.CardSubtitle(collection), Width = width, Classes = { "subdued" }, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis },
             },
         }, collection.Name);
         card.Click += (_, _) => context.OpenCollection(collection);
         return card;
     }
+
+    private static Border CollectionPill(string text) => new()
+    {
+        Background = new SolidColorBrush(Color.FromArgb(0xB8, 0x14, 0x16, 0x1A)),
+        CornerRadius = new CornerRadius(8),
+        Padding = new Thickness(8, 3),
+        Margin = new Thickness(10),
+        HorizontalAlignment = HorizontalAlignment.Right,
+        VerticalAlignment = VerticalAlignment.Top,
+        Child = new TextBlock { Text = text, FontSize = 11, FontWeight = FontWeight.SemiBold, Foreground = Brushes.White },
+    };
 
     /// <summary>A person from the cast or crew: a round photo with name and role.</summary>
     public static Button Person(LibraryContext context, CreditSummary credit, string role)

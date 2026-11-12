@@ -503,16 +503,39 @@ already has a newer position.
 
 ## Collections and smart lists
 
-The server reports capability `collections-v2`.
+The server reports capability `collections-v3` (extending `collections-v2`).
 
-- `GET /api/v1/collections` lists shared collections and the caller's own. A collection with
-  `isShared: true` belongs to the administrators; any other belongs to one profile, which is
-  the only one that can see or change it (administrators included).
-- `POST /api/v1/collections` creates one from `{ name, mediaIds, isSmart, isShared, rulesJson }`.
-  Only administrators may set `isShared`. `PUT /api/v1/collections/{id}` replaces name, items
-  or rules; `DELETE` removes the collection, never a title.
-- `POST` and `DELETE /api/v1/collections/{id}/items/{mediaId}` add or remove one movie or
-  series. A smart list answers `409 smart_collection`: its rules choose its titles.
+- `GET /api/v1/collections` and `GET /api/v1/catalog/collections` list shared collections and the
+  caller's own. A collection with `isShared: true` belongs to the administrators; any other belongs
+  to one profile, which is the only one that can see or change it (administrators included). Each
+  summary includes `id`, `name`, `overview`, `poster`, `backdrop`, `provider` (`tmdb`, `universe`,
+  `local` for a folder, or `null` for own collections and smart lists), `canEdit`, `isSmart`, `isShared`, `userId`,
+  `rulesJson`, `sortMode` (`custom`, `release`, `title`), `itemCount`, `watchedCount`, `yearRange`,
+  `totalCount` and preview `items`.
+- `GET /api/v1/collections/{id}` returns a `CollectionDetail` with the above fields plus
+  `totalRuntimeSeconds`, `genres`, ordered `members` (`id`, `mediaId`, `kind`, `title`,
+  `seasonNumber` where `0` represents Specials, resolved `item`, season `episodes`, `watchedCount`,
+  `itemCount`, `totalRuntimeSeconds`) and `nextItem`.
+- `POST /api/v1/collections` creates a collection from
+  `{ name, mediaIds, isSmart, isShared, rulesJson, overview, sortMode, members }` where `members`
+  holds `{ mediaId, seasonNumber }` entries so movies, shows, individual seasons and episodes can be
+  mixed. Only administrators may set `isShared`. `PUT /api/v1/collections/{id}` replaces metadata,
+  members or rules; `PUT /api/v1/collections/{id}/order` updates member order and `sortMode`;
+  `DELETE /api/v1/collections/{id}` removes the collection, never a title.
+- `POST` and `DELETE /api/v1/collections/{id}/items/{mediaId}` (with optional `?seasonNumber=`)
+  add or remove a movie, series, season or episode. A smart list answers `409 smart_collection`
+  (its rules choose its titles); an automatic collection (`canEdit: false`) answers
+  `404 collection_not_found` to every change.
+- `GET /api/v1/collections/{id}/next` (matching `detail.nextItem`) returns the continuous playback
+  target `{ item, resume, positionMilliseconds, itemIndex, totalItems }` across the collection's
+  ordered playable items (`404 no_playable_items` when empty).
+- Custom collection artwork uses draft uploads `POST` / `GET` /
+  `DELETE /api/v1/collections/{id}/editor/uploads[/{uploadId}]` (`EditorUploadSummary`) and
+  commits or clears a `poster` (2:3) or `backdrop` (16:9) with `POST` /
+  `DELETE /api/v1/collections/{id}/artwork/{kind}` (`{ uploadId, crop }`). Artwork URLs are
+  served at `/api/v1/artwork/collection/{id}` (`?kind=poster|backdrop&width=...`) and
+  `/api/v1/artwork/collection/{id}/{kind}`, falling back to TMDB collection artwork, then a cover made from
+  up to four member posters and the first member's backdrop, when no image of its own is set.
 - A smart list's `rulesJson` is a `SmartCollectionRules` object: `kind` (`movie`, `series` or
   `episode`), `genres`, `yearMin`, `yearMax`, `decade`, `ratingMin`, `ratingMax`,
   `watchedState` (`unwatched`, `inProgress`, `watched`), `addedWithinDays`, `favoritesOnly`,
@@ -522,9 +545,9 @@ The server reports capability `collections-v2`.
   `rulesJson` is not a JSON object; for lists saved by earlier apps it also reads `watched`,
   `watchState`, `search`, `match` (`any`/`all`), `matchAny` and the kind `movies`. Results are
   evaluated per profile and kept for 60 seconds, except watchlist-only lists.
-- `GET /api/v1/catalog/franchises` lists franchises from TMDB (`belongs_to_collection`);
-  `POST /api/v1/collections/from-franchise/{id}` turns one into a personal collection. Any
-  other collection id answers `404 franchise_not_found`.
+- `GET /api/v1/catalog/franchises` lists automatic TMDB film-series and `universe` collections;
+  `POST /api/v1/collections/from-franchise/{id}` turns one into an editable personal collection.
+  Any other id answers `404 franchise_not_found`.
 
 ## Watch history and statistics
 

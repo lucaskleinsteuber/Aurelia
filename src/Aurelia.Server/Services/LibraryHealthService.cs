@@ -184,8 +184,16 @@ public sealed class LibraryHealthService(AureliaDbContext database, LibraryMutat
             }
         }
 
-        foreach (var member in source.CollectionMemberships.Where(member => target.CollectionMemberships.All(existing => existing.CollectionId != member.CollectionId)))
-            database.MediaCollectionMembers.Add(new MediaCollectionMember { CollectionId = member.CollectionId, MediaItemId = target.Id, SortOrder = member.SortOrder });
+        foreach (var member in source.CollectionMemberships.Where(member =>
+            target.CollectionMemberships.All(existing => existing.CollectionId != member.CollectionId || existing.SeasonNumber != member.SeasonNumber)))
+            database.MediaCollectionMembers.Add(new MediaCollectionMember
+            {
+                Id = Guid.NewGuid(),
+                CollectionId = member.CollectionId,
+                MediaItemId = target.Id,
+                SeasonNumber = member.SeasonNumber,
+                SortOrder = member.SortOrder
+            });
 
         await database.WatchEvents.IgnoreQueryFilters().Where(watch => watch.MediaItemId == sourceId)
             .ExecuteUpdateAsync(update => update.SetProperty(watch => watch.MediaItemId, targetId), cancellationToken);

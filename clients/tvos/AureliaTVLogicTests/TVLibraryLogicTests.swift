@@ -220,6 +220,110 @@ struct TVLibraryLogicTests {
     #expect(request.url?.query?.contains("offset=60") == true)
   }
 
+  @Test func boxSetDetailNextAndFranchisesUseReadOnlyEndpointsAndFlattenPlayableQueue()
+    async throws
+  {
+    let boxID = UUID()
+    let movie1 = item(id: UUID(), kind: .movie)
+    let ep1 = TVCatalogItem(
+      id: UUID(), kind: .episode, title: "Pilot", originalTitle: nil, year: 2026,
+      overview: nil, genres: ["Sci-Fi"], poster: nil, backdrop: nil, availability: .available,
+      isFavorite: false, progress: nil, addedAt: "2026-01-01T00:00:00Z", parentTitle: "Odyssey",
+      seasonNumber: 0, episodeNumber: 1, parentId: UUID(), watchState: "unplayed",
+      libraryAvailability: .available)
+    let ep2 = TVCatalogItem(
+      id: UUID(), kind: .episode, title: "Departure", originalTitle: nil, year: 2026,
+      overview: nil, genres: ["Sci-Fi"], poster: nil, backdrop: nil, availability: .available,
+      isFavorite: false, progress: nil, addedAt: "2026-01-02T00:00:00Z", parentTitle: "Odyssey",
+      seasonNumber: 1, episodeNumber: 2, parentId: ep1.parentId, watchState: "inProgress",
+      libraryAvailability: .available)
+    let show = item(id: ep1.parentId ?? UUID(), kind: .series)
+    let memberID = UUID()
+    let detailPayload = """
+      {
+        "id": "\(boxID.uuidString.lowercased())",
+        "name": "Galaxy Saga",
+        "overview": "  Every chapter in order.  ",
+        "provider": "tmdb",
+        "canEdit": false,
+        "itemCount": 3,
+        "watchedCount": 1,
+        "yearRange": "2020–2026",
+        "sortMode": "release",
+        "totalRuntimeSeconds": 5400,
+        "genres": ["Sci-Fi"],
+        "items": [],
+        "members": [
+          {
+            "memberId": "\(memberID.uuidString.lowercased())",
+            "mediaId": "\(movie1.id.uuidString.lowercased())",
+            "kind": "movie",
+            "title": "Movie One",
+            "item": \(String(data: try JSONEncoder().encode(movie1), encoding: .utf8)!)
+          },
+          {
+            "id": "\(UUID().uuidString.lowercased())",
+            "mediaId": "\(show.id.uuidString.lowercased())",
+            "kind": "series",
+            "title": "Odyssey",
+            "seasonNumber": 0,
+            "item": \(String(data: try JSONEncoder().encode(show), encoding: .utf8)!),
+            "episodes": [\(String(data: try JSONEncoder().encode(ep1), encoding: .utf8)!), \(String(data: try JSONEncoder().encode(ep2), encoding: .utf8)!)]
+          }
+        ]
+      }
+      """
+    let nextPayload = TVCollectionNextResponse(
+      item: ep2, resume: true, positionMilliseconds: 42_000, itemIndex: 2, totalItems: 3)
+    let franchise = TVCollection(
+      id: UUID(), name: "Sci-Fi Universe", poster: nil, items: [movie1], provider: "universe",
+      itemCount: 3, watchedCount: 1, yearRange: "2020–2026")
+    let transport = TVLibraryTestTransport(responses: [
+      TVHTTPResponse(
+        statusCode: 200, headers: ["Content-Type": "application/json"],
+        body: Data(detailPayload.utf8), fingerprint: fingerprint),
+      try response(nextPayload),
+      try response([franchise]),
+    ])
+    let client = api(transport)
+    var detail = try await client.collectionDetail(id: boxID)
+    let next = try await client.collectionNext(id: boxID)
+    detail.nextItem = next
+    let loadedFranchises = try await client.franchises()
+
+    #expect(detail.resolvedMembers.first?.id == memberID)
+    #expect(detail.resolvedMembers[1].displayTitle.hasSuffix("Specials"))
+    #expect(TVCollectionPresentation.cleanedOverview(detail.overview) == "Every chapter in order.")
+    #expect(TVCollectionPresentation.providerLabel(for: detail.summary) == "TMDB")
+    #expect(TVCollectionPresentation.statsLine(detail) == "2020–2026 · 3 titles · 1h 30m · 1 of 3 watched")
+    #expect(TVCollectionPresentation.playLabel(for: detail) == "Resume S01 E02")
+    #expect(TVCollectionPresentation.playableItems(in: detail).map(\.id) == [movie1.id, ep1.id, ep2.id])
+    #expect(TVCollectionPresentation.playbackQueue(in: detail, startingAt: ep1.id).map(\.id) == [ep2.id])
+    #expect(TVCollectionPresentation.cardSubtitle(franchise) == "1 of 3 watched · 2020–2026")
+    #expect(loadedFranchises.map(\.name) == ["Sci-Fi Universe"])
+
+    let requests = await transport.requests
+    #expect(requests.map { $0.httpMethod } == ["GET", "GET", "GET"])
+    #expect(requests[0].url?.path == "/api/v1/collections/\(boxID.uuidString.lowercased())")
+    #expect(requests[1].url?.path == "/api/v1/collections/\(boxID.uuidString.lowercased())/next")
+    #expect(requests[2].url?.path == "/api/v1/catalog/franchises")
+  }
+
+  @Test func artworkRequestSupportsCollectionArtworkPathsAndPreservesQueryParameters() throws {
+    let collectionID = UUID()
+    let client = api(TVLibraryTestTransport(responses: []))
+    let artwork = TVArtwork(
+      id: collectionID, kind: "backdrop",
+      path: "/api/v1/artwork/collection/\(collectionID.uuidString.lowercased())/backdrop?kind=backdrop&rev=4",
+      contentType: "image/jpeg", contentLength: 100, revision: 4)
+    let request = try client.artworkRequest(artwork: artwork, width: 1280)
+    let components = try #require(request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) })
+    #expect(components.path == "/api/v1/artwork/collection/\(collectionID.uuidString.lowercased())/backdrop")
+    #expect(components.queryItems?.contains(URLQueryItem(name: "kind", value: "backdrop")) == true)
+    #expect(components.queryItems?.contains(URLQueryItem(name: "rev", value: "4")) == true)
+    #expect(components.queryItems?.contains(URLQueryItem(name: "width", value: "1280")) == true)
+  }
+
   @Test func homeAndSyncDecodeAdditionalUnknownFields() throws {
     let homeJSON =
       #"{"recommendation":null,"continueWatching":[],"recentlyAdded":[],"favorites":[],"collections":[],"recommendationChangesAt":"2099-01-01T00:00:00Z","future":true}"#

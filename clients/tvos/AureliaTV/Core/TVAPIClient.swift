@@ -221,6 +221,20 @@ struct TVAPIClient: Sendable {
     }
     return values
   }
+
+  func collectionDetail(id: UUID) async throws -> TVCollectionDetail {
+    let detail: TVCollectionDetail = try await get("/api/v1/collections/\(id.uuidString.lowercased())")
+    guard detail.id == id else { throw TVCoreError.invalidResponse }
+    return detail
+  }
+
+  func collectionNext(id: UUID) async throws -> TVCollectionNextResponse {
+    try await get("/api/v1/collections/\(id.uuidString.lowercased())/next")
+  }
+
+  func franchises() async throws -> [TVCollection] {
+    try await get("/api/v1/catalog/franchises")
+  }
   func summary(id: UUID) async throws -> TVCatalogItem {
     let item: TVCatalogItem = try await get("/api/v1/catalog/items/\(id.uuidString)/summary")
     guard item.id == id else { throw TVCoreError.invalidResponse }
@@ -473,16 +487,31 @@ struct TVAPIClient: Sendable {
 
   func artworkRequest(artwork: TVArtwork, width: Int) throws -> URLRequest {
     guard [320, 640, 1280, 1920].contains(width),
-      artwork.path == "/api/v1/artwork/\(artwork.id.uuidString.lowercased())"
-        || artwork.path == "/api/v1/artwork/\(artwork.id.uuidString.uppercased())"
+      let components = URLComponents(string: artwork.path),
+      Self.isValidArtworkPath(components.path, artworkID: artwork.id)
     else { throw TVCoreError.invalidResponse }
-    return try request(
-      artwork.path,
-      query: artwork.revision == nil
-        ? []
-        : [
-          URLQueryItem(name: "width", value: String(width))
-        ], authentication: .profile)
+    var query = components.queryItems ?? []
+    if artwork.revision != nil, !query.contains(where: { $0.name == "width" }) {
+      query.append(URLQueryItem(name: "width", value: String(width)))
+    }
+    return try request(components.path, query: query, authentication: .profile)
+  }
+
+  private static func isValidArtworkPath(_ path: String, artworkID: UUID) -> Bool {
+    let lower = artworkID.uuidString.lowercased()
+    let upper = artworkID.uuidString.uppercased()
+    if path == "/api/v1/artwork/\(lower)" || path == "/api/v1/artwork/\(upper)" {
+      return true
+    }
+    for prefix in [
+      "/api/v1/artwork/collection/\(lower)",
+      "/api/v1/artwork/collection/\(upper)",
+    ] {
+      if path == prefix || path == "\(prefix)/poster" || path == "\(prefix)/backdrop" {
+        return true
+      }
+    }
+    return false
   }
   func artworkData(artwork: TVArtwork, width: Int) async throws -> Data {
     let request = try artworkRequest(artwork: artwork, width: width)

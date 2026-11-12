@@ -1509,6 +1509,85 @@ export function smartRulesJson(form) {
   return JSON.stringify(Object.fromEntries(Object.entries(rules).filter(([, value]) => value !== null)));
 }
 
+export const COLLECTION_SORT_MODES = [
+  ["custom", "Custom Order"],
+  ["release", "Release Year"],
+  ["title", "Title"],
+];
+
+/** User-facing provider name for automatic Box Sets and franchises. */
+export function collectionProviderLabel(provider) {
+  if (!provider) return null;
+  if (provider === "tmdb") return "TMDB Collection";
+  if (provider === "universe") return "Universe";
+  return provider;
+}
+
+/** Compact card subtitle for a collection or Box Set. */
+export function collectionSubtitle(collection) {
+  if (!collection) return "Collection";
+  const parts = [];
+  const provider = collectionProviderLabel(collection.provider);
+  if (provider) parts.push(provider);
+  else if (collection.isSmart) parts.push("Smart List");
+  if (collection.yearRange) parts.push(collection.yearRange);
+  if ((collection.itemCount ?? 0) > 0 && (collection.watchedCount ?? 0) > 0) {
+    parts.push(`${collection.watchedCount} of ${collection.itemCount} watched`);
+  }
+  return parts.length ? parts.join(" · ") : "Collection";
+}
+
+/** Hero metadata line for a Box Set detail view. */
+export function collectionStatsLine(detail) {
+  if (!detail) return "";
+  const count = detail.itemCount ?? detail.totalCount ?? detail.items?.length ?? 0;
+  const parts = [`${count} ${count === 1 ? "title" : "titles"}`];
+  if (count > 0 && detail.watchedCount != null) parts.push(`${detail.watchedCount} of ${count} watched`);
+  if (detail.yearRange) parts.push(detail.yearRange);
+  if ((detail.totalRuntimeSeconds ?? 0) >= 60) parts.push(runtime(Math.round(detail.totalRuntimeSeconds / 60)));
+  return parts.join("  ·  ");
+}
+
+/** Play/Resume button label for `/api/v1/collections/{id}/next`. */
+export function collectionPlayLabel(next) {
+  const target = next?.item ?? next?.target;
+  if (!target) return "Play";
+  const isResume = typeof next?.resume === "boolean" ? next.resume : next?.action === "resume";
+  const prefix = isResume ? "Resume" : next?.action === "playAgain" ? "Play Again" : "Play";
+  if (target.kind === "episode" && target.seasonNumber != null && target.episodeNumber != null) {
+    return `${prefix} · S${String(target.seasonNumber).padStart(2, "0")} E${String(target.episodeNumber).padStart(2, "0")}`;
+  }
+  return target.title ? `${prefix} · ${target.title}` : prefix;
+}
+
+/** Flattens Box Set members (movies, series, seasons, episodes) into ordered playable items. */
+export function collectionPlayableItems(detail) {
+  const members = detail?.members;
+  if (Array.isArray(members) && members.length) {
+    const ordered = [];
+    const seen = new Set();
+    for (const member of members) {
+      const units = Array.isArray(member.episodes) && member.episodes.length ? member.episodes : member.item ? [member.item] : [];
+      for (const item of units) {
+        if (item?.id && !seen.has(item.id) && (item.kind === "movie" || item.kind === "episode")) {
+          seen.add(item.id);
+          ordered.push(item);
+        }
+      }
+    }
+    return ordered;
+  }
+  return (detail?.items ?? []).filter((item) => item?.kind === "movie" || item.kind === "episode");
+}
+
+/** Finds the next or previous item inside an ordered Box Set playlist. */
+export function adjacentItem(playlist, currentId, offset = 1) {
+  if (!Array.isArray(playlist) || !currentId) return null;
+  const index = playlist.findIndex((item) => item?.id === currentId);
+  if (index < 0) return null;
+  return playlist[index + offset] ?? null;
+}
+
 /** Offline answers in a row after which the change feed reports the server as off. */
 export const SYNC_OFFLINE_LIMIT = 3;
 

@@ -555,4 +555,23 @@ public sealed class PlaybackControllerTests : IAsyncDisposable
         Assert.Empty(cues.Advance(14_000, now.AddSeconds(7)));
         Assert.Empty(cues.Advance(70_000, now.AddSeconds(8)));
     }
+
+    [Fact]
+    public async Task BoxSetQueuePlaysInOrderAndSupportsNextAndPrevious()
+    {
+        controller = Controller();
+        var first = FakeLibrary.Item(FakeLibrary.EpisodeOne, MediaKind.Episode, "Arrival", 2024, ["Science Fiction"], parent: FakeLibrary.SeriesId, season: 1, episode: 1);
+        var second = FakeLibrary.Item(FakeLibrary.EpisodeTwo, MediaKind.Episode, "Signal", 2024, ["Science Fiction"], parent: FakeLibrary.SeriesId, season: 1, episode: 2);
+        await controller.StartQueueAsync([first, second], first, resume: false);
+
+        Assert.Equal(FakeLibrary.EpisodeOne, controller.Item?.Id);
+        Assert.Equal(FakeLibrary.EpisodeTwo, controller.NextItem?.Id);
+
+        await controller.NextAsync();
+        Assert.Equal(FakeLibrary.EpisodeTwo, controller.Item?.Id);
+        Assert.Null(controller.NextItem);
+
+        await controller.PreviousAsync();
+        Assert.Equal(FakeLibrary.EpisodeOne, controller.Item?.Id);
+    }
 }

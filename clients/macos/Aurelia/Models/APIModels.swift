@@ -590,9 +590,18 @@ struct CollectionSummary: Codable, Identifiable, Equatable, Sendable {
   var isShared: Bool = true
   var userId: UUID? = nil
   var rulesJson: String? = nil
+  var overview: String? = nil
+  var backdrop: ArtworkSummary? = nil
+  var provider: String? = nil
+  var canEdit: Bool = true
+  var itemCount: Int = 0
+  var watchedCount: Int = 0
+  var yearRange: String? = nil
+  var sortMode: String? = nil
 
   enum CodingKeys: String, CodingKey {
     case id, name, poster, items, isSmart, totalCount, isShared, userId, rulesJson
+    case overview, backdrop, provider, canEdit, itemCount, watchedCount, yearRange, sortMode
   }
 
   init(from decoder: Decoder) throws {
@@ -607,12 +616,23 @@ struct CollectionSummary: Codable, Identifiable, Equatable, Sendable {
     isShared = try container.decodeIfPresent(Bool.self, forKey: .isShared) ?? true
     userId = try container.decodeIfPresent(UUID.self, forKey: .userId)
     rulesJson = try container.decodeIfPresent(String.self, forKey: .rulesJson)
+    overview = try container.decodeIfPresent(String.self, forKey: .overview)
+    backdrop = try container.decodeIfPresent(ArtworkSummary.self, forKey: .backdrop)
+    provider = try container.decodeIfPresent(String.self, forKey: .provider)
+    canEdit = try container.decodeIfPresent(Bool.self, forKey: .canEdit) ?? (provider == nil)
+    let rawItemCount = try container.decodeIfPresent(Int.self, forKey: .itemCount) ?? totalCount
+    itemCount = rawItemCount > 0 ? rawItemCount : totalCount
+    watchedCount = try container.decodeIfPresent(Int.self, forKey: .watchedCount) ?? 0
+    yearRange = try container.decodeIfPresent(String.self, forKey: .yearRange)
+    sortMode = try container.decodeIfPresent(String.self, forKey: .sortMode)
   }
 
   init(
     id: UUID, name: String, poster: ArtworkSummary? = nil, items: [CatalogItemSummary] = [],
     isSmart: Bool = false, totalCount: Int = 0, isShared: Bool = true, userId: UUID? = nil,
-    rulesJson: String? = nil
+    rulesJson: String? = nil, overview: String? = nil, backdrop: ArtworkSummary? = nil,
+    provider: String? = nil, canEdit: Bool = true, itemCount: Int = 0, watchedCount: Int = 0,
+    yearRange: String? = nil, sortMode: String? = nil
   ) {
     self.id = id
     self.name = name
@@ -623,6 +643,220 @@ struct CollectionSummary: Codable, Identifiable, Equatable, Sendable {
     self.isShared = isShared
     self.userId = userId
     self.rulesJson = rulesJson
+    self.overview = overview
+    self.backdrop = backdrop
+    self.provider = provider
+    self.canEdit = canEdit
+    self.itemCount = itemCount > 0 ? itemCount : self.totalCount
+    self.watchedCount = watchedCount
+    self.yearRange = yearRange
+    self.sortMode = sortMode
+  }
+}
+
+struct CollectionMemberInput: Codable, Hashable, Sendable {
+  let mediaId: UUID
+  var seasonNumber: Int? = nil
+}
+
+struct CollectionMember: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let mediaId: UUID
+  let kind: MediaKind
+  let title: String
+  var seasonNumber: Int? = nil
+  let item: CatalogItemSummary
+  var episodes: [CatalogItemSummary]? = nil
+  var watchedCount: Int = 0
+  var itemCount: Int = 1
+  var totalRuntimeSeconds: Int64 = 0
+
+  var memberId: UUID { id }
+
+  enum CodingKeys: String, CodingKey {
+    case id, memberId, mediaId, kind, title, seasonNumber, item, episodes, watchedCount, itemCount, totalRuntimeSeconds
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    if let direct = try container.decodeIfPresent(UUID.self, forKey: .id) {
+      id = direct
+    } else {
+      id = try container.decode(UUID.self, forKey: .memberId)
+    }
+    mediaId = try container.decode(UUID.self, forKey: .mediaId)
+    kind = try container.decode(MediaKind.self, forKey: .kind)
+    title = try container.decode(String.self, forKey: .title)
+    seasonNumber = try container.decodeIfPresent(Int.self, forKey: .seasonNumber)
+    item = try container.decode(CatalogItemSummary.self, forKey: .item)
+    episodes = try container.decodeIfPresent([CatalogItemSummary].self, forKey: .episodes)
+    watchedCount = try container.decodeIfPresent(Int.self, forKey: .watchedCount) ?? 0
+    itemCount = try container.decodeIfPresent(Int.self, forKey: .itemCount) ?? 1
+    totalRuntimeSeconds = try container.decodeIfPresent(Int64.self, forKey: .totalRuntimeSeconds) ?? 0
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(id, forKey: .id)
+    try container.encode(mediaId, forKey: .mediaId)
+    try container.encode(kind, forKey: .kind)
+    try container.encode(title, forKey: .title)
+    try container.encodeIfPresent(seasonNumber, forKey: .seasonNumber)
+    try container.encode(item, forKey: .item)
+    try container.encodeIfPresent(episodes, forKey: .episodes)
+    try container.encode(watchedCount, forKey: .watchedCount)
+    try container.encode(itemCount, forKey: .itemCount)
+    try container.encode(totalRuntimeSeconds, forKey: .totalRuntimeSeconds)
+  }
+}
+
+struct CollectionNextResponse: Codable, Equatable, Sendable {
+  let item: CatalogItemSummary
+  let resume: Bool
+  var positionMilliseconds: Int64 = 0
+  var itemIndex: Int = 0
+  var totalItems: Int = 0
+}
+
+struct CollectionDetail: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let name: String
+  var overview: String? = nil
+  var poster: ArtworkSummary? = nil
+  var backdrop: ArtworkSummary? = nil
+  var provider: String? = nil
+  var canEdit: Bool = true
+  var isSmart: Bool = false
+  var isShared: Bool = true
+  var userId: UUID? = nil
+  var rulesJson: String? = nil
+  var sortMode: String = "custom"
+  var itemCount: Int = 0
+  var watchedCount: Int = 0
+  var yearRange: String? = nil
+  var totalRuntimeSeconds: Int64 = 0
+  var genres: [String] = []
+  var members: [CollectionMember] = []
+  var nextItem: CollectionNextResponse? = nil
+
+  var asSummary: CollectionSummary {
+    CollectionSummary(
+      id: id,
+      name: name,
+      poster: poster,
+      items: members.map(\.item),
+      isSmart: isSmart,
+      totalCount: members.count,
+      isShared: isShared,
+      userId: userId,
+      rulesJson: rulesJson,
+      overview: overview,
+      backdrop: backdrop,
+      provider: provider,
+      canEdit: canEdit,
+      itemCount: itemCount,
+      watchedCount: watchedCount,
+      yearRange: yearRange,
+      sortMode: sortMode)
+  }
+}
+
+struct CollectionOrderRequest: Encodable, Sendable {
+  let members: [CollectionMemberInput]
+  let sortMode: String?
+}
+
+struct SaveCollectionArtworkRequest: Encodable, Sendable {
+  let uploadId: UUID?
+  let crop: ArtworkCrop
+}
+
+/// Shared presentation and playback-queue logic for Box Sets across hero, cards, and player.
+enum BoxSetLogic {
+  static func providerLabel(_ provider: String?) -> String? {
+    switch provider {
+    case "tmdb": return "TMDB Collection"
+    case "universe": return "Universe"
+    case let other? where !other.isEmpty: return other
+    default: return nil
+    }
+  }
+
+  static func cardSubtitle(for summary: CollectionSummary) -> String {
+    var parts: [String] = []
+    if let label = providerLabel(summary.provider) {
+      parts.append(label)
+    } else if summary.isSmart {
+      parts.append("Smart List")
+    }
+    if let range = summary.yearRange, !range.isEmpty { parts.append(range) }
+    let total = summary.itemCount > 0 ? summary.itemCount : summary.totalCount
+    if total > 0 && summary.watchedCount > 0 {
+      parts.append("\(summary.watchedCount) of \(total) watched")
+    } else if total > 0 && parts.isEmpty {
+      parts.append("\(total) \(total == 1 ? "title" : "titles")")
+    }
+    return parts.isEmpty ? "Collection" : parts.joined(separator: " · ")
+  }
+
+  static func statsLine(for detail: CollectionDetail) -> String {
+    var parts = ["\(detail.itemCount) \(detail.itemCount == 1 ? "title" : "titles")"]
+    if detail.itemCount > 0 {
+      parts.append("\(detail.watchedCount) of \(detail.itemCount) watched")
+    }
+    if let range = detail.yearRange, !range.isEmpty { parts.append(range) }
+    if detail.totalRuntimeSeconds >= 60 {
+      let totalMinutes = Int((detail.totalRuntimeSeconds + 30) / 60)
+      let hours = totalMinutes / 60
+      let minutes = totalMinutes % 60
+      parts.append(hours > 0 ? (minutes > 0 ? "\(hours) h \(minutes) min" : "\(hours) h") : "\(minutes) min")
+    }
+    return parts.joined(separator: "  ·  ")
+  }
+
+  static func playLabel(for next: CollectionNextResponse?) -> String {
+    guard let next else { return "Play" }
+    let prefix = next.resume ? "Resume" : "Play"
+    let target = next.item
+    if target.kind == .episode, let s = target.seasonNumber, let e = target.episodeNumber {
+      return "\(prefix) · S\(String(format: "%02d", s)) E\(String(format: "%02d", e))"
+    }
+    return target.title.isEmpty ? prefix : "\(prefix) · \(target.title)"
+  }
+
+  static func playableItems(from members: [CollectionMember]) -> [CatalogItemSummary] {
+    var seen = Set<UUID>()
+    var ordered: [CatalogItemSummary] = []
+    for member in members {
+      let units = (member.episodes?.isEmpty == false) ? (member.episodes ?? []) : [member.item]
+      for item in units where (item.kind == .movie || item.kind == .episode) && seen.insert(item.id).inserted {
+        ordered.append(item)
+      }
+    }
+    return ordered
+  }
+
+  static func queueSlices(
+    for target: CatalogItemSummary,
+    in playlist: [CatalogItemSummary]
+  ) -> (previous: [PlaybackQueueItem], upcoming: [PlaybackQueueItem]) {
+    let entries = playlist.map { item in
+      let subtitle: String?
+      if item.kind == .episode, let s = item.seasonNumber, let e = item.episodeNumber {
+        subtitle = "S\(String(format: "%02d", s)) E\(String(format: "%02d", e))"
+      } else {
+        subtitle = item.year.map(String.init)
+      }
+      return PlaybackQueueItem(
+        mediaId: item.id, title: item.title, subtitle: subtitle,
+        artwork: item.backdrop ?? item.poster)
+    }
+    guard let index = playlist.firstIndex(where: { $0.id == target.id }) else {
+      return ([], entries)
+    }
+    let previous = index > 0 ? Array(entries[0..<index]) : []
+    let upcoming = (index + 1) < entries.count ? Array(entries[(index + 1)...]) : []
+    return (previous, upcoming)
   }
 }
 
@@ -948,10 +1182,13 @@ struct MetadataReviewSummary: Codable, Identifiable, Equatable, Sendable {
 
 struct SaveCollectionRequest: Encodable, Sendable {
   let name: String
-  let mediaIds: [UUID]
+  var mediaIds: [UUID]? = nil
   var isSmart: Bool = false
   var isShared: Bool = false
   var rulesJson: String? = nil
+  var overview: String? = nil
+  var sortMode: String? = nil
+  var members: [CollectionMemberInput]? = nil
 }
 
 struct SetFavoriteRequest: Encodable, Sendable {

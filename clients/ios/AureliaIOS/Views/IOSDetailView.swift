@@ -182,6 +182,12 @@ struct IOSDetailView: View {
             IOSMediaContextActions(item: item, actions: actions, includeFavorite: false)
             if item.kind == .series, let selectedSeason {
               let name = selectedSeason == 0 ? "Specials" : "Season \(selectedSeason)"
+              if model.supportsCollections {
+                Button("Add \(name) to Collection…", systemImage: "rectangle.stack.badge.plus") {
+                  actions.requestAddToCollection(
+                    item: item, seasonNumber: selectedSeason, title: "\(item.title) · \(name)")
+                }
+              }
               Button("Mark \(name) as Watched", systemImage: "checkmark.circle") {
                 seasonWatch(true)
               }
@@ -277,6 +283,15 @@ struct IOSDetailView: View {
         }
         .disabled(seasons.count < 2)
         .accessibilityIdentifier("season-picker")
+        .contextMenu {
+          if let selectedSeason, model.supportsCollections {
+            let name = selectedSeason == 0 ? "Specials" : "Season \(selectedSeason)"
+            Button("Add \(name) to Collection…", systemImage: "rectangle.stack.badge.plus") {
+              actions.requestAddToCollection(
+                item: item, seasonNumber: selectedSeason, title: "\(item.title) · \(name)")
+            }
+          }
+        }
         Spacer()
         if let count = season?.episodes.count {
           Text(count == 1 ? "1 episode" : "\(count) episodes").font(.footnote)

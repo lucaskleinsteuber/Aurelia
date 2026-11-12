@@ -11,9 +11,27 @@ final class IOSLibraryActions: ObservableObject {
       "Mark \(state.affectedCount) episodes as \(watched ? "watched" : "unwatched")?"
     }
   }
+  struct AddCollectionTarget: Identifiable {
+    let id = UUID()
+    let mediaId: UUID
+    let seasonNumber: Int?
+    let title: String
+    let kind: IOSMediaKind
+    let summary: IOSCatalogItem?
+  }
   @Published var pending: Pending?
   @Published var error: String?
   @Published private(set) var busy = false
+  @Published var addToCollectionTarget: AddCollectionTarget?
+
+  func requestAddToCollection(item: IOSCatalogItem, seasonNumber: Int? = nil, title: String? = nil) {
+    addToCollectionTarget = AddCollectionTarget(
+      mediaId: item.id,
+      seasonNumber: seasonNumber,
+      title: title ?? item.title,
+      kind: item.kind,
+      summary: seasonNumber == nil ? item : nil)
+  }
 
   func favorite(_ item: IOSCatalogItem, model: IOSAppModel) async {
     await perform(model: model) { api in
@@ -137,6 +155,11 @@ struct IOSLibraryActionPresentation: ViewModifier {
     .onChange(of: model.session?.sessionId) { _, _ in
       actions.pending = nil
       actions.error = nil
+      actions.addToCollectionTarget = nil
+    }
+    .sheet(item: $actions.addToCollectionTarget) { target in
+      IOSAddToCollectionSheet(target: target)
+        .environmentObject(model)
     }
   }
 }
@@ -165,6 +188,13 @@ struct IOSMediaContextActions: View {
       Button(watchlisted ? "Remove from Watchlist" : "Add to Watchlist") {
         Task { _ = await model.setWatchlist(mediaId: item.id, isWatchlisted: !watchlisted) }
       }.disabled(actions.busy)
+    }
+    if model.supportsCollections,
+      item.kind == .movie || item.kind == .series || item.kind == .episode
+    {
+      Button("Add to Collection…", systemImage: "rectangle.stack.badge.plus") {
+        actions.requestAddToCollection(item: item)
+      }
     }
     if continuation || item.kind == .movie || item.kind == .series {
       let hidden = item.continueWatchingHidden == true

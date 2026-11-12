@@ -105,6 +105,6 @@ struct IOSArtworkView: View {
       return nil
     }
     return
-      "\(connection.serverID):\(session.sessionId):\(artwork.id):\(artwork.revision ?? 0):\(requestWidth)"
+      "\(connection.serverID):\(session.sessionId):\(artwork.cacheIdentity):\(artwork.revision ?? 0):\(requestWidth)"
   }
 }

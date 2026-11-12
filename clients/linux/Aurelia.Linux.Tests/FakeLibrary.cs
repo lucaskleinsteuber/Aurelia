@@ -48,7 +48,16 @@ internal static class FakeLibrary
         var episodeOne = Item(EpisodeOne, MediaKind.Episode, "Arrival", 2024, ["Science Fiction"], position: 600_000, parent: SeriesId, season: 1, episode: 1);
         var episodeTwo = Item(EpisodeTwo, MediaKind.Episode, "Signal", 2024, ["Science Fiction"], parent: SeriesId, season: 1, episode: 2);
         var catalog = new[] { series, movieA, movieB, movieC };
-        var collection = new CollectionSummary(CollectionId, "Weekend Picks", null, [movieA, movieB], TotalCount: 2, IsShared: false, UserId: OwnerId);
+        var collection = new CollectionSummary(CollectionId, "Weekend Picks", null, [movieA, movieB], TotalCount: 2, IsShared: false, UserId: OwnerId,
+            Overview: "Invented double-feature box.", CanEdit: true, ItemCount: 2, WatchedCount: 1, YearRange: "2023–2024", SortMode: "custom");
+        var collectionDetail = new CollectionDetail(
+            CollectionId, "Weekend Picks", "Invented double-feature box.", null, null, null, true, false, false, OwnerId, null, "custom",
+            2, 1, "2023–2024", 7_200, ["Science Fiction", "Drama"],
+            [
+                new CollectionMember(Guid.Parse("c1000000-0000-4000-8000-000000000001"), MovieA, MediaKind.Movie, movieA.Title, null, movieA, null),
+                new CollectionMember(Guid.Parse("c1000000-0000-4000-8000-000000000002"), MovieB, MediaKind.Movie, movieB.Title, null, movieB, null),
+            ],
+            new CollectionNextResponse(movieA, true, 1_200_000, 0, 2));
         var home = new HomeResponse(series, [movieA, episodeOne], catalog, [movieA], [collection], DateTimeOffset.UtcNow.AddHours(6));
         var credits = new[]
         {
@@ -63,7 +72,7 @@ internal static class FakeLibrary
             [new SupplementPresentation(Item(Guid.NewGuid(), MediaKind.Trailer, "Official Trailer", 2024, []), "Trailer", null)]);
         var plan = new PlaybackPlanResponse(episodeOne, SeriesId, [episodeOne, episodeTwo], PlaybackPlanAction.Resume, true);
         string Json<T>(T value) => JsonSerializer.Serialize(value, AureliaJson.Options);
-        var capabilities = watchlist ? "\"library-state-v1\",\"watchlist-people-v1\",\"artwork-variants-v1\"" : "\"library-state-v1\"";
+        var capabilities = watchlist ? "\"library-state-v1\",\"watchlist-people-v1\",\"artwork-variants-v1\",\"collections-v3\"" : "\"library-state-v1\",\"collections-v3\"";
         var server = new FakeServer()
             .Answer("GET", "/api/v1/server/info", $$"""
                 {"serverId":"{{FakeServer.ServerId}}","name":"Living Room Server","version":"1.26.3","isSetup":true,"lanAccessEnabled":true,
@@ -73,6 +82,9 @@ internal static class FakeLibrary
             .Answer("GET", "/api/v1/catalog/items", Json(new PagedResponse<CatalogItemSummary>(catalog, 0, 100, catalog.Length, "r1")))
             .Answer("GET", "/api/v1/catalog/search", Json(new PagedResponse<CatalogItemSummary>([movieA], 0, 100, 1, "r1")))
             .Answer("GET", "/api/v1/catalog/collections", Json(new[] { collection }))
+            .Answer("GET", $"/api/v1/collections/{CollectionId}", Json(collectionDetail))
+            .Answer("GET", $"/api/v1/collections/{CollectionId}/next", Json(collectionDetail.NextItem!))
+            .Answer("PUT", $"/api/v1/collections/{CollectionId}/order", Json(collectionDetail))
             .Answer("GET", "/api/v1/catalog/franchises", "[]")
             .Answer("GET", "/api/v1/watchlist", Json(new WatchlistResponse([movieB], [MovieB])))
             .Answer("GET", $"/api/v1/catalog/items/{SeriesId}", Json(detail))

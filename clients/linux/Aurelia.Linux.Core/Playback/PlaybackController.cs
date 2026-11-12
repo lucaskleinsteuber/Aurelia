@@ -496,6 +496,29 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         await LoadAsync(target, startAt ?? (resume ? null : 0));
     }
 
+    public async Task StartQueueAsync(IReadOnlyList<CatalogItemSummary> playlist, CatalogItemSummary target, bool resume, long? startAt = null)
+    {
+        Record(PlaybackDiagnosticKind.Started);
+        queue.Clear();
+        previous.Clear();
+        var index = -1;
+        for (var i = 0; i < playlist.Count; i++)
+        {
+            if (playlist[i].Id == target.Id)
+            {
+                index = i;
+                break;
+            }
+        }
+        if (index >= 0)
+        {
+            for (var i = 0; i < index; i++) previous.Push(playlist[i]);
+            for (var i = index + 1; i < playlist.Count; i++) queue.Add(playlist[i]);
+        }
+        seriesId = target.Kind == MediaKind.Episode ? target.ParentId : null;
+        await LoadAsync(target, startAt ?? (resume ? null : 0));
+    }
+
     public void PlayPause()
     {
         if (State == PlayerState.Playing) Pause();

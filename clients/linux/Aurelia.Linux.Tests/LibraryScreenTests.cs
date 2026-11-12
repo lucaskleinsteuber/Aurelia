@@ -189,25 +189,63 @@ public sealed class LibraryScreenTests
     }
 
     [AvaloniaFact]
-    public void TheCollectionEditorNeedsTwoTitlesAndSendsThem()
+    public void TheCollectionEditorSavesBoxSetWithOverviewSortOrderAndMembers()
     {
         var server = FakeLibrary.Create();
         var window = FakeLibrary.ShowLibrary(server);
         window.Shell!.EditCollection(null, window.Session.Library!.Catalog.Single(item => item.Id == FakeLibrary.MovieA));
         FakeLibrary.Pump(() => window.Shell.SheetHost.IsShowing);
         var editor = Assert.IsType<CollectionEditorSheet>(Assert.IsType<Border>(window.Shell.SheetHost.Current).Child);
-        editor.Model.Name = "New One";
         Assert.False(editor.Model.CanSave);
-        Assert.Equal("Choose at least two titles.", editor.Model.Problem);
-        editor.Model.Toggle(window.Session.Library!.Catalog.Single(item => item.Id == FakeLibrary.MovieB));
+        Assert.Equal("Give the collection a name.", editor.Model.Problem);
+
+        editor.Model.Name = "New One";
         Assert.True(editor.Model.CanSave);
+        editor.Model.Overview = "Curated double bill.";
+        editor.Model.SortMode = "release";
+        editor.Model.Toggle(window.Session.Library!.Catalog.Single(item => item.Id == FakeLibrary.MovieB));
+        editor.Model.ToggleMember(FakeLibrary.SeriesId, 0, "Cobalt Station · Specials", MediaKind.Series);
+        Assert.Equal(3, editor.Model.SelectedMembers.Count);
+
         Snapshot(window, "collection-editor");
         Click(editor.GetVisualDescendants().OfType<Button>().Single(b => b.Content as string == "Save"));
         FakeLibrary.Pump(() => server.Bodies.ContainsKey("POST /api/v1/collections"));
         var body = server.Bodies["POST /api/v1/collections"];
         Assert.Contains("\"name\":\"New One\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"overview\":\"Curated double bill.\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"sortMode\":\"release\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"seasonNumber\":0", body, StringComparison.Ordinal);
         Assert.Contains(FakeLibrary.MovieA.ToString(), body, StringComparison.Ordinal);
         Assert.Contains(FakeLibrary.MovieB.ToString(), body, StringComparison.Ordinal);
+    }
+
+    [AvaloniaFact]
+    public void CollectionDetailLoadsBoxSetMetadataAndPlaysOrderedQueue()
+    {
+        var server = FakeLibrary.Create();
+        var engines = new SimulatedEngines();
+        var window = FakeLibrary.ShowLibrary(server, engines);
+        window.Shell!.Destination = LibraryDestination.Collections;
+        FakeLibrary.Pump(() => window.Shell.CurrentPage is CollectionsPage);
+        var cardButton = window.Shell.CurrentPage!.GetVisualDescendants().OfType<Button>()
+            .First(b => b.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text == "Weekend Picks"));
+        Click(cardButton);
+        FakeLibrary.Pump(() => window.Shell.CurrentPage is CollectionDetailPage
+            && server.Requests.Contains($"GET /api/v1/collections/{FakeLibrary.CollectionId}")
+            && window.Shell.CurrentPage.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text == "Invented double-feature box."));
+        var texts = window.Shell.CurrentPage!.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text).ToList();
+        Assert.Contains("Weekend Picks", texts);
+        Assert.Contains("Invented double-feature box.", texts);
+        Assert.Contains("Quiet Orbit", texts);
+        Assert.Contains("The Quiet Harbor", texts);
+        Assert.Contains(texts, t => t?.Contains("2023–2024", StringComparison.Ordinal) == true);
+
+        var playButton = window.Shell.CurrentPage!.GetVisualDescendants().OfType<Button>()
+            .First(b => (b.Content as string)?.Contains("Resume", StringComparison.Ordinal) == true
+                || b.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text?.Contains("Resume", StringComparison.Ordinal) == true));
+        Click(playButton);
+        FakeLibrary.Pump(() => server.Requests.Contains($"POST /api/v1/media/{FakeLibrary.MovieA}/playback"));
+        Assert.Contains($"GET /api/v1/collections/{FakeLibrary.CollectionId}/next", server.Requests);
     }
 
     [AvaloniaFact]

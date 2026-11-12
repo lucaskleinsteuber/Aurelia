@@ -188,6 +188,7 @@ struct TVCapabilities: Codable, Equatable, Sendable {
     else { throw TVCoreError.unsupportedServer }
   }
   var supportsArtworkVariants: Bool { capabilities?.contains("artwork-variants-v1") == true }
+  var supportsCollectionsV3: Bool { capabilities?.contains("collections-v3") == true }
   var supportsWatchlistAndPeople: Bool { capabilities?.contains("watchlist-people-v1") == true }
   var supportsScrubPreviews: Bool { capabilities?.contains("scrub-previews-v1") == true }
   /// Movie Night: the household swipes one deck until everyone likes a title.
@@ -400,6 +401,8 @@ struct TVArtwork: Codable, Equatable, Sendable {
   let contentType: String
   let contentLength: Int64
   let revision: Int64?
+
+  var cacheIdentity: String { "\(id.uuidString):\(kind):\(path)" }
 }
 
 struct TVPlaybackProgress: Codable, Equatable, Sendable {

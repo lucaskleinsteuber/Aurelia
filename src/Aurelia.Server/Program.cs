@@ -137,6 +137,7 @@ builder.Services.AddSingleton<WebAppAssets>();
 builder.Services.AddScoped<LibraryAccessService>();
 builder.Services.AddSingleton<CatalogMutationGate>();
 builder.Services.AddSingleton<EditorArtworkStore>();
+builder.Services.AddSingleton<CollectionArtworkService>();
 builder.Services.AddScoped<MediaEditorService>();
 builder.Services.AddScoped<LibraryMutationService>();
 builder.Services.AddHostedService<LibraryCleanupWorker>();
@@ -349,8 +350,13 @@ app.Use(async (context, next) =>
         return;
     }
     var backupUpload = HttpMethods.IsPut(context.Request.Method) && (context.Request.Path.Value ?? "").StartsWith("/api/v1/server/backups/uploads/", StringComparison.OrdinalIgnoreCase);
-    var editorPath = (context.Request.Path.Value ?? "").Contains("/editor", StringComparison.Ordinal);
-    var imageUpload = editorPath && HttpMethods.IsPost(context.Request.Method) && context.Request.Path.Value!.EndsWith("/uploads", StringComparison.Ordinal);
+    var requestPath = context.Request.Path.Value ?? string.Empty;
+    var editorPath = requestPath.Contains("/editor", StringComparison.Ordinal);
+    var collectionArtworkUpload = HttpMethods.IsPost(context.Request.Method)
+        && requestPath.StartsWith("/api/v1/collections/", StringComparison.OrdinalIgnoreCase)
+        && requestPath.Contains("/artwork/", StringComparison.OrdinalIgnoreCase);
+    var imageUpload = (editorPath && HttpMethods.IsPost(context.Request.Method) && requestPath.EndsWith("/uploads", StringComparison.Ordinal))
+        || collectionArtworkUpload;
     var photoUpload = HttpMethods.IsPut(context.Request.Method) && (context.Request.Path.Value ?? "").EndsWith("/picture/photo", StringComparison.OrdinalIgnoreCase);
     var maximumBytes = backupUpload ? EncryptedBackupContainer.MaximumBytes : imageUpload ? EditorArtworkStore.MaximumUploadBytes
         : photoUpload ? ProfilePictures.MaximumUploadBytes

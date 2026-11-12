@@ -75,6 +75,9 @@ const PATHS = {
   starFill: ["M12 4l2.4 5 5.4.6-4 3.7 1.1 5.4L12 16l-4.9 2.7 1.1-5.4-4-3.7 5.4-.6z", "fill"],
   people: ["M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20c.4-3.6 3.1-5.8 6.5-5.8s6.1 2.2 6.5 5.8M16.5 11a3 3 0 1 0 0-6M17.5 14.4c2.3.4 3.8 2.3 4 5.6", "stroke"],
   airplay: ["M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1M12 15l5 6H7l5-6z", "stroke"],
+  arrowUp: ["M12 19V5M6 11l6-6 6 6", "stroke"],
+  arrowDown: ["M12 5v14M6 13l6 6 6-6", "stroke"],
+  collections: ["M5 7h14v13H5zM7 4h10M9 20V7", "stroke"],
 };
 
 export function icon(name, { size = 20, label } = {}) {

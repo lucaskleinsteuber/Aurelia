@@ -23,7 +23,7 @@ struct IOSArtworkDiskCache: Sendable {
   static func key(serverID: UUID, profileID: UUID, artwork: IOSArtwork, width: Int) -> String? {
     guard let revision = artwork.revision else { return nil }
     return
-      "\(serverID.uuidString):\(profileID.uuidString):\(artwork.id.uuidString):r\(revision):w\(width)"
+      "\(serverID.uuidString):\(profileID.uuidString):\(artwork.cacheIdentity):r\(revision):w\(width)"
   }
 
   func data(forKey key: String) -> Data? {

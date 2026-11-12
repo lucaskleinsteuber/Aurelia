@@ -105,14 +105,29 @@ public sealed class LibraryFlowTests : IDisposable
         Assert.True(store.IsWatchlisted(movies[0].Id));
         Assert.Contains((await store.Client.WatchlistAsync(TestContext.Current.CancellationToken)).Items, item => item.Id == movies[0].Id);
 
-        var editor = new CollectionEditorModel(store.Catalog, null, null, canShare: true) { Name = "Weekend" };
+        var editor = new CollectionEditorModel(store.Catalog, null, null, canShare: true);
         Assert.False(editor.CanSave);
+        editor.Name = "Weekend";
+        editor.Overview = "Curated test box.";
+        editor.SortMode = "custom";
+        Assert.True(editor.CanSave);
         editor.Toggle(movies[0]);
         editor.Toggle(movies[1]);
-        Assert.True(editor.CanSave);
         var standard = await store.SaveCollectionAsync(null, editor.Request());
         Assert.NotNull(standard);
+        Assert.True(standard.CanEdit);
         Assert.Contains(store.Collections, c => c.Id == standard.Id && c.Items.Count == 2);
+
+        var loaded = await store.CollectionAsync(standard.Id);
+        Assert.NotNull(loaded);
+        Assert.Equal("Curated test box.", loaded.Overview);
+        Assert.Equal(2, loaded.Members.Count);
+        var reordered = await store.UpdateCollectionOrderAsync(standard.Id,
+            [new CollectionMemberInput(movies[1].Id), new CollectionMemberInput(movies[0].Id)], "custom");
+        Assert.NotNull(reordered);
+        Assert.Equal(movies[1].Id, reordered.Members[0].MediaId);
+        var next = await store.Client.CollectionNextAsync(standard.Id, TestContext.Current.CancellationToken);
+        Assert.Equal(movies[1].Id, next.Item.Id);
 
         var smart = new CollectionEditorModel(store.Catalog, null, null, canShare: true) { Name = "All Movies", IsSmart = true, Kind = "movie" };
         Assert.Equal(2, smart.MatchingCount);

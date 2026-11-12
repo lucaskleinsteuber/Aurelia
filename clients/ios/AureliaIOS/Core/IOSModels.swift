@@ -196,7 +196,11 @@ struct IOSCapabilities: Codable, Equatable, Sendable {
   }
   var supportsWatchlistAndPeople: Bool { capabilities?.contains("watchlist-people-v1") == true }
   /// Own and shared collections that can be made and changed here.
-  var supportsCollections: Bool { capabilities?.contains("collections-v2") == true }
+  var supportsCollections: Bool {
+    capabilities?.contains("collections-v2") == true || supportsCollectionsV3
+  }
+  /// Box Sets: metadata, custom artwork, season/episode members, ordering and continuous playback.
+  var supportsCollectionsV3: Bool { capabilities?.contains("collections-v3") == true }
   var supportsScrubPreviews: Bool { capabilities?.contains("scrub-previews-v1") == true }
   /// Movie Night: the household swipes one deck until everyone likes a title.
   var supportsMovieNight: Bool { capabilities?.contains("movie-night-v1") == true }
@@ -410,6 +414,8 @@ struct IOSArtwork: Codable, Equatable, Sendable {
   let contentType: String
   let contentLength: Int64
   let revision: Int64?
+
+  var cacheIdentity: String { "\(id.uuidString):\(kind):\(path)" }
 }
 
 struct IOSPlaybackProgress: Codable, Equatable, Sendable {

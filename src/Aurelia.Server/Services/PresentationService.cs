@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Aurelia.Contracts;
@@ -11,7 +12,8 @@ public sealed class PresentationService(
     TimeProvider timeProvider,
     MediaSearchIndexService searchIndex,
     WatchlistService? watchlist = null,
-    CatalogMutationGate? mutations = null)
+    CatalogMutationGate? mutations = null,
+    CollectionArtworkService? collectionArtwork = null)
 {
     // A profile's changes run one after another: two requests that read the same state and
     // then both write (a double tap, two devices) would otherwise fail in the database.
@@ -87,29 +89,17 @@ public sealed class PresentationService(
         {
             // A movie's own film series first, then the wider universe it shares with series.
             var franchise = await database.MediaCollections.AsNoTracking()
+                .Include(c => c.Artwork)
+                .Include(c => c.Members)
                 .Where(c => (c.Provider == "tmdb" || c.Provider == MediaUniverses.Provider) && c.Members.Count >= 2
                     && c.Members.Any(m => m.MediaItemId == mediaId))
                 .OrderBy(c => c.Provider == "tmdb" ? 0 : 1)
-                .Select(c => new
-                {
-                    c.Id,
-                    c.Name,
-                    Ids = c.Members.OrderBy(m => m.SortOrder).Select(m => m.MediaItemId).ToList()
-                })
                 .FirstOrDefaultAsync(cancellationToken);
 
-            if (franchise is not null && franchise.Ids.Count >= 2)
+            if (franchise is not null)
             {
-                var franchiseCards = ByRelease(await SummariesAsync(userId, franchise.Ids, cancellationToken));
-                var poster = franchiseCards.Select(c => c.Poster).FirstOrDefault(p => p is not null);
-                franchiseSummary = new CollectionSummary(
-                    franchise.Id,
-                    franchise.Name,
-                    poster,
-                    franchiseCards,
-                    IsSmart: false,
-                    TotalCount: franchiseCards.Count,
-                    IsShared: true);
+                var hydrated = await HydrateCollectionsAsync(userId, [franchise], isAdmin: false, includeMembers: false, cancellationToken);
+                franchiseSummary = hydrated.Select(value => value.Summary).FirstOrDefault(summary => summary.Items.Count >= 2);
             }
         }
 
@@ -383,6 +373,27 @@ public sealed class PresentationService(
             suggestions is null ? null : rails);
     }
 
+    private sealed record CollectionBuildResult(
+        CollectionSummary Summary,
+        CollectionDetail Detail,
+        IReadOnlyList<MediaItem> OrderedEntities);
+
+    private sealed record PlayableMediaItem(MediaItem Entity, CatalogItemSummary Card);
+
+    private sealed record ResolvedMember(
+        Guid MemberId,
+        MediaItem Entity,
+        CatalogItemSummary Card,
+        int? SeasonNumber,
+        int SortOrder,
+        string Title,
+        int? MinYear,
+        IReadOnlyList<PlayableMediaItem>? Episodes,
+        int ItemCount,
+        int WatchedCount,
+        long TotalRuntimeSeconds,
+        IReadOnlyList<int> Years);
+
     public Task<IReadOnlyList<CollectionSummary>> CollectionsAsync(Guid userId, int offset, int limit, CancellationToken cancellationToken) =>
         CollectionsAsync(userId, offset, limit, null, cancellationToken);
 
@@ -392,6 +403,7 @@ public sealed class PresentationService(
     private async Task<IReadOnlyList<CollectionSummary>> CollectionsAsync(Guid userId, int offset, int limit, Guid? onlyId, CancellationToken cancellationToken)
     {
         ValidatePage(offset, limit);
+        var isAdmin = await IsAdminUserAsync(userId, cancellationToken);
         // A shared collection's name tells what is in it, so a profile that may see none of its
         // titles (a children's profile, for example) does not get it. Administrators keep all of
         // them to manage, also empty ones.
@@ -399,67 +411,81 @@ public sealed class PresentationService(
             .Where(collection => (collection.UserId == null || collection.UserId == userId)
                 && (onlyId == null || collection.Id == onlyId)
                 && (collection.IsManual || collection.IsSmart || collection.Members.Count >= 2));
-        if (!await IsAdminUserAsync(userId, cancellationToken))
+        if (!isAdmin)
             candidates = candidates.Where(collection => collection.UserId != null || collection.IsSmart || collection.Members.Any());
         var collections = await candidates
             .OrderBy(collection => collection.Name).ThenBy(collection => collection.Id).Skip(offset).Take(limit)
-            .Select(collection => new
-            {
-                collection.Id,
-                collection.Name,
-                collection.IsSmart,
-                collection.SmartRulesJson,
-                collection.UserId,
-                collection.Provider,
-                Ids = collection.Members.OrderBy(member => member.SortOrder).Select(member => member.MediaItemId).ToList()
-            })
+            .Include(collection => collection.Artwork)
+            .Include(collection => collection.Members)
             .ToListAsync(cancellationToken);
 
-        var normalIds = collections.Where(c => !c.IsSmart).SelectMany(collection => collection.Ids).Distinct().ToList();
-        var cards = normalIds.Count == 0 ? [] : await SummariesAsync(userId, normalIds, cancellationToken);
-        var byId = cards.ToDictionary(item => item.Id);
+        var hydrated = await HydrateCollectionsAsync(userId, collections, isAdmin, includeMembers: false, cancellationToken);
+        return hydrated.Select(value => value.Summary).ToList();
+    }
 
-        var results = new List<CollectionSummary>();
-        foreach (var collection in collections)
-        {
-            if (collection.IsSmart)
-            {
-                // Unreadable rules choose nothing rather than the whole library.
-                var rules = SmartListEvaluator.Parse(collection.SmartRulesJson);
-                var listed = rules?.WatchlistOnly == true && watchlist is not null
-                    ? await watchlist.MediaIdsAsync(userId, cancellationToken) : null;
-                var (smartItems, totalCount) = rules is null ? ([], 0)
-                    : await SmartListEvaluator.EvaluateAsync(database, userId, rules, 0, 50, cancellationToken, listed);
-                var memberSummaries = smartItems.Select(item => ToCatalog(item, userId)).ToList();
-                var poster = memberSummaries.Select(item => item.Poster).FirstOrDefault(p => p is not null);
-                results.Add(new CollectionSummary(
-                    collection.Id,
-                    collection.Name,
-                    poster,
-                    memberSummaries,
-                    IsSmart: true,
-                    TotalCount: totalCount,
-                    IsShared: collection.UserId == null,
-                    UserId: collection.UserId,
-                    RulesJson: collection.SmartRulesJson));
-            }
-            else
-            {
-                var members = collection.Ids.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
-                if (collection.Provider is not null) members = ByRelease(members);
-                results.Add(new CollectionSummary(
-                    collection.Id,
-                    collection.Name,
-                    members.Select(item => item.Poster).FirstOrDefault(poster => poster is not null),
-                    members,
-                    IsSmart: false,
-                    TotalCount: members.Count,
-                    IsShared: collection.UserId == null,
-                    UserId: collection.UserId,
-                    RulesJson: null));
-            }
-        }
-        return results;
+    public async Task<CollectionDetail> GetCollectionAsync(Guid userId, Guid id, CancellationToken cancellationToken)
+    {
+        var isAdmin = await IsAdminUserAsync(userId, cancellationToken);
+        var collection = await LoadAccessibleCollectionAsync(userId, id, isAdmin, cancellationToken);
+        var hydrated = await HydrateCollectionsAsync(userId, [collection], isAdmin, includeMembers: true, cancellationToken);
+        return hydrated.Single().Detail;
+    }
+
+    public async Task<CollectionNextResponse> GetCollectionNextAsync(Guid userId, Guid id, CancellationToken cancellationToken)
+    {
+        var detail = await GetCollectionAsync(userId, id, cancellationToken);
+        return detail.NextItem
+            ?? throw new MetadataException("no_playable_items", "The collection has no playable items.", StatusCodes.Status404NotFound);
+    }
+
+    public async Task<CollectionImageResult?> ResolveCollectionImageAsync(
+        Guid userId,
+        Guid collectionId,
+        ArtworkKind kind,
+        int? width,
+        CancellationToken cancellationToken)
+    {
+        if (collectionArtwork is null) return null;
+        var isAdmin = await IsAdminUserAsync(userId, cancellationToken);
+        var collection = await LoadAccessibleCollectionOrNullAsync(userId, collectionId, isAdmin, cancellationToken);
+        if (collection is null) return null;
+
+        var hydrated = await HydrateCollectionsAsync(userId, [collection], isAdmin, includeMembers: false, cancellationToken, loadEpisodes: false);
+        var entities = hydrated.FirstOrDefault()?.OrderedEntities ?? [];
+        return await collectionArtwork.ResolveImageAsync(database, collection, kind, width, entities, cancellationToken);
+    }
+
+    public async Task EnsureCanEditCollectionAsync(Guid userId, Guid collectionId, CancellationToken cancellationToken) =>
+        await LoadEditableCollectionAsync(userId, collectionId, includeMembers: false, includeArtwork: false, cancellationToken);
+
+    public async Task<ArtworkSummary> SaveCollectionArtworkAsync(
+        Guid userId,
+        Guid sessionId,
+        Guid collectionId,
+        ArtworkKind kind,
+        Stream? rawStream,
+        SaveCollectionArtworkRequest? jsonRequest,
+        ArtworkCrop? queryCrop,
+        CancellationToken cancellationToken)
+    {
+        if (collectionArtwork is null)
+            throw new MetadataException("artwork_unavailable", "Collection artwork storage is unavailable.", StatusCodes.Status503ServiceUnavailable);
+
+        using var lease = await EnterMutationAsync(cancellationToken);
+        var collection = await LoadEditableCollectionAsync(userId, collectionId, includeMembers: false, includeArtwork: true, cancellationToken);
+        return await collectionArtwork.SaveManualAsync(database, collection, userId, sessionId, kind, rawStream, jsonRequest, queryCrop, cancellationToken);
+    }
+
+    public async Task RemoveCollectionArtworkAsync(
+        Guid userId,
+        Guid collectionId,
+        ArtworkKind kind,
+        CancellationToken cancellationToken)
+    {
+        if (collectionArtwork is null) return;
+        using var lease = await EnterMutationAsync(cancellationToken);
+        var collection = await LoadEditableCollectionAsync(userId, collectionId, includeMembers: false, includeArtwork: true, cancellationToken);
+        await collectionArtwork.RemoveManualAsync(database, collection, kind, cancellationToken);
     }
 
     public async Task<bool> SetFavoriteAsync(Guid userId, Guid mediaId, bool isFavorite, CancellationToken cancellationToken)
@@ -514,6 +540,7 @@ public sealed class PresentationService(
 
         await ApplyCollectionAsync(collection, request, cancellationToken);
         await database.SaveChangesAsync(cancellationToken);
+        collectionArtwork?.InvalidateCollectionCache(collection.Id);
         return await CollectionAsync(userId, collection.Id, cancellationToken);
     }
 
@@ -525,58 +552,113 @@ public sealed class PresentationService(
 
         if (userId != Guid.Empty) await RequireEditableAsync(collection, userId, cancellationToken);
 
+        var artworkFiles = collectionArtwork is null
+            ? []
+            : await collectionArtwork.FileNamesForCollectionsAsync(database, [collection.Id], cancellationToken);
         database.MediaCollections.Remove(collection);
         await database.SaveChangesAsync(cancellationToken);
+        collectionArtwork?.DeleteFileNames(artworkFiles);
+        collectionArtwork?.InvalidateCollectionCache(collection.Id);
     }
 
     public Task DeleteCollectionAsync(Guid id, CancellationToken cancellationToken) =>
         DeleteCollectionAsync(Guid.Empty, id, cancellationToken);
 
-    public async Task AddCollectionItemAsync(Guid userId, Guid collectionId, Guid mediaId, CancellationToken cancellationToken)
+    public Task AddCollectionItemAsync(Guid userId, Guid collectionId, Guid mediaId, CancellationToken cancellationToken) =>
+        AddCollectionItemAsync(userId, collectionId, mediaId, null, cancellationToken);
+
+    public async Task AddCollectionItemAsync(Guid userId, Guid collectionId, Guid mediaId, int? seasonNumber, CancellationToken cancellationToken)
     {
         using var lease = await EnterMutationAsync(cancellationToken);
-        var collection = await database.MediaCollections.Include(c => c.Members)
-            .SingleOrDefaultAsync(c => c.Id == collectionId && (c.IsManual || c.IsSmart), cancellationToken)
-            ?? throw new MetadataException("collection_not_found", "Collection not found.", StatusCodes.Status404NotFound);
-
-        await RequireEditableAsync(collection, userId, cancellationToken);
+        var collection = await LoadEditableCollectionAsync(userId, collectionId, includeMembers: true, includeArtwork: false, cancellationToken);
         if (collection.IsSmart)
             throw new MetadataException("smart_collection", "A smart list chooses its titles by its rules.", StatusCodes.Status409Conflict);
 
-        if (!await database.MediaItems.AnyAsync(m => m.Id == mediaId && (m.Kind == MediaKind.Movie || m.Kind == MediaKind.Series), cancellationToken))
-            throw new MetadataException("media_not_found", "Media item not found.", StatusCodes.Status404NotFound);
+        var item = await database.MediaItems.AsNoTracking()
+            .Where(m => m.Id == mediaId && (m.Kind == MediaKind.Movie || m.Kind == MediaKind.Series || m.Kind == MediaKind.Episode))
+            .Select(m => new { m.Id, m.Kind })
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new MetadataException("media_not_found", "Media item not found.", StatusCodes.Status404NotFound);
 
-        if (!collection.Members.Any(m => m.MediaItemId == mediaId))
+        if (seasonNumber.HasValue && (item.Kind != MediaKind.Series || seasonNumber.Value < 0))
+            throw new MetadataException("invalid_collection_items", "A season member must reference a series with a non-negative season number.", StatusCodes.Status400BadRequest);
+
+        if (!collection.Members.Any(m => m.MediaItemId == mediaId && m.SeasonNumber == seasonNumber))
         {
+            if (collection.Members.Count >= 500)
+                throw new MetadataException("invalid_collection", "A collection cannot contain more than 500 items.", StatusCodes.Status400BadRequest);
+
             var nextOrder = collection.Members.Count == 0 ? 0 : collection.Members.Max(m => m.SortOrder) + 1;
-            collection.Members.Add(new MediaCollectionMember
+            var added = new MediaCollectionMember
             {
+                Id = Guid.NewGuid(),
                 CollectionId = collection.Id,
                 MediaItemId = mediaId,
-                SortOrder = nextOrder
-            });
-            collection.UpdatedAt = DateTimeOffset.UtcNow;
+                SeasonNumber = seasonNumber,
+                SortOrder = nextOrder,
+            };
+            collection.Members.Add(added);
+            database.MediaCollectionMembers.Add(added);
+            collection.UpdatedAt = timeProvider.GetUtcNow();
             await database.SaveChangesAsync(cancellationToken);
+            collectionArtwork?.InvalidateCollectionCache(collection.Id);
         }
     }
 
-    public async Task RemoveCollectionItemAsync(Guid userId, Guid collectionId, Guid mediaId, CancellationToken cancellationToken)
+    public Task RemoveCollectionItemAsync(Guid userId, Guid collectionId, Guid mediaId, CancellationToken cancellationToken) =>
+        RemoveCollectionItemAsync(userId, collectionId, mediaId, null, cancellationToken);
+
+    public async Task RemoveCollectionItemAsync(Guid userId, Guid collectionId, Guid mediaId, int? seasonNumber, CancellationToken cancellationToken)
     {
         using var lease = await EnterMutationAsync(cancellationToken);
-        var collection = await database.MediaCollections.Include(c => c.Members)
-            .SingleOrDefaultAsync(c => c.Id == collectionId && (c.IsManual || c.IsSmart), cancellationToken)
-            ?? throw new MetadataException("collection_not_found", "Collection not found.", StatusCodes.Status404NotFound);
+        var collection = await LoadEditableCollectionAsync(userId, collectionId, includeMembers: true, includeArtwork: false, cancellationToken);
 
-        await RequireEditableAsync(collection, userId, cancellationToken);
-
-        var member = collection.Members.FirstOrDefault(m => m.MediaItemId == mediaId);
+        var member = collection.Members.FirstOrDefault(m => m.MediaItemId == mediaId && m.SeasonNumber == seasonNumber);
         if (member is not null)
         {
             collection.Members.Remove(member);
             database.MediaCollectionMembers.Remove(member);
-            collection.UpdatedAt = DateTimeOffset.UtcNow;
+            collection.UpdatedAt = timeProvider.GetUtcNow();
             await database.SaveChangesAsync(cancellationToken);
+            collectionArtwork?.InvalidateCollectionCache(collection.Id);
         }
+    }
+
+    public async Task<CollectionDetail> ReorderCollectionAsync(Guid userId, Guid collectionId, CollectionOrderRequest request, CancellationToken cancellationToken)
+    {
+        using var lease = await EnterMutationAsync(cancellationToken);
+        var collection = await LoadEditableCollectionAsync(userId, collectionId, includeMembers: true, includeArtwork: false, cancellationToken);
+        if (collection.IsSmart)
+            throw new MetadataException("smart_collection", "A smart list chooses its titles by its rules.", StatusCodes.Status409Conflict);
+
+        var sortMode = NormalizeSortMode(request.SortMode, allowNullToDefault: true, fallback: "custom");
+        var membersByKey = collection.Members.ToDictionary(m => (m.MediaItemId, m.SeasonNumber));
+        var orderedKeys = new List<(Guid MediaId, int? SeasonNumber)>();
+        var seen = new HashSet<(Guid MediaId, int? SeasonNumber)>();
+        foreach (var entry in request.Members ?? [])
+        {
+            var key = (entry.MediaId, entry.SeasonNumber);
+            if (!membersByKey.ContainsKey(key))
+                throw new MetadataException("invalid_collection_items", "Every reordered item must already belong to the collection.", StatusCodes.Status400BadRequest);
+            if (seen.Add(key)) orderedKeys.Add(key);
+        }
+
+        foreach (var remaining in collection.Members.OrderBy(m => m.SortOrder))
+        {
+            var key = (remaining.MediaItemId, remaining.SeasonNumber);
+            if (seen.Add(key)) orderedKeys.Add(key);
+        }
+
+        for (var i = 0; i < orderedKeys.Count; i++)
+        {
+            membersByKey[orderedKeys[i]].SortOrder = i;
+        }
+
+        collection.SortMode = sortMode;
+        collection.UpdatedAt = timeProvider.GetUtcNow();
+        await database.SaveChangesAsync(cancellationToken);
+        collectionArtwork?.InvalidateCollectionCache(collection.Id);
+        return await GetCollectionAsync(userId, collection.Id, cancellationToken);
     }
 
     /// <summary>A film series or universe in the order its titles came out; undated ones last.</summary>
@@ -586,41 +668,98 @@ public sealed class PresentationService(
     public async Task<IReadOnlyList<CollectionSummary>> FranchisesAsync(Guid userId, int offset, int limit, CancellationToken cancellationToken)
     {
         ValidatePage(offset, limit);
+        var isAdmin = await IsAdminUserAsync(userId, cancellationToken);
         var franchises = await database.MediaCollections.AsNoTracking()
             .Where(c => (c.Provider == "tmdb" || c.Provider == MediaUniverses.Provider) && c.Members.Count >= 1)
             .OrderBy(c => c.Name).ThenBy(c => c.Id)
             .Skip(offset).Take(limit)
-            .Select(c => new
-            {
-                c.Id,
-                c.Name,
-                Ids = c.Members.OrderBy(m => m.SortOrder).Select(m => m.MediaItemId).ToList()
-            })
+            .Include(c => c.Artwork)
+            .Include(c => c.Members)
             .ToListAsync(cancellationToken);
 
-        var ids = franchises.SelectMany(f => f.Ids).Distinct().ToList();
-        var cards = ids.Count == 0 ? [] : await SummariesAsync(userId, ids, cancellationToken);
-        var byId = cards.ToDictionary(item => item.Id);
-
-        return franchises.Select(f =>
-        {
-            var members = ByRelease(f.Ids.Where(byId.ContainsKey).Select(id => byId[id]));
-            var poster = members.Select(m => m.Poster).FirstOrDefault(p => p is not null);
-            return new CollectionSummary(f.Id, f.Name, poster, members, IsSmart: false, TotalCount: members.Count, IsShared: true);
-        }).ToList();
+        var hydrated = await HydrateCollectionsAsync(userId, franchises, isAdmin, includeMembers: false, cancellationToken);
+        return hydrated.Select(value => value.Summary).ToList();
     }
 
     public async Task<CollectionSummary> CreateCollectionFromFranchiseAsync(Guid userId, Guid franchiseId, CancellationToken cancellationToken)
     {
+        using var lease = await EnterMutationAsync(cancellationToken);
         // Only a provider franchise can be copied, never another profile's own collection.
         var franchise = await database.MediaCollections.AsNoTracking()
             .Include(c => c.Members)
+            .Include(c => c.Artwork)
             .SingleOrDefaultAsync(c => c.Id == franchiseId && (c.Provider == "tmdb" || c.Provider == MediaUniverses.Provider), cancellationToken)
             ?? throw new MetadataException("franchise_not_found", "Franchise collection not found.", StatusCodes.Status404NotFound);
 
-        var memberIds = franchise.Members.OrderBy(m => m.SortOrder).Select(m => m.MediaItemId).ToList();
-        var request = new SaveCollectionRequest(franchise.Name, memberIds, IsSmart: false, IsShared: false);
-        return await CreateCollectionAsync(userId, request, cancellationToken);
+        var members = franchise.Members.OrderBy(m => m.SortOrder).Select(m => new CollectionMemberInput(m.MediaItemId, m.SeasonNumber)).ToList();
+        var request = new SaveCollectionRequest(
+            franchise.Name,
+            IsSmart: false,
+            IsShared: false,
+            Overview: franchise.Overview,
+            SortMode: franchise.SortMode ?? "release",
+            Members: members);
+
+        var collection = new MediaCollectionRecord
+        {
+            Id = Guid.NewGuid(),
+            IsManual = true,
+            IsSmart = false,
+            UserId = userId,
+            CreatedAt = timeProvider.GetUtcNow(),
+        };
+        await ApplyCollectionAsync(collection, request, cancellationToken);
+        database.MediaCollections.Add(collection);
+        if (collectionArtwork is not null && franchise.Artwork.Count > 0)
+        {
+            await collectionArtwork.CopyAssetsAsync(database, franchise, collection, cancellationToken);
+        }
+        await database.SaveChangesAsync(cancellationToken);
+        return await CollectionAsync(userId, collection.Id, cancellationToken);
+    }
+
+    private async Task<MediaCollectionRecord?> LoadAccessibleCollectionOrNullAsync(
+        Guid userId,
+        Guid id,
+        bool isAdmin,
+        CancellationToken cancellationToken)
+    {
+        var collection = await database.MediaCollections.AsNoTracking()
+            .Include(c => c.Artwork)
+            .Include(c => c.Members)
+            .Where(c => c.Id == id && (c.UserId == null || c.UserId == userId)
+                && (c.IsManual || c.IsSmart || c.Members.Count >= 1))
+            .SingleOrDefaultAsync(cancellationToken);
+        if (collection is null) return null;
+        if (!isAdmin && collection.UserId is null && !collection.IsSmart && collection.Members.Count == 0)
+            return null;
+        return collection;
+    }
+
+    private async Task<MediaCollectionRecord> LoadAccessibleCollectionAsync(
+        Guid userId,
+        Guid id,
+        bool isAdmin,
+        CancellationToken cancellationToken) =>
+        await LoadAccessibleCollectionOrNullAsync(userId, id, isAdmin, cancellationToken)
+            ?? throw new MetadataException("collection_not_found", "The collection was not found.", StatusCodes.Status404NotFound);
+
+    private async Task<MediaCollectionRecord> LoadEditableCollectionAsync(
+        Guid userId,
+        Guid collectionId,
+        bool includeMembers,
+        bool includeArtwork,
+        CancellationToken cancellationToken)
+    {
+        IQueryable<MediaCollectionRecord> query = database.MediaCollections;
+        if (includeMembers) query = query.Include(c => c.Members);
+        if (includeArtwork) query = query.Include(c => c.Artwork);
+        var collection = await query
+            .SingleOrDefaultAsync(c => c.Id == collectionId && (c.IsManual || c.IsSmart), cancellationToken)
+            ?? throw new MetadataException("collection_not_found", "The editable collection was not found.", StatusCodes.Status404NotFound);
+
+        await RequireEditableAsync(collection, userId, cancellationToken);
+        return collection;
     }
 
     /// <summary>
@@ -638,6 +777,26 @@ public sealed class PresentationService(
         return isAdmin;
     }
 
+    private static bool ComputeCanEdit(MediaCollectionRecord collection, Guid userId, bool isAdmin) =>
+        (collection.IsManual || collection.IsSmart)
+        && (collection.UserId is null ? isAdmin : collection.UserId == userId);
+
+    private static string DefaultSortMode(MediaCollectionRecord collection) =>
+        collection.IsSmart ? "title" : collection.Provider is not null ? "release" : "custom";
+
+    private static string NormalizeSortMode(string? value, bool allowNullToDefault, string fallback)
+    {
+        if (value is null)
+        {
+            return allowNullToDefault
+                ? fallback
+                : throw new MetadataException("invalid_sort_mode", "Sort mode must be custom, release, or title.", StatusCodes.Status400BadRequest);
+        }
+        var normalized = value.Trim().ToLowerInvariant();
+        if (normalized is "custom" or "release" or "title") return normalized;
+        throw new MetadataException("invalid_sort_mode", "Sort mode must be custom, release, or title.", StatusCodes.Status400BadRequest);
+    }
+
     private async Task<bool> IsAdminUserAsync(Guid userId, CancellationToken cancellationToken) =>
         userId != Guid.Empty && await database.Users.AnyAsync(u => u.Id == userId && u.IsEnabled && (u.Role == UserRole.Owner || u.Role == UserRole.Admin), cancellationToken);
 
@@ -647,8 +806,17 @@ public sealed class PresentationService(
         if (name.Length is < 1 or > 512)
             throw new MetadataException("invalid_collection", "A collection needs a name between 1 and 512 characters.", StatusCodes.Status400BadRequest);
 
+        if (request.Overview is not null)
+        {
+            var overview = request.Overview.Trim();
+            if (overview.Length > 8192)
+                throw new MetadataException("invalid_overview", "Overview must contain 8192 characters or fewer.", StatusCodes.Status400BadRequest);
+            collection.Overview = overview.Length == 0 ? null : overview;
+        }
+
+        collection.SortMode = NormalizeSortMode(request.SortMode, allowNullToDefault: true, fallback: collection.SortMode ?? DefaultSortMode(collection));
         collection.Name = name;
-        collection.UpdatedAt = DateTimeOffset.UtcNow;
+        collection.UpdatedAt = timeProvider.GetUtcNow();
 
         if (request.IsSmart)
         {
@@ -665,18 +833,36 @@ public sealed class PresentationService(
             return;
         }
 
-        var ids = request.MediaIds.Distinct().ToList();
-        if (ids.Count > 500)
+        var rawEntries = request.Members is not null
+            ? request.Members
+            : (request.MediaIds ?? []).Select(id => new CollectionMemberInput(id, null));
+        var entries = rawEntries
+            .DistinctBy(entry => (entry.MediaId, entry.SeasonNumber))
+            .ToList();
+        if (entries.Count > 500)
             throw new MetadataException("invalid_collection", "A collection cannot contain more than 500 items.", StatusCodes.Status400BadRequest);
 
-        var validIds = ids.Count == 0 ? [] : await database.MediaItems.Where(item => ids.Contains(item.Id) && (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series)).Select(item => item.Id).ToListAsync(cancellationToken);
-        if (validIds.Count != ids.Count)
-            throw new MetadataException("invalid_collection_items", "Every collection item must be an existing movie or series.", StatusCodes.Status400BadRequest);
+        var distinctMediaIds = entries.Select(entry => entry.MediaId).Distinct().ToList();
+        var itemKinds = distinctMediaIds.Count == 0
+            ? new Dictionary<Guid, MediaKind>()
+            : await database.MediaItems
+                .Where(item => distinctMediaIds.Contains(item.Id) && (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series || item.Kind == MediaKind.Episode))
+                .Select(item => new { item.Id, item.Kind })
+                .ToDictionaryAsync(item => item.Id, item => item.Kind, cancellationToken);
 
-        var desired = ids.Select((mediaId, index) => (mediaId, index)).ToDictionary(value => value.mediaId, value => value.index);
+        foreach (var entry in entries)
+        {
+            if (!itemKinds.TryGetValue(entry.MediaId, out var kind))
+                throw new MetadataException("invalid_collection_items", "Every collection item must be an existing movie, series, or episode.", StatusCodes.Status400BadRequest);
+            if (entry.SeasonNumber.HasValue && (kind != MediaKind.Series || entry.SeasonNumber.Value < 0))
+                throw new MetadataException("invalid_collection_items", "A season member must reference a series with a non-negative season number.", StatusCodes.Status400BadRequest);
+        }
+
+        var desired = entries.Select((entry, index) => (entry, index))
+            .ToDictionary(pair => (pair.entry.MediaId, pair.entry.SeasonNumber), pair => pair.index);
         foreach (var member in collection.Members.ToList())
         {
-            if (!desired.TryGetValue(member.MediaItemId, out var sortOrder))
+            if (!desired.TryGetValue((member.MediaItemId, member.SeasonNumber), out var sortOrder))
             {
                 collection.Members.Remove(member);
                 database.MediaCollectionMembers.Remove(member);
@@ -686,13 +872,408 @@ public sealed class PresentationService(
             member.SortOrder = sortOrder;
         }
 
-        var existingIds = collection.Members.Select(member => member.MediaItemId).ToHashSet();
-        collection.Members.AddRange(ids.Where(mediaId => !existingIds.Contains(mediaId)).Select(mediaId => new MediaCollectionMember
+        var existingKeys = collection.Members.Select(member => (member.MediaItemId, member.SeasonNumber)).ToHashSet();
+        collection.Members.AddRange(entries
+            .Where(entry => !existingKeys.Contains((entry.MediaId, entry.SeasonNumber)))
+            .Select(entry => new MediaCollectionMember
+            {
+                Id = Guid.NewGuid(),
+                CollectionId = collection.Id,
+                MediaItemId = entry.MediaId,
+                SeasonNumber = entry.SeasonNumber,
+                SortOrder = desired[(entry.MediaId, entry.SeasonNumber)],
+            }));
+    }
+
+    private async Task<List<CollectionBuildResult>> HydrateCollectionsAsync(
+        Guid userId,
+        List<MediaCollectionRecord> collections,
+        bool isAdmin,
+        bool includeMembers,
+        CancellationToken cancellationToken,
+        bool loadEpisodes = true)
+    {
+        if (collections.Count == 0) return [];
+        // Lists and pictures need a smart list's first titles only; its own page shows up to 500.
+        var smartLimit = includeMembers ? 500 : 50;
+        // Episodes are only loaded where progress is shown: a smart list's page, or a person's own boxes.
+        var episodeSeries = new HashSet<Guid>();
+
+        IReadOnlyCollection<Guid>? watchlistIds = null;
+        var smartEvaluationByCollection = new Dictionary<Guid, (IReadOnlyList<Guid> Ids, int TotalCount, string SortMode)>();
+        var referencedMediaIds = new HashSet<Guid>();
+
+        foreach (var collection in collections)
         {
-            CollectionId = collection.Id,
-            MediaItemId = mediaId,
-            SortOrder = desired[mediaId],
-        }));
+            if (collection.IsSmart)
+            {
+                var sortMode = NormalizeSortMode(collection.SortMode, allowNullToDefault: true, fallback: DefaultSortMode(collection));
+                var rules = SmartListEvaluator.Parse(collection.SmartRulesJson);
+                if (rules?.WatchlistOnly == true && watchlist is not null && watchlistIds is null)
+                {
+                    watchlistIds = await watchlist.MediaIdsAsync(userId, cancellationToken);
+                }
+
+                var (ids, total) = rules is null
+                    ? ((IReadOnlyList<Guid>)[], 0)
+                    : await SmartListEvaluator.EvaluateIdsAsync(database, userId, rules, 0, smartLimit, cancellationToken, watchlistIds, sortMode);
+                smartEvaluationByCollection[collection.Id] = (ids, total, sortMode);
+                foreach (var id in ids)
+                {
+                    referencedMediaIds.Add(id);
+                    if (includeMembers) episodeSeries.Add(id);
+                }
+            }
+            else
+            {
+                foreach (var member in collection.Members)
+                {
+                    referencedMediaIds.Add(member.MediaItemId);
+                    episodeSeries.Add(member.MediaItemId);
+                }
+            }
+        }
+
+        var loadedItems = referencedMediaIds.Count == 0
+            ? []
+            : await Cards(BaseItems(userId).Where(item => referencedMediaIds.Contains(item.Id)), userId).ToListAsync(cancellationToken);
+        var itemsById = loadedItems.ToDictionary(item => item.Id, item => new PlayableMediaItem(item, ToCatalog(item, userId)));
+
+        var seriesIds = loadEpisodes
+            ? loadedItems.Where(item => item.Kind == MediaKind.Series && episodeSeries.Contains(item.Id)).Select(item => item.Id).Distinct().ToList()
+            : [];
+        var loadedEpisodes = seriesIds.Count == 0
+            ? []
+            : await Cards(BaseItems(userId).Where(child => child.ParentId != null && seriesIds.Contains(child.ParentId.Value) && child.Kind == MediaKind.Episode), userId)
+                .OrderBy(child => child.SeasonNumber).ThenBy(child => child.EpisodeNumber)
+                .ThenBy(child => child.DetectedTitle).ThenBy(child => child.Id)
+                .ToListAsync(cancellationToken);
+
+        var episodesBySeries = loadedEpisodes
+            .GroupBy(ep => ep.ParentId!.Value)
+            .ToDictionary(group => group.Key, group => group.Select(ep => new PlayableMediaItem(ep, ToCatalog(ep, userId))).ToList());
+
+        var results = new List<CollectionBuildResult>(collections.Count);
+        foreach (var collection in collections)
+        {
+            var sortMode = NormalizeSortMode(collection.SortMode, allowNullToDefault: true, fallback: DefaultSortMode(collection));
+            var resolvedMembers = BuildResolvedMembers(collection, smartEvaluationByCollection, itemsById, episodesBySeries, sortMode);
+            var orderedEntities = resolvedMembers.Select(member => member.Entity).ToList();
+
+            var poster = ResolveCollectionArtworkSummary(collection, ArtworkKind.Poster, orderedEntities);
+            var backdrop = ResolveCollectionArtworkSummary(collection, ArtworkKind.Backdrop, orderedEntities);
+
+            var playable = FlattenPlayable(resolvedMembers);
+            var allYears = resolvedMembers.SelectMany(member => member.Years).ToList();
+            var yearRange = FormatYearRange(allYears);
+            var itemCount = playable.Count;
+            var watchedCount = playable.Count(item => item.Card.WatchState == CatalogWatchState.Completed);
+            var totalRuntimeSeconds = resolvedMembers.Sum(member => member.TotalRuntimeSeconds);
+            var genres = resolvedMembers
+                .SelectMany(member => member.Card.Genres)
+                .Where(genre => !string.IsNullOrWhiteSpace(genre))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(20)
+                .ToList();
+
+            var summaryItems = (collection.IsSmart
+                    ? resolvedMembers.Take(50).Select(member => member.Card)
+                    : resolvedMembers.Select(member => member.Card))
+                .ToList();
+            var totalCount = collection.IsSmart && smartEvaluationByCollection.TryGetValue(collection.Id, out var smartResult)
+                ? smartResult.TotalCount
+                : resolvedMembers.Count;
+            // A list card counts a smart list's matches, since only its first titles were loaded.
+            if (collection.IsSmart && !includeMembers) itemCount = totalCount;
+            var canEdit = ComputeCanEdit(collection, userId, isAdmin);
+
+            var summary = new CollectionSummary(
+                collection.Id,
+                collection.Name,
+                poster,
+                summaryItems,
+                IsSmart: collection.IsSmart,
+                TotalCount: totalCount,
+                IsShared: collection.UserId == null,
+                UserId: collection.UserId,
+                RulesJson: collection.IsSmart ? collection.SmartRulesJson : null,
+                Overview: collection.Overview,
+                Backdrop: backdrop,
+                Provider: collection.Provider,
+                CanEdit: canEdit,
+                ItemCount: itemCount,
+                WatchedCount: watchedCount,
+                YearRange: yearRange,
+                SortMode: sortMode);
+
+            var memberDtos = includeMembers
+                ? resolvedMembers.Select(member => new CollectionMember(
+                    member.MemberId,
+                    member.Card.Id,
+                    member.Card.Kind,
+                    member.Title,
+                    member.SeasonNumber,
+                    member.Card,
+                    member.Episodes?.Select(ep => ep.Card).ToList(),
+                    member.WatchedCount,
+                    member.ItemCount,
+                    member.TotalRuntimeSeconds)).ToList()
+                : [];
+            var nextItem = includeMembers ? ComputeNextItem(playable) : null;
+
+            var detail = new CollectionDetail(
+                collection.Id,
+                collection.Name,
+                collection.Overview,
+                poster,
+                backdrop,
+                collection.Provider,
+                canEdit,
+                collection.IsSmart,
+                collection.UserId == null,
+                collection.UserId,
+                collection.IsSmart ? collection.SmartRulesJson : null,
+                sortMode,
+                itemCount,
+                watchedCount,
+                yearRange,
+                totalRuntimeSeconds,
+                genres,
+                memberDtos,
+                nextItem);
+
+            results.Add(new CollectionBuildResult(summary, detail, orderedEntities));
+        }
+
+        return results;
+    }
+
+    private static List<ResolvedMember> BuildResolvedMembers(
+        MediaCollectionRecord collection,
+        Dictionary<Guid, (IReadOnlyList<Guid> Ids, int TotalCount, string SortMode)> smartEvaluations,
+        IReadOnlyDictionary<Guid, PlayableMediaItem> itemsById,
+        IReadOnlyDictionary<Guid, List<PlayableMediaItem>> episodesBySeries,
+        string sortMode)
+    {
+        IEnumerable<(Guid MemberId, Guid MediaId, int? SeasonNumber, int SortOrder)> inputs = collection.IsSmart
+            && smartEvaluations.TryGetValue(collection.Id, out var smart)
+            ? smart.Ids.Select((id, index) => (id, id, (int?)null, index))
+            : collection.Members.OrderBy(member => member.SortOrder).Select(m => (m.Id, m.MediaItemId, m.SeasonNumber, m.SortOrder));
+
+        var resolved = new List<ResolvedMember>();
+        foreach (var (memberId, mediaId, seasonNumber, sortOrder) in inputs)
+        {
+            if (!itemsById.TryGetValue(mediaId, out var entry)) continue;
+            var card = entry.Card;
+            var entity = entry.Entity;
+            var defaultEpisodeMinutes = MetadataPresentation.ToSummary(entity).RuntimeMinutes;
+
+            if (seasonNumber.HasValue)
+            {
+                var seasonEpisodes = (episodesBySeries.GetValueOrDefault(mediaId) ?? [])
+                    .Where(ep => ep.Card.SeasonNumber == seasonNumber.Value)
+                    .ToList();
+                var seasonTitle = seasonNumber.Value == 0 ? $"{card.Title} — Specials" : $"{card.Title} — Season {seasonNumber.Value}";
+                var years = seasonEpisodes.Select(ep => ep.Card.Year).OfType<int>().ToList();
+                if (years.Count == 0 && card.Year.HasValue) years.Add(card.Year.Value);
+                var minYear = years.Count > 0 ? years.Min() : card.Year;
+                var runtimeSec = seasonEpisodes.Sum(ep => ComputeRuntimeSeconds(ep.Entity, ep.Card, defaultEpisodeMinutes));
+                var watched = seasonEpisodes.Count(ep => ep.Card.WatchState == CatalogWatchState.Completed);
+                var seasonCard = card with { SeasonNumber = seasonNumber.Value, WatchState = AggregateEpisodeStates(seasonEpisodes) };
+                resolved.Add(new ResolvedMember(memberId, entity, seasonCard, seasonNumber, sortOrder, seasonTitle, minYear, seasonEpisodes, seasonEpisodes.Count, watched, runtimeSec, years));
+            }
+            else if (card.Kind == MediaKind.Series)
+            {
+                var seriesEpisodes = (episodesBySeries.GetValueOrDefault(mediaId) ?? [])
+                    .Where(ep => ep.Card.SeasonNumber > 0)
+                    .ToList();
+                var years = seriesEpisodes.Select(ep => ep.Card.Year).OfType<int>().ToList();
+                if (card.Year.HasValue) years.Add(card.Year.Value);
+                var minYear = years.Count > 0 ? years.Min() : card.Year;
+                var runtimeSec = seriesEpisodes.Sum(ep => ComputeRuntimeSeconds(ep.Entity, ep.Card, defaultEpisodeMinutes));
+                var watched = seriesEpisodes.Count(ep => ep.Card.WatchState == CatalogWatchState.Completed);
+                resolved.Add(new ResolvedMember(memberId, entity, card, null, sortOrder, card.Title, minYear, seriesEpisodes, seriesEpisodes.Count, watched, runtimeSec, years));
+            }
+            else
+            {
+                var years = card.Year.HasValue ? (List<int>)[card.Year.Value] : [];
+                var runtimeSec = ComputeRuntimeSeconds(entity, card);
+                var watched = card.WatchState == CatalogWatchState.Completed ? 1 : 0;
+                resolved.Add(new ResolvedMember(memberId, entity, card, null, sortOrder, card.Title, card.Year, null, 1, watched, runtimeSec, years));
+            }
+        }
+
+        if (collection.IsSmart || sortMode == "custom") return resolved;
+        if (sortMode == "release")
+        {
+            return [.. resolved
+                .OrderBy(m => m.MinYear ?? int.MaxValue)
+                .ThenBy(m => m.SeasonNumber ?? int.MinValue)
+                .ThenBy(m => m.Card.EpisodeNumber ?? int.MinValue)
+                .ThenBy(m => m.Title, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(m => m.SortOrder)];
+        }
+        return [.. resolved
+            .OrderBy(m => m.Title, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(m => m.SeasonNumber ?? int.MinValue)
+            .ThenBy(m => m.Card.EpisodeNumber ?? int.MinValue)
+            .ThenBy(m => m.SortOrder)];
+    }
+
+    private static List<PlayableMediaItem> FlattenPlayable(IReadOnlyList<ResolvedMember> members)
+    {
+        var list = new List<PlayableMediaItem>();
+        var seen = new HashSet<Guid>();
+        foreach (var member in members)
+        {
+            if (member.Episodes is not null)
+            {
+                foreach (var episode in member.Episodes)
+                {
+                    if (seen.Add(episode.Card.Id)) list.Add(episode);
+                }
+            }
+            else if (seen.Add(member.Card.Id))
+            {
+                list.Add(new PlayableMediaItem(member.Entity, member.Card));
+            }
+        }
+        return list;
+    }
+
+    private static CollectionNextResponse? ComputeNextItem(IReadOnlyList<PlayableMediaItem> playable)
+    {
+        if (playable.Count == 0) return null;
+
+        var lastPlayedIndex = -1;
+        DateTimeOffset lastPlayedAt = DateTimeOffset.MinValue;
+        for (var i = 0; i < playable.Count; i++)
+        {
+            var playedAt = playable[i].Card.Progress?.LastPlayedAt;
+            if (playedAt.HasValue && (lastPlayedIndex < 0 || playedAt.Value > lastPlayedAt))
+            {
+                lastPlayedAt = playedAt.Value;
+                lastPlayedIndex = i;
+            }
+        }
+
+        var targetIndex = -1;
+        if (lastPlayedIndex >= 0)
+        {
+            var lastProgress = playable[lastPlayedIndex].Card.Progress!;
+            if (!lastProgress.IsCompleted && lastProgress.PositionMilliseconds > 0)
+            {
+                targetIndex = lastPlayedIndex;
+            }
+            else
+            {
+                var startSearch = lastPlayedIndex + (lastProgress.IsCompleted ? 1 : 0);
+                for (var i = startSearch; i < playable.Count; i++)
+                {
+                    if (playable[i].Card.WatchState != CatalogWatchState.Completed)
+                    {
+                        targetIndex = i;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (targetIndex < 0)
+        {
+            for (var i = 0; i < playable.Count; i++)
+            {
+                if (playable[i].Card.WatchState != CatalogWatchState.Completed)
+                {
+                    targetIndex = i;
+                    break;
+                }
+            }
+        }
+
+        if (targetIndex < 0) targetIndex = 0;
+
+        var chosen = playable[targetIndex].Card;
+        var chosenProgress = chosen.Progress;
+        var resume = chosenProgress is { IsCompleted: false, PositionMilliseconds: > 0 };
+        var positionMs = resume ? chosenProgress!.PositionMilliseconds : 0L;
+        return new CollectionNextResponse(chosen, resume, positionMs, targetIndex, playable.Count);
+    }
+
+    private static ArtworkSummary? ResolveCollectionArtworkSummary(
+        MediaCollectionRecord collection,
+        ArtworkKind kind,
+        IReadOnlyList<MediaItem> orderedEntities)
+    {
+        var preferredId = kind == ArtworkKind.Poster ? collection.PosterAssetId : collection.BackdropAssetId;
+        var explicitAsset = collection.Artwork
+            .Where(asset => asset.Kind == kind)
+            .OrderByDescending(asset => asset.Id == preferredId)
+            .ThenByDescending(asset => asset.IsManual)
+            .ThenByDescending(asset => asset.Revision)
+            .FirstOrDefault();
+        if (explicitAsset is not null)
+        {
+            return CollectionArtworkService.ToSummary(collection.Id, explicitAsset);
+        }
+
+        if (kind == ArtworkKind.Backdrop)
+        {
+            var memberBackdrop = orderedEntities
+                .Select(entity => CollectionArtworkService.SelectMemberAsset(entity, ArtworkKind.Backdrop))
+                .FirstOrDefault(asset => asset is not null);
+            if (memberBackdrop is null) return null;
+            var backdropRev = CollectionArtworkService.ComputeFallbackRevision(collection.UpdatedAt, [(memberBackdrop.Id, memberBackdrop.Revision)]);
+            return new ArtworkSummary(
+                collection.Id,
+                ArtworkKind.Backdrop,
+                $"/api/v1/artwork/collection/{collection.Id}?kind=backdrop",
+                memberBackdrop.ContentType,
+                memberBackdrop.ContentLength,
+                backdropRev);
+        }
+
+        var posters = orderedEntities
+            .Select(entity => CollectionArtworkService.SelectMemberAsset(entity, ArtworkKind.Poster))
+            .OfType<ArtworkAsset>()
+            .DistinctBy(asset => asset.Id)
+            .Take(4)
+            .ToList();
+        if (posters.Count == 0) return null;
+        var rev = CollectionArtworkService.ComputeFallbackRevision(collection.UpdatedAt, posters.Select(p => (p.Id, p.Revision)));
+        return new ArtworkSummary(
+            collection.Id,
+            ArtworkKind.Poster,
+            $"/api/v1/artwork/collection/{collection.Id}?kind=poster",
+            posters.Count == 1 ? posters[0].ContentType : "image/jpeg",
+            posters.Count == 1 ? posters[0].ContentLength : 0,
+            rev);
+    }
+
+    private static CatalogWatchState AggregateEpisodeStates(IReadOnlyList<PlayableMediaItem> episodes)
+    {
+        if (episodes.Count == 0) return CatalogWatchState.Unplayed;
+        if (episodes.All(ep => ep.Card.WatchState == CatalogWatchState.Completed)) return CatalogWatchState.Completed;
+        return episodes.Any(ep => ep.Card.WatchState != CatalogWatchState.Unplayed)
+            ? CatalogWatchState.InProgress
+            : CatalogWatchState.Unplayed;
+    }
+
+    private static long ComputeRuntimeSeconds(MediaItem entity, CatalogItemSummary card, int? seriesDefaultMinutes = null)
+    {
+        var metadataMinutes = MetadataPresentation.ToSummary(entity).RuntimeMinutes;
+        if (metadataMinutes is > 0) return metadataMinutes.Value * 60L;
+        if (card.Progress is { DurationMilliseconds: > 0 } progress) return progress.DurationMilliseconds / 1000L;
+        if (seriesDefaultMinutes is > 0) return seriesDefaultMinutes.Value * 60L;
+        return 0L;
+    }
+
+    private static string? FormatYearRange(List<int> years)
+    {
+        if (years.Count == 0) return null;
+        var min = years.Min();
+        var max = years.Max();
+        return min == max ? min.ToString(CultureInfo.InvariantCulture) : string.Create(CultureInfo.InvariantCulture, $"{min}\u2013{max}");
     }
 
     // EF suppresses recursive MediaItem filters inside correlated navigations.
@@ -767,7 +1348,8 @@ public sealed class PresentationService(
                     ProviderTitle = item.Parent.Metadata.ProviderTitle,
                     ManualFieldsJson = item.Parent.Metadata.ManualFieldsJson,
                     ManualPosterId = item.Parent.Metadata.ManualPosterId,
-                    Artwork = item.Parent.Metadata.Artwork.Where(art => art.Kind == ArtworkKind.Poster).Select(art => new ArtworkAsset
+                    ManualBackdropId = item.Parent.Metadata.ManualBackdropId,
+                    Artwork = item.Parent.Metadata.Artwork.Where(art => art.Kind == ArtworkKind.Poster || art.Kind == ArtworkKind.Backdrop).Select(art => new ArtworkAsset
                     { Id = art.Id, Kind = art.Kind, IsManual = art.IsManual, ContentType = art.ContentType, ContentLength = art.ContentLength, Revision = art.Revision }).ToList(),
                 },
             },
@@ -782,6 +1364,8 @@ public sealed class PresentationService(
                 ProviderOverview = item.Metadata.ProviderOverview,
                 ManualReleaseDate = item.Metadata.ManualReleaseDate,
                 ManualReleaseYear = item.Metadata.ManualReleaseYear,
+                ManualRuntimeMinutes = item.Metadata.ManualRuntimeMinutes,
+                ProviderRuntimeMinutes = item.Metadata.ProviderRuntimeMinutes,
                 ManualFieldsJson = item.Metadata.ManualFieldsJson,
                 ManualPosterId = item.Metadata.ManualPosterId,
                 ManualBackdropId = item.Metadata.ManualBackdropId,

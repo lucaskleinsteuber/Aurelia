@@ -21,7 +21,13 @@ public interface ILibraryNavigator
 
     void Play(CatalogItemSummary item, bool fromLastPosition);
 
+    void PlayCollection(IReadOnlyList<CatalogItemSummary> playlist, CatalogItemSummary target, bool fromLastPosition) =>
+        Play(target, fromLastPosition);
+
     void EditCollection(CollectionSummary? collection, CatalogItemSummary? preselected);
+
+    void EditCollection(CollectionSummary? collection, CatalogItemSummary? preselected, int? seasonNumber) =>
+        EditCollection(collection, preselected);
 
     /// <summary>Play On: other players in the household, or null before a profile is open.</summary>
     RemotePlayback? Remote { get; }
@@ -71,4 +77,7 @@ public sealed class LibraryContext(LibraryStore store, ILibraryNavigator navigat
     public void OpenPerson(string name, string? personKey) => Navigator.OpenPerson(name, personKey);
 
     public void Play(CatalogItemSummary item, bool resume) => Navigator.Play(item, fromLastPosition: resume);
+
+    public void PlayCollection(IReadOnlyList<CatalogItemSummary> playlist, CatalogItemSummary target, bool resume) =>
+        Navigator.PlayCollection(playlist, target, resume);
 }

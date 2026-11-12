@@ -77,6 +77,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public DbSet<UserFavorite> UserFavorites => Set<UserFavorite>();
     public DbSet<MediaCollectionRecord> MediaCollections => Set<MediaCollectionRecord>();
     public DbSet<MediaCollectionMember> MediaCollectionMembers => Set<MediaCollectionMember>();
+    public DbSet<CollectionArtworkAsset> CollectionArtworkAssets => Set<CollectionArtworkAsset>();
     public DbSet<WatchEvent> WatchEvents => Set<WatchEvent>();
     public DbSet<SyncChange> SyncChanges => Set<SyncChange>();
     public DbSet<MediaExclusion> MediaExclusions => Set<MediaExclusion>();
@@ -152,6 +153,10 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                     break;
                 case MediaCollectionMember member:
                     changes.Add((SyncChangeArea.Collections, null, member.MediaItemId));
+                    break;
+                case CollectionArtworkAsset collectionArtwork:
+                    changedCollections.Add(collectionArtwork.CollectionId);
+                    changes.Add((SyncChangeArea.Collections, null, null));
                     break;
                 case UserFavorite favorite:
                     changes.Add((SyncChangeArea.UserState, favorite.UserId, favorite.MediaItemId));
@@ -812,8 +817,12 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
         {
             entity.HasKey(collection => collection.Id);
             entity.Property(collection => collection.Name).HasMaxLength(512).IsRequired();
+            entity.Property(collection => collection.Overview).HasMaxLength(8192);
+            entity.Property(collection => collection.SortMode).HasMaxLength(16);
             entity.Property(collection => collection.Provider).HasMaxLength(32);
             entity.Property(collection => collection.ProviderCollectionId).HasMaxLength(64);
+            entity.Property(collection => collection.ProviderPosterPath).HasMaxLength(512);
+            entity.Property(collection => collection.ProviderBackdropPath).HasMaxLength(512);
             entity.Property(collection => collection.SourceKey).HasMaxLength(4096);
             entity.Property(collection => collection.CreatedAt).HasConversion(dateTimeOffsetConverter);
             entity.Property(collection => collection.UpdatedAt).HasConversion(dateTimeOffsetConverter);
@@ -822,6 +831,21 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.HasIndex(collection => collection.UserId);
             entity.HasOne(collection => collection.User).WithMany()
                 .HasForeignKey(collection => collection.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<CollectionArtworkAsset>(entity =>
+        {
+            entity.HasKey(asset => asset.Id);
+            entity.Property(asset => asset.Revision).HasDefaultValue(1L);
+            entity.Property(asset => asset.Kind).HasConversion<string>().HasMaxLength(16);
+            entity.Property(asset => asset.ProviderPath).HasMaxLength(512).IsRequired();
+            entity.Property(asset => asset.RelativeFilePath).HasMaxLength(512).IsRequired();
+            entity.Property(asset => asset.ContentType).HasMaxLength(64).IsRequired();
+            entity.Property(asset => asset.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(asset => asset.RelativeFilePath).IsUnique();
+            entity.HasIndex(asset => new { asset.CollectionId, asset.Kind });
+            entity.HasOne(asset => asset.Collection).WithMany(collection => collection.Artwork)
+                .HasForeignKey(asset => asset.CollectionId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<WatchEvent>(entity =>
@@ -838,7 +862,14 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
 
         modelBuilder.Entity<MediaCollectionMember>(entity =>
         {
-            entity.HasKey(member => new { member.CollectionId, member.MediaItemId });
+            entity.HasKey(member => member.Id);
+            entity.Property(member => member.Id).ValueGeneratedNever();
+            entity.HasIndex(member => new { member.CollectionId, member.MediaItemId })
+                .IsUnique()
+                .HasFilter("\"SeasonNumber\" IS NULL");
+            entity.HasIndex(member => new { member.CollectionId, member.MediaItemId, member.SeasonNumber })
+                .IsUnique()
+                .HasFilter("\"SeasonNumber\" IS NOT NULL");
             entity.HasOne(member => member.Collection).WithMany(collection => collection.Members)
                 .HasForeignKey(member => member.CollectionId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(member => member.MediaItem).WithMany(item => item.CollectionMemberships)

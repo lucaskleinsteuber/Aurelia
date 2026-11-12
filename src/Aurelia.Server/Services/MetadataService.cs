@@ -12,7 +12,8 @@ public sealed class MetadataService(
     MetadataJobScheduler scheduler,
     ArtworkStore artworkStore,
     CatalogMutationGate mutations,
-    MetadataJobStore jobs)
+    MetadataJobStore jobs,
+    CollectionArtworkService? collectionArtwork = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -176,6 +177,8 @@ public sealed class MetadataService(
             .AsSplitQuery()
             .SingleOrDefaultAsync(media => media.Id == mediaId, cancellationToken)
             ?? throw NotFound("media_not_found", "The media item was not found.");
+        var staleFiles = await RemoveStaleAutomaticMembershipsAsync(
+            mediaId, syncTmdb: true, keepTmdbId: null, syncUniverse: true, keepUniverseKeys: EmptyStringSet, cancellationToken);
         if (item.Metadata is not null)
         {
             if (!MetadataPresentation.ManualFields(item.Metadata).Contains("credits")) database.MediaCredits.RemoveRange(item.Metadata.Credits);
@@ -184,8 +187,12 @@ public sealed class MetadataService(
             ClearProvider(item.Metadata);
             item.Metadata.ReviewState = MetadataReviewState.NeedsReview;
             item.Metadata.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+        if (database.ChangeTracker.HasChanges())
+        {
             await database.SaveChangesAsync(cancellationToken);
         }
+        collectionArtwork?.DeleteFileNames(staleFiles);
         return MetadataPresentation.ToSummary(item);
     }
 
@@ -238,10 +245,15 @@ public sealed class MetadataService(
         metadata.ProviderCreditsJson = JsonSerializer.Serialize(credits.Select(credit => MediaEditorService.Credit(item, credit)), MediaEditorService.Json);
         var review = await database.MetadataReviews.SingleOrDefaultAsync(value => value.MediaItemId == item.Id, cancellationToken);
         if (review is not null) review.State = MetadataReviewState.Matched;
+        var universeKeys = UniverseKeysFor(item, provider.Keywords);
+        var keepTmdbId = item.Kind == MediaKind.Movie ? provider.Collection?.ProviderId : null;
+        var staleFiles = await RemoveStaleAutomaticMembershipsAsync(
+            item.Id, syncTmdb: true, keepTmdbId, syncUniverse: true, universeKeys, cancellationToken);
         if (provider.Collection is not null && item.Kind == MediaKind.Movie)
-            await UpsertCollectionAsync(item, "tmdb", provider.Collection.ProviderId, provider.Collection.Name, cancellationToken);
+            await UpsertCollectionAsync(item, "tmdb", provider.Collection.ProviderId, provider.Collection.Name, provider.Collection, cancellationToken);
         await JoinUniversesAsync(item, provider.Keywords, cancellationToken);
         await database.SaveChangesAsync(cancellationToken);
+        collectionArtwork?.DeleteFileNames(staleFiles);
         original.Metadata = metadata;
     }
 
@@ -317,11 +329,15 @@ public sealed class MetadataService(
             .AsSplitQuery()
             .SingleOrDefaultAsync(media => media.Id == itemId, cancellationToken);
         if (item?.Metadata is not { } metadata) return false;
+        var universeKeys = UniverseKeysFor(item, provider.Keywords);
+        var staleFiles = await RemoveStaleAutomaticMembershipsAsync(
+            item.Id, syncTmdb: false, keepTmdbId: null, syncUniverse: true, universeKeys, cancellationToken);
         await StoreKeywordsAsync(item.Id, provider.Keywords, cancellationToken);
         await JoinUniversesAsync(item, provider.Keywords, cancellationToken);
         if (MetadataPresentation.ManualFields(metadata).Contains("credits"))
         {
             await database.SaveChangesAsync(cancellationToken);
+            collectionArtwork?.DeleteFileNames(staleFiles);
             return false;
         }
         var credits = ReplaceCredits(item, metadata, provider.Credits);
@@ -329,6 +345,7 @@ public sealed class MetadataService(
         catch (MetadataException exception) when (exception.Code == "artwork_limit_reached") { }
         metadata.ProviderCreditsJson = JsonSerializer.Serialize(credits.Select(credit => MediaEditorService.Credit(item, credit)), MediaEditorService.Json);
         await database.SaveChangesAsync(cancellationToken);
+        collectionArtwork?.DeleteFileNames(staleFiles);
         return true;
     }
 
@@ -377,27 +394,146 @@ public sealed class MetadataService(
         }
     }
 
+    private static readonly IReadOnlySet<string> EmptyStringSet = new HashSet<string>(StringComparer.Ordinal);
+
+    private static IReadOnlySet<string> UniverseKeysFor(MediaItem item, IReadOnlyList<string>? keywords) =>
+        item.Kind is MediaKind.Movie or MediaKind.Series
+            ? MediaUniverses.Find(keywords).Select(entry => entry.Key).ToHashSet(StringComparer.Ordinal)
+            : EmptyStringSet;
+
+    private async Task<IReadOnlyList<string>> RemoveStaleAutomaticMembershipsAsync(
+        Guid mediaId,
+        bool syncTmdb,
+        string? keepTmdbId,
+        bool syncUniverse,
+        IReadOnlySet<string> keepUniverseKeys,
+        CancellationToken cancellationToken)
+    {
+        var memberships = await database.MediaCollectionMembers
+            .Include(member => member.Collection)
+            .ThenInclude(collection => collection.Members)
+            .Where(member => member.MediaItemId == mediaId
+                && !member.Collection.IsManual
+                && !member.Collection.IsSmart
+                && member.Collection.Provider != null)
+            .ToListAsync(cancellationToken);
+        if (memberships.Count == 0) return [];
+
+        var emptied = new List<MediaCollectionRecord>();
+        foreach (var membership in memberships)
+        {
+            var collection = membership.Collection;
+            var remove = collection.Provider switch
+            {
+                "tmdb" => syncTmdb && !string.Equals(collection.ProviderCollectionId, keepTmdbId, StringComparison.Ordinal),
+                MediaUniverses.Provider => syncUniverse && (collection.ProviderCollectionId is null || !keepUniverseKeys.Contains(collection.ProviderCollectionId)),
+                _ => false,
+            };
+            if (!remove) continue;
+
+            collection.Members.Remove(membership);
+            database.MediaCollectionMembers.Remove(membership);
+            collection.UpdatedAt = DateTimeOffset.UtcNow;
+            collectionArtwork?.InvalidateCollectionCache(collection.Id);
+            if (collection.Members.Count == 0)
+            {
+                emptied.Add(collection);
+            }
+        }
+
+        IReadOnlyList<string> staleFiles = [];
+        if (emptied.Count > 0)
+        {
+            if (collectionArtwork is not null)
+            {
+                staleFiles = await collectionArtwork.FileNamesForCollectionsAsync(
+                    database, emptied.Select(c => c.Id).ToArray(), cancellationToken);
+            }
+            database.MediaCollections.RemoveRange(emptied);
+        }
+        return staleFiles;
+    }
+
     private async Task JoinUniversesAsync(MediaItem item, IReadOnlyList<string>? keywords, CancellationToken cancellationToken)
     {
         if (item.Kind is not (MediaKind.Movie or MediaKind.Series)) return;
         foreach (var (key, name) in MediaUniverses.Find(keywords))
-            await UpsertCollectionAsync(item, MediaUniverses.Provider, key, name, cancellationToken);
+            await UpsertCollectionAsync(item, MediaUniverses.Provider, key, name, null, cancellationToken);
     }
 
-    private async Task UpsertCollectionAsync(MediaItem item, string providerName, string providerId, string name, CancellationToken cancellationToken)
+    private async Task UpsertCollectionAsync(
+        MediaItem item,
+        string providerName,
+        string providerId,
+        string name,
+        TmdbCollectionInfo? tmdbInfo,
+        CancellationToken cancellationToken)
     {
         var collection = database.MediaCollections.Local.FirstOrDefault(value => value.Provider == providerName && value.ProviderCollectionId == providerId)
             ?? await database.MediaCollections.Include(value => value.Members).SingleOrDefaultAsync(
                 value => value.Provider == providerName && value.ProviderCollectionId == providerId, cancellationToken);
         if (collection is null)
         {
-            collection = new MediaCollectionRecord { Id = Guid.NewGuid(), Name = name, Provider = providerName, ProviderCollectionId = providerId, CreatedAt = DateTimeOffset.UtcNow };
+            collection = new MediaCollectionRecord
+            {
+                Id = Guid.NewGuid(),
+                Name = name,
+                Provider = providerName,
+                ProviderCollectionId = providerId,
+                SortMode = "release",
+                CreatedAt = DateTimeOffset.UtcNow,
+            };
             database.MediaCollections.Add(collection);
         }
         collection.Name = name;
         collection.UpdatedAt = DateTimeOffset.UtcNow;
-        if (!collection.Members.Any(member => member.MediaItemId == item.Id))
-            collection.Members.Add(new MediaCollectionMember { CollectionId = collection.Id, MediaItemId = item.Id, SortOrder = collection.Members.Count });
+        if (!collection.Members.Any(member => member.MediaItemId == item.Id && member.SeasonNumber == null))
+        {
+            var added = new MediaCollectionMember
+            {
+                Id = Guid.NewGuid(),
+                CollectionId = collection.Id,
+                MediaItemId = item.Id,
+                SortOrder = collection.Members.Count,
+            };
+            collection.Members.Add(added);
+            database.MediaCollectionMembers.Add(added);
+            collectionArtwork?.InvalidateCollectionCache(collection.Id);
+        }
+
+        if (providerName != "tmdb") return;
+
+        var posterPath = tmdbInfo?.PosterPath;
+        var backdropPath = tmdbInfo?.BackdropPath;
+        var configuration = settings.Load();
+        if (configuration.Enabled && !string.IsNullOrWhiteSpace(configuration.Token))
+        {
+            TmdbCollectionDetail? detail = null;
+            try
+            {
+                detail = await tmdb.GetCollectionAsync(configuration.Token, configuration.Language, providerId, cancellationToken);
+            }
+            catch (Exception error) when (error is MetadataException or MetadataProviderException or HttpRequestException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                detail = null;
+            }
+
+            if (detail is not null)
+            {
+                if (!string.IsNullOrWhiteSpace(detail.Name)) collection.Name = detail.Name.Trim();
+                if (!collection.IsManual && !string.IsNullOrWhiteSpace(detail.Overview)) collection.Overview = detail.Overview.Trim();
+                if (!string.IsNullOrWhiteSpace(detail.PosterPath)) posterPath = detail.PosterPath;
+                if (!string.IsNullOrWhiteSpace(detail.BackdropPath)) backdropPath = detail.BackdropPath;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(posterPath)) collection.ProviderPosterPath = posterPath;
+        if (!string.IsNullOrWhiteSpace(backdropPath)) collection.ProviderBackdropPath = backdropPath;
+        if (collectionArtwork is not null)
+        {
+            await collectionArtwork.StoreProviderArtworkAsync(database, collection, ArtworkKind.Poster, posterPath, cancellationToken);
+            await collectionArtwork.StoreProviderArtworkAsync(database, collection, ArtworkKind.Backdrop, backdropPath, cancellationToken);
+        }
     }
 
     private MetadataProviderConfiguration RequireEnabled()

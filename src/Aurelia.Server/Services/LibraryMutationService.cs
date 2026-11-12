@@ -116,7 +116,24 @@ public sealed class LibraryMutationService(AureliaDbContext database, CatalogMut
             foreach (var area in new[] { SyncChangeArea.Catalog, SyncChangeArea.Libraries })
                 database.SyncChanges.Add(new SyncChange { Area = area, UserId = account, CreatedAt = DateTimeOffset.UtcNow });
         if (roots.Count > 0) await database.LibraryRoots.Where(root => roots.Contains(root.Id)).ExecuteDeleteAsync(token);
-        await database.MediaCollections.IgnoreQueryFilters().Where(collection => !collection.Members.Any()).ExecuteDeleteAsync(token);
+        // A person's own collections and smart lists stay even when their titles are gone;
+        // only automatic collections without members are removed.
+        var emptyAutoCollections = database.MediaCollections.IgnoreQueryFilters()
+            .Where(collection => !collection.IsManual && !collection.IsSmart && !collection.Members.Any());
+        var emptyCollectionIds = await emptyAutoCollections.Select(collection => collection.Id).ToArrayAsync(token);
+        if (emptyCollectionIds.Length > 0)
+        {
+            var colAssets = await database.CollectionArtworkAssets.IgnoreQueryFilters()
+                .Where(asset => emptyCollectionIds.Contains(asset.CollectionId))
+                .Select(asset => new { asset.RelativeFilePath, asset.OriginalFilePath })
+                .ToArrayAsync(token);
+            var extraFiles = colAssets
+                .SelectMany(asset => new[] { asset.RelativeFilePath, asset.OriginalFilePath })
+                .OfType<string>()
+                .Select(name => "Collections/" + name);
+            receipt.FilesJson = JsonSerializer.Serialize(files.Concat(extraFiles).Distinct().ToArray());
+        }
+        await emptyAutoCollections.ExecuteDeleteAsync(token);
         database.LibraryMutations.Add(receipt);
         // ExecuteDelete leaves stale tracked entities. Do not subsequently save them.
         foreach (var entry in database.ChangeTracker.Entries<MediaItem>().ToArray()) entry.State = EntityState.Detached;
@@ -147,15 +164,23 @@ public sealed class LibraryMutationService(AureliaDbContext database, CatalogMut
         try
         {
             var referenced = await database.ArtworkAssets.IgnoreQueryFilters().Select(asset => new { asset.RelativeFilePath, asset.OriginalFilePath }).ToListAsync(token);
-            var keep = referenced.SelectMany(asset => new[] { asset.RelativeFilePath, asset.OriginalFilePath }).ToHashSet(StringComparer.Ordinal);
+            var referencedCollections = await database.CollectionArtworkAssets.IgnoreQueryFilters().Select(asset => new { asset.RelativeFilePath, asset.OriginalFilePath }).ToListAsync(token);
+            var keep = referenced.SelectMany(asset => new[] { asset.RelativeFilePath, asset.OriginalFilePath })
+                .Concat(referencedCollections.SelectMany(asset => new[] { asset.RelativeFilePath, asset.OriginalFilePath }).OfType<string>().Select(name => "Collections/" + name))
+                .ToHashSet(StringComparer.Ordinal);
             foreach (var name in JsonSerializer.Deserialize<string[]>(receipt.FilesJson) ?? [])
             {
                 token.ThrowIfCancellationRequested();
                 var draft = name.StartsWith("EditorUploads/", StringComparison.Ordinal);
-                var file = draft ? name["EditorUploads/".Length..] : name;
+                var collectionArtwork = !draft && name.StartsWith("Collections/", StringComparison.Ordinal);
+                var file = draft ? name["EditorUploads/".Length..] : collectionArtwork ? name["Collections/".Length..] : name;
                 if (Path.GetFileName(file) != file || string.IsNullOrWhiteSpace(file) || file is "." or "..") throw new InvalidDataException("Invalid managed artwork path.");
                 if (keep.Contains(name)) continue;
-                var path = Path.Combine(runtime.DataDirectory, draft ? "EditorUploads" : "Artwork", file);
+                var path = draft
+                    ? Path.Combine(runtime.DataDirectory, "EditorUploads", file)
+                    : collectionArtwork
+                        ? Path.Combine(runtime.DataDirectory, "Artwork", "Collections", file)
+                        : Path.Combine(runtime.DataDirectory, "Artwork", file);
                 // File.Exists hides permission/IO errors as "missing". Delete directly so
                 // an unreadable managed file cannot be reported as successfully cleaned.
                 try { File.Delete(path); }

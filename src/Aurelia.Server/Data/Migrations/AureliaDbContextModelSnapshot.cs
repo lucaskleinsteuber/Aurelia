@@ -77,6 +77,65 @@ namespace Aurelia.Server.Data.Migrations
                     b.ToTable("ArtworkAssets");
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.CollectionArtworkAsset", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CollectionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ContentLength")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CropJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsManual")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OriginalFilePath")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderPath")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RelativeFilePath")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RelativeFilePath")
+                        .IsUnique();
+
+                    b.HasIndex("CollectionId", "Kind");
+
+                    b.ToTable("CollectionArtworkAssets");
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.ContinueWatchingState", b =>
                 {
                     b.Property<Guid>("UserId")
@@ -654,18 +713,33 @@ namespace Aurelia.Server.Data.Migrations
 
             modelBuilder.Entity("Aurelia.Server.Data.MediaCollectionMember", b =>
                 {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedNever()
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("CollectionId")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("MediaItemId")
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("SeasonNumber")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("SortOrder")
                         .HasColumnType("INTEGER");
 
-                    b.HasKey("CollectionId", "MediaItemId");
+                    b.HasKey("Id");
 
                     b.HasIndex("MediaItemId");
+
+                    b.HasIndex("CollectionId", "MediaItemId")
+                        .IsUnique()
+                        .HasFilter("\"SeasonNumber\" IS NULL");
+
+                    b.HasIndex("CollectionId", "MediaItemId", "SeasonNumber")
+                        .IsUnique()
+                        .HasFilter("\"SeasonNumber\" IS NOT NULL");
 
                     b.ToTable("MediaCollectionMembers");
                 });
@@ -674,6 +748,9 @@ namespace Aurelia.Server.Data.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("BackdropAssetId")
                         .HasColumnType("TEXT");
 
                     b.Property<long>("CreatedAt")
@@ -690,15 +767,34 @@ namespace Aurelia.Server.Data.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Overview")
+                        .HasMaxLength(8192)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PosterAssetId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Provider")
                         .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderBackdropPath")
+                        .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ProviderCollectionId")
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ProviderPosterPath")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("SmartRulesJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SortMode")
+                        .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SourceKey")
@@ -1972,6 +2068,17 @@ namespace Aurelia.Server.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.CollectionArtworkAsset", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.MediaCollectionRecord", "Collection")
+                        .WithMany("Artwork")
+                        .HasForeignKey("CollectionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Collection");
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.MediaCollectionMember", b =>
                 {
                     b.HasOne("Aurelia.Server.Data.MediaCollectionRecord", "Collection")
@@ -2323,6 +2430,8 @@ namespace Aurelia.Server.Data.Migrations
 
             modelBuilder.Entity("Aurelia.Server.Data.MediaCollectionRecord", b =>
                 {
+                    b.Navigation("Artwork");
+
                     b.Navigation("Members");
                 });
 

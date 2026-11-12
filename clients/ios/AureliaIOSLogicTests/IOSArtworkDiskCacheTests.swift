@@ -66,6 +66,25 @@ struct IOSArtworkDiskCacheTests {
     #expect(FileManager.default.fileExists(atPath: unrelated.path))
   }
 
+  @Test func collectionPosterAndBackdropNeverCollideOnDisk() throws {
+    let sharedID = UUID()
+    let server = UUID()
+    let profile = UUID()
+    let posterArt = IOSArtwork(
+      id: sharedID, kind: "poster",
+      path: "/api/v1/artwork/collection/\(sharedID.uuidString.lowercased())?kind=poster&rev=2",
+      contentType: "image/webp", contentLength: 3, revision: 2)
+    let backdropArt = IOSArtwork(
+      id: sharedID, kind: "backdrop",
+      path: "/api/v1/artwork/collection/\(sharedID.uuidString.lowercased())?kind=backdrop&rev=2",
+      contentType: "image/webp", contentLength: 3, revision: 2)
+    let posterKey = try #require(
+      IOSArtworkDiskCache.key(serverID: server, profileID: profile, artwork: posterArt, width: 640))
+    let backdropKey = try #require(
+      IOSArtworkDiskCache.key(serverID: server, profileID: profile, artwork: backdropArt, width: 640))
+    #expect(posterKey != backdropKey)
+  }
+
   private func poster(id: UUID = UUID(), revision: Int64?) -> IOSArtwork {
     IOSArtwork(
       id: id, kind: "poster", path: "/api/v1/artwork/\(id.uuidString.lowercased())",

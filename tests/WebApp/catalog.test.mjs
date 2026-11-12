@@ -8,7 +8,7 @@ import { installDOM, flush, deferred, all, button, input } from "./dom-fixture.m
 const items = (start, count) => Array.from({ length: count }, (_v, i) => ({ id: `item-${start + i}`, title: `Invented ${start + i}`, kind: "movie", genres: ["Drama"], year: 2000 }));
 function fixture(t, overrides = {}) {
   installDOM(t);
-  const requests = [], cards = [], routes = [], messages = [];
+  const requests = [], cards = [], routes = [], messages = [], played = [];
   let changed = 0;
   const view = createCatalogView({
     api: { catalogPage: async (query, options) => { requests.push({ query, options }); return { items: items(query.offset, Math.min(100, 230 - query.offset)), total: 230, revision: "r1" }; }, collections: async () => [], ...overrides },
@@ -18,10 +18,11 @@ function fixture(t, overrides = {}) {
     emptyState: (_symbol, title, text, action) => h("div", {}, title, text, action),
     openMenu: (_anchor, entries) => document.body.append(h("div", {}, entries)),
     menuOption: (label, _selected, action, disabled) => h("button", { onclick: action, disabled }, label),
+    play: (...args) => played.push(args),
     handleError: () => false, toast: (text) => messages.push(text), onChanged: () => { changed++; },
   });
   t.after(() => view.close());
-  return { view, requests, cards, routes, messages, get changed() { return changed; }, get dialog() { return document.body.querySelector("dialog"); } };
+  return { view, requests, cards, routes, messages, played, get changed() { return changed; }, get dialog() { return document.body.querySelector("dialog"); } };
 }
 test("browse requests one bounded page, retains all filters, and pages against one revision", async (t) => {
   const f = fixture(t);
@@ -190,4 +191,103 @@ test("titles hidden by this browser's settings are counted apart and fully hidde
   assert.equal(cards.length, 50);
   assert.match(page.textContent, /50 shown · 250 hidden by this browser’s settings/);
   assert.doesNotMatch(page.textContent, /No title matches/);
+});
+
+test("box set detail respects canEdit, copies automatic franchises, and starts continuous box playback", async (t) => {
+  const copied = [];
+  const nextMovie = { id: "m2", kind: "movie", title: "Part Two", availability: "available" };
+  const detail = {
+    id: "box-tmdb",
+    name: "Galaxy Box",
+    overview: "Complete space saga.",
+    provider: "tmdb",
+    canEdit: false,
+    isSmart: false,
+    itemCount: 2,
+    watchedCount: 1,
+    yearRange: "2001–2005",
+    totalRuntimeSeconds: 9000,
+    genres: ["Sci-Fi"],
+    members: [
+      { id: "mb1", mediaId: "m1", kind: "movie", title: "Part One", seasonNumber: null, item: { id: "m1", kind: "movie", title: "Part One", watchState: "completed" }, watchedCount: 1, itemCount: 1, totalRuntimeSeconds: 4500 },
+      { id: "mb2", mediaId: "m2", kind: "movie", title: "Part Two", seasonNumber: null, item: nextMovie, watchedCount: 0, itemCount: 1, totalRuntimeSeconds: 4500 },
+    ],
+    nextItem: { item: nextMovie, resume: true, positionMilliseconds: 120_000, itemIndex: 1, totalItems: 2 },
+  };
+  const f = fixture(t, {
+    collection: async () => detail,
+    collectionNext: async () => detail.nextItem,
+    createCollectionFromFranchise: async (id) => { copied.push(id); return { id: "box-copy", name: "Galaxy Box" }; },
+  });
+  const page = await f.view.collection({ id: "box-tmdb" });
+  assert.match(page.textContent, /TMDB Collection/);
+  assert.match(page.textContent, /Complete space saga\./);
+  assert.equal(all(page).some((n) => n.textContent === "Edit…" || n.textContent === "Delete"), false);
+  button(page, "Resume · Part Two").click();
+  await flush();
+  assert.equal(f.played.length, 1);
+  assert.equal(f.played[0][0].id, "m2");
+  assert.equal(f.played[0][2].intent, "resume");
+  assert.deepEqual(f.played[0][2].playlist.map((i) => i.id), ["m1", "m2"]);
+
+  button(page, "Save as Collection").click();
+  await flush();
+  assert.deepEqual(copied, ["box-tmdb"]);
+  assert.deepEqual(f.routes.at(-1), { name: "collection", id: "box-copy" });
+});
+
+test("Add to Collection filters non-editable boxes and passes seasonNumber for seasons", async (t) => {
+  const added = [];
+  const f = fixture(t, {
+    collections: async () => [
+      { id: "c-tmdb", name: "Auto Box", isSmart: false, canEdit: false },
+      { id: "c-smart", name: "Smart", isSmart: true, canEdit: true },
+      { id: "c-mine", name: "My Box", isSmart: false, canEdit: true },
+    ],
+    addCollectionItem: async (cid, mid, season) => added.push({ cid, mid, season }),
+  });
+  await f.view.openAddToCollectionDialog({ id: "show-1", title: "Invented Show", kind: "series" }, 2);
+  assert.doesNotMatch(f.dialog.textContent, /Auto Box|Smart/);
+  assert.match(f.dialog.textContent, /Season 2/);
+  button(f.dialog, "My Box").click();
+  await flush();
+  assert.deepEqual(added, [{ cid: "c-mine", mid: "show-1", season: 2 }]);
+});
+
+test("collection editor saves overview, sortMode, and reordered members including seasons", async (t) => {
+  const updates = [];
+  const detail = {
+    id: "box-1",
+    name: "My Saga",
+    overview: "Old note",
+    sortMode: "release",
+    canEdit: true,
+    isSmart: false,
+    isShared: false,
+    members: [
+      { id: "1", mediaId: "m1", kind: "movie", title: "Film A", seasonNumber: null, item: { id: "m1", kind: "movie", title: "Film A" }, watchedCount: 0, itemCount: 1, totalRuntimeSeconds: 5000 },
+      { id: "2", mediaId: "s1", kind: "series", title: "Show B", seasonNumber: 1, item: { id: "s1", kind: "series", title: "Show B" }, watchedCount: 0, itemCount: 5, totalRuntimeSeconds: 9000 },
+    ],
+  };
+  const f = fixture(t, {
+    collection: async () => detail,
+    updateCollection: async (id, body) => { updates.push({ id, body }); return { ...detail, ...body }; },
+  });
+  const page = await f.view.collection({ id: "box-1" });
+  button(page, "Edit…").click();
+  await flush();
+  const textarea = all(f.dialog).find((n) => n.tagName === "TEXTAREA");
+  textarea.textContent = "Updated epic saga.";
+  textarea.value = "Updated epic saga.";
+  all(f.dialog).find((n) => n.tagName === "BUTTON" && n.getAttribute("aria-label") === "Move Down").click();
+  f.dialog.querySelector("form").dispatchEvent(new Event("submit", { cancelable: true }));
+  await flush();
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].id, "box-1");
+  assert.equal(updates[0].body.overview, "Updated epic saga.");
+  assert.equal(updates[0].body.sortMode, "custom");
+  assert.deepEqual(updates[0].body.members, [
+    { mediaId: "s1", seasonNumber: 1 },
+    { mediaId: "m1", seasonNumber: null },
+  ]);
 });

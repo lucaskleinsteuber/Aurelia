@@ -89,6 +89,46 @@ enum MediaContextMenuPolicy {
   }
 }
 
+struct AddToCollectionMenu: View {
+  @EnvironmentObject private var model: AppModel
+  let item: CatalogItemSummary
+  var seasonNumber: Int? = nil
+
+  var body: some View {
+    let editable = model.collections.filter { !$0.isSmart && $0.canEdit }
+    Menu(
+      seasonNumber == nil ? "Add to Collection" : "Add Season to Collection",
+      systemImage: "rectangle.stack.badge.plus"
+    ) {
+      ForEach(editable) { collection in
+        let isMember = seasonNumber == nil && collection.items.contains { $0.id == item.id }
+        Button {
+          Task {
+            if isMember {
+              await model.removeMediaFromCollection(collectionId: collection.id, mediaId: item.id)
+            } else {
+              await model.addMediaToCollection(
+                collectionId: collection.id, mediaId: item.id, seasonNumber: seasonNumber)
+            }
+          }
+        } label: {
+          if isMember {
+            Label(collection.name, systemImage: "checkmark")
+          } else {
+            Text(collection.name)
+          }
+        }
+      }
+      if !editable.isEmpty {
+        Divider()
+      }
+      Button("New Collection…", systemImage: "plus") {
+        model.presentNewCollection(with: item, seasonNumber: seasonNumber)
+      }
+    }
+  }
+}
+
 struct MediaContextMenuItems: View {
   @EnvironmentObject private var model: AppModel
   let item: CatalogItemSummary
@@ -147,37 +187,9 @@ struct MediaContextMenuItems: View {
           Task { _ = await model.setWatchlist(mediaId: item.id, isWatchlisted: !watchlisted) }
         }
       }
-      let editableCollections = model.collections.filter {
-        !$0.isSmart
-          && ($0.userId == model.profile?.user?.id || ($0.isShared && model.canManageMedia))
-      }
-      Menu("Add to Collection…") {
-        ForEach(editableCollections) { col in
-          let inCollection = col.items.contains(where: { $0.id == item.id })
-          Button {
-            Task {
-              if inCollection {
-                await model.removeMediaFromCollection(collectionId: col.id, mediaId: item.id)
-              } else {
-                await model.addMediaToCollection(collectionId: col.id, mediaId: item.id)
-              }
-            }
-          } label: {
-            HStack {
-              Text(col.name)
-              if inCollection {
-                Image(systemName: "checkmark")
-              }
-            }
-          }
-        }
-        if !editableCollections.isEmpty {
-          Divider()
-        }
-        Button("New Collection…") {
-          model.presentNewCollection(with: item)
-        }
-      }
+    }
+    if item.kind == .movie || item.kind == .series || item.kind == .episode {
+      AddToCollectionMenu(item: item)
     }
     MediaContinueWatchingMenuItem(item: item, controller: controller)
     DownloadMenuItems(item: item)

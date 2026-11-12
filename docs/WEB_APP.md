@@ -190,9 +190,13 @@ beginning), Resume, Go to Series, watched or unwatched (a whole season or show a
 names the number of episodes), Favorites, Watchlist, Add to Collection, Remove from Continue
 Watching and, for administrators, Edit Metadata.
 
-**Collections** lists shared collections and your own. You can create collections, smart lists
-that fill themselves by rules (genre, decade, rating, watch state, date added, text) and, as an
-administrator, shared collections; movie pages offer their TMDB franchise as a collection.
+**Collections** lists shared collections, your own, smart lists and the automatic film series and
+universes. A collection can hold movies, shows, single seasons (*Add Season to Collection*) and
+episodes, with a description, a cropped cover and background, and a sort order (Custom Order,
+Release Year or Title). Its page shows the watched progress and plays the whole collection in
+order. Smart lists fill themselves by rules (genre, decade, rating, watch state, date added, text);
+*Save as Collection* copies a film series or universe into an editable collection, and
+administrators manage shared collections.
 **Watch History** and **Statistics** in the profile menu show only your own profile's viewing.
 
 ## Settings

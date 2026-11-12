@@ -400,7 +400,8 @@ struct LibraryShellView: View {
         CollectionDetailView(
           collection: collection,
           onBack: { goBack() },
-          onSelect: { open(.media($0)) })
+          onSelect: { open(.media($0)) },
+          onOpenCollection: { open(.collection($0)) })
       }
     case .person(let person):
       PersonDetailView(
@@ -1101,34 +1102,85 @@ private struct CollectionCard: View {
   @Environment(\.aureliaReduceMotion) private var reduceMotion
 
   var body: some View {
+    let total = collection.itemCount > 0 ? collection.itemCount : collection.totalCount
     VStack(alignment: .leading, spacing: 9) {
       ZStack(alignment: .topTrailing) {
-        AuthenticatedArtwork(artwork: collection.poster, symbol: "rectangle.stack.fill")
-          .frame(width: 210, height: 280)
-          .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
-          .overlay {
-            RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
-              .stroke(hovering ? .white.opacity(0.25) : AureliaDesign.hairline, lineWidth: 1)
-          }
-          .shadow(color: .black.opacity(hovering ? 0.34 : 0), radius: 14, y: 8)
+        ZStack {
+          RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
+            .fill(.white.opacity(0.06))
+            .overlay {
+              RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
+                .stroke(AureliaDesign.hairline, lineWidth: 1)
+            }
+            .frame(width: 196, height: 266)
+            .offset(x: 10, y: -10)
 
-        if collection.isSmart {
+          RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
+            .fill(.white.opacity(0.09))
+            .overlay {
+              RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
+                .stroke(AureliaDesign.hairline, lineWidth: 1)
+            }
+            .frame(width: 204, height: 274)
+            .offset(x: 5, y: -5)
+
+          AuthenticatedArtwork(artwork: collection.poster, symbol: "rectangle.stack.fill")
+            .frame(width: 210, height: 280)
+            .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
+            .overlay(alignment: .bottom) {
+              if total > 0 && collection.watchedCount > 0 {
+                let fraction = min(1.0, max(0.0, Double(collection.watchedCount) / Double(total)))
+                GeometryReader { geo in
+                  ZStack(alignment: .leading) {
+                    Rectangle().fill(.black.opacity(0.45))
+                    Rectangle().fill(Color.accentColor).frame(width: geo.size.width * fraction)
+                  }
+                }
+                .frame(height: 4)
+                .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
+              }
+            }
+            .overlay {
+              RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
+                .stroke(hovering ? .white.opacity(0.25) : AureliaDesign.hairline, lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(hovering ? 0.34 : 0), radius: 14, y: 8)
+        }
+        .padding(.top, 10)
+        .padding(.trailing, 10)
+
+        if let providerBadge = BoxSetLogic.providerLabel(collection.provider) {
+          Label(
+            providerBadge,
+            systemImage: collection.provider == "universe" ? "sparkles.square.filled.on.square" : "film.stack"
+          )
+          .font(.caption2.weight(.bold))
+          .padding(.horizontal, 8)
+          .padding(.vertical, 4)
+          .background(.ultraThinMaterial, in: Capsule())
+          .overlay { Capsule().stroke(.white.opacity(0.25), lineWidth: 1) }
+          .padding(.top, 20)
+          .padding(.trailing, 20)
+        } else if collection.isSmart {
           Label("Smart", systemImage: "sparkles")
             .font(.caption2.weight(.bold))
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(.ultraThinMaterial, in: Capsule())
             .overlay { Capsule().stroke(.white.opacity(0.25), lineWidth: 1) }
-            .padding(10)
+            .padding(.top, 20)
+            .padding(.trailing, 20)
         }
       }
       Text(collection.name)
         .font(.headline)
         .lineLimit(1)
         .frame(width: 210, alignment: .leading)
-      Text("\(collection.totalCount > 0 ? collection.totalCount : collection.items.count) titles")
+      Text(BoxSetLogic.cardSubtitle(for: collection))
         .font(.caption)
         .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .frame(width: 210, alignment: .leading)
     }
     .scaleEffect(hovering && !reduceMotion ? 1.012 : 1)
     .animation(reduceMotion ? nil : AureliaDesign.responsiveSpring, value: hovering)
@@ -1137,24 +1189,73 @@ private struct CollectionCard: View {
 }
 
 private struct CollectionDetailView: View {
-  // Settings › General changes these pages while they are open.
-  @AppStorage(GeneralPreferenceKeys.posterSize) private var posterSizeSetting = "standard"
-  @AppStorage(GeneralPreferenceKeys.showWatchedInRows) private var showWatchedSetting = true
-  @AppStorage(GeneralPreferenceKeys.hideOfflineTitles) private var hideOfflineSetting = false
-
   @EnvironmentObject private var model: AppModel
   let collection: CollectionSummary
   let onBack: () -> Void
   let onSelect: (UUID) -> Void
+  var onOpenCollection: ((UUID) -> Void)? = nil
+  @State private var detail: CollectionDetail?
+  @State private var expandedMemberIds: Set<UUID> = []
   @State private var showingEditor = false
+  @State private var isUpdatingOrder = false
+  @State private var isSavingCopy = false
+  @State private var errorMessage: String?
+
+  private var summary: CollectionSummary { detail?.asSummary ?? collection }
+  private var canEdit: Bool { detail?.canEdit ?? collection.canEdit }
+  private var members: [CollectionMember] { detail?.members ?? [] }
 
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 30) {
         collectionHero
         VStack(alignment: .leading, spacing: 16) {
-          AureliaSectionHeading(title: "Titles", count: collection.items.count)
-          posterGrid(collection.items, onSelect: onSelect)
+          if let errorMessage {
+            Text(errorMessage)
+              .font(.callout)
+              .foregroundStyle(.orange)
+          }
+
+          HStack(alignment: .firstTextBaseline) {
+            AureliaSectionHeading(
+              title: "In This Collection",
+              count: detail?.itemCount ?? collection.items.count)
+            Spacer()
+            if let detail {
+              let sortTitle =
+                switch detail.sortMode {
+                case "release": "Sorted by Release Date"
+                case "title": "Sorted by Title"
+                default: "Custom Order"
+                }
+              Text(sortTitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+
+          if let detail {
+            if detail.members.isEmpty {
+              ContentUnavailableView(
+                "No Titles Yet",
+                systemImage: "rectangle.stack",
+                description: Text(
+                  canEdit
+                    ? "Edit this collection or use Add to Collection on any title."
+                    : "Matching titles will appear here automatically."
+                )
+              )
+              .frame(maxWidth: .infinity, minHeight: 200)
+            } else {
+              VStack(spacing: 12) {
+                ForEach(Array(detail.members.enumerated()), id: \.element.id) { index, member in
+                  memberRow(member, index: index, total: detail.members.count, detail: detail)
+                }
+              }
+            }
+          } else {
+            posterGrid(collection.items, onSelect: onSelect)
+          }
         }
         .padding(.horizontal, AureliaDesign.pagePadding)
       }
@@ -1163,54 +1264,150 @@ private struct CollectionDetailView: View {
     }
     .scrollClipDisabled()
     .aureliaOverlayScrollbars()
-    .aureliaCompactHeader(title: collection.name, threshold: 360, onBack: onBack)
+    .aureliaCompactHeader(title: summary.name, threshold: 380, onBack: onBack)
+    .task(id: collection) {
+      await loadDetail()
+    }
+    .onChange(of: showingEditor) { _, open in
+      if !open {
+        Task { await loadDetail() }
+      }
+    }
     .sheet(isPresented: $showingEditor) {
-      CollectionEditorSheet(collection: collection).environmentObject(model)
+      CollectionEditorSheet(collection: summary).environmentObject(model)
     }
   }
 
   private var collectionHero: some View {
-    ZStack(alignment: .bottomLeading) {
+    let heroArtwork =
+      summary.backdrop
+      ?? summary.items.first?.backdrop
+      ?? summary.poster
+    let eyebrow: String = {
+      var parts: [String] = []
+      if let providerLabel = BoxSetLogic.providerLabel(summary.provider) {
+        parts.append(providerLabel.uppercased())
+      } else if summary.isSmart {
+        parts.append("SMART COLLECTION")
+      } else {
+        parts.append("COLLECTION")
+      }
+      if let genres = detail?.genres, !genres.isEmpty {
+        parts.append(genres.prefix(3).joined(separator: " · ").uppercased())
+      }
+      return parts.joined(separator: "  ·  ")
+    }()
+    let playable = BoxSetLogic.playableItems(from: members)
+    let statsText = detail.map(BoxSetLogic.statsLine(for:)) ?? BoxSetLogic.cardSubtitle(for: summary)
+    let totalItems = detail?.itemCount ?? (summary.itemCount > 0 ? summary.itemCount : summary.totalCount)
+    let watchedItems = detail?.watchedCount ?? summary.watchedCount
+
+    return ZStack(alignment: .bottomLeading) {
       AuthenticatedArtwork(
-        artwork: collection.items.first?.backdrop ?? collection.poster,
+        artwork: heroArtwork,
         symbol: "rectangle.stack.fill",
         contentMode: .fill
       )
       .backgroundExtensionEffect()
       .aureliaHeroSettle()
+
       LinearGradient(
         stops: [
-          .init(color: .black.opacity(0.7), location: 0),
-          .init(color: .black.opacity(0.3), location: 0.4),
-          .init(color: .clear, location: 0.75),
+          .init(color: .black.opacity(0.75), location: 0),
+          .init(color: .black.opacity(0.38), location: 0.48),
+          .init(color: .clear, location: 0.8),
         ],
         startPoint: .leading,
         endPoint: .trailing)
       LinearGradient(
         stops: [
-          .init(color: .clear, location: 0.42),
-          .init(color: AureliaDesign.canvas.opacity(0.3), location: 0.66),
-          .init(color: AureliaDesign.canvas.opacity(0.78), location: 0.88),
+          .init(color: .clear, location: 0.38),
+          .init(color: AureliaDesign.canvas.opacity(0.35), location: 0.65),
+          .init(color: AureliaDesign.canvas.opacity(0.82), location: 0.88),
           .init(color: AureliaDesign.canvas, location: 1),
         ],
         startPoint: .top,
         endPoint: .bottom)
 
-      VStack(alignment: .leading, spacing: 8) {
-        Text(collection.isSmart ? "SMART COLLECTION" : "COLLECTION")
-          .font(.caption.weight(.bold))
-          .tracking(1)
-          .foregroundStyle(.white.opacity(0.72))
+      HStack(alignment: .bottom, spacing: 24) {
+        AuthenticatedArtwork(artwork: summary.poster, symbol: "rectangle.stack.fill")
+          .frame(width: 140, height: 210)
+          .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
+          .overlay {
+            RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
+              .stroke(.white.opacity(0.22), lineWidth: 1)
+          }
+          .shadow(color: .black.opacity(0.45), radius: 18, y: 10)
           .aureliaRiseIn(0)
-        Text(collection.name)
-          .font(AureliaDesign.heroTitle)
-          .tracking(-0.6)
-          .lineLimit(2)
-          .aureliaRiseIn(1)
-        Text("\(collection.totalCount > 0 ? collection.totalCount : collection.items.count) titles")
-          .font(.callout.weight(.semibold))
-          .foregroundStyle(.white.opacity(0.78))
+
+        VStack(alignment: .leading, spacing: 10) {
+          Text(eyebrow)
+            .font(.caption.weight(.bold))
+            .tracking(1)
+            .foregroundStyle(.white.opacity(0.74))
+            .aureliaRiseIn(0)
+
+          Text(summary.name)
+            .font(AureliaDesign.heroTitle)
+            .tracking(-0.6)
+            .lineLimit(2)
+            .aureliaRiseIn(1)
+
+          if let overview = summary.overview, !overview.isEmpty {
+            Text(overview)
+              .font(.callout)
+              .foregroundStyle(.white.opacity(0.84))
+              .lineLimit(3)
+              .frame(maxWidth: 640, alignment: .leading)
+              .aureliaRiseIn(1)
+          }
+
+          VStack(alignment: .leading, spacing: 6) {
+            Text(statsText)
+              .font(.callout.weight(.semibold))
+              .foregroundStyle(.white.opacity(0.8))
+            if totalItems > 0 && watchedItems > 0 {
+              ProgressView(value: Double(min(watchedItems, totalItems)), total: Double(totalItems))
+                .progressViewStyle(.linear)
+                .frame(maxWidth: 260)
+            }
+          }
           .aureliaRiseIn(2)
+
+          HStack(spacing: 12) {
+            if let detail, !playable.isEmpty {
+              Button {
+                Task { await model.startCollectionPlayback(detail: detail) }
+              } label: {
+                Label(BoxSetLogic.playLabel(for: detail.nextItem), systemImage: "play.fill")
+              }
+              .buttonStyle(AureliaPrimaryActionButtonStyle())
+            }
+
+            if summary.provider != nil && !canEdit {
+              Button {
+                Task { await saveAsEditableCollection() }
+              } label: {
+                Label(
+                  isSavingCopy ? "Saving…" : "Save as Collection",
+                  systemImage: "plus.rectangle.on.rectangle")
+              }
+              .buttonStyle(.bordered)
+              .disabled(isSavingCopy)
+            }
+
+            if canEdit {
+              Button {
+                showingEditor = true
+              } label: {
+                Label("Edit Collection", systemImage: "pencil")
+              }
+              .buttonStyle(.bordered)
+            }
+          }
+          .padding(.top, 4)
+          .aureliaRiseIn(3)
+        }
       }
       .padding(AureliaDesign.pagePadding)
       .padding(.bottom, 16)
@@ -1219,9 +1416,6 @@ private struct CollectionDetailView: View {
         HStack {
           AureliaIconControl(symbol: "chevron.left", label: "Back", action: onBack)
           Spacer()
-          let canEdit =
-            collection.userId == model.profile?.user?.id
-            || (collection.isShared && model.canManageMedia)
           if canEdit {
             AureliaIconControl(
               symbol: "ellipsis",
@@ -1234,9 +1428,274 @@ private struct CollectionDetailView: View {
       }
     }
     // Full-bleed like every other hero; artwork continues beneath the sidebar.
-    .frame(height: 460)
+    .frame(height: 500)
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("collection-hero")
+  }
+
+  @ViewBuilder
+  private func memberRow(
+    _ member: CollectionMember, index: Int, total: Int, detail: CollectionDetail
+  ) -> some View {
+    let hasEpisodes = member.episodes?.isEmpty == false
+    let isExpanded = expandedMemberIds.contains(member.id)
+    let canReorder = canEdit && !summary.isSmart
+
+    let rowCard = VStack(alignment: .leading, spacing: 10) {
+      HStack(spacing: 14) {
+        Text("\(index + 1)")
+          .font(.callout.monospacedDigit().weight(.semibold))
+          .foregroundStyle(.secondary)
+          .frame(width: 24, alignment: .trailing)
+
+        AuthenticatedArtwork(
+          artwork: member.item.poster ?? member.item.backdrop,
+          symbol: member.kind == .series ? "tv" : "film"
+        )
+        .frame(width: 48, height: 72)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay {
+          RoundedRectangle(cornerRadius: 6).stroke(AureliaDesign.hairline, lineWidth: 1)
+        }
+
+        VStack(alignment: .leading, spacing: 4) {
+          HStack(spacing: 8) {
+            Text(member.title)
+              .font(.headline)
+              .lineLimit(1)
+            if let season = member.seasonNumber {
+              Text(season == 0 ? "Specials" : "Season \(season)")
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 2)
+                .background(.white.opacity(0.1), in: Capsule())
+            }
+          }
+
+          HStack(spacing: 10) {
+            Text(memberTypeSubtitle(member))
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            if member.itemCount > 1 {
+              Text("\(member.watchedCount) of \(member.itemCount) watched")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } else if member.watchedCount > 0 {
+              Label("Watched", systemImage: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+          if hasEpisodes {
+            toggleExpanded(member.id)
+          } else {
+            onSelect(member.mediaId)
+          }
+        }
+
+        Spacer()
+
+        if let firstPlayable = BoxSetLogic.playableItems(from: [member]).first {
+          Button {
+            Task { await model.startCollectionPlayback(detail: detail, target: firstPlayable) }
+          } label: {
+            Image(systemName: "play.fill")
+          }
+          .buttonStyle(.bordered)
+          .help("Play from here")
+        }
+
+        Button {
+          onSelect(member.mediaId)
+        } label: {
+          Image(systemName: "info.circle")
+        }
+        .buttonStyle(.bordered)
+        .help("Open Details")
+
+        if hasEpisodes {
+          Button {
+            toggleExpanded(member.id)
+          } label: {
+            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+          }
+          .buttonStyle(.bordered)
+          .help(isExpanded ? "Hide Episodes" : "Show Episodes")
+        }
+
+        if canReorder {
+          Button {
+            Task { await moveMember(from: index, to: index - 1) }
+          } label: {
+            Image(systemName: "arrow.up")
+          }
+          .buttonStyle(.borderless)
+          .disabled(isUpdatingOrder || index == 0)
+
+          Button {
+            Task { await moveMember(from: index, to: index + 1) }
+          } label: {
+            Image(systemName: "arrow.down")
+          }
+          .buttonStyle(.borderless)
+          .disabled(isUpdatingOrder || index == total - 1)
+
+          Button {
+            Task { await removeMember(member) }
+          } label: {
+            Image(systemName: "trash")
+              .foregroundStyle(.secondary)
+          }
+          .buttonStyle(.borderless)
+          .disabled(isUpdatingOrder)
+          .help("Remove from Collection")
+        }
+      }
+
+      if isExpanded, let episodes = member.episodes, !episodes.isEmpty {
+        Divider()
+        VStack(spacing: 6) {
+          ForEach(episodes) { episode in
+            HStack(spacing: 12) {
+              let code =
+                if let s = episode.seasonNumber, let e = episode.episodeNumber {
+                  "S\(String(format: "%02d", s)) E\(String(format: "%02d", e))"
+                } else {
+                  "Episode"
+                }
+              Text(code)
+                .font(.caption.monospacedDigit().weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 68, alignment: .leading)
+              Text(episode.title)
+                .font(.callout)
+                .lineLimit(1)
+              Spacer()
+              if episode.watchState == .completed || episode.progress?.isCompleted == true {
+                Image(systemName: "checkmark.circle.fill")
+                  .foregroundStyle(.secondary)
+                  .font(.caption)
+              }
+              Button {
+                Task { await model.startCollectionPlayback(detail: detail, target: episode) }
+              } label: {
+                Image(systemName: "play.fill")
+              }
+              .buttonStyle(.borderless)
+              .help("Play \(episode.title)")
+            }
+            .padding(.leading, 38)
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+            .onTapGesture { onSelect(episode.id) }
+            .mediaActions(item: episode)
+          }
+        }
+      }
+    }
+    .padding(14)
+    .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
+    .overlay {
+      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius).stroke(AureliaDesign.hairline, lineWidth: 1)
+    }
+
+    if canReorder {
+      rowCard
+        .draggable(member.memberId.uuidString)
+        .dropDestination(for: String.self) { items, _ in
+          guard let raw = items.first,
+            let draggedId = UUID(uuidString: raw),
+            let sourceIndex = members.firstIndex(where: { $0.memberId == draggedId }),
+            sourceIndex != index
+          else { return false }
+          Task { await moveMember(from: sourceIndex, to: index) }
+          return true
+        }
+    } else {
+      rowCard
+    }
+  }
+
+  private func memberTypeSubtitle(_ member: CollectionMember) -> String {
+    var parts: [String] = []
+    if member.seasonNumber != nil {
+      parts.append("\(member.itemCount) \(member.itemCount == 1 ? "episode" : "episodes")")
+    } else {
+      switch member.kind {
+      case .movie: parts.append("Movie")
+      case .series: parts.append("TV Show")
+      case .episode:
+        if let s = member.item.seasonNumber, let e = member.item.episodeNumber {
+          parts.append("S\(String(format: "%02d", s)) E\(String(format: "%02d", e))")
+        } else {
+          parts.append("Episode")
+        }
+      default: break
+      }
+    }
+    if let year = member.item.year { parts.append(String(year)) }
+    if member.totalRuntimeSeconds >= 60 {
+      let mins = Int((member.totalRuntimeSeconds + 30) / 60)
+      let hours = mins / 60
+      let rem = mins % 60
+      parts.append(hours > 0 ? (rem > 0 ? "\(hours)h \(rem)m" : "\(hours)h") : "\(rem)m")
+    }
+    return parts.joined(separator: " · ")
+  }
+
+  private func toggleExpanded(_ memberId: UUID) {
+    if expandedMemberIds.contains(memberId) {
+      expandedMemberIds.remove(memberId)
+    } else {
+      expandedMemberIds.insert(memberId)
+    }
+  }
+
+  private func loadDetail() async {
+    errorMessage = nil
+    if let fetched = try? await model.collectionDetail(id: collection.id) {
+      detail = fetched
+    }
+  }
+
+  private func moveMember(from sourceIndex: Int, to targetIndex: Int) async {
+    guard var reordered = detail?.members,
+      reordered.indices.contains(sourceIndex),
+      reordered.indices.contains(targetIndex),
+      sourceIndex != targetIndex
+    else { return }
+    let moved = reordered.remove(at: sourceIndex)
+    reordered.insert(moved, at: targetIndex)
+    isUpdatingOrder = true
+    defer { isUpdatingOrder = false }
+    do {
+      let inputs = reordered.map { CollectionMemberInput(mediaId: $0.mediaId, seasonNumber: $0.seasonNumber) }
+      detail = try await model.updateCollectionOrder(id: collection.id, members: inputs, sortMode: "custom")
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+  }
+
+  private func removeMember(_ member: CollectionMember) async {
+    isUpdatingOrder = true
+    defer { isUpdatingOrder = false }
+    await model.removeMediaFromCollection(
+      collectionId: collection.id, mediaId: member.mediaId, seasonNumber: member.seasonNumber)
+    await loadDetail()
+  }
+
+  private func saveAsEditableCollection() async {
+    isSavingCopy = true
+    defer { isSavingCopy = false }
+    do {
+      let copied = try await model.createCollectionFromFranchise(collection.id.uuidString)
+      onOpenCollection?(copied.id)
+    } catch {
+      errorMessage = error.localizedDescription
+    }
   }
 }
 

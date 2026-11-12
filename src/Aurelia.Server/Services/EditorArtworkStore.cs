@@ -17,7 +17,13 @@ public sealed class EditorArtworkStore(ServerRuntimeOptions runtime) : IDisposab
     private sealed record Receipt(Guid MediaId, Guid UserId, Guid SessionId, DateTimeOffset ExpiresAt);
     public void Dispose() => decodeGate.Dispose();
 
-    public async Task<EditorUploadSummary> UploadAsync(Guid mediaId, Guid userId, Guid sessionId, Stream input, CancellationToken token)
+    public async Task<EditorUploadSummary> UploadAsync(
+        Guid mediaId,
+        Guid userId,
+        Guid sessionId,
+        Stream input,
+        CancellationToken token,
+        string? uploadRouteTemplate = null)
     {
         await decodeGate.WaitAsync(token);
         try
@@ -25,16 +31,8 @@ public sealed class EditorArtworkStore(ServerRuntimeOptions runtime) : IDisposab
             PruneDrafts();
             if (Directory.EnumerateFiles(drafts, "*.json").Count() >= 512)
                 throw new AccountException("artwork_draft_limit", "Too many unfinished image uploads. Save or cancel existing editors first.", 429);
-            using var bytes = new MemoryStream();
-            var buffer = new byte[65_536];
-            while (true)
-            {
-                var read = await input.ReadAsync(buffer, token);
-                if (read == 0) break;
-                if (bytes.Length + read > MaximumUploadBytes) throw new AccountException("artwork_too_large", "Images must be no larger than 20 MB.", 413);
-                bytes.Write(buffer, 0, read);
-            }
-            using var bitmap = Decode(bytes.ToArray());
+            var rawBytes = await ReadUploadBytesAsync(input, token);
+            using var bitmap = Decode(rawBytes);
             using var oriented = Orient(bitmap.Image, bitmap.Origin);
             var data = Encode(oriented);
             var id = Guid.NewGuid();
@@ -45,9 +43,24 @@ public sealed class EditorArtworkStore(ServerRuntimeOptions runtime) : IDisposab
                     JsonSerializer.SerializeToUtf8Bytes(new Receipt(mediaId, userId, sessionId, DateTimeOffset.UtcNow.AddHours(24)), Json), token);
             }
             catch { File.Delete(Path.Combine(drafts, id.ToString("N") + ".png")); throw; }
-            return new(id, $"/api/v1/media/{mediaId}/editor/uploads/{id}", oriented.Width, oriented.Height);
+            var route = uploadRouteTemplate is null ? $"/api/v1/media/{mediaId}/editor/uploads/{id}" : string.Format(System.Globalization.CultureInfo.InvariantCulture, uploadRouteTemplate, id);
+            return new(id, route, oriented.Width, oriented.Height);
         }
         finally { decodeGate.Release(); }
+    }
+
+    internal static async Task<byte[]> ReadUploadBytesAsync(Stream input, CancellationToken token)
+    {
+        using var bytes = new MemoryStream();
+        var buffer = new byte[65_536];
+        while (true)
+        {
+            var read = await input.ReadAsync(buffer, token);
+            if (read == 0) break;
+            if (bytes.Length + read > MaximumUploadBytes) throw new AccountException("artwork_too_large", "Images must be no larger than 20 MB.", 413);
+            bytes.Write(buffer, 0, read);
+        }
+        return bytes.ToArray();
     }
 
     public string DraftPath(Guid id, Guid mediaId, Guid userId, Guid sessionId)
@@ -88,17 +101,58 @@ public sealed class EditorArtworkStore(ServerRuntimeOptions runtime) : IDisposab
             return existing;
         var sourcePath = selection.UploadId is { } upload ? DraftPath(upload, mediaId, userId, sessionId)
             : existing is not null ? OriginalPath(existing) : throw new AccountException("invalid_artwork", "Choose an image source.", 400);
+        var (original, rendered) = await RenderFromFileAsync(sourcePath, kind, crop, allowProviderWebP: existing?.IsManual == false, token);
+        var id = Guid.NewGuid();
+        var originalName = id.ToString("N") + ".original.png";
+        var renderedName = id.ToString("N") + ".png";
+        PrivateFilePermissions.CreatePrivateDirectory(images);
+        await WriteAsync(Path.Combine(images, originalName), original, token);
+        try { await WriteAsync(Path.Combine(images, renderedName), rendered, token); }
+        catch { File.Delete(Path.Combine(images, originalName)); throw; }
+        var asset = new ArtworkAsset
+        {
+            Id = id,
+            MediaItemId = mediaId,
+            Kind = kind,
+            IsManual = true,
+            ProviderPath = "manual/" + id.ToString("N"),
+            RelativeFilePath = renderedName,
+            OriginalFilePath = originalName,
+            CropJson = JsonSerializer.Serialize(crop, Json),
+            ContentType = "image/png",
+            ContentLength = rendered.Length,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        database.ArtworkAssets.Add(asset);
+        return asset;
+    }
+
+    internal async Task<(byte[] Original, byte[] Rendered)> RenderFromFileAsync(
+        string sourcePath,
+        ArtworkKind kind,
+        ArtworkCrop? crop,
+        bool allowProviderWebP,
+        CancellationToken token)
+    {
+        var info = new FileInfo(sourcePath);
+        if (info.Length > MaximumUploadBytes) throw new AccountException("artwork_too_large", "The image exceeds the editing limit.", 413);
+        return await RenderFromBytesAsync(await File.ReadAllBytesAsync(sourcePath, token), kind, crop, allowProviderWebP, token);
+    }
+
+    internal async Task<(byte[] Original, byte[] Rendered)> RenderFromBytesAsync(
+        byte[] sourceBytes,
+        ArtworkKind kind,
+        ArtworkCrop? crop,
+        bool allowProviderWebP,
+        CancellationToken token)
+    {
+        ValidateCrop(crop);
         await decodeGate.WaitAsync(token);
         try
         {
-            var info = new FileInfo(sourcePath);
-            if (info.Length > MaximumUploadBytes) throw new AccountException("artwork_too_large", "The image exceeds the editing limit.", 413);
-            using var decoded = Decode(await File.ReadAllBytesAsync(sourcePath, token), allowProviderWebP: existing?.IsManual == false);
+            using var decoded = Decode(sourceBytes, allowProviderWebP: allowProviderWebP);
             using var oriented = Orient(decoded.Image, decoded.Origin);
             using var rotated = Rotate(oriented, crop?.Rotation ?? 0);
-            var id = Guid.NewGuid();
-            var originalName = id.ToString("N") + ".original.png";
-            var renderedName = id.ToString("N") + ".png";
             var sourceRect = crop is null ? new SKRect(0, 0, rotated.Width, rotated.Height)
                 : new SKRect((float)(crop.X * rotated.Width), (float)(crop.Y * rotated.Height),
                     (float)((crop.X + crop.Width) * rotated.Width), (float)((crop.Y + crop.Height) * rotated.Height));
@@ -118,28 +172,7 @@ public sealed class EditorArtworkStore(ServerRuntimeOptions runtime) : IDisposab
             var outputHeight = Math.Max(1, (int)Math.Round(outputWidth / ratio));
             using var result = new SKBitmap(outputWidth, outputHeight);
             using (var canvas = new SKCanvas(result)) canvas.DrawBitmap(rotated, sourceRect, new SKRect(0, 0, outputWidth, outputHeight), new SKSamplingOptions(SKFilterMode.Linear));
-            var original = Encode(oriented);
-            var rendered = Encode(result);
-            PrivateFilePermissions.CreatePrivateDirectory(images);
-            await WriteAsync(Path.Combine(images, originalName), original, token);
-            try { await WriteAsync(Path.Combine(images, renderedName), rendered, token); }
-            catch { File.Delete(Path.Combine(images, originalName)); throw; }
-            var asset = new ArtworkAsset
-            {
-                Id = id,
-                MediaItemId = mediaId,
-                Kind = kind,
-                IsManual = true,
-                ProviderPath = "manual/" + id.ToString("N"),
-                RelativeFilePath = renderedName,
-                OriginalFilePath = originalName,
-                CropJson = JsonSerializer.Serialize(crop, Json),
-                ContentType = "image/png",
-                ContentLength = rendered.Length,
-                CreatedAt = DateTimeOffset.UtcNow
-            };
-            database.ArtworkAssets.Add(asset);
-            return asset;
+            return (Encode(oriented), Encode(result));
         }
         finally { decodeGate.Release(); }
     }
@@ -220,7 +253,7 @@ public sealed class EditorArtworkStore(ServerRuntimeOptions runtime) : IDisposab
         if (!File.Exists(path) || new FileInfo(path).LinkTarget is not null) throw new IOException("The image is unavailable.");
         return path;
     }
-    private static async Task WriteAsync(string path, byte[] data, CancellationToken token)
+    internal static async Task WriteAsync(string path, byte[] data, CancellationToken token)
     {
         await using var output = PrivateFilePermissions.OpenNewPrivateFile(path);
         await output.WriteAsync(data, token);

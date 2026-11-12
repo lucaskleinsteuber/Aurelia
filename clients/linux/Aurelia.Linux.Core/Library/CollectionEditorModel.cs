@@ -6,10 +6,23 @@ using Aurelia.Contracts;
 
 namespace Aurelia.Linux.Core.Library;
 
+/// <summary>An ordered member entry in a Box Set draft (movie, series, season, or episode).</summary>
+public sealed record CollectionMemberEntry(Guid MediaId, int? SeasonNumber, string Title, MediaKind Kind)
+{
+    public string TypeLabel => SeasonNumber is { } s
+        ? (s == 0 ? "Specials (Season 0)" : $"Season {s}")
+        : Kind switch
+        {
+            MediaKind.Movie => "Movie",
+            MediaKind.Series => "TV Show",
+            MediaKind.Episode => "Episode",
+            _ => Kind.ToString(),
+        };
+}
+
 /// <summary>
-/// Creating or editing a collection, as in the Mac app's editor: a standard collection of chosen
-/// titles in order (at least two), or a smart list with rules and a live count of matching titles.
-/// Rules are sent in the server's canonical spelling.
+/// Creating or editing a collection/box set: custom metadata, artwork, sort order, members (movies,
+/// series, seasons, or episodes), or a rule-based smart list.
 /// </summary>
 public sealed class CollectionEditorModel : ObservableObject
 {
@@ -17,6 +30,8 @@ public sealed class CollectionEditorModel : ObservableObject
 
     private readonly IReadOnlyList<CatalogItemSummary> catalog;
     private string name;
+    private string overview;
+    private string sortMode;
     private bool isSmart;
     private bool isShared;
     private bool matchAny;
@@ -29,17 +44,35 @@ public sealed class CollectionEditorModel : ObservableObject
     private int addedWithinDays;
     private bool favoritesOnly;
     private string titleContains = "";
+    private CollectionArtworkDraft? posterDraft;
+    private CollectionArtworkDraft? backdropDraft;
+    private bool removePoster;
+    private bool removeBackdrop;
 
-    public CollectionEditorModel(IReadOnlyList<CatalogItemSummary> catalog, CollectionSummary? existing, CatalogItemSummary? preselected, bool canShare)
+    public CollectionEditorModel(IReadOnlyList<CatalogItemSummary> catalog, CollectionSummary? existing, CatalogItemSummary? preselected, bool canShare, int? preselectedSeasonNumber = null)
     {
         this.catalog = [.. catalog.Where(item => item.Kind is MediaKind.Movie or MediaKind.Series).OrderBy(item => item.Title, StringComparer.CurrentCultureIgnoreCase)];
         Existing = existing;
         CanShare = canShare;
         name = existing?.Name ?? "";
+        overview = existing?.Overview ?? "";
         isSmart = existing?.IsSmart ?? false;
+        sortMode = existing?.SortMode ?? (isSmart ? "release" : "custom");
         isShared = existing?.IsShared ?? false;
-        if (existing is not null) foreach (var item in existing.Items) Selected.Add(item);
-        else if (preselected is not null) Selected.Add(preselected);
+        if (existing is not null)
+        {
+            foreach (var item in existing.Items)
+            {
+                AddEntry(item.Id, null, item.Title, item.Kind, item);
+            }
+        }
+        else if (preselected is not null)
+        {
+            var title = preselectedSeasonNumber is { } s
+                ? $"{preselected.Title} · {(s == 0 ? "Specials" : $"Season {s}")}"
+                : preselected.Title;
+            AddEntry(preselected.Id, preselectedSeasonNumber, title, preselected.Kind, preselected);
+        }
         if (existing?.RulesJson is { Length: > 0 } json) LoadRules(json);
     }
 
@@ -49,11 +82,28 @@ public sealed class CollectionEditorModel : ObservableObject
 
     public ObservableCollection<CatalogItemSummary> Selected { get; } = [];
 
+    public ObservableCollection<CollectionMemberEntry> SelectedMembers { get; } = [];
+
     public IReadOnlyList<CatalogItemSummary> Candidates => catalog;
 
     public string Name { get => name; set { if (SetProperty(ref name, value)) Changed(); } }
 
-    public bool IsSmart { get => isSmart; set { if (SetProperty(ref isSmart, value)) Changed(); } }
+    public string Overview { get => overview; set => SetProperty(ref overview, value); }
+
+    public string SortMode { get => sortMode; set => SetProperty(ref sortMode, value); }
+
+    public bool IsSmart
+    {
+        get => isSmart;
+        set
+        {
+            if (SetProperty(ref isSmart, value))
+            {
+                if (value && sortMode == "custom") SortMode = "release";
+                Changed();
+            }
+        }
+    }
 
     public bool IsShared { get => isShared; set => SetProperty(ref isShared, value); }
 
@@ -81,23 +131,105 @@ public sealed class CollectionEditorModel : ObservableObject
 
     public string TitleContains { get => titleContains; set { if (SetProperty(ref titleContains, value)) Changed(); } }
 
-    public bool Contains(CatalogItemSummary item) => Selected.Any(selected => selected.Id == item.Id);
+    public CollectionArtworkDraft? PosterDraft { get => posterDraft; set { if (SetProperty(ref posterDraft, value) && value is not null) removePoster = false; } }
 
-    public void Toggle(CatalogItemSummary item)
+    public CollectionArtworkDraft? BackdropDraft { get => backdropDraft; set { if (SetProperty(ref backdropDraft, value) && value is not null) removeBackdrop = false; } }
+
+    public bool RemovePoster { get => removePoster; set { if (SetProperty(ref removePoster, value) && value) posterDraft = null; } }
+
+    public bool RemoveBackdrop { get => removeBackdrop; set { if (SetProperty(ref removeBackdrop, value) && value) backdropDraft = null; } }
+
+    public void LoadDetail(CollectionDetail detail)
     {
-        var existing = Selected.FirstOrDefault(selected => selected.Id == item.Id);
-        if (existing is not null) Selected.Remove(existing);
-        else Selected.Add(item);
+        if (string.IsNullOrWhiteSpace(overview) && detail.Overview is { Length: > 0 } loadedOverview)
+        {
+            Overview = loadedOverview;
+        }
+        SortMode = detail.SortMode;
+        SelectedMembers.Clear();
+        Selected.Clear();
+        foreach (var member in detail.Members)
+        {
+            AddEntry(member.MediaId, member.SeasonNumber, member.Title, member.Kind, member.Item);
+        }
+        Changed();
+    }
+
+    public bool Contains(CatalogItemSummary item) => ContainsMember(item.Id, null);
+
+    public bool ContainsMember(Guid mediaId, int? seasonNumber) =>
+        SelectedMembers.Any(m => m.MediaId == mediaId && m.SeasonNumber == seasonNumber);
+
+    public void Toggle(CatalogItemSummary item) => ToggleMember(item.Id, null, item.Title, item.Kind, item);
+
+    public void ToggleMember(Guid mediaId, int? seasonNumber, string title, MediaKind mediaKind, CatalogItemSummary? summary = null)
+    {
+        var index = FindMemberIndex(mediaId, seasonNumber);
+        if (index >= 0)
+        {
+            SelectedMembers.RemoveAt(index);
+            if (seasonNumber is null)
+            {
+                var selectedItem = Selected.FirstOrDefault(s => s.Id == mediaId);
+                if (selectedItem is not null) Selected.Remove(selectedItem);
+            }
+        }
+        else
+        {
+            AddEntry(mediaId, seasonNumber, title, mediaKind, summary);
+        }
         Changed();
     }
 
     public void Move(CatalogItemSummary item, int by)
     {
-        var index = Selected.IndexOf(item);
+        var index = FindMemberIndex(item.Id, null);
+        if (index >= 0) MoveMember(index, by);
+    }
+
+    public void MoveMember(int index, int by)
+    {
         var target = index + by;
-        if (index < 0 || target < 0 || target >= Selected.Count) return;
-        Selected.Move(index, target);
+        if (index < 0 || target < 0 || target >= SelectedMembers.Count) return;
+        SelectedMembers.Move(index, target);
+        SortMode = "custom";
+        SyncLegacySelected();
         Changed();
+    }
+
+    public void RemoveMemberAt(int index)
+    {
+        if (index < 0 || index >= SelectedMembers.Count) return;
+        SelectedMembers.RemoveAt(index);
+        SyncLegacySelected();
+        Changed();
+    }
+
+    private void AddEntry(Guid mediaId, int? seasonNumber, string title, MediaKind mediaKind, CatalogItemSummary? summary)
+    {
+        if (ContainsMember(mediaId, seasonNumber)) return;
+        SelectedMembers.Add(new CollectionMemberEntry(mediaId, seasonNumber, title, mediaKind));
+        if (seasonNumber is null && summary is not null && !Selected.Any(s => s.Id == mediaId)) Selected.Add(summary);
+    }
+
+    private int FindMemberIndex(Guid mediaId, int? seasonNumber)
+    {
+        for (var i = 0; i < SelectedMembers.Count; i++)
+        {
+            if (SelectedMembers[i].MediaId == mediaId && SelectedMembers[i].SeasonNumber == seasonNumber) return i;
+        }
+        return -1;
+    }
+
+    private void SyncLegacySelected()
+    {
+        var existingById = Selected.ToDictionary(s => s.Id);
+        Selected.Clear();
+        foreach (var member in SelectedMembers.Where(m => m.SeasonNumber is null))
+        {
+            if (existingById.TryGetValue(member.MediaId, out var s)) Selected.Add(s);
+            else if (catalog.FirstOrDefault(c => c.Id == member.MediaId) is { } found) Selected.Add(found);
+        }
     }
 
     /// <summary>The live "Matching N titles" preview; like the Mac it leaves rating and "added within" to the server.</summary>
@@ -119,9 +251,7 @@ public sealed class CollectionEditorModel : ObservableObject
         }
     }
 
-    public string? Problem => Name.Trim().Length == 0 ? "Give the collection a name."
-        : !IsSmart && Selected.Count < 2 ? "Choose at least two titles."
-        : null;
+    public string? Problem => Name.Trim().Length == 0 ? "Give the collection a name." : null;
 
     public bool CanSave => Problem is null;
 
@@ -137,12 +267,20 @@ public sealed class CollectionEditorModel : ObservableObject
         TextContains: TitleContains.Trim() is { Length: > 0 } text ? text : null,
         Combination: MatchAny ? "or" : "and");
 
-    public SaveCollectionRequest Request() => new(
-        Name.Trim(),
-        IsSmart ? [] : [.. Selected.Select(item => item.Id)],
-        IsSmart,
-        CanShare && IsShared,
-        IsSmart ? JsonSerializer.Serialize(Rules(), RulesJson) : null);
+    public SaveCollectionRequest Request()
+    {
+        var trimmedOverview = Overview.Trim();
+        var effectiveSort = IsSmart && SortMode == "custom" ? "release" : SortMode;
+        return new SaveCollectionRequest(
+            Name.Trim(),
+            IsSmart ? [] : [.. SelectedMembers.Select(m => m.MediaId)],
+            IsSmart,
+            CanShare && IsShared,
+            IsSmart ? JsonSerializer.Serialize(Rules(), RulesJson) : null,
+            Overview: trimmedOverview.Length == 0 ? "" : trimmedOverview,
+            SortMode: effectiveSort,
+            Members: IsSmart ? null : [.. SelectedMembers.Select(m => new CollectionMemberInput(m.MediaId, m.SeasonNumber))]);
+    }
 
     private void LoadRules(string json)
     {

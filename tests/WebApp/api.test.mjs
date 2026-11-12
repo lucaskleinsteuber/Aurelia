@@ -244,12 +244,40 @@ test("collections v2, subtitles, history, statistics and health API endpoints us
   assert.equal(calls.at(-1).path, "/api/v1/collections/col-1/items/med-1");
   assert.equal(calls.at(-1).method, "POST");
 
+  await api.addCollectionItem("col-1", "ser-1", 0);
+  assert.equal(calls.at(-1).path, "/api/v1/collections/col-1/items/ser-1?seasonNumber=0");
+  assert.equal(calls.at(-1).method, "POST");
+
   await api.removeCollectionItem("col-1", "med-1");
   assert.equal(calls.at(-1).path, "/api/v1/collections/col-1/items/med-1");
   assert.equal(calls.at(-1).method, "DELETE");
 
+  await api.removeCollectionItem("col-1", "ser-1", 2);
+  assert.equal(calls.at(-1).path, "/api/v1/collections/col-1/items/ser-1?seasonNumber=2");
+  assert.equal(calls.at(-1).method, "DELETE");
+
+  await api.collection("col-1");
+  assert.equal(calls.at(-1).path, "/api/v1/collections/col-1");
+  assert.equal(calls.at(-1).method, "GET");
+
+  await api.collectionNext("col-1");
+  assert.equal(calls.at(-1).path, "/api/v1/collections/col-1/next");
+  assert.equal(calls.at(-1).method, "GET");
+
+  await api.updateCollectionOrder("col-1", { members: [{ mediaId: "med-1", seasonNumber: null }], sortMode: "custom" });
+  assert.equal(calls.at(-1).path, "/api/v1/collections/col-1/order");
+  assert.equal(calls.at(-1).method, "PUT");
+
+  await api.saveCollectionArtwork("col-1", "poster", { uploadId: "u-1", crop: { x: 0, y: 0, width: 1, height: 1 } });
+  assert.equal(calls.at(-1).path, "/api/v1/collections/col-1/artwork/poster");
+  assert.equal(calls.at(-1).method, "POST");
+
+  await api.deleteCollectionArtwork("col-1", "backdrop");
+  assert.equal(calls.at(-1).path, "/api/v1/collections/col-1/artwork/backdrop");
+  assert.equal(calls.at(-1).method, "DELETE");
+
   await api.franchises();
-  assert.equal(calls.at(-1).path, "/api/v1/franchises");
+  assert.equal(calls.at(-1).path, "/api/v1/catalog/franchises");
   assert.equal(calls.at(-1).method, "GET");
 
   await api.createCollectionFromFranchise("fran-1");

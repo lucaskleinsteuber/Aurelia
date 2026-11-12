@@ -294,26 +294,109 @@ struct IOSAPIClient: Sendable {
     }
     return values
   }
-  /// Shared collections and this profile's own ("collections-v2").
-  func updateCollection(_ collection: IOSCollection, name: String, mediaIDs: [UUID]) async throws
-    -> IOSCollection
-  {
+  /// Shared collections and this profile's own ("collections-v2" / "collections-v3").
+  func collectionDetail(id: UUID) async throws -> IOSCollectionDetail {
+    try Self.decode(
+      IOSCollectionDetail.self,
+      data: await send("/api/v1/collections/\(id.uuidString.lowercased())"))
+  }
+
+  func collectionNext(id: UUID) async throws -> IOSCollectionNextResponse {
+    try Self.decode(
+      IOSCollectionNextResponse.self,
+      data: await send("/api/v1/collections/\(id.uuidString.lowercased())/next"))
+  }
+
+  func franchises() async throws -> [IOSCollection] {
+    try Self.decode([IOSCollection].self, data: await send("/api/v1/catalog/franchises"))
+  }
+
+  func saveFromFranchise(id: UUID) async throws -> IOSCollection {
+    try Self.decode(
+      IOSCollection.self,
+      data: await send("/api/v1/collections/from-franchise/\(id.uuidString.lowercased())", method: "POST"))
+  }
+
+  func createCollection(_ payload: IOSSaveCollection) async throws -> IOSCollection {
+    try Self.decode(
+      IOSCollection.self,
+      data: await send("/api/v1/collections", method: "POST", body: JSONEncoder().encode(payload)))
+  }
+
+  func updateCollection(id: UUID, _ payload: IOSSaveCollection) async throws -> IOSCollection {
     try Self.decode(
       IOSCollection.self,
       data: await send(
-        "/api/v1/collections/\(collection.id.uuidString.lowercased())", method: "PUT",
-        body: JSONEncoder().encode(
-          IOSSaveCollection(name: name, mediaIds: mediaIDs, isShared: collection.isShared))))
+        "/api/v1/collections/\(id.uuidString.lowercased())", method: "PUT",
+        body: JSONEncoder().encode(payload)))
+  }
+
+  func updateCollection(_ collection: IOSCollection, name: String, mediaIDs: [UUID]) async throws
+    -> IOSCollection
+  {
+    try await updateCollection(
+      id: collection.id,
+      IOSSaveCollection(
+        name: name, mediaIds: mediaIDs, isSmart: collection.isSmart,
+        isShared: collection.isShared, rulesJson: collection.rulesJson,
+        overview: collection.overview, sortMode: collection.sortMode))
+  }
+
+  func updateCollectionOrder(id: UUID, _ order: IOSCollectionOrderRequest) async throws
+    -> IOSCollectionDetail
+  {
+    try Self.decode(
+      IOSCollectionDetail.self,
+      data: await send(
+        "/api/v1/collections/\(id.uuidString.lowercased())/order", method: "PUT",
+        body: JSONEncoder().encode(order)))
   }
 
   func deleteCollection(id: UUID) async throws {
     _ = try await send("/api/v1/collections/\(id.uuidString.lowercased())", method: "DELETE")
   }
 
-  func setCollectionItem(collectionID: UUID, mediaID: UUID, included: Bool) async throws {
+  func setCollectionItem(
+    collectionID: UUID, mediaID: UUID, seasonNumber: Int? = nil, included: Bool
+  ) async throws {
+    let query = seasonNumber.map { [URLQueryItem(name: "seasonNumber", value: String($0))] } ?? []
     _ = try await send(
       "/api/v1/collections/\(collectionID.uuidString.lowercased())/items/\(mediaID.uuidString.lowercased())",
-      method: included ? "POST" : "DELETE")
+      method: included ? "POST" : "DELETE", query: query)
+  }
+
+  func uploadCollectionEditorImage(
+    collectionID: UUID, _ data: Data, contentType: String = "image/jpeg"
+  ) async throws -> IOSUploadedEditorImage {
+    guard !data.isEmpty, data.count <= IOSRectCrop.maximumArtworkUploadBytes else {
+      throw IOSCoreError.invalidRequest
+    }
+    let response = try await send(
+      "/api/v1/collections/\(collectionID.uuidString.lowercased())/editor/uploads",
+      method: "POST", body: data, contentType: contentType)
+    return try Self.decode(IOSUploadedEditorImage.self, data: response)
+  }
+
+  func discardCollectionEditorImage(collectionID: UUID, uploadID: UUID) async throws {
+    _ = try await send(
+      "/api/v1/collections/\(collectionID.uuidString.lowercased())/editor/uploads/\(uploadID.uuidString.lowercased())",
+      method: "DELETE")
+  }
+
+  func saveCollectionArtwork(
+    collectionID: UUID, kind: String, _ payload: IOSSaveCollectionArtwork
+  ) async throws -> IOSArtwork {
+    try Self.decode(
+      IOSArtwork.self,
+      data: await send(
+        "/api/v1/collections/\(collectionID.uuidString.lowercased())/artwork/\(kind)",
+        method: "POST", body: JSONEncoder().encode(payload)))
+  }
+
+  func deleteCollectionArtwork(collectionID: UUID, kind: String) async throws {
+    _ = try await send(
+      "/api/v1/collections/\(collectionID.uuidString.lowercased())/artwork/\(kind)",
+      method: "DELETE")
   }
 
   func summary(id: UUID) async throws -> IOSCatalogItem {
@@ -569,18 +652,39 @@ struct IOSAPIClient: Sendable {
     return try request(path, authentication: .profile).url!
   }
 
+  static func isValidArtworkPath(_ path: String, id: UUID) -> (path: String, query: [URLQueryItem])? {
+    guard path.hasPrefix("/api/v1/artwork/"),
+      let components = URLComponents(string: path),
+      components.scheme == nil, components.host == nil, components.fragment == nil,
+      components.percentEncodedPath == components.path
+    else { return nil }
+    let trimmed = components.path
+    if trimmed == "/api/v1/artwork/\(id.uuidString.lowercased())"
+      || trimmed == "/api/v1/artwork/\(id.uuidString.uppercased())"
+    {
+      return (trimmed, components.queryItems ?? [])
+    }
+    let prefix = "/api/v1/artwork/collection/"
+    if trimmed.hasPrefix(prefix) {
+      let suffix = trimmed.dropFirst(prefix.count).split(separator: "/", omittingEmptySubsequences: false)
+      guard (1...2).contains(suffix.count), UUID(uuidString: String(suffix[0])) != nil else {
+        return nil
+      }
+      if suffix.count == 2, suffix[1] != "poster", suffix[1] != "backdrop" { return nil }
+      return (trimmed, components.queryItems ?? [])
+    }
+    return nil
+  }
+
   func artworkRequest(artwork: IOSArtwork, width: Int) throws -> URLRequest {
     guard [320, 640, 1280, 1920].contains(width),
-      artwork.path == "/api/v1/artwork/\(artwork.id.uuidString.lowercased())"
-        || artwork.path == "/api/v1/artwork/\(artwork.id.uuidString.uppercased())"
+      let parsed = Self.isValidArtworkPath(artwork.path, id: artwork.id)
     else { throw IOSCoreError.invalidResponse }
-    return try request(
-      artwork.path,
-      query: artwork.revision == nil
-        ? []
-        : [
-          URLQueryItem(name: "width", value: String(width))
-        ], authentication: .profile)
+    var query = parsed.query
+    if artwork.revision != nil, !query.contains(where: { $0.name == "width" }) {
+      query.append(URLQueryItem(name: "width", value: String(width)))
+    }
+    return try request(parsed.path, query: query, authentication: .profile)
   }
   func artworkData(artwork: IOSArtwork, width: Int) async throws -> Data {
     let request = try artworkRequest(artwork: artwork, width: width)
@@ -629,12 +733,13 @@ struct IOSAPIClient: Sendable {
   }
   private func send(
     _ path: String, method: String = "GET", query: [URLQueryItem] = [],
-    body: Data? = nil, authentication: Authentication = .profile
+    body: Data? = nil, contentType: String = "application/json",
+    authentication: Authentication = .profile
   ) async throws -> Data {
     var request = try request(path, query: query, authentication: authentication)
     request.httpMethod = method
     request.httpBody = body
-    if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+    if body != nil { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
     return try await execute(request).body
   }
 

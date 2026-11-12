@@ -71,6 +71,11 @@ public static class ServerFeatures
     public const string CollectionsV2 = "collections-v2";
 
     /// <summary>
+    /// Box Sets: collection descriptions, custom/mosaic artwork, sort modes, season and episode members, box progress, next-to-play, provider and editability ("collections-v3").
+    /// </summary>
+    public const string CollectionsV3 = "collections-v3";
+
+    /// <summary>
     /// Remote playback command queue and active player reporting ("remote-playback-v1").
     /// </summary>
     public const string RemotePlayback = "remote-playback-v1";
@@ -122,8 +127,8 @@ public static class ServerFeatures
     /// <summary>The features this server reports: <see cref="All"/> and those its host provides.</summary>
     public static IReadOnlyList<string> Reported(bool liveConversion, bool speechAudio = false, bool adaptiveStreaming = false)
     {
-        if (!liveConversion) return Array.AsReadOnly([.. All, WatchlistAndPeople, CollectionsV2, RemotePlayback]);
-        List<string> features = [.. All, WatchlistAndPeople, CollectionsV2, RemotePlayback, LiveConversion, ScrubPreviews];
+        if (!liveConversion) return Array.AsReadOnly([.. All, WatchlistAndPeople, CollectionsV2, CollectionsV3, RemotePlayback]);
+        List<string> features = [.. All, WatchlistAndPeople, CollectionsV2, CollectionsV3, RemotePlayback, LiveConversion, ScrubPreviews];
         if (speechAudio) features.AddRange([SpeechSubtitles, SubtitleSync]);
         if (adaptiveStreaming) features.Add(AdaptiveStreaming);
         return features.AsReadOnly();

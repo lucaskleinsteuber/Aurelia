@@ -76,7 +76,7 @@ public static class MediaEditingEndpoints
         });
     }
 
-    private static IResult Image(HttpContext context, string path, string type = "image/png")
+    internal static IResult Image(HttpContext context, string path, string type = "image/png")
     {
         context.Response.Headers.CacheControl = "private, no-store";
         context.Response.Headers.XContentTypeOptions = "nosniff";

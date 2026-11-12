@@ -54,3 +54,84 @@ public static class LibraryPresentation
     /// <summary>The picture for a landscape card or hero: backdrop, else poster.</summary>
     public static ArtworkSummary? LandscapeArtwork(CatalogItemSummary item) => item.Backdrop ?? item.Poster;
 }
+
+/// <summary>Pending artwork upload/crop pair when saving a Box Set.</summary>
+public sealed record CollectionArtworkDraft(Guid? UploadId, byte[]? Bytes, ArtworkCrop? Crop);
+
+/// <summary>Shared Box Set presentation and queue flattening helpers.</summary>
+public static class BoxSetPresentation
+{
+    public static string? ProviderLabel(string? provider) => provider switch
+    {
+        "tmdb" => "TMDB Collection",
+        "universe" => "Universe",
+        { Length: > 0 } other => other,
+        _ => null,
+    };
+
+    public static bool CanEditCollection(CollectionSummary collection, LibraryStore store)
+    {
+        if (store.Client.SupportsCollectionsV3) return collection.CanEdit;
+        if (collection.Provider is not null) return collection.CanEdit;
+        return collection.CanEdit
+            || collection.UserId == store.Client.Profile.User.Id
+            || (collection.IsShared && store.CanManageMedia);
+    }
+
+    public static string CardSubtitle(CollectionSummary collection)
+    {
+        var parts = new List<string>();
+        if (ProviderLabel(collection.Provider) is { } label) parts.Add(label);
+        else if (collection.IsSmart) parts.Add("Smart List");
+        if (collection.YearRange is { Length: > 0 } range) parts.Add(range);
+        var total = collection.ItemCount > 0 ? collection.ItemCount : collection.TotalCount > 0 ? collection.TotalCount : collection.Items.Count;
+        if (total > 0 && collection.WatchedCount > 0) parts.Add($"{collection.WatchedCount} of {total} watched");
+        else if (total > 0 && parts.Count == 0) parts.Add(total == 1 ? "1 title" : $"{total} titles");
+        return parts.Count == 0 ? "Collection" : string.Join(" · ", parts);
+    }
+
+    public static string StatsLine(CollectionDetail detail)
+    {
+        var count = detail.ItemCount > 0 ? detail.ItemCount : detail.Members.Count;
+        var parts = new List<string> { count == 1 ? "1 title" : $"{count} titles" };
+        if (count > 0) parts.Add($"{detail.WatchedCount} of {count} watched");
+        if (detail.YearRange is { Length: > 0 } range) parts.Add(range);
+        if (detail.TotalRuntimeSeconds >= 60)
+        {
+            var minutes = (int)((detail.TotalRuntimeSeconds + 30) / 60);
+            var hours = minutes / 60;
+            var rem = minutes % 60;
+            parts.Add(hours > 0 ? (rem > 0 ? $"{hours} h {rem} min" : $"{hours} h") : $"{rem} min");
+        }
+        return string.Join("  ·  ", parts);
+    }
+
+    public static string PlayLabel(CollectionNextResponse? next)
+    {
+        if (next is null) return "Play";
+        var prefix = next.Resume ? "Resume" : "Play";
+        var target = next.Item;
+        if (target.Kind == MediaKind.Episode && target.SeasonNumber is { } season && target.EpisodeNumber is { } episode)
+        {
+            return $"{prefix} · S{season:00} E{episode:00}";
+        }
+        return target.Title.Length > 0 ? $"{prefix} · {target.Title}" : prefix;
+    }
+
+    public static IReadOnlyList<CatalogItemSummary> PlayableItems(CollectionDetail detail)
+    {
+        var seen = new HashSet<Guid>();
+        var ordered = new List<CatalogItemSummary>();
+        foreach (var member in detail.Members)
+        {
+            IEnumerable<CatalogItemSummary> units = member.Episodes is { Count: > 0 } episodes
+                ? episodes
+                : member.Item is not null ? [member.Item] : [];
+            foreach (var item in units)
+            {
+                if (item.Kind is MediaKind.Movie or MediaKind.Episode && seen.Add(item.Id)) ordered.Add(item);
+            }
+        }
+        return ordered;
+    }
+}

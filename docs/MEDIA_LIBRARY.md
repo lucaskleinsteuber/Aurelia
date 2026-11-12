@@ -125,13 +125,19 @@ Selecting a person shows every movie and series in your library they are part of
 
 ## Collections
 
-- **Film series** such as *The Lord of the Rings* are gathered automatically from TMDB, in the
-  order they came out.
+- **Film series** such as *The Lord of the Rings* are gathered automatically from TMDB, with their
+  TMDB description and artwork in release order.
 - **Universes** such as the Marvel Cinematic Universe or Middle-earth gather the movies *and* series
   that TMDB marks as part of one world.
 - **Your own collections** and **smart lists** that fill themselves by genre, year, rating,
   watched state or Watchlist are created under *Collections*. They can be private to your profile
   or shared with everyone.
+- A collection works like a box set on a shelf: it can hold movies, whole series, single seasons
+  (such as a show's Specials) and single episodes, in your own order or by release or title. Give
+  it a description, a cover and a background picture, or let Aurelia make a cover from its titles.
+  It shows how much of it you have watched, and **Play** continues where you left off.
+- An automatic film series or universe can be saved as your own collection to change it. On
+  Apple TV, collections can be browsed and played but not edited.
 
 ## Several folders, drives that are not always there
 

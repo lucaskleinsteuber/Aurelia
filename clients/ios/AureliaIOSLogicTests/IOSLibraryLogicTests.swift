@@ -266,6 +266,119 @@ struct IOSLibraryLogicTests {
     #expect(updated.poster == original.poster && updated.isFavorite == original.isFavorite)
   }
 
+  @Test func boxSetCanonicalContractsPlayQueueAndFranchiseEndpointsWork() async throws {
+    let colID = UUID()
+    let m1 = item(id: UUID(), kind: .movie)
+    let ep1 = item(id: UUID(), kind: .episode)
+    let detailJSON = """
+      {
+        "id": "\(colID.uuidString)",
+        "name": "Galaxy Saga",
+        "overview": "Chronological marathon.",
+        "provider": "tmdb",
+        "canEdit": false,
+        "isSmart": false,
+        "isShared": true,
+        "sortMode": "release",
+        "itemCount": 2,
+        "watchedCount": 1,
+        "yearRange": "2024–2026",
+        "totalRuntimeSeconds": 5400,
+        "genres": ["Science Fiction"],
+        "members": [
+          {
+            "id": "\(UUID().uuidString)",
+            "mediaId": "\(m1.id.uuidString)",
+            "kind": "movie",
+            "title": "Orbit",
+            "item": \(String(decoding: try JSONEncoder().encode(m1), as: UTF8.self)),
+            "watchedCount": 1,
+            "itemCount": 1
+          },
+          {
+            "id": "\(UUID().uuidString)",
+            "mediaId": "\(UUID().uuidString)",
+            "kind": "series",
+            "title": "Cobalt Station",
+            "seasonNumber": 0,
+            "episodes": [\(String(decoding: try JSONEncoder().encode(ep1), as: UTF8.self))],
+            "watchedCount": 0,
+            "itemCount": 1
+          }
+        ],
+        "nextItem": {
+          "item": \(String(decoding: try JSONEncoder().encode(ep1), as: UTF8.self)),
+          "resume": true,
+          "positionMilliseconds": 45000,
+          "itemIndex": 1,
+          "totalItems": 2
+        }
+      }
+      """
+    let detail = try JSONDecoder().decode(IOSCollectionDetail.self, from: Data(detailJSON.utf8))
+    #expect(detail.members.count == 2)
+    #expect(detail.members[1].seasonNumber == 0)
+    #expect(IOSCollectionRules.providerLabel(detail.provider) == "TMDB Collection")
+    #expect(!IOSCollectionRules.canEdit(detail.summary, userID: profileID, role: "owner", supportsV3: true))
+    #expect(IOSCollectionRules.playLabel(detail.nextItem) == "Resume · S01 E01")
+    #expect(IOSCollectionRules.playableItems(from: detail).map(\.id) == [m1.id, ep1.id])
+    #expect(IOSCollectionRules.queue(in: detail, startingAt: m1).map(\.id) == [ep1.id])
+    #expect(IOSCollectionRules.statsLine(detail).contains("1 h 30 min"))
+
+    let colPoster = IOSArtwork(
+      id: colID, kind: "poster",
+      path: "/api/v1/artwork/collection/\(colID.uuidString.lowercased())?kind=poster&rev=3",
+      contentType: "image/webp", contentLength: 100, revision: 3)
+    let uploadID = UUID()
+    let uploadSummary = IOSUploadedEditorImage(
+      id: uploadID, path: "/api/v1/collections/\(colID.uuidString.lowercased())/editor/uploads/\(uploadID.uuidString.lowercased())",
+      width: 800, height: 1200)
+    let transport = IOSLibraryTestTransport(responses: [
+      try response(detail),
+      try response([detail.summary]),
+      try response(detail.summary),
+      try response(uploadSummary),
+      try response(colPoster),
+      IOSHTTPResponse(statusCode: 204, headers: [:], body: Data(), fingerprint: fingerprint),
+    ])
+    let client = api(transport)
+    let req = try client.artworkRequest(artwork: colPoster, width: 640)
+    #expect(req.url?.path == "/api/v1/artwork/collection/\(colID.uuidString.lowercased())")
+    #expect(req.url?.query?.contains("kind=poster") == true)
+    #expect(req.url?.query?.contains("width=640") == true)
+
+    _ = try await client.collectionDetail(id: colID)
+    _ = try await client.franchises()
+    _ = try await client.saveFromFranchise(id: colID)
+    let uploaded = try await client.uploadCollectionEditorImage(collectionID: colID, Data([0xFF, 0xD8, 0xFF]))
+    #expect(uploaded.id == uploadID)
+    _ = try await client.saveCollectionArtwork(
+      collectionID: colID, kind: "poster",
+      IOSSaveCollectionArtwork(uploadId: uploadID, crop: IOSArtworkCrop(x: 0, y: 0, width: 1, height: 1)))
+    try await client.discardCollectionEditorImage(collectionID: colID, uploadID: uploadID)
+    let recorded = await transport.requests
+    #expect(recorded.map { $0.url?.path } == [
+      "/api/v1/collections/\(colID.uuidString.lowercased())",
+      "/api/v1/catalog/franchises",
+      "/api/v1/collections/from-franchise/\(colID.uuidString.lowercased())",
+      "/api/v1/collections/\(colID.uuidString.lowercased())/editor/uploads",
+      "/api/v1/collections/\(colID.uuidString.lowercased())/artwork/poster",
+      "/api/v1/collections/\(colID.uuidString.lowercased())/editor/uploads/\(uploadID.uuidString.lowercased())",
+    ])
+  }
+
+  @Test func rectCropProducesNormalizedCoordinatesInUnitSquare() {
+    let crop = IOSRectCrop.normalizedCrop(
+      imageSize: CGSize(width: 2000, height: 1000),
+      frameSize: CGSize(width: 200, height: 300),
+      zoom: 2,
+      offset: CGSize(width: 20, height: -10))
+    #expect(crop.x >= 0 && crop.x <= 1)
+    #expect(crop.y >= 0 && crop.y <= 1)
+    #expect(crop.width > 0 && crop.x + crop.width <= 1.0001)
+    #expect(crop.height > 0 && crop.y + crop.height <= 1.0001)
+  }
+
   private func api(_ transport: IOSLibraryTestTransport) -> IOSAPIClient {
     let connection = IOSStoredConnection(
       serverID: serverID, name: "Synthetic server",

@@ -338,6 +338,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         var created = new LibraryShell { LeadingInset = Chrome.LeadingWidth, Session = Session, Engines = services.Engines };
         if (Remote is not null) created.AttachRemote(Remote);
         created.PlayRequested += (item, resume) => _ = PlayAsync(item, resume);
+        created.PlayCollectionRequested += (playlist, target, resume) => _ = PlayAsync(target, resume, playlist: playlist);
         created.Together = this;
         // Progress watched offline goes back to the server once a profile is open again.
         if (services.Downloads is { } offline && Session.Library is { } opened)
@@ -677,7 +678,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
     public PlaybackController? Player { get; private set; }
 
     /// <summary>Opens the player over the library for a title (a series plays its next episode).</summary>
-    public async Task PlayAsync(Aurelia.Contracts.CatalogItemSummary item, bool resume, long? startAt = null)
+    public async Task PlayAsync(Aurelia.Contracts.CatalogItemSummary item, bool resume, long? startAt = null, IReadOnlyList<Aurelia.Contracts.CatalogItemSummary>? playlist = null)
     {
         if (Session.Library is not { } library || services.Engines is null) return;
         if (Player is { } running) await running.CloseAsync();
@@ -710,12 +711,15 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         PlayerHost.Content = view;
         PlayerHost.IsVisible = true;
         await outbox.FlushAsync(player.Client, CancellationToken.None);
+        Task StartChosen() => playlist is { Count: > 0 }
+            ? player.StartQueueAsync(playlist, item, resume, startAt)
+            : player.StartAsync(item, resume, startAt);
         // Cinema mode: an ad, trailers and the curtain before a film that starts from its beginning.
         var preShow = await CinemaPreShow.PrepareAsync(player.Client, services.Engines, services.Time, action => Dispatcher.UIThread.Post(action),
             item, resume, startAt, PlaybackPreferences.Load(services.Settings), services.Settings, WatchParty is not null);
         if (preShow is null || Player != player)
         {
-            await player.StartAsync(item, resume, startAt);
+            await StartChosen();
             return;
         }
         var started = false;
@@ -723,7 +727,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         {
             if (started) return Task.CompletedTask;
             started = true;
-            return player.StartAsync(item, resume, startAt);
+            return StartChosen();
         }
         var curtain = new CinemaView(preShow, () => _ = player.CloseAsync());
         void FilmMoving(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

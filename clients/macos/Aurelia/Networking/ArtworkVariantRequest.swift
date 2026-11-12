@@ -7,11 +7,17 @@ enum ArtworkVariantRequest {
   }
 
   static func artwork(_ source: ArtworkSummary, width: Int?) -> ArtworkSummary {
-    guard source.revision != nil, let width, [320, 640, 1280, 1920].contains(width),
-      !source.path.contains("?")
-    else { return source }
+    guard source.revision != nil, let width, [320, 640, 1280, 1920].contains(width) else {
+      return source
+    }
+    if let existing = URLComponents(string: source.path),
+      existing.queryItems?.contains(where: { $0.name == "width" }) == true
+    {
+      return source
+    }
+    let separator = source.path.contains("?") ? "&" : "?"
     return ArtworkSummary(
-      id: source.id, kind: source.kind, path: source.path + "?width=\(width)",
+      id: source.id, kind: source.kind, path: source.path + "\(separator)width=\(width)",
       contentType: source.contentType, contentLength: source.contentLength,
       revision: source.revision)
   }

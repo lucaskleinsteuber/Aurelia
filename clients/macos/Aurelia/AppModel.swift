@@ -10,6 +10,7 @@ final class AppModel: ObservableObject {
   @Published var requestedMediaDetail: UUID?
   @Published var requestedPersonDetail: PersonSelection?
   @Published var preselectedCollectionItem: CatalogItemSummary?
+  @Published var preselectedCollectionSeasonNumber: Int?
   @Published var showingCollectionEditor = false
   /// Movie Night over the whole window: a new night, or the one to join.
   @Published var movieNightLaunch: MovieNightLaunch?
@@ -18,8 +19,9 @@ final class AppModel: ObservableObject {
 
   func closeMovieNight() { movieNightLaunch = nil }
 
-  func presentNewCollection(with item: CatalogItemSummary? = nil) {
+  func presentNewCollection(with item: CatalogItemSummary? = nil, seasonNumber: Int? = nil) {
     preselectedCollectionItem = item
+    preselectedCollectionSeasonNumber = seasonNumber
     showingCollectionEditor = true
   }
 
@@ -2357,46 +2359,151 @@ final class AppModel: ObservableObject {
     return try await currentConnection { try await APIClient(profile: profile).metadataReviews() }
   }
 
+  func collectionDetail(id: UUID) async throws -> CollectionDetail {
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await currentConnection { try await APIClient(profile: profile).collection(id: id) }
+  }
+
+  func collectionNext(id: UUID) async throws -> CollectionNextResponse {
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await currentConnection { try await APIClient(profile: profile).collectionNext(id: id) }
+  }
+
+  func updateCollectionOrder(
+    id: UUID, members: [CollectionMemberInput], sortMode: String? = "custom"
+  ) async throws -> CollectionDetail {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let generation = connectionGeneration
+    let updated = try await APIClient(profile: profile).updateCollectionOrder(
+      id: id, members: members, sortMode: sortMode)
+    guard isCurrent(generation) else { throw CancellationError() }
+    try await refresh()
+    return updated
+  }
+
+  func startCollectionPlayback(
+    detail: CollectionDetail,
+    target explicitTarget: CatalogItemSummary? = nil,
+    intent explicitIntent: PlaybackStartIntent? = nil
+  ) async {
+    guard profile != nil else { return }
+    let playlist = BoxSetLogic.playableItems(from: detail.members)
+    guard !playlist.isEmpty else { return }
+
+    let resolvedTarget: CatalogItemSummary
+    let resolvedIntent: PlaybackStartIntent
+    if let explicitTarget {
+      resolvedTarget = explicitTarget
+      if let explicitIntent {
+        resolvedIntent = explicitIntent
+      } else {
+        let canResume = explicitTarget.progress?.isCompleted != true
+          && explicitTarget.watchState != .completed
+          && ((explicitTarget.progress?.positionMilliseconds ?? 0) > 0
+            || explicitTarget.watchState == .inProgress)
+        resolvedIntent = canResume ? .resume : .play
+      }
+    } else {
+      let next = (try? await collectionNext(id: detail.id)) ?? detail.nextItem
+      resolvedTarget = next?.item ?? playlist[0]
+      resolvedIntent = (next?.resume == true) ? .resume : .play
+    }
+
+    let slices = BoxSetLogic.queueSlices(for: resolvedTarget, in: playlist)
+    let subtitle: String?
+    if resolvedTarget.kind == .episode, let s = resolvedTarget.seasonNumber,
+      let e = resolvedTarget.episodeNumber
+    {
+      subtitle = "S\(String(format: "%02d", s)) E\(String(format: "%02d", e))"
+    } else {
+      subtitle = resolvedTarget.year.map(String.init)
+    }
+    startPlayback(
+      mediaId: resolvedTarget.id,
+      title: resolvedTarget.title,
+      subtitle: subtitle,
+      queue: slices.upcoming,
+      previousItems: slices.previous,
+      startIntent: resolvedIntent,
+      trackScope: resolvedTarget.kind == .episode ? resolvedTarget.parentId : nil,
+      artwork: resolvedTarget.backdrop ?? resolvedTarget.poster ?? detail.poster)
+  }
+
+  @discardableResult
   func saveCollection(
     id: UUID?,
     name: String,
-    mediaIds: [UUID],
+    mediaIds: [UUID] = [],
     isSmart: Bool = false,
     isShared: Bool = false,
-    rulesJson: String? = nil
-  ) async throws {
+    rulesJson: String? = nil,
+    overview: String? = nil,
+    sortMode: String? = nil,
+    members: [CollectionMemberInput]? = nil,
+    posterUpload: (uploadId: UUID?, data: Data?, crop: ArtworkCrop)? = nil,
+    backdropUpload: (uploadId: UUID?, data: Data?, crop: ArtworkCrop)? = nil,
+    removePoster: Bool = false,
+    removeBackdrop: Bool = false
+  ) async throws -> CollectionSummary {
     guard let profile else { throw APIClientError.invalidResponse }
     let generation = connectionGeneration
     let client = APIClient(profile: profile)
+    let saved: CollectionSummary
     if let id {
-      _ = try await client.updateCollection(
-        id: id, name: name, mediaIds: mediaIds, isSmart: isSmart, isShared: isShared,
-        rulesJson: rulesJson)
+      saved = try await client.updateCollection(
+        id: id, name: name, mediaIds: members == nil ? mediaIds : nil, isSmart: isSmart,
+        isShared: isShared, rulesJson: rulesJson, overview: overview, sortMode: sortMode,
+        members: members)
     } else {
-      _ = try await client.createCollection(
-        name: name, mediaIds: mediaIds, isSmart: isSmart, isShared: isShared, rulesJson: rulesJson)
+      saved = try await client.createCollection(
+        name: name, mediaIds: members == nil ? mediaIds : nil, isSmart: isSmart,
+        isShared: isShared, rulesJson: rulesJson, overview: overview, sortMode: sortMode,
+        members: members)
     }
+
+    for (kind, pending, shouldRemove) in [
+      ("poster", posterUpload, removePoster),
+      ("backdrop", backdropUpload, removeBackdrop),
+    ] {
+      if shouldRemove, id != nil {
+        try? await client.deleteCollectionArtwork(id: saved.id, kind: kind)
+      } else if let pending {
+        var resolvedUploadId = pending.uploadId
+        if resolvedUploadId == nil, let bytes = pending.data {
+          resolvedUploadId = try await client.uploadCollectionEditorImage(id: saved.id, png: bytes).id
+        }
+        if let resolvedUploadId {
+          _ = try await client.saveCollectionArtwork(
+            id: saved.id, kind: kind,
+            request: SaveCollectionArtworkRequest(uploadId: resolvedUploadId, crop: pending.crop))
+        }
+      }
+    }
+
     guard isCurrent(generation) else { throw CancellationError() }
     try await refresh()
+    return saved
   }
 
-  func addMediaToCollection(collectionId: UUID, mediaId: UUID) async {
+  func addMediaToCollection(collectionId: UUID, mediaId: UUID, seasonNumber: Int? = nil) async {
     guard let profile else { return }
     let generation = connectionGeneration
     do {
       try await APIClient(profile: profile).addCollectionItem(
-        collectionId: collectionId, mediaId: mediaId)
+        collectionId: collectionId, mediaId: mediaId, seasonNumber: seasonNumber)
       guard isCurrent(generation) else { return }
       try await refresh()
     } catch {}
   }
 
-  func removeMediaFromCollection(collectionId: UUID, mediaId: UUID) async {
+  func removeMediaFromCollection(collectionId: UUID, mediaId: UUID, seasonNumber: Int? = nil)
+    async
+  {
     guard let profile else { return }
     let generation = connectionGeneration
     do {
       try await APIClient(profile: profile).removeCollectionItem(
-        collectionId: collectionId, mediaId: mediaId)
+        collectionId: collectionId, mediaId: mediaId, seasonNumber: seasonNumber)
       guard isCurrent(generation) else { return }
       try await refresh()
     } catch {}

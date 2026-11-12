@@ -558,3 +558,28 @@ test("the server policy keeps numbers in range and refuses impossible combinatio
   assert.match(serverPolicyDraft(stored, { maintenanceStartHour: 5, maintenanceEndHour: 5 }).problem, /different hours/);
   assert.equal(serverPolicyDraft(stored, { maximumEvents: "abc" }).draft.maximumEvents, 1000);
 });
+
+test("box set helpers format provider labels, stats, play labels, and continuous playlists", () => {
+  assert.equal(logic.collectionProviderLabel("tmdb"), "TMDB Collection");
+  assert.equal(logic.collectionProviderLabel("universe"), "Universe");
+  assert.equal(logic.collectionProviderLabel(null), null);
+
+  assert.equal(logic.collectionSubtitle({ provider: "tmdb", yearRange: "2008–2019", itemCount: 4, watchedCount: 2 }), "TMDB Collection · 2008–2019 · 2 of 4 watched");
+  assert.equal(logic.collectionSubtitle({ isSmart: true }), "Smart List");
+  assert.equal(logic.collectionStatsLine({ itemCount: 3, watchedCount: 1, yearRange: "2005–2012", totalRuntimeSeconds: 7200 }), "3 titles  ·  1 of 3 watched  ·  2005–2012  ·  2 h");
+
+  assert.equal(logic.collectionPlayLabel({ resume: true, item: { kind: "episode", seasonNumber: 2, episodeNumber: 4, title: "Turn" }, positionMilliseconds: 12000, itemIndex: 0, totalItems: 2 }), "Resume · S02 E04");
+  assert.equal(logic.collectionPlayLabel({ resume: false, item: { kind: "movie", title: "Part I" }, positionMilliseconds: 0, itemIndex: 0, totalItems: 2 }), "Play · Part I");
+
+  const playlist = logic.collectionPlayableItems({
+    members: [
+      { kind: "movie", item: { id: "m1", kind: "movie", title: "First" } },
+      { kind: "series", seasonNumber: 1, episodes: [{ id: "e1", kind: "episode" }, { id: "e2", kind: "episode" }] },
+      { kind: "episode", item: { id: "e2", kind: "episode" } },
+    ],
+  });
+  assert.deepEqual(playlist.map((p) => p.id), ["m1", "e1", "e2"]);
+  assert.equal(logic.adjacentItem(playlist, "e1", 1)?.id, "e2");
+  assert.equal(logic.adjacentItem(playlist, "e1", -1)?.id, "m1");
+  assert.equal(logic.adjacentItem(playlist, "e2", 1), null);
+});

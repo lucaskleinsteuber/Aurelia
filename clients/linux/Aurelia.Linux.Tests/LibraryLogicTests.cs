@@ -120,7 +120,7 @@ public sealed class LibraryLogicTests
         Assert.Equal("Late Night", request.Name);
         Assert.True(request.IsSmart);
         Assert.False(request.IsShared);
-        Assert.Empty(request.MediaIds);
+        Assert.Empty(request.MediaIds ?? []);
         Assert.Equal("""{"kind":"movie","genres":["Science Fiction","Drama"],"yearMin":2020,"watchedState":"unwatched","combination":"and"}""", request.RulesJson);
         Assert.Equal(1, model.MatchingCount);
         model.MatchAny = true;
@@ -204,5 +204,75 @@ public sealed class LibraryLogicTests
         Assert.DoesNotContain(LibraryDestination.History, saved.Hidden);
         prefs.ResetSidebar();
         Assert.Equal(SidebarLayout.DefaultOrder, prefs.Sidebar().Order);
+    }
+
+    [Fact]
+    public void BoxSetEditorSupportsSeasonsReorderAndZeroMembers()
+    {
+        var movie = Item("Orbit", year: 2024);
+        var series = Item("Cobalt Station", MediaKind.Series, year: 2023);
+        var model = new CollectionEditorModel([movie, series], null, null, canShare: true)
+        {
+            Name = "Sci-Fi Saga",
+            Overview = " Chronological order ",
+            SortMode = "release",
+        };
+        Assert.True(model.CanSave);
+        model.Toggle(movie);
+        model.ToggleMember(series.Id, 0, "Cobalt Station · Specials", MediaKind.Series);
+        model.ToggleMember(series.Id, 1, "Cobalt Station · Season 1", MediaKind.Series);
+        Assert.Equal(3, model.SelectedMembers.Count);
+        model.MoveMember(2, -1);
+        Assert.Equal(1, model.SelectedMembers[1].SeasonNumber);
+        Assert.Equal("custom", model.SortMode);
+        model.SortMode = "release";
+        model.RemoveMemberAt(0);
+        var req = model.Request();
+        Assert.Equal("Chronological order", req.Overview);
+        Assert.Equal("release", req.SortMode);
+        Assert.NotNull(req.Members);
+        Assert.Equal([1, 0], req.Members!.Select(m => m.SeasonNumber));
+    }
+
+    [Fact]
+    public async Task BoxSetPresentationAndArtworkCacheDifferentiateProvidersAndPaths()
+    {
+        var tmdbBox = new CollectionSummary(Guid.NewGuid(), "Trilogy", null, [], TotalCount: 3, IsShared: true,
+            Provider: "tmdb", CanEdit: false, ItemCount: 3, WatchedCount: 1, YearRange: "2020–2024", SortMode: "release");
+        var customBox = new CollectionSummary(Guid.NewGuid(), "Mine", null, [], TotalCount: 1, IsShared: false, UserId: FakeLibrary.OwnerId,
+            CanEdit: true, ItemCount: 1, WatchedCount: 0);
+        Assert.Equal("TMDB Collection", BoxSetPresentation.ProviderLabel(tmdbBox.Provider));
+
+        var ep1 = new CatalogItemSummary(Guid.NewGuid(), MediaKind.Episode, "Ep 1", null, 2024, null, [], null, null,
+            MediaAvailability.Available, false, null, DateTimeOffset.UtcNow, "Cobalt Station", 1, 1);
+        Assert.Equal("Resume · S01 E01", BoxSetPresentation.PlayLabel(
+            new CollectionNextResponse(ep1, Resume: true, 120_000, 0, 3)));
+
+        var server = FakeLibrary.Create(pictures: false);
+        var colArtId = Guid.NewGuid();
+        server.Image($"/api/v1/artwork/collection/{colArtId}", [1, 2, 3, 4]);
+        using var api = new Aurelia.Linux.Core.Api.AureliaApi(server);
+        var stored = new Aurelia.Linux.Core.Connection.StoredServer(
+            FakeServer.ServerId, "Living Room Server", new Uri("https://192.168.1.20:43111"), FakeServer.Fingerprint,
+            "device-token-synthetic-0000000000000000000001", Guid.NewGuid(), DateTimeOffset.UtcNow.AddDays(30));
+        var session = new Aurelia.Linux.Core.Connection.ProfileSession(
+            new UserSummary(FakeLibrary.OwnerId, "Lucas", UserRole.Owner, DateTimeOffset.UtcNow),
+            Guid.NewGuid(), "profile-token-synthetic-0000000000000000001", DateTimeOffset.UtcNow.AddHours(12));
+        var client = new LibraryClient(api, stored, session, ["collections-v3", "artwork-variants-v1"]);
+        var cache = new ArtworkCache(null);
+        var store = new LibraryStore(client, cache, new GeneralPreferences(new MemorySettingsStore()), _ => { });
+
+        Assert.False(BoxSetPresentation.CanEditCollection(tmdbBox, store));
+        Assert.True(BoxSetPresentation.CanEditCollection(customBox, store));
+
+        var poster = new ArtworkSummary(colArtId, ArtworkKind.Poster, $"/api/v1/artwork/collection/{colArtId}?kind=poster&rev=2", "image/webp", 640, 2);
+        var backdrop = new ArtworkSummary(colArtId, ArtworkKind.Backdrop, $"/api/v1/artwork/collection/{colArtId}?kind=backdrop&rev=2", "image/webp", 1280, 2);
+        Assert.Equal([1, 2, 3, 4], await cache.GetAsync(client, poster, 320, CancellationToken.None));
+        Assert.Equal([1, 2, 3, 4], await cache.GetAsync(client, backdrop, 320, CancellationToken.None));
+        Assert.Contains($"GET /api/v1/artwork/collection/{colArtId}?kind=poster&rev=2&width=320", server.RequestUris);
+        Assert.Contains($"GET /api/v1/artwork/collection/{colArtId}?kind=backdrop&rev=2&width=320", server.RequestUris);
+
+        await client.FranchisesAsync(CancellationToken.None);
+        Assert.Contains("GET /api/v1/catalog/franchises", server.Requests);
     }
 }

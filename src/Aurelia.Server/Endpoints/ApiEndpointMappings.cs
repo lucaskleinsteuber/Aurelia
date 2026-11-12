@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Net.Http.Headers;
+using System.Text.Json;
 using Aurelia.Contracts;
 using Aurelia.Server.Authentication;
 using Aurelia.Server.Data;
@@ -87,10 +89,18 @@ public static class ApiEndpointMappings
         var collections = api.MapGroup("/collections").RequireAuthorization();
         collections.MapGet(string.Empty, ListCollectionsAsync);
         collections.MapPost(string.Empty, CreateCollectionAsync);
+        collections.MapGet("/{collectionId:guid}", GetCollectionAsync);
         collections.MapPut("/{collectionId:guid}", UpdateCollectionAsync);
+        collections.MapPut("/{collectionId:guid}/order", ReorderCollectionAsync);
+        collections.MapGet("/{collectionId:guid}/next", GetCollectionNextAsync);
         collections.MapDelete("/{collectionId:guid}", DeleteCollectionAsync);
         collections.MapPost("/{collectionId:guid}/items/{mediaId:guid}", AddCollectionItemAsync);
         collections.MapDelete("/{collectionId:guid}/items/{mediaId:guid}", RemoveCollectionItemAsync);
+        collections.MapPost("/{collectionId:guid}/artwork/{kind}", SaveCollectionArtworkAsync);
+        collections.MapDelete("/{collectionId:guid}/artwork/{kind}", DeleteCollectionArtworkAsync);
+        collections.MapPost("/{collectionId:guid}/editor/uploads", UploadCollectionArtworkDraftAsync);
+        collections.MapGet("/{collectionId:guid}/editor/uploads/{upload:guid}", GetCollectionArtworkDraftAsync);
+        collections.MapDelete("/{collectionId:guid}/editor/uploads/{upload:guid}", DiscardCollectionArtworkDraftAsync);
         collections.MapPost("/from-franchise/{franchiseId:guid}", CreateCollectionFromFranchiseAsync);
 
         var history = api.MapGroup("/history").RequireAuthorization();
@@ -177,6 +187,12 @@ public static class ApiEndpointMappings
         api.MapMethods("/artwork/{artworkId:guid}", [HttpMethods.Get, HttpMethods.Head], ArtworkAsync)
             .RequireAuthorization()
             .WithDisplayName("Artwork");
+        api.MapMethods("/artwork/collection/{collectionId:guid}", [HttpMethods.Get, HttpMethods.Head], CollectionArtworkAsync)
+            .RequireAuthorization()
+            .WithDisplayName("Collection artwork");
+        api.MapMethods("/artwork/collection/{collectionId:guid}/{kind}", [HttpMethods.Get, HttpMethods.Head], CollectionArtworkByKindAsync)
+            .RequireAuthorization()
+            .WithDisplayName("Collection artwork by kind");
         api.MapGet("/sync/changes", GetSyncChangesAsync).RequireAuthorization();
     }
 
@@ -650,20 +666,129 @@ public static class ApiEndpointMappings
     private static Task<IResult> ListFranchisesAsync(HttpContext context, int? offset, int? limit, PresentationService presentation, CancellationToken cancellationToken) =>
         ExecuteAsync(() => presentation.FranchisesAsync(context.User.RequireUserId(), offset ?? 0, limit ?? 100, cancellationToken));
 
+    private static readonly JsonSerializerOptions CollectionWebJson = new(JsonSerializerDefaults.Web);
+
+    private static Task<IResult> GetCollectionAsync(HttpContext context, Guid collectionId, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => presentation.GetCollectionAsync(context.User.RequireUserId(), collectionId, cancellationToken));
+
     private static Task<IResult> CreateCollectionAsync(HttpContext context, SaveCollectionRequest request, PresentationService presentation, CancellationToken cancellationToken) =>
         ExecuteAsync(() => presentation.CreateCollectionAsync(context.User.RequireUserId(), request, cancellationToken));
 
     private static Task<IResult> UpdateCollectionAsync(HttpContext context, Guid collectionId, SaveCollectionRequest request, PresentationService presentation, CancellationToken cancellationToken) =>
         ExecuteAsync(() => presentation.UpdateCollectionAsync(context.User.RequireUserId(), collectionId, request, cancellationToken));
 
+    private static Task<IResult> ReorderCollectionAsync(HttpContext context, Guid collectionId, CollectionOrderRequest request, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => presentation.ReorderCollectionAsync(context.User.RequireUserId(), collectionId, request, cancellationToken));
+
+    private static Task<IResult> GetCollectionNextAsync(HttpContext context, Guid collectionId, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => presentation.GetCollectionNextAsync(context.User.RequireUserId(), collectionId, cancellationToken));
+
     private static Task<IResult> DeleteCollectionAsync(HttpContext context, Guid collectionId, PresentationService presentation, CancellationToken cancellationToken) =>
         ExecuteNoContentAsync(() => presentation.DeleteCollectionAsync(context.User.RequireUserId(), collectionId, cancellationToken));
 
-    private static Task<IResult> AddCollectionItemAsync(HttpContext context, Guid collectionId, Guid mediaId, PresentationService presentation, CancellationToken cancellationToken) =>
-        ExecuteNoContentAsync(() => presentation.AddCollectionItemAsync(context.User.RequireUserId(), collectionId, mediaId, cancellationToken));
+    private static Task<IResult> AddCollectionItemAsync(HttpContext context, Guid collectionId, Guid mediaId, int? seasonNumber, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteNoContentAsync(() => presentation.AddCollectionItemAsync(context.User.RequireUserId(), collectionId, mediaId, seasonNumber, cancellationToken));
 
-    private static Task<IResult> RemoveCollectionItemAsync(HttpContext context, Guid collectionId, Guid mediaId, PresentationService presentation, CancellationToken cancellationToken) =>
-        ExecuteNoContentAsync(() => presentation.RemoveCollectionItemAsync(context.User.RequireUserId(), collectionId, mediaId, cancellationToken));
+    private static Task<IResult> RemoveCollectionItemAsync(HttpContext context, Guid collectionId, Guid mediaId, int? seasonNumber, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteNoContentAsync(() => presentation.RemoveCollectionItemAsync(context.User.RequireUserId(), collectionId, mediaId, seasonNumber, cancellationToken));
+
+    private static Task<IResult> SaveCollectionArtworkAsync(
+        HttpContext context,
+        Guid collectionId,
+        string kind,
+        PresentationService presentation,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(async () =>
+        {
+            var artworkKind = ParseCollectionArtworkKind(kind);
+            var userId = context.User.RequireUserId();
+            var sessionId = context.User.RequireSessionId();
+            if (context.Request.HasJsonContentType())
+            {
+                SaveCollectionArtworkRequest? json;
+                try
+                {
+                    json = await JsonSerializer.DeserializeAsync<SaveCollectionArtworkRequest>(context.Request.Body, CollectionWebJson, cancellationToken);
+                }
+                catch (JsonException)
+                {
+                    json = null;
+                }
+                if (json is null)
+                    throw new AccountException("invalid_artwork", "Provide a valid collection artwork request.", StatusCodes.Status400BadRequest);
+                return await presentation.SaveCollectionArtworkAsync(userId, sessionId, collectionId, artworkKind, null, json, null, cancellationToken);
+            }
+
+            var queryCrop = ParseQueryCrop(context.Request.Query);
+            return await presentation.SaveCollectionArtworkAsync(userId, sessionId, collectionId, artworkKind, context.Request.Body, null, queryCrop, cancellationToken);
+        });
+
+    private static Task<IResult> DeleteCollectionArtworkAsync(
+        HttpContext context,
+        Guid collectionId,
+        string kind,
+        PresentationService presentation,
+        CancellationToken cancellationToken) =>
+        ExecuteNoContentAsync(() => presentation.RemoveCollectionArtworkAsync(
+            context.User.RequireUserId(), collectionId, ParseCollectionArtworkKind(kind), cancellationToken));
+
+    private static Task<IResult> UploadCollectionArtworkDraftAsync(
+        HttpContext context,
+        Guid collectionId,
+        PresentationService presentation,
+        EditorArtworkStore images,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(async () =>
+        {
+            var userId = context.User.RequireUserId();
+            await presentation.EnsureCanEditCollectionAsync(userId, collectionId, cancellationToken);
+            return await images.UploadAsync(
+                collectionId,
+                userId,
+                context.User.RequireSessionId(),
+                context.Request.Body,
+                cancellationToken,
+                $"/api/v1/collections/{collectionId}/editor/uploads/{{0:D}}");
+        });
+
+    private static async Task<IResult> GetCollectionArtworkDraftAsync(
+        HttpContext context,
+        Guid collectionId,
+        Guid upload,
+        PresentationService presentation,
+        EditorArtworkStore images,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var userId = context.User.RequireUserId();
+            await presentation.EnsureCanEditCollectionAsync(userId, collectionId, cancellationToken);
+            var path = images.DraftPath(upload, collectionId, userId, context.User.RequireSessionId());
+            return File.Exists(path) ? MediaEditingEndpoints.Image(context, path) : Results.NotFound();
+        }
+        catch (AccountException exception)
+        {
+            return Problem(exception.Code, exception.Message, exception.StatusCode);
+        }
+        catch (MetadataException exception)
+        {
+            return Problem(exception.Code, exception.Message, exception.StatusCode);
+        }
+    }
+
+    private static Task<IResult> DiscardCollectionArtworkDraftAsync(
+        HttpContext context,
+        Guid collectionId,
+        Guid upload,
+        PresentationService presentation,
+        EditorArtworkStore images,
+        CancellationToken cancellationToken) =>
+        ExecuteNoContentAsync(async () =>
+        {
+            var userId = context.User.RequireUserId();
+            await presentation.EnsureCanEditCollectionAsync(userId, collectionId, cancellationToken);
+            images.Discard(upload, collectionId, userId, context.User.RequireSessionId());
+        });
 
     private static Task<IResult> CreateCollectionFromFranchiseAsync(HttpContext context, Guid franchiseId, PresentationService presentation, CancellationToken cancellationToken) =>
         ExecuteAsync(() => presentation.CreateCollectionFromFranchiseAsync(context.User.RequireUserId(), franchiseId, cancellationToken));
@@ -875,6 +1000,97 @@ public static class ApiEndpointMappings
             catch { await source.Stream.DisposeAsync(); throw; }
         }
         return Results.File(source.Stream, source.ContentType, lastModified: source.LastModified, entityTag: entityTag);
+    }
+
+    private static Task<IResult> CollectionArtworkAsync(
+        HttpContext context,
+        Guid collectionId,
+        string? kind,
+        int? width,
+        long? rev,
+        PresentationService presentation,
+        CancellationToken cancellationToken) =>
+        ServeCollectionArtworkAsync(context, collectionId, kind ?? "poster", width, rev, presentation, cancellationToken);
+
+    private static Task<IResult> CollectionArtworkByKindAsync(
+        HttpContext context,
+        Guid collectionId,
+        string kind,
+        int? width,
+        long? rev,
+        PresentationService presentation,
+        CancellationToken cancellationToken) =>
+        ServeCollectionArtworkAsync(context, collectionId, kind, width, rev, presentation, cancellationToken);
+
+    private static async Task<IResult> ServeCollectionArtworkAsync(
+        HttpContext context,
+        Guid collectionId,
+        string kind,
+        int? width,
+        long? rev,
+        PresentationService presentation,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var artworkKind = ParseCollectionArtworkKind(kind);
+            var result = await presentation.ResolveCollectionImageAsync(context.User.RequireUserId(), collectionId, artworkKind, width, cancellationToken);
+            if (result is null) return Results.NotFound();
+
+            context.Response.Headers.CacheControl = rev == result.Revision ? "private, max-age=31536000, immutable" : "private, no-cache";
+            context.Response.Headers.XContentTypeOptions = "nosniff";
+            var entityTag = ArtworkEntityTag(result.EntityId, result.Revision, width ?? 0);
+            if (IsUnchanged(context, entityTag))
+            {
+                if (result.Stream is not null) await result.Stream.DisposeAsync();
+                context.Response.Headers.ETag = entityTag.ToString();
+                return Results.StatusCode(StatusCodes.Status304NotModified);
+            }
+
+            if (result.Stream is not null)
+            {
+                return Results.File(result.Stream, result.ContentType, lastModified: result.LastModified, entityTag: entityTag);
+            }
+            return Results.Bytes(result.Bytes ?? [], result.ContentType, lastModified: result.LastModified, entityTag: entityTag);
+        }
+        catch (AccountException exception)
+        {
+            return Problem(exception.Code, exception.Message, exception.StatusCode);
+        }
+        catch (MetadataException exception)
+        {
+            return Problem(exception.Code, exception.Message, exception.StatusCode);
+        }
+    }
+
+    private static ArtworkKind ParseCollectionArtworkKind(string? value) =>
+        value?.Trim().ToLowerInvariant() switch
+        {
+            "poster" => ArtworkKind.Poster,
+            "backdrop" => ArtworkKind.Backdrop,
+            _ => throw new AccountException("invalid_artwork_kind", "Collections only support poster or backdrop artwork.", StatusCodes.Status400BadRequest),
+        };
+
+    private static ArtworkCrop? ParseQueryCrop(IQueryCollection query)
+    {
+        if (!query.TryGetValue("x", out var xRaw) || !query.TryGetValue("y", out var yRaw)
+            || !query.TryGetValue("width", out var wRaw) || !query.TryGetValue("height", out var hRaw))
+        {
+            return null;
+        }
+        if (!double.TryParse(xRaw, NumberStyles.Float, CultureInfo.InvariantCulture, out var x)
+            || !double.TryParse(yRaw, NumberStyles.Float, CultureInfo.InvariantCulture, out var y)
+            || !double.TryParse(wRaw, NumberStyles.Float, CultureInfo.InvariantCulture, out var w)
+            || !double.TryParse(hRaw, NumberStyles.Float, CultureInfo.InvariantCulture, out var h))
+        {
+            return null;
+        }
+        var rotation = 0;
+        if (query.TryGetValue("rotation", out var rotRaw) && int.TryParse(rotRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedRot))
+        {
+            rotation = parsedRot;
+        }
+        return new ArtworkCrop(x, y, w, h, rotation);
     }
 
     // Variants are deterministic per artwork revision and width; "v1" changes with the encoder.

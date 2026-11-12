@@ -152,7 +152,7 @@ function showServerOff() {
 const settings = createSettings({ api, state, navigate, toast, handleError, profilePicture, switchProfile, confirmSignOut,
   rememberPhoto, updateProfile, pictureAddress, startTour: () => { navigate({ name: "home" }); setTimeout(() => startTour(), 400); } });
 
-const catalog = createCatalogView({ api, navigate, posterCard, collectionCard, emptyState, openMenu, menuOption, handleError, toast,
+const catalog = createCatalogView({ api, navigate, artwork: (...args) => artwork(...args), progressBar: (progress) => progressBar(progress), posterCard, collectionCard, emptyState, openMenu, menuOption, handleError, toast,
   play: playTitle, canManage: () => logic.managementPermissions(state.profile).administrator,
   editMetadata: (item) => settings.editMetadata(item),
   isWatchlisted: (mediaId) => state.watchlistIds.has(mediaId),
@@ -1209,14 +1209,21 @@ function continueCard(item) {
 }
 
 function collectionCard(collection, offset = 0) {
-  const count = collection.totalCount ?? collection.items?.length ?? 0;
-  return h("a", { class: "poster-card", href: logic.routePath({ name: "collection", id: collection.id, ...(offset ? { offset } : {}) }), "data-route": true },
-    h("div", { class: "poster-frame" },
-      artwork(collection.poster ?? collection.items?.[0]?.poster, 320, "poster-art", ""),
-      collection.isSmart ? h("span", { class: "badge", style: { top: "8px", left: "8px" } }, "Smart") : null,
-      h("span", { class: "badge count-badge" }, String(count))),
+  const count = collection.itemCount ?? collection.totalCount ?? collection.items?.length ?? 0;
+  const badgeText = collection.isSmart ? "Smart" : collection.provider === "tmdb" ? "TMDB" : collection.provider === "universe" ? "Universe" : null;
+  const progress = (collection.itemCount ?? 0) > 0 && (collection.watchedCount ?? 0) > 0
+    ? { positionMilliseconds: collection.watchedCount, durationMilliseconds: collection.itemCount }
+    : null;
+  return h("a", { class: "poster-card box-card", href: logic.routePath({ name: "collection", id: collection.id, ...(offset ? { offset } : {}) }), "data-route": true },
+    h("div", { class: "box-stack" },
+      h("div", { class: "poster-frame" },
+        artwork(collection.poster ?? collection.items?.[0]?.poster, 320, "poster-art", ""),
+        collection.poster ?? collection.items?.[0]?.poster ? null : h("div", { class: "poster-fallback" }, collection.name),
+        badgeText ? h("span", { class: "badge", style: { top: "8px", left: "8px" } }, badgeText) : null,
+        h("span", { class: "badge count-badge" }, String(count)),
+        progressBar(progress))),
     h("div", { class: "card-title" }, collection.name),
-    h("div", { class: "card-subtitle" }, collection.isSmart ? "Smart List" : "Collection"));
+    h("div", { class: "card-subtitle" }, logic.collectionSubtitle(collection)));
 }
 
 function emptyState(symbol, title, text, action) {
@@ -1458,12 +1465,18 @@ function seasonsSection(item, seasons, target) {
       ...seasons.map((season) => menuOption(logic.seasonTitle(season.number), season === current, () => show(season, true))),
       h("div", { class: "menu-divider" }),
       ...watchMenu(item, "season", current.number),
+      h("div", { class: "menu-divider" }),
+      h("button", { class: "menu-item", onclick: () => catalog.openAddToCollectionDialog(item, current.number) }, icon("plus", { size: 16 }), "Add Season to Collection…"),
     ]);
   });
   titleButton.addEventListener("contextmenu", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    openMenu(titleButton, watchMenu(item, "season", current.number));
+    openMenu(titleButton, [
+      ...watchMenu(item, "season", current.number),
+      h("div", { class: "menu-divider" }),
+      h("button", { class: "menu-item", onclick: () => catalog.openAddToCollectionDialog(item, current.number) }, icon("plus", { size: 16 }), "Add Season to Collection…"),
+    ]);
   });
   show(current, false);
   return h("section", { class: "detail-section" },
@@ -1931,7 +1944,7 @@ function showMiniRemote(device, target) {
 
 // MARK: Playing
 
-async function playTitle(item, seasons, { intent = "play", skipCinema = false, onFinished } = {}) {
+async function playTitle(item, seasons, { intent = "play", skipCinema = false, onFinished, playlist } = {}) {
   let target = item;
   try {
     // A show starts where its plan says: the next or the started episode.
@@ -1955,12 +1968,12 @@ async function playTitle(item, seasons, { intent = "play", skipCinema = false, o
     api,
     item: target, intent, onFinished,
     preferenceScope: `${state.server?.serverId ?? location.origin}:${state.profile?.id ?? ""}`,
-    next: async () => (target.kind === "episode" ? logic.nextEpisode(seasons, target.id) : null),
-    previous: async () => (target.kind === "episode" ? logic.previousEpisode(seasons, target.id) : null),
+    next: async () => (playlist?.length ? logic.adjacentItem(playlist, target.id, 1) : target.kind === "episode" ? logic.nextEpisode(seasons, target.id) : null),
+    previous: async () => (playlist?.length ? logic.adjacentItem(playlist, target.id, -1) : target.kind === "episode" ? logic.previousEpisode(seasons, target.id) : null),
     // After a movie or a series' last episode, the server suggests what follows.
     suggestions: !onFinished && state.server?.capabilities?.includes("suggestions-v1") ? () => api.suggestions(target.id, 3) : undefined,
     onPlaySuggestion: (next) => playTitle(next),
-    onPlayNext: (next, options) => playTitle(next, seasons, options),
+    onPlayNext: (next, options) => playTitle(next, seasons, { ...options, playlist }),
     onShowShortcuts: () => showShortcutsDialog(),
     onClose: () => {
       if (state.player === player) state.player = null;

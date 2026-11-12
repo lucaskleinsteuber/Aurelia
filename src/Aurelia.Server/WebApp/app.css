@@ -1918,3 +1918,115 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .trim-times { display: flex; flex-wrap: wrap; gap: 18px; margin: 8px 0; }
 .trim-time { font-variant-numeric: tabular-nums; min-width: 4.5em; }
 @media (max-width: 600px) { .segments-row { grid-template-columns: 1fr 1fr; } }
+
+/* Box Sets: stacked shelf cards, hero with box cover, ordered member rows, and picker */
+.box-stack { position: relative; padding-top: 6px; }
+.box-stack::before, .box-stack::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 0;
+  height: 12px;
+  border-radius: calc(var(--card-radius) - 2px) calc(var(--card-radius) - 2px) 0 0;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-bottom: 0;
+  pointer-events: none;
+}
+.box-stack::before { top: 0; left: 16px; right: 16px; opacity: 0.55; }
+.box-stack::after { top: 3px; opacity: 0.85; }
+.box-stack > .poster-frame { position: relative; z-index: 1; }
+
+.box-hero { height: auto; min-height: clamp(360px, 52vh, 540px); padding-top: 76px; }
+.box-hero-layout {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 28px;
+  padding: 0 var(--gutter) 32px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.box-hero-cover {
+  flex: 0 0 auto;
+  width: clamp(132px, 16vw, 192px);
+  aspect-ratio: 2 / 3;
+  border-radius: var(--card-radius);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
+  background: var(--surface);
+}
+.box-hero-cover .poster-art { width: 100%; height: 100%; object-fit: cover; display: block; }
+.box-hero .detail-hero-content { padding: 0; flex: 1; min-width: 0; max-width: 760px; }
+.box-progress-row { display: flex; align-items: center; gap: 12px; margin-top: 4px; max-width: 420px; }
+.box-progress-track { flex: 1; height: 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.2); overflow: hidden; }
+.box-progress-fill { height: 100%; border-radius: 999px; background: #fff; }
+
+.box-members { padding: 24px var(--gutter) 48px; display: flex; flex-direction: column; gap: 12px; }
+.box-member-item {
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  transition: border-color 0.2s, background-color 0.2s;
+}
+.box-member-item.dragging { opacity: 0.55; border-color: var(--accent); }
+.box-member-row {
+  display: grid;
+  grid-template-columns: 32px 60px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+}
+.box-member-index { text-align: center; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--muted); }
+.box-member-thumb { width: 60px; aspect-ratio: 2 / 3; border-radius: 8px; overflow: hidden; background: var(--raised); border: 1px solid var(--hairline); display: block; }
+.box-member-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.box-member-info { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.box-member-title { font-weight: 600; font-size: 15px; color: var(--text); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.box-member-title:hover { text-decoration: underline; }
+.box-member-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.box-member-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.box-member-episodes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  padding: 0 14px 14px 58px;
+}
+.box-episode-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hairline);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.box-episode-pill:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.28); background: rgba(255, 255, 255, 0.08); }
+
+.collection-editor-sheet { width: min(760px, calc(100vw - 32px)); }
+.box-editor-list { display: flex; flex-direction: column; gap: 8px; max-height: 240px; overflow-y: auto; }
+.box-editor-member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--hairline);
+}
+.box-editor-member.dragging { opacity: 0.55; border-color: var(--accent); }
+.box-picker-results { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; margin-top: 8px; }
+.box-picker-seasons { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0 6px 14px; }
+
+@media (max-width: 720px) {
+  .box-hero-layout { flex-direction: column; align-items: flex-start; gap: 16px; }
+  .box-hero-cover { width: 120px; }
+  .box-member-row { grid-template-columns: 24px 48px minmax(0, 1fr); }
+  .box-member-actions { grid-column: 1 / -1; justify-content: flex-end; }
+  .box-member-episodes { padding-left: 14px; }
+}

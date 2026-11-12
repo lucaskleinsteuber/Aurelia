@@ -99,32 +99,18 @@ public sealed class SmartListEvaluator
         int offset,
         int limit,
         CancellationToken cancellationToken,
-        IReadOnlyCollection<Guid>? watchlist = null)
+        IReadOnlyCollection<Guid>? watchlist = null,
+        string? sortMode = null)
     {
-        var cacheKey = $"{userId}:{JsonSerializer.Serialize(rules)}";
-        List<Guid> matchedIds;
+        var (matchedIds, total) = await EvaluateIdsAsync(database, userId, rules, offset, limit, cancellationToken, watchlist, sortMode);
 
-        // A watchlist changes with every tap, so those lists are always chosen afresh.
-        if (rules.WatchlistOnly != true && Cache.TryGetValue(cacheKey, out var entry) && (DateTimeOffset.UtcNow - entry.CachedAt) < CacheDuration)
-        {
-            matchedIds = entry.ItemIds;
-        }
-        else
-        {
-            matchedIds = await QueryMatchedIdsAsync(database, userId, rules, watchlist, cancellationToken);
-            if (rules.WatchlistOnly != true) Remember(cacheKey, matchedIds);
-        }
-
-        var total = matchedIds.Count;
-        var pagedIds = matchedIds.Skip(offset).Take(limit).ToList();
-
-        if (pagedIds.Count == 0)
+        if (matchedIds.Count == 0)
         {
             return (Array.Empty<MediaItem>(), total);
         }
 
         var items = await database.MediaItems.AsNoTracking()
-            .Where(item => pagedIds.Contains(item.Id))
+            .Where(item => matchedIds.Contains(item.Id))
             .Include(item => item.Metadata)
                 .ThenInclude(metadata => metadata!.Artwork)
             .Include(item => item.Favorites)
@@ -137,10 +123,45 @@ public sealed class SmartListEvaluator
 
         // Preserve order of pagedIds
         var itemMap = items.ToDictionary(item => item.Id);
-        var ordered = pagedIds.Where(id => itemMap.ContainsKey(id)).Select(id => itemMap[id]).ToList();
+        var ordered = matchedIds.Where(id => itemMap.ContainsKey(id)).Select(id => itemMap[id]).ToList();
 
         return (ordered, total);
     }
+
+    internal static async Task<(IReadOnlyList<Guid> Ids, int TotalCount)> EvaluateIdsAsync(
+        AureliaDbContext database,
+        Guid userId,
+        SmartCollectionRules rules,
+        int offset,
+        int limit,
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<Guid>? watchlist = null,
+        string? sortMode = null)
+    {
+        var normalizedSort = NormalizeSort(sortMode);
+        var cacheKey = $"{userId}:{normalizedSort}:{JsonSerializer.Serialize(rules)}";
+        List<Guid> matchedIds;
+
+        // A watchlist changes with every tap, so those lists are always chosen afresh.
+        if (rules.WatchlistOnly != true && Cache.TryGetValue(cacheKey, out var entry) && (DateTimeOffset.UtcNow - entry.CachedAt) < CacheDuration)
+        {
+            matchedIds = entry.ItemIds;
+        }
+        else
+        {
+            matchedIds = await QueryMatchedIdsAsync(database, userId, rules, watchlist, normalizedSort, cancellationToken);
+            if (rules.WatchlistOnly != true) Remember(cacheKey, matchedIds);
+        }
+
+        return (matchedIds.Skip(offset).Take(limit).ToList(), matchedIds.Count);
+    }
+
+    private static string NormalizeSort(string? sortMode) => sortMode?.ToLowerInvariant() switch
+    {
+        "release" => "release",
+        "custom" => "custom",
+        _ => "title",
+    };
 
     public static async Task<int> CountAsync(
         AureliaDbContext database,
@@ -148,13 +169,13 @@ public sealed class SmartListEvaluator
         SmartCollectionRules rules,
         CancellationToken cancellationToken)
     {
-        var cacheKey = $"{userId}:{JsonSerializer.Serialize(rules)}";
+        var cacheKey = $"{userId}:title:{JsonSerializer.Serialize(rules)}";
         if (Cache.TryGetValue(cacheKey, out var entry) && (DateTimeOffset.UtcNow - entry.CachedAt) < CacheDuration)
         {
             return entry.ItemIds.Count;
         }
 
-        var matchedIds = await QueryMatchedIdsAsync(database, userId, rules, null, cancellationToken);
+        var matchedIds = await QueryMatchedIdsAsync(database, userId, rules, null, "title", cancellationToken);
         Remember(cacheKey, matchedIds);
         return matchedIds.Count;
     }
@@ -171,6 +192,7 @@ public sealed class SmartListEvaluator
         Guid userId,
         SmartCollectionRules rules,
         IReadOnlyCollection<Guid>? watchlist,
+        string sortMode,
         CancellationToken cancellationToken)
     {
         var query = database.MediaItems.AsNoTracking()
@@ -269,9 +291,22 @@ public sealed class SmartListEvaluator
             query = query.Where(conditions.Aggregate(Either));
         else
             foreach (var condition in conditions) query = query.Where(condition);
-        return await query
-            .OrderBy(item => item.DetectedTitle)
-            .ThenBy(item => item.Id)
+        IOrderedQueryable<MediaItem> ordered = sortMode switch
+        {
+            "release" => query
+                .OrderBy(item => item.Metadata != null ? (item.Metadata.ManualReleaseYear ?? item.Year ?? int.MaxValue) : (item.Year ?? int.MaxValue))
+                .ThenBy(item => item.Metadata != null ? (item.Metadata.ManualReleaseDate ?? item.Metadata.ProviderReleaseDate ?? "") : "")
+                .ThenBy(item => item.Metadata != null ? (item.Metadata.ManualTitle ?? item.Metadata.ProviderTitle ?? item.OverrideTitle ?? item.DetectedTitle) : (item.OverrideTitle ?? item.DetectedTitle))
+                .ThenBy(item => item.Id),
+            "custom" => query
+                .OrderByDescending(item => item.CreatedAt)
+                .ThenBy(item => item.Metadata != null ? (item.Metadata.ManualTitle ?? item.Metadata.ProviderTitle ?? item.OverrideTitle ?? item.DetectedTitle) : (item.OverrideTitle ?? item.DetectedTitle))
+                .ThenBy(item => item.Id),
+            _ => query
+                .OrderBy(item => item.Metadata != null ? (item.Metadata.ManualTitle ?? item.Metadata.ProviderTitle ?? item.OverrideTitle ?? item.DetectedTitle) : (item.OverrideTitle ?? item.DetectedTitle))
+                .ThenBy(item => item.Id),
+        };
+        return await ordered
             .Select(item => item.Id)
             .Take(1000)
             .ToListAsync(cancellationToken);
