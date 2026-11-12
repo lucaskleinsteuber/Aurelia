@@ -74,6 +74,20 @@ struct TVContentButtonStyle: ButtonStyle {
   }
 }
 
+/// A card that brings its own colors, such as Wrapped: focus lifts it with a shadow and draws no
+/// platter around it, so no white or grey edge shows beside the card.
+struct TVCardButtonStyle: ButtonStyle {
+  @Environment(\.isFocused) private var focused
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .brightness(focused ? 0.06 : 0)
+      .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: 22, y: 12)
+      .scaleEffect(configuration.isPressed ? 0.98 : focused ? 1.03 : 1)
+      .animation(.easeOut(duration: 0.14), value: focused)
+  }
+}
+
 /// tvOS focus language: the focused control turns white with dark text and lifts.
 /// `primary` stays white like the Mac's primary capsule even without focus.
 struct TVButtonStyle: ButtonStyle {
