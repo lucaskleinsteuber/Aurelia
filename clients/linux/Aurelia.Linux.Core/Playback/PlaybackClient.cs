@@ -49,6 +49,11 @@ public sealed class PlaybackClient(AureliaApi api, LibraryClient library)
         (await Send<CinemaTrailersResponse>(HttpMethod.Get,
             $"/api/v1/media/{mediaId}/cinema-trailers?count={count.ToString(CultureInfo.InvariantCulture)}", null, cancellation)).Trailers;
 
+    /// <summary>What to watch after a title (servers from 2.11.0); an episode's are its series'.</summary>
+    public async Task<IReadOnlyList<MediaSuggestion>> SuggestionsAsync(Guid mediaId, int limit, CancellationToken cancellation) =>
+        (await Send<MediaSuggestionsResponse>(HttpMethod.Get,
+            $"/api/v1/media/{mediaId}/suggestions?limit={limit.ToString(CultureInfo.InvariantCulture)}", null, cancellation)).Suggestions;
+
     public Task SleepTimerEndedAsync(CancellationToken cancellation) =>
         Send<AureliaApi.NoContent>(HttpMethod.Post, "/api/v1/playback/sleep-timer-ended", null, cancellation);
 

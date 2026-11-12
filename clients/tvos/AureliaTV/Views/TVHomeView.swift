@@ -69,6 +69,11 @@ struct TVHomeView: View {
           if model.supportsMovieNight { movieNightRow }
           // Same order as the Mac Home page.
           shelf("Continue Watching", items: home.continueWatching, section: .continueWatching)
+          ForEach(home.becauseYouWatched ?? []) { rail in
+            genreShelf(
+              TVHomeGenreRow(
+                genre: "Because You Watched \(rail.sourceTitle)", items: rail.suggestions.map(\.item)))
+          }
           if model.supportsWatchlist && !model.watchlistItems.isEmpty {
             shelf("Watchlist", items: model.watchlistItems, section: .watchlist)
           }
@@ -132,6 +137,7 @@ struct TVHomeView: View {
               seriesID: request.target.kind == .episode ? request.target.parentId : nil,
               preferencesStore: model.environment.preferences,
               adaptiveStreaming: model.supportsAdaptiveStreaming,
+              supportsSuggestions: model.supportsSuggestions,
               onClose: { playback = nil },
               onSessionFailure: { failure in
                 guard model.session?.sessionId == session.sessionId else { return }
@@ -148,7 +154,7 @@ struct TVHomeView: View {
           Task {
             // The match plays the way Home plays anything, once Movie Night has closed.
             try? await Task.sleep(for: .milliseconds(700))
-            if let item = try? await model.client?.summary(id: mediaID) { play(item, fromMovieNight: true) }
+            if let item = try? await model.client?.summary(id: mediaID) { play(item, viaPlan: true) }
           }
         }
         .environmentObject(model)
@@ -159,6 +165,18 @@ struct TVHomeView: View {
       movieNight = nil
     }
     .onChange(of: model.remoteStopRequests) { _, _ in playback = nil }
+    .onChange(of: model.suggestedPlaybackItem) { _, item in
+      guard let item else { return }
+      model.suggestedPlaybackItem = nil
+      Task {
+        // The player closes first, so it saves its progress, then the suggestion plays.
+        if model.playerPresented { model.stopPlayer() }
+        for _ in 0..<20 where model.playerPresented {
+          try? await Task.sleep(for: .milliseconds(100))
+        }
+        play(item, viaPlan: true)
+      }
+    }
     .onChange(of: model.remotePlaybackItem) { _, item in
       guard let item else { return }
       model.remotePlaybackItem = nil
@@ -190,10 +208,12 @@ struct TVHomeView: View {
   }
 
   /// Continue Watching starts playback right away from the server's resume target.
-  private func play(_ item: TVCatalogItem, fromMovieNight: Bool = false) {
+  /// `viaPlan` plays a show from its plan (Movie Night's match, a suggestion): a show itself is
+  /// not playable; its plan picks the episode.
+  private func play(_ item: TVCatalogItem, viaPlan: Bool = false) {
     // Offline titles stay reachable in Continue Watching; selecting one explains why. A show
     // from Movie Night is not playable itself; its plan picks the episode.
-    guard item.isPlayable || (fromMovieNight && item.kind == .series) else {
+    guard item.isPlayable || (viaPlan && item.kind == .series) else {
       unavailable = item
       return
     }

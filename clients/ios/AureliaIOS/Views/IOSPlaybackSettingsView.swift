@@ -38,6 +38,16 @@ struct IOSPlaybackSettingsView: View {
           "Your server finds where an episode's intro and credits are. Show Skip Intro offers a button while the intro plays; Skip Automatically jumps past it once per episode, but never when you go back into it yourself. Up Next appears when the credits begin, with Watch Credits."
         )
       }
+      if model.capabilities?.supportsSuggestions == true {
+        Section {
+          Toggle("Play Suggestions Automatically", isOn: $value.playSuggestionsAutomatically)
+            .accessibilityIdentifier("settings-play-suggestions")
+        } footer: {
+          Text(
+            "When a movie or a series' last episode reaches its credits, your server suggests what to watch next, with Watch Now, Watch Credits and Done. Turned on, the suggestion starts by itself when the title ends; otherwise an end screen shows it with two more."
+          )
+        }
+      }
       if model.capabilities?.supportsCinema == true {
         Section {
           Toggle("Cinema Mode", isOn: $value.cinemaMode)

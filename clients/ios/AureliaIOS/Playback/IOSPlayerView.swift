@@ -50,7 +50,9 @@ struct IOSPlayerView: View {
           .accessibilityLabel("Show playback controls").accessibilityIdentifier(
             "player-wake-surface")
       }
-      if (controller.controlsVisible && !controller.isStarting) || controller.errorMessage != nil {
+      if !controller.showsSuggestionEndScreen,
+        (controller.controlsVisible && !controller.isStarting) || controller.errorMessage != nil
+      {
         controls
       }
       if let skip, !controller.controlsVisible { skipIndicator(skip) }
@@ -62,6 +64,14 @@ struct IOSPlayerView: View {
       }
       if let upNext = controller.upNext, !controller.controlsVisible, controller.trackMenu == nil {
         upNextCard(upNext)
+      }
+      if controller.showsSuggestion, let first = controller.suggestions.first,
+        !controller.controlsVisible, controller.trackMenu == nil
+      {
+        suggestionCard(first)
+      }
+      if controller.showsSuggestionEndScreen, !controller.suggestions.isEmpty {
+        suggestionEndScreen.transition(.opacity)
       }
       // Skip Intro while the intro plays; above the bottom controls while they show.
       if controller.showsSkipIntro, controller.upNext == nil, controller.trackMenu == nil,
@@ -108,6 +118,9 @@ struct IOSPlayerView: View {
         IOSSceneNoteCue(notes: notes, position: controller.position)
           .padding(.top, controller.controlsVisible ? 64 : 16).padding(.trailing, 16)
       }
+    }
+    .onChange(of: controller.suggestionToStart) { _, item in
+      if let item { model.suggestedPlaybackItem = item }
     }
     .task(id: controller.currentMediaID) {
       if notes == nil { notes = controller.makeSceneNotes() }
@@ -500,6 +513,81 @@ struct IOSPlayerView: View {
     .padding(.trailing, 16).padding(.bottom, controller.controlsVisible ? 120 : 16)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
     .animation(.easeOut(duration: 0.2), value: controller.controlsVisible)
+  }
+
+  /// After a movie or a series' last episode, from the credits on: the server's suggestion,
+  /// without a countdown.
+  private func suggestionCard(_ suggestion: IOSMediaSuggestion) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("UP NEXT").font(.caption2.weight(.bold)).tracking(1)
+        .foregroundStyle(.secondary)
+      Text(suggestion.item.title).font(.subheadline.weight(.semibold)).lineLimit(2)
+      Text(IOSPlayerPolicy.suggestionCaption(suggestion)).font(.caption).foregroundStyle(.secondary)
+        .lineLimit(2)
+      HStack(spacing: 8) {
+        Button {
+          controller.playSuggestion(suggestion.item)
+        } label: {
+          Label("Watch Now", systemImage: "play.fill")
+        }
+        .buttonStyle(.glassProminent).tint(.white).foregroundStyle(.black)
+        .accessibilityIdentifier("player-suggestion-play")
+        Button("Credits") { controller.dismissSuggestion() }
+          .buttonStyle(.glass)
+          .accessibilityLabel("Watch Credits")
+          .accessibilityHint("Keeps playing the credits")
+          .accessibilityIdentifier("player-suggestion-credits")
+        Button("Done") { controller.doneWithSuggestions() }
+          .buttonStyle(.glass)
+          .accessibilityHint("Closes the player")
+          .accessibilityIdentifier("player-suggestion-done")
+      }
+      .font(.footnote.weight(.semibold))
+    }
+    .padding(14)
+    .frame(width: 300, alignment: .leading)
+    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    .padding(.trailing, 16).padding(.bottom, 16)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("player-suggestion")
+  }
+
+  /// When the file ended: the suggestion and two more, and Done.
+  private var suggestionEndScreen: some View {
+    let list = Array(controller.suggestions.prefix(3))
+    return ZStack {
+      Color.black.opacity(0.82).ignoresSafeArea()
+      ScrollView {
+        VStack(spacing: 20) {
+          Text("What's Next").font(.title.weight(.bold))
+          HStack(alignment: .top, spacing: 16) {
+            ForEach(Array(list.enumerated()), id: \.element.id) { index, suggestion in
+              Button {
+                controller.playSuggestion(suggestion.item)
+              } label: {
+                VStack(alignment: .leading, spacing: 6) {
+                  IOSPosterLabel(item: suggestion.item)
+                  Text(IOSPlayerPolicy.suggestionCaption(suggestion)).font(.caption2)
+                    .foregroundStyle(.secondary).lineLimit(2)
+                }
+                .frame(width: index == 0 ? 140 : 110)
+              }
+              .buttonStyle(.plain)
+              .accessibilityHint("Watch now")
+              .accessibilityIdentifier("player-end-suggestion-\(index)")
+            }
+          }
+          Button("Done") { controller.doneWithSuggestions() }
+            .buttonStyle(.glass)
+            .accessibilityIdentifier("player-end-suggestions-done")
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+      }
+      .scrollBounceBehavior(.basedOnSize)
+    }
+    .accessibilityIdentifier("player-end-suggestions")
   }
 
   private func upNextCard(_ upNext: IOSUpNext) -> some View {

@@ -1081,6 +1081,16 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .up-next-subtitle { font-size: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .up-next .button-row { margin-top: 4px; }
 .up-next .primary-button span { font-variant-numeric: tabular-nums; }
+.suggestion-card { width: 400px; }
+.suggestion-end { position: absolute; inset: 0; z-index: 6; display: grid; place-items: center; background: rgba(0, 0, 0, 0.78); padding: 16px; overflow-y: auto; }
+.suggestion-end-panel { display: grid; justify-items: center; gap: 22px; max-width: 100%; }
+.suggestion-end-panel h2 { margin: 0; font-size: 34px; }
+.suggestion-end-items { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 28px; }
+.suggestion-end-item { display: grid; gap: 8px; width: 150px; }
+.suggestion-end-item.first { width: 200px; }
+.suggestion-end-poster { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 10px; background: var(--surface, #222); }
+.suggestion-end-item .primary-button, .suggestion-end-item .secondary-button { justify-self: start; }
+@media (max-width: 600px) { .suggestion-card { width: auto; left: 16px; right: 16px; } .suggestion-end-item, .suggestion-end-item.first { width: 130px; } }
 
 /* "Skip Intro" while an episode's intro plays; it stays when the controls hide. */
 .skip-intro {

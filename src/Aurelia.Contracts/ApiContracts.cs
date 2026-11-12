@@ -785,4 +785,5 @@ public sealed record HomeResponse(
     IReadOnlyList<CatalogItemSummary> RecentlyAdded,
     IReadOnlyList<CatalogItemSummary> Favorites,
     IReadOnlyList<CollectionSummary> Collections,
-    DateTimeOffset RecommendationChangesAt);
+    DateTimeOffset RecommendationChangesAt,
+    IReadOnlyList<HomeSuggestionRail>? BecauseYouWatched = null);

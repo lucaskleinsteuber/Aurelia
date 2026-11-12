@@ -9,7 +9,7 @@ public static class ServerFeatures
     {
         "library-state-v1", "server-readiness-v1", "device-authorization-v1", "artwork-variants-v1",
         "catalog-pages-500-v1", PreviewStreams, WebApp, ProfilePersonalization, AgeLimits,
-        WebPairingCode, CinemaTrailers, MovieNight, YearWrapped, MonthlyWrapped, MediaSegments, ServerSpeech,
+        WebPairingCode, CinemaTrailers, MovieNight, YearWrapped, MonthlyWrapped, MediaSegments, ServerSpeech, Suggestions,
     });
 
     /// <summary>
@@ -48,6 +48,12 @@ public static class ServerFeatures
     /// GET /api/v1/media/{id}/speech says whether it is installed and has a model.
     /// </summary>
     public const string ServerSpeech = "server-speech-v1";
+
+    /// <summary>
+    /// Suggestions of what to watch next ("suggestions-v1"): GET /api/v1/media/{id}/suggestions and
+    /// Home's "Because You Watched" rails, each suggestion with its reason.
+    /// </summary>
+    public const string Suggestions = "suggestions-v1";
 
     /// <summary>Display names and profile pictures ("profile-personalization-v1").</summary>
     public const string ProfilePersonalization = "profile-personalization-v1";

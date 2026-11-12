@@ -37,6 +37,7 @@ final class TVAppModel: ObservableObject {
   var supportsWatchlist: Bool { capabilities?.supportsWatchlistAndPeople ?? false }
   var supportsScrubPreviews: Bool { capabilities?.supportsScrubPreviews ?? false }
   var supportsMovieNight: Bool { capabilities?.supportsMovieNight ?? false }
+  var supportsSuggestions: Bool { capabilities?.supportsSuggestions ?? false }
   var supportsAdaptiveStreaming: Bool { capabilities?.supportsAdaptiveStreaming ?? false }
   @Published private(set) var homeLoading = false
   @Published private(set) var homeError: String?
@@ -45,6 +46,8 @@ final class TVAppModel: ObservableObject {
   @Published private(set) var acknowledgedProgress: [UUID: TVPlaybackProgress] = [:]
   @Published private var mutationSummaries: [UUID: TVCatalogItem] = [:]
   @Published var remotePlaybackItem: TVCatalogItem?
+  /// Watch Now on a suggestion in the player: Home closes the player and plays this title.
+  @Published var suggestedPlaybackItem: TVCatalogItem?
   /// Counts Stop requests from another device; the screen showing the player closes it.
   @Published private(set) var remoteStopRequests = 0
   /// The player on screen, so the heartbeat can tell other devices what plays.

@@ -78,7 +78,8 @@
       "year-wrapped-v1",
       "monthly-wrapped-v1",
       "media-segments-v2",
-      "server-speech-v1"
+      "server-speech-v1",
+      "suggestions-v1"
     ]
   },
   "problem": {

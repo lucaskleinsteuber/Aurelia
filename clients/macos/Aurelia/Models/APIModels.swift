@@ -894,6 +894,32 @@ struct HomeResponse: Codable, Equatable, Sendable {
   let favorites: [CatalogItemSummary]
   let collections: [CollectionSummary]
   let recommendationChangesAt: String
+  /// "Because You Watched …" rails; servers before 2.11.0 send none.
+  var becauseYouWatched: [HomeSuggestionRail]? = nil
+}
+
+/// What to watch next with its reason in words ("suggestions-v1"); `kind` is kept as text so a
+/// newer server's reasons still decode.
+struct MediaSuggestion: Codable, Equatable, Sendable, Identifiable {
+  let item: CatalogItemSummary
+  let kind: String
+  let reason: String
+
+  var id: UUID { item.id }
+}
+
+struct MediaSuggestionsResponse: Codable, Equatable, Sendable {
+  let mediaId: UUID
+  let suggestions: [MediaSuggestion]
+}
+
+/// Home's "Because You Watched …" rail for one recently watched title.
+struct HomeSuggestionRail: Codable, Equatable, Sendable, Identifiable {
+  let sourceId: UUID
+  let sourceTitle: String
+  let suggestions: [MediaSuggestion]
+
+  var id: UUID { sourceId }
 }
 
 struct MetadataCandidateSummary: Codable, Identifiable, Equatable, Sendable {

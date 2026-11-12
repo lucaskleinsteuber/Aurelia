@@ -102,6 +102,13 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     private long? creditsAnchor;
     private bool introSkipped;
     private bool movedIntoIntro;
+    /// <summary>The server's suggestions after a movie or a series' last episode; null until asked for.</summary>
+    private IReadOnlyList<MediaSuggestion>? suggestions;
+    private bool suggestionsRequested;
+    private bool suggestionDismissed;
+    private bool showsEndScreen;
+    /// <summary>Leaving for a suggestion or with Done after the credits began: the title counts as watched.</summary>
+    private bool finishOnClose;
     private bool showsSkipIntro;
     private string? error;
     private bool hasConflict;
@@ -282,6 +289,77 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
 
     /// <summary>The card appeared with the credits: its second button keeps watching them ("Watch Credits").</summary>
     public bool UpNextDuringCredits => UpNext is not null && PlayerPolicy.ShowsForCredits(Position, Duration, CreditsStart);
+
+    /// <summary>The server's suggestions for this title, best first.</summary>
+    public IReadOnlyList<MediaSuggestion> Suggestions => suggestions ?? [];
+
+    /// <summary>The suggestion card from the credits on, without a countdown.</summary>
+    public bool ShowsSuggestion => !showsEndScreen && UpNext is null
+        && PlayerPolicy.ShowsSuggestion(Position, Duration, NextItem is not null, Suggestions.Count > 0, suggestionDismissed,
+            Segments?.CreditsStartMilliseconds, Preferences.UpNextCountdownSeconds);
+
+    /// <summary>The end screen with the suggestion and two more, once the file ended.</summary>
+    public bool ShowsEndScreen
+    {
+        get => showsEndScreen;
+        private set => SetProperty(ref showsEndScreen, value);
+    }
+
+    /// <summary>Raised after the player closed for a suggestion that should play now.</summary>
+    public event Action<CatalogItemSummary>? SuggestionChosen;
+
+    /// <summary>"Watch Credits" on the suggestion card: the credits play to the end, then the end screen follows.</summary>
+    public void DismissSuggestion()
+    {
+        suggestionDismissed = true;
+        OnPropertyChanged(nameof(ShowsSuggestion));
+    }
+
+    /// <summary>"Watch Now": this title counts as watched from its credits on, and the suggestion starts.</summary>
+    public async Task PlaySuggestionAsync(CatalogItemSummary suggestion)
+    {
+        ArgumentNullException.ThrowIfNull(suggestion);
+        if (closed) return;
+        await DoneAsync();
+        SuggestionChosen?.Invoke(suggestion);
+    }
+
+    /// <summary>"Done": closes the player; from the credits on the title counts as watched.</summary>
+    public async Task DoneAsync()
+    {
+        finishOnClose = PlayerPolicy.NextFinishesCurrent(Position, Duration, ShowsSuggestion || ShowsEndScreen, Segments?.CreditsStartMilliseconds);
+        await CloseAsync();
+    }
+
+    private void RequestSuggestions()
+    {
+        if (suggestionsRequested || offline is not null || Item is not { } current || !client.Library.Supports(ServerFeatures.Suggestions)
+            || !PlayerPolicy.WantsSuggestions(Position, Duration, NextItem is not null)) return;
+        suggestionsRequested = true;
+        _ = LoadSuggestionsAsync(current.Id);
+    }
+
+    private async Task LoadSuggestionsAsync(Guid id)
+    {
+        try
+        {
+            var list = await client.SuggestionsAsync(id, 3, CancellationToken.None);
+            post(() =>
+            {
+                if (Item?.Id != id) return;
+                suggestions = [.. list.Where(entry => entry.Item.Id != id)];
+                OnPropertyChanged(nameof(Suggestions));
+                OnPropertyChanged(nameof(ShowsSuggestion));
+            });
+        }
+        catch (AureliaApiException)
+        {
+            // An older server or a failed request: no suggestion, the player ends as before.
+        }
+        catch (HttpRequestException)
+        {
+        }
+    }
 
     /// <summary>The intro and credits times of the playing title from the server ("media-segments-v2"); downloads have none.</summary>
     public MediaSegmentsDto? Segments => offline is null && ticket is { } current && current.MediaId == Item?.Id ? current.Segments : null;
@@ -575,7 +653,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         closed = true;
         Record(PlaybackDiagnosticKind.Stopped);
         clock?.Dispose();
-        await SaveProgressAsync(finished: false);
+        await SaveProgressAsync(finished: finishOnClose);
         await ReleaseAsync(revoke: true);
         system.KeepAwake(false);
         system.Update(null);
@@ -594,6 +672,10 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         upNextDismissed = false;
         autoplayCancelled = false;
         creditsAnchor = null;
+        suggestions = null;
+        suggestionsRequested = false;
+        suggestionDismissed = false;
+        ShowsEndScreen = false;
         introSkipped = false;
         movedIntoIntro = false;
         ShowsSkipIntro = false;
@@ -782,9 +864,11 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         if (UpNextDuringCredits) creditsAnchor ??= Position;
         else creditsAnchor = null;
         UpdateSkipIntro();
+        RequestSuggestions();
         OnPropertyChanged(nameof(UpNext));
         OnPropertyChanged(nameof(UpNextDuringCredits));
         OnPropertyChanged(nameof(UpNextSeconds));
+        OnPropertyChanged(nameof(ShowsSuggestion));
         system.Update(this);
         // The countdown ran out in the credits before the file ended: the next episode starts and this one counts as watched.
         if (UpNextDuringCredits && UpNextSeconds == 0 && State == PlayerState.Playing && Position < Duration && !advancing)
@@ -816,6 +900,20 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
             queue.RemoveAt(0);
             previous.Push(current);
             await LoadAsync(next, null);
+            return;
+        }
+        if (NextItem is null && Suggestions.Count > 0)
+        {
+            // After a movie or a series' last episode: only the person's own setting starts the suggestion.
+            if (Preferences.PlaySuggestionsAutomatically && !autoplayCancelled)
+            {
+                await PlaySuggestionAsync(Suggestions[0].Item);
+                return;
+            }
+            engine?.Pause();
+            State = PlayerState.Paused;
+            ShowsEndScreen = true;
+            OnPropertyChanged(nameof(ShowsSuggestion));
             return;
         }
         await CloseAsync();

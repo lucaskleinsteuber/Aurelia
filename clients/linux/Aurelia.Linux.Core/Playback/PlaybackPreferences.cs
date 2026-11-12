@@ -26,7 +26,8 @@ public sealed record PlaybackPreferences(
     bool UpNextAtCredits = true,
     bool CinemaMode = false,
     bool CinemaAds = true,
-    int CinemaTrailers = 2)
+    int CinemaTrailers = 2,
+    bool PlaySuggestionsAutomatically = false)
 {
     [JsonIgnore]
     public VolumeLeveling EffectiveLeveling => VolumeLeveling ?? (NightMode ? Playback.VolumeLeveling.Standard : Playback.VolumeLeveling.Off);

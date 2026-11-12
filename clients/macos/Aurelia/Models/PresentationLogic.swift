@@ -216,6 +216,38 @@ enum UpNextPolicy {
   }
 }
 
+/// After a movie or a series' last episode the server suggests what to watch next: a card from
+/// the credits on (or the last seconds without known credits), without a countdown, and an end
+/// screen when the file ends.
+enum SuggestionPolicy {
+  /// Shorter titles (a short film, an extra) get no suggestions.
+  static let minimumDuration: Int64 = 600_000
+
+  /// Suggestions are asked for once the title has no next episode and is half watched.
+  static func wantsSuggestions(position: Int64, duration: Int64, hasNext: Bool) -> Bool {
+    !hasNext && duration >= minimumDuration && position >= duration / 2
+  }
+
+  static func showsCard(
+    position: Int64, duration: Int64, hasNext: Bool, hasSuggestion: Bool, dismissed: Bool,
+    creditsStart: Int64?, lead: Int64 = UpNextPolicy.lead
+  ) -> Bool {
+    guard !hasNext, hasSuggestion, !dismissed, duration >= minimumDuration, position > 0 else {
+      return false
+    }
+    if let credits = UpNextPolicy.credits(creditsStart, duration: duration) {
+      return position >= credits
+    }
+    return duration - position <= lead
+  }
+
+  /// "Next in the Toy Story Collection · 2010"
+  static func caption(_ suggestion: MediaSuggestion) -> String {
+    [suggestion.reason, suggestion.item.year.map(String.init)].compactMap { $0 }
+      .filter { !$0.isEmpty }.joined(separator: " · ")
+  }
+}
+
 struct PlaybackUpNext: Equatable {
   let title: String
   let subtitle: String?

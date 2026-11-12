@@ -70,6 +70,30 @@ public static class PlayerPolicy
         return upNextShown || position >= duration - duration / 10;
     }
 
+    /// <summary>Titles shorter than ten minutes (a short film, an extra) get no suggestions.</summary>
+    public const long SuggestionMinimumDuration = 600_000;
+
+    /// <summary>Suggestions are asked for once a title without a next episode is half watched (Mac: SuggestionPolicy).</summary>
+    public static bool WantsSuggestions(long position, long duration, bool hasNext) =>
+        !hasNext && duration >= SuggestionMinimumDuration && position >= duration / 2;
+
+    /// <summary>The suggestion card after a movie or a series' last episode: from the credits on, else the last seconds; no countdown.</summary>
+    public static bool ShowsSuggestion(long position, long duration, bool hasNext, bool hasSuggestion, bool dismissed, long? creditsStart,
+        int countdownSeconds = 20)
+    {
+        if (hasNext || !hasSuggestion || dismissed || duration < SuggestionMinimumDuration || position <= 0) return false;
+        if (Credits(creditsStart, duration) is { } credits) return position >= credits;
+        return duration - position <= countdownSeconds * 1000L;
+    }
+
+    /// <summary>"Next in the Toy Story Collection · 2010"</summary>
+    public static string SuggestionCaption(MediaSuggestion suggestion)
+    {
+        ArgumentNullException.ThrowIfNull(suggestion);
+        return string.Join(" · ", new[] { suggestion.Reason, suggestion.Item.Year?.ToString(CultureInfo.InvariantCulture) }
+            .Where(part => !string.IsNullOrWhiteSpace(part)));
+    }
+
     /// <summary>The intro when both ends are known and in order.</summary>
     public static (long Start, long End)? Intro(MediaSegmentsDto? segments) =>
         segments is { IntroStartMilliseconds: { } start, IntroEndMilliseconds: { } end } && start >= 0 && end > start ? (start, end) : null;

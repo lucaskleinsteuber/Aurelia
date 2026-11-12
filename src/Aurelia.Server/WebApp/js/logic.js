@@ -1051,6 +1051,26 @@ export function nextFinishesCurrent({ position, duration, upNextShown, credits =
   return upNextShown || position >= duration - duration / 10;
 }
 
+/** Titles shorter than ten minutes (a short film, an extra) get no suggestions. */
+export const SUGGESTION_MINIMUM_SECONDS = 600;
+
+/** Suggestions are asked for once a title without a next episode is half watched. */
+export function wantsSuggestions({ position, duration, hasNext }) {
+  return !hasNext && duration >= SUGGESTION_MINIMUM_SECONDS && position >= duration / 2;
+}
+
+/** The suggestion card after a movie or a series' last episode: from the credits on, else the last seconds; no countdown. */
+export function showsSuggestion({ position, duration, hasNext, hasSuggestion, dismissed, credits = null, lead = UP_NEXT_LEAD }) {
+  if (hasNext || !hasSuggestion || dismissed || !(duration >= SUGGESTION_MINIMUM_SECONDS) || !(position > 0)) return false;
+  if (credits != null) return position >= credits;
+  return duration - position <= lead;
+}
+
+/** "Next in the Toy Story Collection · 2010" */
+export function suggestionCaption(suggestion) {
+  return [suggestion?.reason, suggestion?.item?.year].filter((part) => part !== undefined && part !== null && part !== "").join(" · ");
+}
+
 export const INTRO_SKIPPING_CHOICES = Object.freeze([
   ["off", "Don’t Offer"], ["button", "Show Skip Intro"], ["automatic", "Skip Automatically"],
 ]);
@@ -1084,6 +1104,7 @@ export const PLAYBACK_DEFAULTS = Object.freeze({
   upNextCountdownSeconds: UP_NEXT_LEAD,
   introSkipping: "button",
   upNextAtCredits: true,
+  playSuggestionsAutomatically: false,
   resumeThresholdSeconds: 0,
   defaultAudioLanguage: "original",
   defaultSubtitleLanguage: "off",
@@ -1113,6 +1134,7 @@ export function normalizePreferences(value) {
     upNextCountdownSeconds: Math.round(number(merged.upNextCountdownSeconds, 5, 30, UP_NEXT_LEAD)),
     introSkipping: ["off", "button", "automatic"].includes(merged.introSkipping) ? merged.introSkipping : "button",
     upNextAtCredits: merged.upNextAtCredits !== false,
+    playSuggestionsAutomatically: merged.playSuggestionsAutomatically === true,
     resumeThresholdSeconds: Math.round(number(merged.resumeThresholdSeconds, 0, 120, 0)),
     defaultAudioLanguage: typeof merged.defaultAudioLanguage === "string" && /^(original|[a-z]{2})$/.test(merged.defaultAudioLanguage) ? merged.defaultAudioLanguage : "original",
     defaultSubtitleLanguage: typeof merged.defaultSubtitleLanguage === "string" && /^(off|[a-z]{2})$/.test(merged.defaultSubtitleLanguage) ? merged.defaultSubtitleLanguage : "off",

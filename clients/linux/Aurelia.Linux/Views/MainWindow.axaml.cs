@@ -685,7 +685,9 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         var player = new PlaybackController(new PlaybackClient(Session.Api, library.Client), services.Engines, services.Settings, outbox,
             services.Time, action => Dispatcher.UIThread.Post(action), services.PlaybackSystem);
         Player = player;
-        var view = new PlayerView(player, this, this);
+        var view = new PlayerView(player, this, this) { Store = library };
+        // Watch Now on a suggestion: the closed player hands over to the suggested title.
+        player.SuggestionChosen += next => Dispatcher.UIThread.Post(() => _ = PlayAsync(next, resume: false));
         // A party this computer is in follows into the new player before it starts.
         WatchParty?.Attach(player);
         player.Closed += () => Dispatcher.UIThread.Post(() =>

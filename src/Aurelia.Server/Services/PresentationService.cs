@@ -326,7 +326,11 @@ public sealed class PresentationService(
         return new PagedResponse<CatalogItemSummary>(items, request.Offset, request.Limit, total);
     }
 
-    public async Task<HomeResponse> HomeAsync(Guid userId, CancellationToken cancellationToken)
+    /// <summary>
+    /// Home. With <paramref name="suggestions"/> it also has "Because You Watched …" rails, and the
+    /// hour's title comes from the profile's personal top ten when it has one.
+    /// </summary>
+    public async Task<HomeResponse> HomeAsync(Guid userId, CancellationToken cancellationToken, SuggestionService? suggestions = null)
     {
         var available = BaseItems(userId)
             .Where(item => item.Availability == MediaAvailability.Available);
@@ -359,9 +363,11 @@ public sealed class PresentationService(
         var hour = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, TimeSpan.Zero);
         var preferred = topLevel.Where(item => !item.PlaybackProgress.Any(
             progress => progress.UserId == userId && progress.IsCompleted));
+        var (rails, topTen) = suggestions is null ? ([], []) : await suggestions.HomeAsync(userId, cancellationToken);
         // The hour's title: one read of the candidates' ids, counted and chosen here, then only
         // that card. Counting and then skipping through them in the database walked them twice.
-        var pool = await preferred.OrderBy(item => item.Id).Select(item => item.Id).ToListAsync(cancellationToken);
+        // A profile with a watch history gets one of its personal top ten instead.
+        var pool = topTen.Count > 0 ? [.. topTen] : await preferred.OrderBy(item => item.Id).Select(item => item.Id).ToListAsync(cancellationToken);
         if (pool.Count == 0) pool = await topLevel.OrderBy(item => item.Id).Select(item => item.Id).ToListAsync(cancellationToken);
         Guid? chosen = pool.Count == 0 ? null : pool[StableIndex(userId, hour, pool.Count)];
         var recommendationItem = chosen is not { } chosenId
@@ -373,7 +379,8 @@ public sealed class PresentationService(
             recentItems.Select(item => ToCatalog(item, userId)).ToList(),
             favoriteItems.Select(item => ToCatalog(item, userId)).ToList(),
             await CollectionsAsync(userId, 0, 30, cancellationToken),
-            hour.AddHours(1));
+            hour.AddHours(1),
+            suggestions is null ? null : rails);
     }
 
     public Task<IReadOnlyList<CollectionSummary>> CollectionsAsync(Guid userId, int offset, int limit, CancellationToken cancellationToken) =>

@@ -261,6 +261,8 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     saveServerMediaSegments: (body) => request("/api/v1/server/media-segments", { method: "PUT", body }),
     mediaSegmentSeries: (options = {}) => request("/api/v1/server/media-segments/series", options),
     reanalyzeSeriesSegments: (seriesId) => request("/api/v1/server/media-segments/reanalyze", { method: "POST", body: seriesId ? { seriesId } : {} }),
+    // What to watch next ("suggestions-v1"); an episode's are its series'.
+    suggestions: async (mediaId, limit = 10) => (await request(`/api/v1/media/${id(mediaId)}/suggestions?limit=${limit}`))?.suggestions ?? [],
     reanalyzeMovieSegments: () => request("/api/v1/server/media-segments/reanalyze", { method: "POST", body: { movies: true } }),
 
     serverScrubPreviews: (options = {}) => request("/api/v1/server/scrub-previews", options),

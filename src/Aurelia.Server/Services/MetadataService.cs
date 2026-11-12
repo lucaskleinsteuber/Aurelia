@@ -197,7 +197,7 @@ public sealed class MetadataService(
         // without detaching the worker's durable job counters and completion state.
         foreach (var entry in database.ChangeTracker.Entries().Where(entry => entry.Entity is
             MediaItem or MediaMetadata or MediaCredit or ArtworkAsset or MetadataReview
-            or MediaCollectionRecord or MediaCollectionMember).ToArray())
+            or MediaCollectionRecord or MediaCollectionMember or MediaKeywords).ToArray())
             entry.State = EntityState.Detached;
         var fresh = await database.MediaItems.Include(media => media.Metadata)!.ThenInclude(meta => meta!.Credits)
             .Include(media => media.Metadata)!.ThenInclude(meta => meta!.Artwork).AsSplitQuery()
@@ -225,6 +225,7 @@ public sealed class MetadataService(
         metadata.ProviderGenresJson = MetadataPresentation.SerializeList(provider.Genres);
         metadata.ProviderStudiosJson = MetadataPresentation.SerializeList(provider.Studios);
         metadata.ProviderCountriesJson = MetadataPresentation.SerializeList(provider.Countries);
+        await StoreKeywordsAsync(item.Id, provider.Keywords, cancellationToken);
         metadata.ReviewState = MetadataReviewState.Matched;
         metadata.ProviderUpdatedAt = DateTimeOffset.UtcNow;
         metadata.UpdatedAt = DateTimeOffset.UtcNow;
@@ -242,6 +243,34 @@ public sealed class MetadataService(
         await JoinUniversesAsync(item, provider.Keywords, cancellationToken);
         await database.SaveChangesAsync(cancellationToken);
         original.Metadata = metadata;
+    }
+
+    /// <summary>A title's keywords for suggestions: at most 60, each short, so the column stays small.</summary>
+    internal static string KeywordsJson(IReadOnlyList<string>? keywords) => MetadataPresentation.SerializeList(
+        [.. (keywords ?? []).Select(keyword => keyword.Trim()).Where(keyword => keyword.Length is > 0 and <= 80)
+            .Distinct(StringComparer.OrdinalIgnoreCase).Take(60)]);
+
+    /// <summary>Stores a matched title's keywords again; its match, texts, credits and hand edits stay.</summary>
+    internal async Task<bool> RefreshKeywordsAsync(Guid itemId, TmdbMetadata provider, CancellationToken cancellationToken)
+    {
+        using var lease = await mutations.EnterAsync(cancellationToken);
+        if (!await database.MediaMetadata.AnyAsync(value => value.MediaItemId == itemId, cancellationToken)) return false;
+        await StoreKeywordsAsync(itemId, provider.Keywords, cancellationToken);
+        await database.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    /// <summary>Keeps the title's keywords; the caller saves.</summary>
+    private async Task StoreKeywordsAsync(Guid itemId, IReadOnlyList<string>? keywords, CancellationToken cancellationToken)
+    {
+        var row = await database.MediaKeywords.SingleOrDefaultAsync(value => value.MediaItemId == itemId, cancellationToken);
+        if (row is null)
+        {
+            row = new MediaKeywords { MediaItemId = itemId };
+            database.MediaKeywords.Add(row);
+        }
+        row.KeywordsJson = KeywordsJson(keywords);
+        row.UpdatedAt = DateTimeOffset.UtcNow;
     }
 
     // Pictures of the first people only: everyone's picture for every title would fill the
@@ -288,6 +317,7 @@ public sealed class MetadataService(
             .AsSplitQuery()
             .SingleOrDefaultAsync(media => media.Id == itemId, cancellationToken);
         if (item?.Metadata is not { } metadata) return false;
+        await StoreKeywordsAsync(item.Id, provider.Keywords, cancellationToken);
         await JoinUniversesAsync(item, provider.Keywords, cancellationToken);
         if (MetadataPresentation.ManualFields(metadata).Contains("credits"))
         {

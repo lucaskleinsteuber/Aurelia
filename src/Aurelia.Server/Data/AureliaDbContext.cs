@@ -60,6 +60,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public DbSet<LibraryStateMutation> LibraryStateMutations => Set<LibraryStateMutation>();
     public DbSet<SceneNote> SceneNotes => Set<SceneNote>();
     public DbSet<MediaSegment> MediaSegments => Set<MediaSegment>();
+    public DbSet<MediaKeywords> MediaKeywords => Set<MediaKeywords>();
 
     public DbSet<MediaMetadata> MediaMetadata => Set<MediaMetadata>();
     // Read only by the access filters below, which must see titles without filtering them.
@@ -377,6 +378,14 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             value => value.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(value.Value) : null);
         modelBuilder.Entity<MediaSegment>().Property(segment => segment.UpdatedAt).HasConversion(dateTimeOffsetConverter);
         modelBuilder.Entity<MediaSegment>().Property(segment => segment.AnalyzedFileModifiedAt).HasConversion(nullableDateTimeOffsetConverter);
+        modelBuilder.Entity<MediaKeywords>(entity =>
+        {
+            entity.HasKey(keywords => keywords.MediaItemId);
+            entity.Property(keywords => keywords.KeywordsJson).HasMaxLength(8192);
+            entity.Property(keywords => keywords.UpdatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasOne(keywords => keywords.MediaItem).WithOne().HasForeignKey<MediaKeywords>(keywords => keywords.MediaItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
 
         modelBuilder.Entity<ServerUser>(entity =>
         {

@@ -146,6 +146,16 @@ final class PlaybackController: ObservableObject {
   @Published private(set) var upNext: PlaybackUpNext?
   /// Skip Intro is offered: the intro the server found is playing.
   @Published private(set) var showsSkipIntro = false
+  /// The server's suggestions after a movie or a series' last episode, best first.
+  @Published private(set) var suggestions: [MediaSuggestion] = []
+  /// The title has no next episode and is half watched: the view asks the server for suggestions.
+  @Published private(set) var wantsSuggestions = false
+  /// The suggestion card from the credits on, without a countdown.
+  @Published private(set) var showsSuggestionCard = false
+  /// The end screen with the suggestion and two more, once the file ended.
+  @Published private(set) var showsSuggestionEndScreen = false
+  /// Set when Play Suggestions Automatically starts the suggestion at the end.
+  @Published private(set) var suggestionToStart: MediaSuggestion?
   @Published private(set) var isPlaying = false
   @Published private(set) var isSeekable = false
   @Published private(set) var currentTimeMilliseconds: Int64 = 0
@@ -206,6 +216,8 @@ final class PlaybackController: ObservableObject {
   /// The engine was asked to open at the resume position, so it usually needs no seek.
   private var openedAtResume = false
   private var upNextDismissed = false
+  /// Watch Credits on the suggestion card.
+  private var suggestionCardDismissed = false
   /// Where the Up Next card appeared with the credits; its countdown runs from there.
   private var creditsAnchor: Int64?
   /// The intro was already skipped for this episode, automatically or with the button.
@@ -987,6 +999,7 @@ final class PlaybackController: ObservableObject {
     assignIfChanged(&currentChapterIndex, engine.currentChapterIndex)
     assignIfChanged(&isPreparing, wantsPlayback && durationMilliseconds <= 0 && !isPlaying)
     updateUpNext()
+    updateSuggestionCard()
     updateSkipIntro()
 
     // Buffering or an external decoder pause breaks continuous stable playback,
@@ -1079,6 +1092,16 @@ final class PlaybackController: ObservableObject {
     enqueueProgressSave(isFinished: true)
     upNext = nil
     showsSkipIntro = false
+    showsSuggestionCard = false
+    if sleepTimer != .endOfEpisode, queuedItems.isEmpty, let first = suggestions.first {
+      // After a movie or a series' last episode: the suggestion starts by itself only when the
+      // person asked for that; otherwise the end screen shows it with two more.
+      if preferences.playSuggestionsAutomatically, !autoplayCancelled {
+        suggestionToStart = first
+      } else {
+        showsSuggestionEndScreen = true
+      }
+    }
     if sleepTimer == .endOfEpisode {
       let client = client
       Task { await client.sleepTimerEnded() }
@@ -1142,6 +1165,46 @@ final class PlaybackController: ObservableObject {
     if upNext?.duringCredits != true { autoplayCancelled = true }
     creditsAnchor = nil
     upNext = nil
+  }
+
+  /// The server's suggestions for this title arrived (asked for while `wantsSuggestions`).
+  func offerSuggestions(_ list: [MediaSuggestion]) {
+    guard queuedItems.isEmpty else { return }
+    suggestions = list.filter { $0.item.id != presentation.mediaId }
+  }
+
+  /// Watch Credits on the suggestion card: the credits play; the end screen follows.
+  func dismissSuggestionCard() {
+    suggestionCardDismissed = true
+    showsSuggestionCard = false
+  }
+
+  /// Leaving for a suggestion or with Done counts the title as watched from its credits on.
+  func finishForSuggestion() {
+    if UpNextPolicy.nextFinishesCurrent(
+      position: currentTimeMilliseconds, duration: durationMilliseconds,
+      upNextShown: showsSuggestionCard || showsSuggestionEndScreen,
+      creditsStart: currentSegments?.creditsStartMilliseconds)
+    {
+      naturalEndReached = true
+    }
+  }
+
+  private func updateSuggestionCard() {
+    let hasNext = !queuedItems.isEmpty
+    let wanted =
+      wantsSuggestions
+      || SuggestionPolicy.wantsSuggestions(
+        position: currentTimeMilliseconds, duration: durationMilliseconds, hasNext: hasNext)
+    assignIfChanged(&wantsSuggestions, wanted)
+    let shown =
+      !endHandled
+      && SuggestionPolicy.showsCard(
+        position: currentTimeMilliseconds, duration: durationMilliseconds, hasNext: hasNext,
+        hasSuggestion: !suggestions.isEmpty, dismissed: suggestionCardDismissed,
+        creditsStart: currentSegments?.creditsStartMilliseconds,
+        lead: Int64(preferences.upNextCountdownSeconds) * 1_000)
+    assignIfChanged(&showsSuggestionCard, shown && upNext == nil)
   }
 
   /// The intro and credits times of the title that is playing.
@@ -1289,6 +1352,12 @@ final class PlaybackController: ObservableObject {
     upNext = nil
     upNextDismissed = false
     autoplayCancelled = false
+    suggestions = []
+    wantsSuggestions = false
+    showsSuggestionCard = false
+    showsSuggestionEndScreen = false
+    suggestionToStart = nil
+    suggestionCardDismissed = false
     creditsAnchor = nil
     showsSkipIntro = false
     introSkipped = false

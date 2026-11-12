@@ -155,6 +155,33 @@ enum TVPlayerPolicy {
     return upNextShown || position >= duration - duration / 10
   }
 
+  /// Titles shorter than ten minutes (a short film, an extra) get no suggestions.
+  static let suggestionMinimumDuration: Int64 = 600_000
+
+  /// Suggestions are asked for once a title without a next episode is half watched (Mac:
+  /// SuggestionPolicy).
+  static func wantsSuggestions(position: Int64, duration: Int64, hasNext: Bool) -> Bool {
+    !hasNext && duration >= suggestionMinimumDuration && position >= duration / 2
+  }
+
+  /// The suggestion card after a movie or a series' last episode: from the credits on, else the
+  /// last seconds; it has no countdown.
+  static func showsSuggestion(
+    position: Int64, duration: Int64, hasNext: Bool, hasSuggestion: Bool, dismissed: Bool,
+    creditsStart: Int64?
+  ) -> Bool {
+    guard !hasNext, hasSuggestion, !dismissed, duration >= suggestionMinimumDuration, position > 0
+    else { return false }
+    if let credits = credits(creditsStart, duration: duration) { return position >= credits }
+    return duration - position <= upNextLead
+  }
+
+  /// "Next in the Toy Story Collection · 2010"
+  static func suggestionCaption(_ suggestion: TVMediaSuggestion) -> String {
+    [suggestion.reason, suggestion.item.year.map(String.init)].compactMap { $0 }
+      .filter { !$0.isEmpty }.joined(separator: " · ")
+  }
+
   /// "Skip Intro" appears a second before the intro and leaves two seconds before its end.
   static func showsSkipIntro(position: Int64, introStart: Int64, introEnd: Int64) -> Bool {
     guard introEnd > introStart else { return false }

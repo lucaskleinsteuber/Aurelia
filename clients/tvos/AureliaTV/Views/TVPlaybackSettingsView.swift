@@ -33,6 +33,13 @@ struct TVPlaybackSettingsView: View {
             "Offer Next Episode When Credits Begin", value: value.upNextAtCredits ? "On" : "Off",
             id: "settings-up-next-credits"
           ) { value.upNextAtCredits.toggle() }
+          if model.capabilities?.supportsSuggestions == true {
+            row(
+              "Play Suggestions Automatically",
+              value: value.playSuggestionsAutomatically ? "On" : "Off",
+              id: "settings-play-suggestions"
+            ) { value.playSuggestionsAutomatically.toggle() }
+          }
           if model.capabilities?.supportsCinema == true {
             Spacer().frame(height: 18)
             row("Cinema Mode", value: value.cinemaMode ? "On" : "Off", id: "settings-cinema") {

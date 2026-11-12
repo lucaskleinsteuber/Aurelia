@@ -3,6 +3,42 @@ import Testing
 
 @Suite("iOS scrub previews, resume and Up Next")
 struct IOSScrubAndUpNextTests {
+  @Test func suggestionsFollowAMovieOrALastEpisodeWithoutACountdown() throws {
+    let duration: Int64 = 6_000_000
+    #expect(!IOSPlayerPolicy.wantsSuggestions(position: 2_000_000, duration: duration, hasNext: false))
+    #expect(IOSPlayerPolicy.wantsSuggestions(position: 3_000_000, duration: duration, hasNext: false))
+    #expect(!IOSPlayerPolicy.wantsSuggestions(position: 5_000_000, duration: duration, hasNext: true))
+    #expect(
+      IOSPlayerPolicy.showsSuggestion(
+        position: 5_500_000, duration: duration, hasNext: false, hasSuggestion: true,
+        dismissed: false, creditsStart: 5_400_000))
+    #expect(
+      !IOSPlayerPolicy.showsSuggestion(
+        position: 5_300_000, duration: duration, hasNext: false, hasSuggestion: true,
+        dismissed: false, creditsStart: 5_400_000))
+    #expect(
+      IOSPlayerPolicy.showsSuggestion(
+        position: 5_985_000, duration: duration, hasNext: false, hasSuggestion: true,
+        dismissed: false, creditsStart: nil))
+    #expect(
+      !IOSPlayerPolicy.showsSuggestion(
+        position: 5_500_000, duration: duration, hasNext: false, hasSuggestion: true,
+        dismissed: true, creditsStart: 5_400_000))
+    let json = Data(
+      """
+      {"recommendation":null,"continueWatching":[],"recentlyAdded":[],"favorites":[],
+      "collections":[],"recommendationChangesAt":"2026-11-12T12:00:00Z","becauseYouWatched":[
+      {"sourceId":"10000000-0000-0000-0000-000000000001","sourceTitle":"Toy Tale","suggestions":[
+      {"kind":"nextPart","reason":"Next in Toy Tale Collection","item":{
+      "id":"10000000-0000-0000-0000-000000000002","kind":"movie","title":"Toy Tale 2","year":1999,
+      "genres":[],"availability":"available","isFavorite":false,"addedAt":"2026-11-12T10:00:00Z"}}]}]}
+      """.utf8)
+    let home = try JSONDecoder().decode(IOSHome.self, from: json)
+    let suggestion = try #require(home.becauseYouWatched?.first?.suggestions.first)
+    #expect(IOSPlayerPolicy.suggestionCaption(suggestion) == "Next in Toy Tale Collection · 1999")
+    #expect(!IOSPlaybackPreferences().playSuggestionsAutomatically)
+  }
+
   @Test func previewStepsCoverTheTimelineCoarseFirstAndOnlyOnce() {
     #expect(IOSScrubPreviewPlan.interval(for: 45 * 60_000) == 10_000)
     #expect(IOSScrubPreviewPlan.interval(for: 3 * 3_600_000) == 15_000)

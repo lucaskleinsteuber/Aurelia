@@ -114,6 +114,14 @@ public sealed class HomePage(LibraryContext context) : LibraryPageBase(context)
                 Shelf("Continue Watching", home.ContinueWatching, item => MediaCards.Landscape(Context, item, 320, "CONTINUE WATCHING", plays: true)),
                 home.ContinueWatching.Count));
         }
+        // "Because You Watched …": the server's suggestions after the latest watched titles (2.11.0).
+        foreach (var rail in home.BecauseYouWatched ?? [])
+        {
+            var suggested = Visible([.. rail.Suggestions.Select(suggestion => suggestion.Item)]);
+            var heading = $"Because You Watched {rail.SourceTitle}";
+            if (suggested.Count > 0)
+                page.Children.Add(Section(heading, Shelf(heading, suggested, item => MediaCards.Poster(Context, item, posterWidth)), suggested.Count));
+        }
         foreach (var row in LibraryPresentation.GenreRows(Visible(store.Catalog.Where(item => item.Kind is MediaKind.Movie or MediaKind.Series))))
         {
             page.Children.Add(Section(row.Title, Shelf(row.Title, row.Items, item => MediaCards.Poster(Context, item, posterWidth)), row.Items.Count));

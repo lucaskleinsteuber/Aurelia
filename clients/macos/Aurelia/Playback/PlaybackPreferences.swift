@@ -116,6 +116,8 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
   var introSkipping: IntroSkipping = .button
   /// The next episode is offered when the credits begin, not only in the last seconds.
   var upNextAtCredits = true
+  /// After a movie or a series' last episode, the server's suggestion starts on its own.
+  var playSuggestionsAutomatically = false
 
   /// Kept for code and settings from 2.8 and 2.9, where this was a single switch.
   var skipIntrosAutomatically: Bool {
@@ -187,7 +189,7 @@ extension PlaybackPreferences {
     case upNextCountdownSeconds, resumeThresholdSeconds
     case defaultAudioLanguage, defaultSubtitleLanguage, dialogueBoost, volumeLeveling
     case fillsScreen, cinemaMode, cinemaAds, cinemaTrailers, streamingQuality
-    case skipIntrosAutomatically, introSkipping, upNextAtCredits
+    case skipIntrosAutomatically, introSkipping, upNextAtCredits, playSuggestionsAutomatically
   }
 
   /// Settings saved before a newer option existed keep their values; the new option starts off.
@@ -226,6 +228,8 @@ extension PlaybackPreferences {
       (try? container.decodeIfPresent(IntroSkipping.self, forKey: .introSkipping))
       ?? (automatic ? .automatic : .button)
     upNextAtCredits = try container.decodeIfPresent(Bool.self, forKey: .upNextAtCredits) ?? true
+    playSuggestionsAutomatically =
+      try container.decodeIfPresent(Bool.self, forKey: .playSuggestionsAutomatically) ?? false
   }
   func encode(to encoder: Encoder) throws {
     var values = encoder.container(keyedBy: CodingKeys.self)
@@ -251,6 +255,7 @@ extension PlaybackPreferences {
     try values.encode(skipIntrosAutomatically, forKey: .skipIntrosAutomatically)
     try values.encode(introSkipping, forKey: .introSkipping)
     try values.encode(upNextAtCredits, forKey: .upNextAtCredits)
+    try values.encode(playSuggestionsAutomatically, forKey: .playSuggestionsAutomatically)
   }
 
 }

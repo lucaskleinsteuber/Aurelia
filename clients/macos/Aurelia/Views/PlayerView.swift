@@ -133,6 +133,22 @@ struct PlayerView: View {
             .transition(.opacity)
         }
 
+        if controller.showsSuggestionCard, let first = controller.suggestions.first,
+          controller.errorMessage == nil
+        {
+          suggestionCard(first)
+            .padding(.trailing, 28)
+            .padding(.bottom, controlsVisible ? Self.overlayBottomWithControls : 40)
+            .frame(width: viewport.width, height: viewport.height, alignment: .bottomTrailing)
+            .transition(.opacity)
+        }
+
+        if controller.showsSuggestionEndScreen, !controller.suggestions.isEmpty {
+          suggestionEndScreen
+            .frame(width: viewport.width, height: viewport.height)
+            .transition(.opacity)
+        }
+
         // Skip Intro stays in view while the intro plays, also after the controls have hidden.
         if controller.showsSkipIntro, controller.upNext == nil, controller.errorMessage == nil,
           preShow == nil
@@ -171,6 +187,9 @@ struct PlayerView: View {
       .frame(width: viewport.width, height: viewport.height)
       .animation(reduceMotion ? nil : .easeInOut(duration: 0.5), value: startScreenVisible)
       .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: controller.upNext != nil)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: controller.showsSuggestionCard)
+      .animation(
+        reduceMotion ? nil : .easeOut(duration: 0.3), value: controller.showsSuggestionEndScreen)
       .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: controller.showsSkipIntro)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -256,6 +275,10 @@ struct PlayerView: View {
     .onChange(of: controller.sleepTimerFinished) { _, finished in
       if finished { closePlayer() }
     }
+    .onChange(of: controller.suggestionToStart) { _, suggestion in
+      if let suggestion { playSuggestion(suggestion.item) }
+    }
+    .task(id: controller.wantsSuggestions) { await loadSuggestions() }
     .onChange(of: controller.isPlaying) {
       model.reportPlayerPlaying(controller.isPlaying)
       if !controller.isPlaying, preShow == nil { cursor.show() }
@@ -877,6 +900,138 @@ struct PlayerView: View {
     .accessibilityHint("Jumps to the end of the intro. Return or S does the same.")
     .accessibilityIdentifier("player-skip-intro")
     .onHover { interaction("skip-intro-hover", active: $0) }
+  }
+
+  /// After a movie or a series' last episode, from the credits on: the server's suggestion,
+  /// without a countdown.
+  private func suggestionCard(_ suggestion: MediaSuggestion) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("UP NEXT").font(.caption.weight(.bold)).tracking(1.2).foregroundStyle(.secondary)
+      HStack(alignment: .top, spacing: 12) {
+        AuthenticatedArtwork(
+          artwork: suggestion.item.poster, symbol: suggestion.item.kind == .movie ? "film" : "tv"
+        )
+        .frame(width: 54, height: 80)
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        VStack(alignment: .leading, spacing: 4) {
+          Text(suggestion.item.title).font(.title3.weight(.semibold)).lineLimit(2)
+          Text(SuggestionPolicy.caption(suggestion)).font(.callout).foregroundStyle(.secondary)
+            .lineLimit(2)
+        }
+      }
+      HStack(spacing: 10) {
+        Button {
+          playSuggestion(suggestion.item)
+        } label: {
+          Label("Watch Now", systemImage: "play.fill").frame(minWidth: 110)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.white)
+        .foregroundStyle(.black)
+        .help("Starts \(suggestion.item.title); this title counts as watched.")
+        .accessibilityIdentifier("player-suggestion-play")
+        Button("Watch Credits") { controller.dismissSuggestionCard() }
+          .buttonStyle(.bordered)
+          .help("Hides the suggestion and plays the credits to the end.")
+          .accessibilityIdentifier("player-suggestion-credits")
+        Button("Done") { finishWithoutSuggestion() }
+          .buttonStyle(.bordered)
+          .help("Closes the player; this title counts as watched.")
+          .accessibilityIdentifier("player-suggestion-done")
+      }
+      .controlSize(.large)
+      .padding(.top, 4)
+    }
+    .padding(18)
+    .frame(width: 400, alignment: .leading)
+    .playerMaterial(
+      reduceTransparency: reduceTransparency,
+      shape: RoundedRectangle(cornerRadius: 18, style: .continuous)
+    )
+    .onHover { interaction("suggestion-hover", active: $0) }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("player-suggestion")
+  }
+
+  /// When the file ended: the suggestion and two more, each with Watch Now, and Done.
+  private var suggestionEndScreen: some View {
+    let list = Array(controller.suggestions.prefix(3))
+    return ZStack {
+      Color.black.opacity(0.78).ignoresSafeArea()
+      VStack(spacing: 22) {
+        Text("What's Next").font(.largeTitle.weight(.bold))
+        HStack(alignment: .top, spacing: 28) {
+          ForEach(Array(list.enumerated()), id: \.element.id) { index, suggestion in
+            VStack(alignment: .leading, spacing: 8) {
+              AuthenticatedArtwork(
+                artwork: suggestion.item.poster,
+                symbol: suggestion.item.kind == .movie ? "film" : "tv"
+              )
+              .frame(width: index == 0 ? 200 : 150, height: index == 0 ? 300 : 225)
+              .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+              Text(suggestion.item.title).font(index == 0 ? .title3.weight(.semibold) : .headline)
+                .lineLimit(2)
+              Text(SuggestionPolicy.caption(suggestion)).font(.callout).foregroundStyle(.secondary)
+                .lineLimit(2)
+              Button {
+                playSuggestion(suggestion.item)
+              } label: {
+                Label("Watch Now", systemImage: "play.fill")
+              }
+              .buttonStyle(.borderedProminent)
+              .tint(index == 0 ? .white : .gray)
+              .foregroundStyle(index == 0 ? .black : .white)
+              .controlSize(.large)
+              .accessibilityIdentifier("player-end-suggestion-\(index)")
+            }
+            .frame(width: index == 0 ? 200 : 150, alignment: .leading)
+          }
+        }
+        Button("Done") { closePlayer() }
+          .buttonStyle(.bordered)
+          .controlSize(.large)
+          .keyboardShortcut(.cancelAction)
+          .accessibilityIdentifier("player-end-suggestions-done")
+      }
+      .padding(40)
+    }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("player-end-suggestions")
+  }
+
+  /// Asks the server once what follows a movie or a series' last episode.
+  private func loadSuggestions() async {
+    guard controller.wantsSuggestions, controller.suggestions.isEmpty,
+      model.libraryCapabilities.contains(ServerFeatureNames.suggestions),
+      model.profile?.sessionId == profile.sessionId, controller.presentation.offlineID == nil
+    else { return }
+    let mediaId = controller.presentation.mediaId
+    guard
+      let list = try? await APIClient(profile: profile).suggestions(mediaId: mediaId, limit: 3),
+      !Task.isCancelled, controller.presentation.mediaId == mediaId
+    else { return }
+    controller.offerSuggestions(list)
+  }
+
+  /// Watch Now: this title counts as watched from its credits on, and the suggestion starts in
+  /// a new player, from its own plan (a series at its next episode).
+  private func playSuggestion(_ item: CatalogItemSummary) {
+    guard !cursor.isRetired else { return }
+    controller.finishForSuggestion()
+    hideTask?.cancel()
+    controlsPolicy.invalidate()
+    cursor.retire()
+    fullScreenKeyboard.retire()
+    model.dismissPlayback()
+    Task {
+      await controller.shutdown()
+      model.startPlayback(item: item)
+    }
+  }
+
+  private func finishWithoutSuggestion() {
+    controller.finishForSuggestion()
+    closePlayer()
   }
 
   /// The next episode with a countdown: when the credits begin, or in this title's last seconds.

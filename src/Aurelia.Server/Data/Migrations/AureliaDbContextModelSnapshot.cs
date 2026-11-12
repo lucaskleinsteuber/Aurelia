@@ -936,6 +936,24 @@ namespace Aurelia.Server.Data.Migrations
                     b.ToView("MediaMetadata", (string)null);
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.MediaKeywords", b =>
+                {
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("KeywordsJson")
+                        .IsRequired()
+                        .HasMaxLength(8192)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("MediaItemId");
+
+                    b.ToTable("MediaKeywords");
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.MediaMetadata", b =>
                 {
                     b.Property<Guid>("MediaItemId")
@@ -1925,6 +1943,17 @@ namespace Aurelia.Server.Data.Migrations
                     b.Navigation("LibraryRoot");
 
                     b.Navigation("Parent");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.MediaKeywords", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.MediaItem", "MediaItem")
+                        .WithOne()
+                        .HasForeignKey("Aurelia.Server.Data.MediaKeywords", "MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.MediaMetadata", b =>

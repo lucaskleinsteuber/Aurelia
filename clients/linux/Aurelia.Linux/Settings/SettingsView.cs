@@ -539,6 +539,8 @@ public sealed class SettingsView : UserControl
                 current.IntroSkipping, value => Save(PlaybackPreferences.Load(Prefs.Store) with { IntroSkipping = value })),
             Toggle("Offer Next Episode When Credits Begin", "Up Next appears when the credits begin, with the countdown above and Watch Credits. Turned off, or for episodes without known credits, it appears in the last seconds.",
                 current.UpNextAtCredits, value => Save(PlaybackPreferences.Load(Prefs.Store) with { UpNextAtCredits = value })),
+            Toggle("Play Suggestions Automatically", "When a movie or a series' last episode reaches its credits, your server suggests what to watch next, with Watch Now, Watch Credits and Done. Turned on, the suggestion starts by itself when the title ends; otherwise an end screen shows it with two more.",
+                current.PlaySuggestionsAutomatically, value => Save(PlaybackPreferences.Load(Prefs.Store) with { PlaySuggestionsAutomatically = value })),
             Toggle("Prevent Sleep During Playback", "The screen stays on while a title plays.", current.PreventSleep, value => Save(PlaybackPreferences.Load(Prefs.Store) with { PreventSleep = value }))));
         if (shell?.Client?.Supports(Aurelia.Contracts.ServerFeatures.CinemaTrailers) == true)
         {

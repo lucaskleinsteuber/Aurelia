@@ -951,6 +951,11 @@ async function homeScreen() {
   const hero = home.recommendation ?? continuing[0] ?? recent[0];
   const sections = [];
   if (continuing.length) sections.push(rail("Continue Watching", continuing.map((item) => continueCard(item)), "landscape"));
+  // "Because You Watched …": the server's suggestions after the latest watched titles (2.11.0).
+  for (const suggestionRail of home.becauseYouWatched ?? []) {
+    const items = visibleTitles(suggestionRail.suggestions.map((suggestion) => suggestion.item), general);
+    if (items.length) sections.push(rail(`Because You Watched ${suggestionRail.sourceTitle}`, items.map((item) => posterCard(item))));
+  }
   if (favorites.length) sections.push(rail("Favorites", favorites.map((item) => posterCard(item))));
   if (recent.length) sections.push(rail("Recently Added", recent.map((item) => posterCard(item))));
   if (home.collections?.length) sections.push(rail("Collections", home.collections.map((collection) => collectionCard(collection)), "poster", "/collections"));
@@ -1799,6 +1804,9 @@ async function playTitle(item, seasons, { intent = "play", skipCinema = false, o
     preferenceScope: `${state.server?.serverId ?? location.origin}:${state.profile?.id ?? ""}`,
     next: async () => (target.kind === "episode" ? logic.nextEpisode(seasons, target.id) : null),
     previous: async () => (target.kind === "episode" ? logic.previousEpisode(seasons, target.id) : null),
+    // After a movie or a series' last episode, the server suggests what follows.
+    suggestions: !onFinished && state.server?.capabilities?.includes("suggestions-v1") ? () => api.suggestions(target.id, 3) : undefined,
+    onPlaySuggestion: (next) => playTitle(next),
     onPlayNext: (next, options) => playTitle(next, seasons, options),
     onShowShortcuts: () => showShortcutsDialog(),
     onClose: () => {

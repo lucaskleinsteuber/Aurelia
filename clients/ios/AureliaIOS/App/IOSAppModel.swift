@@ -38,6 +38,7 @@ final class IOSAppModel: ObservableObject {
   var supportsCollections: Bool { capabilities?.supportsCollections ?? false }
   var supportsScrubPreviews: Bool { capabilities?.supportsScrubPreviews ?? false }
   var supportsMovieNight: Bool { capabilities?.supportsMovieNight ?? false }
+  var supportsSuggestions: Bool { capabilities?.supportsSuggestions ?? false }
   var supportsWrapped: Bool { capabilities?.supportsWrapped ?? false }
   var supportsMonthlyWrapped: Bool { capabilities?.supportsMonthlyWrapped ?? false }
   var supportsAdaptiveStreaming: Bool { capabilities?.supportsAdaptiveStreaming ?? false }
@@ -48,6 +49,8 @@ final class IOSAppModel: ObservableObject {
   @Published private(set) var acknowledgedProgress: [UUID: IOSPlaybackProgress] = [:]
   @Published private var mutationSummaries: [UUID: IOSCatalogItem] = [:]
   @Published var remotePlaybackItem: IOSCatalogItem?
+  /// Watch Now on a suggestion in the player: Home closes the player and plays this title.
+  @Published var suggestedPlaybackItem: IOSCatalogItem?
   /// Counts Stop requests from another device; the screen showing the player closes it.
   @Published private(set) var remoteStopRequests = 0
   /// The player on screen, so the heartbeat can tell other devices what plays.

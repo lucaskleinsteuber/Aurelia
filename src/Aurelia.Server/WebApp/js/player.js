@@ -12,6 +12,7 @@ import { ApiError } from "./api.js";
 import {
   ProgressSaver, SLEEP_MINUTES, PLAYBACK_RATES, clock, endsAt, normalizePreferences,
   playerSubtitle, rateLabel, playbackStartSeconds, sessionRefused, scrubPreviewFrameUrl, showsUpNext, upNextSeconds,
+  wantsSuggestions, showsSuggestion, suggestionCaption, artworkUrl,
   introRange, showsSkipIntro, skipsIntroAutomatically, creditsStart, nextFinishesCurrent,
   timelineValueText, trackForLanguage, volumeValueText, audioProfile, decibels, DIALOGUE_BOOST_CHOICES, VOLUME_LEVELING_CHOICES,
 } from "./logic.js";
@@ -94,13 +95,18 @@ export class Player {
    * @param {boolean} [options.canConvert]  the server reports live conversion
    * @param {boolean} [options.canStreamAdaptive]  the server streams in several qualities over HLS
    */
-  constructor({ api, item, next, previous, intent = "play", onPlayNext, onMediaMenu, onShowShortcuts, onClose, onSessionEnded, onFinished, canConvert = false, canScrubPreview = canConvert, canStreamAdaptive = false, preferenceScope, together }) {
+  constructor({ api, item, next, previous, intent = "play", suggestions, onPlaySuggestion, onPlayNext, onMediaMenu, onShowShortcuts, onClose, onSessionEnded, onFinished, canConvert = false, canScrubPreview = canConvert, canStreamAdaptive = false, preferenceScope, together }) {
     this.api = api;
     // Watch Together: { session(), start(player), leave() } from the app, or undefined.
     this.together = together;
     this.item = item;
     this.next = next;
     this.previous = previous;
+    // After a movie or a series' last episode: () => the server's suggestions, and how to play one.
+    this.suggestions = suggestions;
+    this.onPlaySuggestion = onPlaySuggestion;
+    this.suggestionList = undefined;
+    this.suggestionDismissed = false;
     this.startIntent = intent === "resume" ? "resume" : "play";
     this.navigationPending = false;
     this.onPlayNext = onPlayNext;
@@ -198,6 +204,8 @@ export class Player {
     this.controls = h("div", { class: "player-controls" }, h("div", { class: "player-shade" }), this.top, this.transport, this.bottom);
     this.popover = h("div", { class: "player-popover glass", role: "menu", hidden: true });
     this.upNext = h("div", { class: "up-next glass", hidden: true });
+    this.suggestionCard = h("div", { class: "up-next suggestion-card glass", hidden: true });
+    this.endScreen = h("div", { class: "suggestion-end", hidden: true, role: "dialog", "aria-label": "What's Next" });
     this.upNext.addEventListener("contextmenu", (event) => {
       if (this.closed || !this.upNextItem || !this.onMediaMenu) return;
       event.preventDefault();
@@ -213,7 +221,7 @@ export class Player {
     this.togetherNotice = h("div", { class: "together-notice glass", role: "status", hidden: true });
 
     this.element = h("div", { class: "player controls-visible paused", role: "dialog", "aria-modal": "true", "aria-label": `Playing ${this.item.title}`, tabindex: "-1" },
-      this.video, this.startScreen, this.controls, this.cue, this.skipIntroButton, this.upNext, this.popover, this.notice, this.togetherNotice);
+      this.video, this.startScreen, this.controls, this.cue, this.skipIntroButton, this.upNext, this.suggestionCard, this.endScreen, this.popover, this.notice, this.togetherNotice);
     // What a Watch Together party sees of this player.
     this.partyPlayer = {
       mediaId: this.item.id,
@@ -729,6 +737,7 @@ export class Player {
     this.updateTime();
     this.updateSkipIntro();
     this.updateUpNext();
+    this.updateSuggestion();
     this.updateCue();
   }
 
@@ -1176,6 +1185,95 @@ export class Player {
     this.reportToParty("seek");
   }
 
+  /** After a movie or a series' last episode: the server's suggestion from the credits on, without a countdown. */
+  async updateSuggestion() {
+    const video = this.video;
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    if (!this.suggestions || this.closed) return;
+    if (this.upNextItem === undefined && this.next && duration >= 300 && video.currentTime >= duration / 2) {
+      this.upNextItem = null;
+      this.upNextItem = await this.next().catch(() => null);
+    }
+    const hasNext = Boolean(this.upNextItem) || (this.next && this.upNextItem === undefined);
+    if (this.suggestionList === undefined && wantsSuggestions({ position: video.currentTime, duration, hasNext })) {
+      this.suggestionList = null;
+      this.suggestionList = (await this.suggestions().catch(() => null))?.filter((entry) => entry.item?.id !== this.item.id) ?? [];
+    }
+    const first = this.suggestionList?.[0];
+    const visible = this.endScreen.hidden && showsSuggestion({
+      position: video.currentTime, duration, hasNext, hasSuggestion: Boolean(first), dismissed: this.suggestionDismissed,
+      credits: creditsStart(this.source?.segments, duration), lead: this.preferences.upNextCountdownSeconds,
+    }) && this.upNext.hidden;
+    if (!visible) {
+      this.suggestionCard.hidden = true;
+      return;
+    }
+    if (this.suggestionCard.hidden || this.suggestionCard.dataset.id !== first.item.id) {
+      clear(this.suggestionCard);
+      this.suggestionCard.dataset.id = first.item.id;
+      this.suggestionCard.append(
+        h("div", { class: "eyebrow" }, "Up Next"),
+        h("div", { class: "up-next-title" }, first.item.title),
+        h("div", { class: "up-next-subtitle" }, suggestionCaption(first)),
+        h("div", { class: "button-row" },
+          h("button", { class: "primary-button", title: `Starts ${first.item.title}; this title counts as watched`, onclick: () => this.playSuggestion(first.item) },
+            icon("play", { size: 15 }), h("span", {}, "Watch Now")),
+          h("button", { class: "secondary-button", title: "Hides the suggestion and plays the credits to the end", onclick: () => this.dismissSuggestion() }, "Watch Credits"),
+          h("button", { class: "secondary-button", title: "Closes the player; this title counts as watched", onclick: () => this.doneWithSuggestions() }, "Done")));
+    }
+    this.skipIntroButton.hidden = true;
+    this.suggestionCard.hidden = false;
+  }
+
+  dismissSuggestion() {
+    this.suggestionDismissed = true;
+    this.suggestionCard.hidden = true;
+  }
+
+  /** Leaving for a suggestion, or with Done, counts this title as watched from its credits on. */
+  finishForSuggestion() {
+    const video = this.video;
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    if (this.saver && duration > 0 && nextFinishesCurrent({ position: video.currentTime, duration,
+      upNextShown: !this.suggestionCard.hidden || !this.endScreen.hidden, credits: creditsStart(this.source?.segments, duration) })) {
+      this.saver.save(duration * 1000, duration * 1000, true, { keepalive: true });
+      this.saver = null;
+    }
+  }
+
+  playSuggestion(item) {
+    if (this.closed || !item) return;
+    this.finishForSuggestion();
+    const play = this.onPlaySuggestion;
+    this.close();
+    play?.(item);
+  }
+
+  doneWithSuggestions() {
+    if (this.closed) return;
+    this.finishForSuggestion();
+    this.close();
+  }
+
+  /** The end of the file: the suggestion and two more, each with Watch Now, and Done. */
+  showEndScreen() {
+    const list = (this.suggestionList ?? []).slice(0, 3);
+    clear(this.endScreen);
+    this.suggestionCard.hidden = true;
+    this.endScreen.append(h("div", { class: "suggestion-end-panel" },
+      h("h2", {}, "What’s Next"),
+      h("div", { class: "suggestion-end-items" }, ...list.map((suggestion, index) => h("div", { class: `suggestion-end-item${index === 0 ? " first" : ""}` },
+        suggestion.item.poster ? h("img", { class: "suggestion-end-poster", alt: "", src: artworkUrl(suggestion.item.poster, index === 0 ? 400 : 300) })
+          : h("div", { class: "suggestion-end-poster placeholder" }),
+        h("div", { class: "up-next-title" }, suggestion.item.title),
+        h("div", { class: "up-next-subtitle" }, suggestionCaption(suggestion)),
+        h("button", { class: index === 0 ? "primary-button" : "secondary-button", onclick: () => this.playSuggestion(suggestion.item) },
+          icon("play", { size: 15 }), h("span", {}, "Watch Now"))))),
+      h("button", { class: "secondary-button", onclick: () => this.doneWithSuggestions() }, "Done")));
+    this.endScreen.hidden = false;
+    this.endScreen.querySelector("button")?.focus();
+  }
+
   async updateUpNext() {
     const video = this.video;
     const duration = Number.isFinite(video.duration) ? video.duration : 0;
@@ -1266,8 +1364,12 @@ export class Player {
     const next = this.sleep.mode === "end" || this.autoplayCancelled || !this.preferences.automaticallyPlayNextEpisode
       ? null
       : this.upNextItem ?? (this.next ? await this.next().catch(() => null) : null);
-    if (next) this.playNext(next);
-    else this.close();
+    if (next) return this.playNext(next);
+    const suggestion = this.sleep.mode === "end" ? null : this.suggestionList?.[0];
+    if (!suggestion) return this.close();
+    // Only the viewer's own setting starts a suggestion; otherwise the end screen offers it.
+    if (this.preferences.playSuggestionsAutomatically && !this.autoplayCancelled) this.playSuggestion(suggestion.item);
+    else this.showEndScreen();
   }
 
   async updateEpisodeButtons() {

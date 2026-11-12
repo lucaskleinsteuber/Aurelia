@@ -515,6 +515,21 @@ test("the detection's progress and time left read like the Mac", () => {
   assert.equal(logic.segmentMovieSummary({ movieCount: 40, moviesWithCredits: 12, moviesPendingCount: 3 }), "Movies: 12 of 40 with credits · 3 to examine");
   assert.equal(logic.segmentMovieSummary({ movieCount: 2, moviesWithCredits: 2, moviesPendingCount: 0 }), "Movies: 2 of 2 with credits");
   assert.equal(logic.segmentMovieSummary({ pendingCount: 0 }), "");
+  // Suggestions after a movie or a series' last episode, without a countdown.
+  assert.equal(logic.wantsSuggestions({ position: 2000, duration: 6000, hasNext: false }), false);
+  assert.equal(logic.wantsSuggestions({ position: 3000, duration: 6000, hasNext: false }), true);
+  assert.equal(logic.wantsSuggestions({ position: 5000, duration: 6000, hasNext: true }), false);
+  assert.equal(logic.wantsSuggestions({ position: 400, duration: 500, hasNext: false }), false);
+  const card = { duration: 6000, hasNext: false, hasSuggestion: true, dismissed: false, credits: 5400 };
+  assert.equal(logic.showsSuggestion({ ...card, position: 5500 }), true);
+  assert.equal(logic.showsSuggestion({ ...card, position: 5300 }), false);
+  assert.equal(logic.showsSuggestion({ ...card, position: 5985, credits: null }), true);
+  assert.equal(logic.showsSuggestion({ ...card, position: 5500, dismissed: true }), false);
+  assert.equal(logic.showsSuggestion({ ...card, position: 5500, hasNext: true }), false);
+  assert.equal(logic.showsSuggestion({ ...card, position: 5500, hasSuggestion: false }), false);
+  assert.equal(logic.suggestionCaption({ reason: "Next in Toy Tale Collection", item: { year: 1999 } }), "Next in Toy Tale Collection · 1999");
+  assert.equal(logic.normalizePreferences({}).playSuggestionsAutomatically, false);
+  assert.equal(logic.normalizePreferences({ playSuggestionsAutomatically: true }).playSuggestionsAutomatically, true);
   assert.equal(logic.segmentRemaining(12_000), "About 3 h 20 min left");
   assert.equal(logic.segmentRemaining(600), "About 10 min left");
   assert.equal(logic.segmentRemaining(null), "");

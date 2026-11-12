@@ -388,6 +388,9 @@ export function createSettings(app) {
         state.server?.capabilities?.includes("media-segments-v2") ? row("Offer Next Episode When Credits Begin",
           toggle(preferences.upNextAtCredits, (on) => save({ upNextAtCredits: on }), "Offer Next Episode When Credits Begin"),
           "Up Next appears when the credits begin, with the countdown above and Watch Credits. Turned off, or for episodes without known credits, it appears in the last seconds.") : null,
+        state.server?.capabilities?.includes("suggestions-v1") ? row("Play Suggestions Automatically",
+          toggle(preferences.playSuggestionsAutomatically, (on) => save({ playSuggestionsAutomatically: on }), "Play Suggestions Automatically"),
+          "When a movie or a series’ last episode reaches its credits, your server suggests what to watch next, with Watch Now, Watch Credits and Done. Turned on, the suggestion starts by itself when the title ends; otherwise an end screen shows it with two more.") : null,
         row("Start Over If Barely Started", select([
           [0, "Never"], [30, "Under 30 seconds"], [60, "Under 1 minute"], [120, "Under 2 minutes"],
         ], preferences.resumeThresholdSeconds, (sec) => save({ resumeThresholdSeconds: Number(sec) }), "Start Over If Barely Started"),

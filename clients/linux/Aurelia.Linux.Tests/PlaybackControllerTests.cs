@@ -425,6 +425,26 @@ public sealed class PlaybackControllerTests : IAsyncDisposable
     }
 
     [Fact]
+    public void SuggestionsFollowAMovieOrALastEpisodeWithoutACountdown()
+    {
+        Assert.False(PlayerPolicy.WantsSuggestions(2_000_000, 6_000_000, hasNext: false));
+        Assert.True(PlayerPolicy.WantsSuggestions(3_000_000, 6_000_000, hasNext: false));
+        Assert.False(PlayerPolicy.WantsSuggestions(5_000_000, 6_000_000, hasNext: true));
+        Assert.False(PlayerPolicy.WantsSuggestions(400_000, 500_000, hasNext: false));
+        Assert.True(PlayerPolicy.ShowsSuggestion(5_500_000, 6_000_000, false, true, false, 5_400_000));
+        Assert.False(PlayerPolicy.ShowsSuggestion(5_300_000, 6_000_000, false, true, false, 5_400_000));
+        Assert.True(PlayerPolicy.ShowsSuggestion(5_985_000, 6_000_000, false, true, false, null));
+        Assert.False(PlayerPolicy.ShowsSuggestion(5_500_000, 6_000_000, true, true, false, 5_400_000));
+        Assert.False(PlayerPolicy.ShowsSuggestion(5_500_000, 6_000_000, false, false, false, 5_400_000));
+        Assert.False(PlayerPolicy.ShowsSuggestion(5_500_000, 6_000_000, false, true, true, 5_400_000));
+        var item = new CatalogItemSummary(Guid.NewGuid(), MediaKind.Movie, "Toy Tale 2", null, 1999, null, [], null, null,
+            MediaAvailability.Available, false, null, DateTimeOffset.UnixEpoch);
+        Assert.Equal("Next in Toy Tale Collection · 1999",
+            PlayerPolicy.SuggestionCaption(new MediaSuggestion(item, MediaSuggestionKind.NextPart, "Next in Toy Tale Collection")));
+        Assert.False(new PlaybackPreferences().PlaySuggestionsAutomatically);
+    }
+
+    [Fact]
     public void ThePlayerRulesMatchTheMac()
     {
         Assert.True(PlayerPolicy.IsNaturalCompletion(3_598_000, 3_600_000, observedPlayback: true));

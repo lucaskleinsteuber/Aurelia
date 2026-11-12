@@ -399,6 +399,27 @@ time to a wrong one.
 How the server finds the times and what it stores is described in
 [Organizing your media](MEDIA_LIBRARY.md#intros-and-credits).
 
+## Suggestions
+
+A server from 2.11.0 reports `suggestions-v1`. `GET /api/v1/media/{id}/suggestions?limit=10`
+(1 to 30) returns `{mediaId, suggestions: [{item, kind, reason}]}`, best first: movies and series
+the profile may open (its age limit included) and has not finished. For an episode the
+suggestions are for its series. `kind` is `nextPart` (the next film of a series of films, far
+ahead of everything), `franchise`, `keywords` (shared TMDB keywords, rare ones weigh more),
+`people`, `genres`, `studio` or `title`; `reason` says it in words, such as "Next in the Toy Story
+Collection" or "Also directed by …", and clients show it instead of a percentage. Very different
+age ratings weigh strongly against a title.
+
+`GET /api/v1/home` adds `becauseYouWatched`: up to three rails `{sourceId, sourceTitle,
+suggestions}` for the latest titles the profile finished or watched a while, each with titles no
+earlier rail shows. With a watch history, `recommendation` (the hour's title) is one of the
+profile's personal top ten. Older servers send no rails; clients show none.
+
+In the player a client offers a suggestion when a movie reaches its credits or the last episode
+of a series does: a card with **Watch Now**, **Watch Credits** and **Done**, without a countdown;
+only the person's own setting *Play Suggestions Automatically* (off by default) starts it on its
+own. At the end of the file an end screen shows the suggestion and two alternatives.
+
 ## Cinema mode
 
 With `cinema-trailers-v1` (server 2.3.0), a player can show trailers before a film, as at the

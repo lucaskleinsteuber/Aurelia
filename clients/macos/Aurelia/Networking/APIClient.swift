@@ -1371,6 +1371,13 @@ struct APIClient: Sendable {
     return response.trailers
   }
 
+  /// What to watch after a title (servers from 2.11.0); an episode's are its series'.
+  func suggestions(mediaId: UUID, limit: Int = 10) async throws -> [MediaSuggestion] {
+    let response: MediaSuggestionsResponse = try await get(
+      "/api/v1/media/\(mediaId.uuidString.lowercased())/suggestions?limit=\(limit)")
+    return response.suggestions
+  }
+
   func playbackProgress(mediaId: UUID) async throws -> PlaybackProgressResponse {
     try await get("/api/v1/media/\(mediaId.uuidString.lowercased())/progress")
   }

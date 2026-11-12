@@ -217,6 +217,30 @@ struct IOSHome: Codable, Equatable, Sendable {
   let favorites: [IOSCatalogItem]
   let collections: [IOSCollection]
   let recommendationChangesAt: String
+  /// "Because You Watched …" rails; servers before 2.11.0 send none.
+  var becauseYouWatched: [IOSHomeSuggestionRail]? = nil
+}
+
+/// What to watch next with its reason in words ("suggestions-v1").
+struct IOSMediaSuggestion: Codable, Equatable, Sendable, Identifiable {
+  let item: IOSCatalogItem
+  let kind: String
+  let reason: String
+
+  var id: UUID { item.id }
+}
+
+struct IOSMediaSuggestionsResponse: Codable, Equatable, Sendable {
+  let mediaId: UUID
+  let suggestions: [IOSMediaSuggestion]
+}
+
+struct IOSHomeSuggestionRail: Codable, Equatable, Sendable, Identifiable {
+  let sourceId: UUID
+  let sourceTitle: String
+  let suggestions: [IOSMediaSuggestion]
+
+  var id: UUID { sourceId }
 }
 
 enum IOSWatchScope: String, Codable, Sendable { case title, season, series }

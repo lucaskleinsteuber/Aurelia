@@ -30,6 +30,9 @@ public sealed class PlayerView : UserControl, IDisposable
     private static readonly IBrush Secondary = new SolidColorBrush(Color.FromArgb(0xAD, 0xFF, 0xFF, 0xFF));
     private readonly PlaybackController controller;
     private readonly Window? window;
+
+    /// <summary>The library's artwork store, for the suggestions' posters; without it they show titles only.</summary>
+    public Aurelia.Linux.Core.Library.LibraryStore? Store { get; init; }
     private readonly VideoSurface surface = new();
     private readonly Grid chrome = new();
     private readonly TextBlock title = new() { FontSize = 20, FontWeight = FontWeight.SemiBold, Foreground = Brushes.White, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -60,6 +63,12 @@ public sealed class PlayerView : UserControl, IDisposable
     private readonly TextBlock upNextTitle = new() { FontSize = 18, FontWeight = FontWeight.SemiBold, Foreground = Brushes.White, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly TextBlock upNextCountdown = new() { Foreground = Secondary };
     private readonly Button upNextSecond = new() { Content = "Cancel", Classes = { "chip" } };
+    /// <summary>After a movie or a series' last episode: the server's suggestion from the credits on, without a countdown.</summary>
+    private readonly Border suggestionCard = new() { Classes = { "upNext" }, IsVisible = false, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Width = 420 };
+    /// <summary>When the file ended: the suggestion and two more.</summary>
+    private readonly Border endScreen = new() { Background = new SolidColorBrush(Color.FromArgb(0xC8, 0, 0, 0)), IsVisible = false };
+    private Guid? shownSuggestion;
+    private bool endScreenBuilt;
     /// <summary>"Skip Intro" while an episode's intro plays; it stays when the controls hide.</summary>
     private readonly Button skipIntro = new() { Classes = { "skipIntro" }, IsVisible = false, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom };
     private readonly Border status = new() { Classes = { "playerMaterial", "playerPanel" }, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
@@ -263,7 +272,7 @@ public sealed class PlayerView : UserControl, IDisposable
         chrome.Children.Add(transport);
         chrome.Children.Add(bottom);
         chrome.Children.Add(conflict);
-        Content = new Grid { Children = { surface, chrome, status, skipIntro, upNext, noteCues, togetherNotice } };
+        Content = new Grid { Children = { surface, chrome, status, skipIntro, upNext, suggestionCard, endScreen, noteCues, togetherNotice } };
         if (together is not null) together.WatchPartyChanged += ShowTogetherNotice;
 
         controller.PropertyChanged += OnControllerChanged;
@@ -336,6 +345,7 @@ public sealed class PlayerView : UserControl, IDisposable
         var visible = chrome.IsVisible;
         // Skip Intro and Up Next sit above the bottom controls while they show, never on them.
         upNext.Margin = new Thickness(0, 0, 48, visible ? 200 : 40);
+        suggestionCard.Margin = new Thickness(0, 0, 48, visible ? 200 : 40);
         skipIntro.Margin = new Thickness(0, 0, 48, visible ? 200 : 40);
         noteCues.Margin = new Thickness(0, visible ? 104 : 32, 26, 0);
     }
@@ -394,7 +404,8 @@ public sealed class PlayerView : UserControl, IDisposable
                 ? "Hides this card and keeps playing the credits; the next episode still follows at the end"
                 : "Stops at the end instead of playing the next episode");
         }
-        skipIntro.IsVisible = controller.ShowsSkipIntro && controller.UpNext is null;
+        UpdateSuggestions();
+        skipIntro.IsVisible = controller.ShowsSkipIntro && controller.UpNext is null && !suggestionCard.IsVisible;
         conflict.IsVisible = controller.HasConflict;
         var preparing = controller.State is PlayerState.Loading or PlayerState.Recovering;
         var failed = controller.State == PlayerState.Failed;
@@ -427,6 +438,91 @@ public sealed class PlayerView : UserControl, IDisposable
         sleep.Classes.Set("active", controller.SleepTimer.IsOn);
         subtitles.Classes.Set("active", controller.SubtitleTracks.Any(track => track.Id == controller.SubtitleTrack));
     }
+
+    private void UpdateSuggestions()
+    {
+        var first = controller.Suggestions.Count > 0 ? controller.Suggestions[0] : null;
+        suggestionCard.IsVisible = controller.ShowsSuggestion && first is not null;
+        if (suggestionCard.IsVisible && first is not null && shownSuggestion != first.Item.Id)
+        {
+            shownSuggestion = first.Item.Id;
+            var watch = new Button { Content = "Watch Now", Classes = { "primary" } };
+            watch.Click += (_, _) => _ = controller.PlaySuggestionAsync(first.Item);
+            ToolTip.SetTip(watch, $"Starts {first.Item.Title}; this title counts as watched");
+            var credits = new Button { Content = "Watch Credits", Classes = { "chip" } };
+            credits.Click += (_, _) => controller.DismissSuggestion();
+            ToolTip.SetTip(credits, "Hides the suggestion and plays the credits to the end");
+            var done = new Button { Content = "Done", Classes = { "chip" } };
+            done.Click += (_, _) => _ = controller.DoneAsync();
+            ToolTip.SetTip(done, "Closes the player; this title counts as watched");
+            var text = new StackPanel
+            {
+                Spacing = 4,
+                Children =
+                {
+                    new TextBlock { Text = first.Item.Title, FontSize = 18, FontWeight = FontWeight.SemiBold, Foreground = Brushes.White, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis },
+                    new TextBlock { Text = PlayerPolicy.SuggestionCaption(first), Foreground = Secondary, TextWrapping = TextWrapping.Wrap, MaxLines = 2 },
+                },
+            };
+            suggestionCard.Child = new StackPanel
+            {
+                Spacing = 10,
+                Children =
+                {
+                    new TextBlock { Text = "UP NEXT", Classes = { "eyebrow" }, Foreground = Secondary },
+                    Store is null ? text : new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Children = { Poster(first.Item, 54), text } },
+                    new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { watch, credits, done } },
+                },
+            };
+        }
+        endScreen.IsVisible = controller.ShowsEndScreen && controller.Suggestions.Count > 0;
+        if (endScreen.IsVisible && !endScreenBuilt)
+        {
+            endScreenBuilt = true;
+            var items = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Center };
+            foreach (var (suggestion, index) in controller.Suggestions.Take(3).Select((entry, index) => (entry, index)))
+            {
+                var width = index == 0 ? 200 : 150;
+                var watch = new Button { Content = "Watch Now", Classes = { index == 0 ? "primary" : "chip" } };
+                watch.Click += (_, _) => _ = controller.PlaySuggestionAsync(suggestion.Item);
+                AutomationProperties.SetName(watch, $"Watch {suggestion.Item.Title} Now");
+                var column = new StackPanel { Width = width, Spacing = 8, Margin = new Thickness(14) };
+                if (Store is not null) column.Children.Add(Poster(suggestion.Item, width));
+                column.Children.Add(new TextBlock { Text = suggestion.Item.Title, FontSize = index == 0 ? 18 : 15, FontWeight = FontWeight.SemiBold, Foreground = Brushes.White, TextWrapping = TextWrapping.Wrap, MaxLines = 2 });
+                column.Children.Add(new TextBlock { Text = PlayerPolicy.SuggestionCaption(suggestion), Foreground = Secondary, TextWrapping = TextWrapping.Wrap, MaxLines = 2 });
+                column.Children.Add(watch);
+                items.Children.Add(column);
+            }
+            var done = new Button { Content = "Done", Classes = { "chip" }, HorizontalAlignment = HorizontalAlignment.Center };
+            done.Click += (_, _) => _ = controller.DoneAsync();
+            endScreen.Child = new ScrollViewer
+            {
+                Content = new StackPanel
+                {
+                    Spacing = 18,
+                    Margin = new Thickness(16),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Children =
+                    {
+                        new TextBlock { Text = "What's Next", FontSize = 32, FontWeight = FontWeight.Bold, Foreground = Brushes.White, HorizontalAlignment = HorizontalAlignment.Center },
+                        items,
+                        done,
+                    },
+                },
+            };
+        }
+        if (!endScreen.IsVisible) endScreenBuilt = false;
+    }
+
+    private Border Poster(CatalogItemSummary item, double width) => new()
+    {
+        Width = width,
+        Height = width * 1.5,
+        CornerRadius = new CornerRadius(8),
+        ClipToBounds = true,
+        Child = new ArtworkImage(Store, item.Poster, width),
+    };
 
     private static string RateLabel(double rate) => rate.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "×";
 

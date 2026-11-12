@@ -154,6 +154,43 @@ struct GeneralPreferencesTests {
     #expect(ServerMediaSegmentsEditor.remaining(50 * 3_600) == "2 days 2 hours")
   }
 
+  @Test func suggestionsAppearAfterAMovieOrALastEpisodeWithoutACountdown() throws {
+    let duration: Int64 = 6_000_000
+    #expect(!SuggestionPolicy.wantsSuggestions(position: 2_000_000, duration: duration, hasNext: false))
+    #expect(SuggestionPolicy.wantsSuggestions(position: 3_000_000, duration: duration, hasNext: false))
+    #expect(!SuggestionPolicy.wantsSuggestions(position: 5_000_000, duration: duration, hasNext: true))
+    #expect(!SuggestionPolicy.wantsSuggestions(position: 400_000, duration: 500_000, hasNext: false))
+    // From the credits on; without credits in the last seconds.
+    #expect(
+      SuggestionPolicy.showsCard(
+        position: 5_500_000, duration: duration, hasNext: false, hasSuggestion: true,
+        dismissed: false, creditsStart: 5_400_000))
+    #expect(
+      !SuggestionPolicy.showsCard(
+        position: 5_300_000, duration: duration, hasNext: false, hasSuggestion: true,
+        dismissed: false, creditsStart: 5_400_000))
+    #expect(
+      SuggestionPolicy.showsCard(
+        position: 5_985_000, duration: duration, hasNext: false, hasSuggestion: true,
+        dismissed: false, creditsStart: nil))
+    for (next, has, dismissed) in [(true, true, false), (false, false, false), (false, true, true)] {
+      #expect(
+        !SuggestionPolicy.showsCard(
+          position: 5_500_000, duration: duration, hasNext: next, hasSuggestion: has,
+          dismissed: dismissed, creditsStart: 5_400_000))
+    }
+    let json = Data(
+      """
+      {"mediaId":"10000000-0000-0000-0000-000000000001","suggestions":[{"kind":"nextPart",
+      "reason":"Next in Toy Tale Collection","item":{"id":"10000000-0000-0000-0000-000000000002",
+      "kind":"movie","title":"Toy Tale 2","year":1999,"genres":[],"availability":"available",
+      "isFavorite":false,"addedAt":"2026-11-12T10:00:00Z"}}]}
+      """.utf8)
+    let response = try JSONDecoder().decode(MediaSuggestionsResponse.self, from: json)
+    #expect(SuggestionPolicy.caption(response.suggestions[0]) == "Next in Toy Tale Collection · 1999")
+    #expect(!PlaybackPreferences.defaultValue.playSuggestionsAutomatically)
+  }
+
   @Test func serverProgressCountsMoviesFrom2_11() throws {
     let current = Data(
       """

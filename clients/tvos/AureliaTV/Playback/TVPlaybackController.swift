@@ -42,6 +42,14 @@ final class TVPlaybackController: ObservableObject {
   @Published private(set) var upNext: TVUpNext?
   /// "Skip Intro" is offered while the episode's intro plays (times from the server).
   @Published private(set) var showsSkipIntro = false
+  /// The server's suggestions after a movie or a series' last episode, best first.
+  @Published private(set) var suggestions: [TVMediaSuggestion] = []
+  /// The suggestion card from the credits on, without a countdown.
+  @Published private(set) var showsSuggestion = false
+  /// The end screen with the suggestion and two more, once the file ended.
+  @Published private(set) var showsSuggestionEndScreen = false
+  /// Set when the suggestion should start: Watch Now, or Play Suggestions Automatically at the end.
+  @Published private(set) var suggestionToStart: TVCatalogItem?
   /// A separate local relay for timeline previews; its reads are marked as previews, which
   /// the server counts apart from playback, and its failures never touch playback.
   @Published private(set) var previewSourceURL: URL?
@@ -84,6 +92,9 @@ final class TVPlaybackController: ObservableObject {
   private var lastScrubAt: TimeInterval = 0
   private var upNextDismissed = false
   private var autoplayCancelled = false
+  private let supportsSuggestions: Bool
+  private var suggestionsRequested = false
+  private var suggestionDismissed = false
   /// Where the card appeared in the credits; its countdown runs from there.
   private var creditsAnchor: Int64?
   private var introSkipped = false
@@ -116,11 +127,13 @@ final class TVPlaybackController: ObservableObject {
     preferences: TVPlaybackPreferences? = nil,
     preferencesStore: TVPlaybackPreferencesStore? = nil,
     adaptiveStreaming: Bool = false,
+    supportsSuggestions: Bool = false,
     onClose: @escaping @MainActor () -> Void,
     onSessionFailure: @escaping @MainActor (Error) -> Void = { _ in },
     startOver: Bool = false
   ) {
     self.adaptiveStreaming = adaptiveStreaming
+    self.supportsSuggestions = supportsSuggestions
     self.connection = connection
     self.session = session
     self.mediaID = mediaID
@@ -513,9 +526,65 @@ final class TVPlaybackController: ObservableObject {
     upNext = nil
   }
 
+  /// Watch Credits on the suggestion card: the credits play, then the end screen follows.
+  func dismissSuggestion() {
+    suggestionDismissed = true
+    showsSuggestion = false
+  }
+
+  /// Watch Now: this title counts as watched from its credits on; the app plays the suggestion
+  /// the way Home plays anything.
+  func playSuggestion(_ item: TVCatalogItem) {
+    finishForSuggestion()
+    suggestionToStart = item
+  }
+
+  /// Done, or leaving for a suggestion: from the credits on the title counts as watched.
+  func finishForSuggestion() {
+    if TVPlayerPolicy.nextFinishesCurrent(
+      position: position, duration: duration,
+      upNextShown: showsSuggestion || showsSuggestionEndScreen,
+      creditsStart: currentSegments?.creditsStartMilliseconds)
+    {
+      finished = true
+    }
+  }
+
+  func doneWithSuggestions() {
+    finishForSuggestion()
+    close()
+  }
+
+  private func updateSuggestion() {
+    let hasNext = queue.first?.isPlayable == true
+    if supportsSuggestions, !suggestionsRequested,
+      TVPlayerPolicy.wantsSuggestions(position: position, duration: duration, hasNext: hasNext)
+    {
+      suggestionsRequested = true
+      let api = api
+      let media = mediaID
+      Task { [weak self] in
+        guard let list = try? await api.suggestions(mediaID: media, limit: 3) else { return }
+        guard let self, self.mediaID == media, !self.closed else { return }
+        self.suggestions = list.filter { $0.item.id != media }
+      }
+    }
+    let shown =
+      !finished && upNext == nil
+      && TVPlayerPolicy.showsSuggestion(
+        position: position, duration: duration, hasNext: hasNext,
+        hasSuggestion: !suggestions.isEmpty, dismissed: suggestionDismissed,
+        creditsStart: currentSegments?.creditsStartMilliseconds)
+    assignIfChanged(&showsSuggestion, shown)
+  }
+
   func back() {
     if scrubPosition != nil {
       cancelScrub()
+    } else if showsSuggestionEndScreen {
+      doneWithSuggestions()
+    } else if showsSuggestion, !controlsVisible {
+      dismissSuggestion()
     } else if upNext != nil, !controlsVisible {
       dismissUpNext()
     } else if showsSkipIntro, !controlsVisible {
@@ -711,6 +780,7 @@ final class TVPlaybackController: ObservableObject {
       userInteracted()
     }
     updateUpNext()
+    updateSuggestion()
     updateSkipIntro()
     if wasPlaying != isPlaying || wasLoading != isLoading { userInteracted() }
     if !isPlaying { controlsVisible = true }
@@ -787,10 +857,20 @@ final class TVPlaybackController: ObservableObject {
     {
       finished = true
       upNext = nil
+      showsSuggestion = false
       if sleepTimer != .endOfEpisode, preferences.automaticallyPlayNextEpisode,
         !autoplayCancelled, let next = queue.first
       {
         advanceTask = Task { [weak self] in await self?.advance(to: next) }
+      } else if sleepTimer != .endOfEpisode, queue.isEmpty, let first = suggestions.first {
+        // After a movie or a series' last episode: only the viewer's own setting starts the
+        // suggestion; otherwise the end screen offers it with two more.
+        if preferences.playSuggestionsAutomatically, !autoplayCancelled {
+          suggestionToStart = first.item
+        } else {
+          controlsVisible = false
+          showsSuggestionEndScreen = true
+        }
       } else {
         if sleepTimer == .endOfEpisode {
           let api = api
@@ -959,6 +1039,11 @@ final class TVPlaybackController: ObservableObject {
     upNext = nil
     upNextDismissed = false
     autoplayCancelled = false
+    suggestions = []
+    suggestionsRequested = false
+    suggestionDismissed = false
+    showsSuggestion = false
+    showsSuggestionEndScreen = false
     creditsAnchor = nil
     introSkipped = false
     movedIntoIntro = false

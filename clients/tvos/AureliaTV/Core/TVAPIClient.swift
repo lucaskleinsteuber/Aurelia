@@ -373,6 +373,13 @@ struct TVAPIClient: Sendable {
     return response.trailers
   }
 
+  /// What to watch after a title (servers from 2.11.0); an episode's are its series'.
+  func suggestions(mediaID: UUID, limit: Int = 3) async throws -> [TVMediaSuggestion] {
+    let response: TVMediaSuggestionsResponse = try await get(
+      "/api/v1/media/\(mediaID.uuidString.lowercased())/suggestions?limit=\(limit)")
+    return response.suggestions
+  }
+
   func revokeTicket(id: UUID) async throws {
     _ = try await send("/api/v1/playback/\(id.uuidString)", method: "DELETE")
   }

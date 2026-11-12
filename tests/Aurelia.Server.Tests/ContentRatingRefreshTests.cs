@@ -170,6 +170,75 @@ public sealed class ContentRatingRefreshTests
         }
     }
 
+    [Fact]
+    public async Task MatchedTitlesGetTheirKeywordsOnceAndTitlesWithKeywordsAreNotAsked()
+    {
+        var root = Path.Combine(TestPaths.CreateDataDirectory(), "Keyword Library");
+        Directory.CreateDirectory(root);
+        var provider = new Provider();
+        try
+        {
+            using var factory = new AureliaServerFactory(configureServices: services =>
+            {
+                services.RemoveAll<ITmdbClient>();
+                services.AddSingleton<ITmdbClient>(provider);
+            });
+            using var client = factory.CreateClient();
+            await ApiTestClient.SetupOwnerAsync(client);
+            var refresh = factory.Services.GetRequiredService<KeywordRefresh>();
+            Assert.False(await refresh.RunAsync(TimeSpan.Zero, default));
+            factory.Services.GetRequiredService<MetadataProviderSettingsStore>().Save(new UpdateMetadataProviderRequest(true, "en", "synthetic-provider-token-with-no-network"));
+            var movie = Guid.NewGuid();
+            var known = Guid.NewGuid();
+            await using (var scope = factory.Services.CreateAsyncScope())
+            {
+                var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+                var library = new LibraryRoot { Id = Guid.NewGuid(), Name = "Invented", Path = root, NormalizedPath = MediaPath.Normalize(root), MonitoringEnabled = false, Kind = LibraryKind.Automatic };
+                database.LibraryRoots.Add(library);
+                MediaItem Item(Guid id, string name, string providerId) => new()
+                {
+                    Id = id,
+                    LibraryRootId = library.Id,
+                    Kind = MediaKind.Movie,
+                    DetectedTitle = name,
+                    SourcePath = Path.Combine(root, name),
+                    NormalizedSourcePath = MediaPath.Normalize(Path.Combine(root, name)),
+                    Metadata = new MediaMetadata
+                    {
+                        Provider = "tmdb",
+                        ProviderMediaId = providerId,
+                        ProviderMediaType = "movie",
+                        ProviderTitle = name,
+                        ProviderContentRating = "FSK 6",
+                        ReviewState = MetadataReviewState.Matched,
+                    },
+                };
+                database.MediaItems.Add(Item(movie, "Invented Heist", "11"));
+                database.MediaItems.Add(Item(known, "Invented Known", "12"));
+                database.MediaKeywords.Add(new MediaKeywords { MediaItemId = known, KeywordsJson = "[\"lighthouse\"]", UpdatedAt = DateTimeOffset.UtcNow });
+                await database.SaveChangesAsync();
+            }
+
+            Assert.True(await refresh.RunAsync(TimeSpan.Zero, default));
+            await using (var scope = factory.Services.CreateAsyncScope())
+            {
+                var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+                var stored = await database.MediaKeywords.AsNoTracking().ToDictionaryAsync(row => row.MediaItemId, row => row.KeywordsJson);
+                Assert.Equal(MetadataPresentation.SerializeList(["heist", "Marvel Cinematic Universe (MCU)"]), stored[movie]);
+                Assert.Equal("[\"lighthouse\"]", stored[known]);
+                var metadata = await database.MediaMetadata.AsNoTracking().SingleAsync(row => row.MediaItemId == movie);
+                Assert.Equal(("Invented Heist", "FSK 6"), (metadata.ProviderTitle, metadata.ProviderContentRating));
+            }
+            Assert.Equal(["movie/11"], provider.Details);
+            Assert.True(await refresh.RunAsync(TimeSpan.Zero, default));
+            Assert.Single(provider.Details);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(root)!, recursive: true);
+        }
+    }
+
     private sealed class Provider : ITmdbClient
     {
         public int Searches;

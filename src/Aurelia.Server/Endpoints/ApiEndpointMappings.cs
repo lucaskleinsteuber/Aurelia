@@ -146,6 +146,8 @@ public static class ApiEndpointMappings
         // Trailers of films not started yet, for the pre-show before this film in cinema mode.
         media.MapGet("/{mediaId:guid}/cinema-trailers", (HttpContext context, Guid mediaId, int? count, PresentationService presentation, CancellationToken token) =>
             ExecuteAsync(() => presentation.CinemaTrailersAsync(context.User.RequireUserId(), mediaId, count ?? 2, token)));
+        media.MapGet("/{mediaId:guid}/suggestions", (HttpContext context, Guid mediaId, int? limit, SuggestionService suggestions, CancellationToken token) =>
+            ExecuteAsync(() => suggestions.SuggestAsync(context.User.RequireUserId(), mediaId, limit ?? SuggestionService.DefaultLimit, token)));
         media.MapGet("/{mediaId:guid}/progress", GetPlaybackProgressAsync);
         media.MapPut("/{mediaId:guid}/progress", UpdatePlaybackProgressAsync);
         media.MapGet("/{mediaId:guid}/metadata", GetMediaMetadataAsync);
@@ -642,8 +644,8 @@ public static class ApiEndpointMappings
     private static Task<IResult> ListCollectionsAsync(HttpContext context, int? offset, int? limit, PresentationService presentation, CancellationToken cancellationToken) =>
         ExecuteAsync(() => presentation.CollectionsAsync(context.User.RequireUserId(), offset ?? 0, limit ?? 100, cancellationToken));
 
-    private static Task<IResult> GetHomeAsync(HttpContext context, PresentationService presentation, SyncChangeService changes, CancellationToken cancellationToken) =>
-        ExecuteRevisionedAsync(context, changes, () => presentation.HomeAsync(context.User.RequireUserId(), cancellationToken));
+    private static Task<IResult> GetHomeAsync(HttpContext context, PresentationService presentation, SuggestionService suggestions, SyncChangeService changes, CancellationToken cancellationToken) =>
+        ExecuteRevisionedAsync(context, changes, () => presentation.HomeAsync(context.User.RequireUserId(), cancellationToken, suggestions));
 
     private static Task<IResult> ListFranchisesAsync(HttpContext context, int? offset, int? limit, PresentationService presentation, CancellationToken cancellationToken) =>
         ExecuteAsync(() => presentation.FranchisesAsync(context.User.RequireUserId(), offset ?? 0, limit ?? 100, cancellationToken));

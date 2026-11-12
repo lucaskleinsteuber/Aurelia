@@ -494,6 +494,9 @@ private struct HomePage: View {
             "Continue Watching",
             items: model.home?.continueWatching ?? [],
             eyebrow: "Continue Watching")
+          ForEach(model.home?.becauseYouWatched ?? []) { rail in
+            posterRow("Because You Watched \(rail.sourceTitle)", items: rail.suggestions.map(\.item))
+          }
           ForEach(genreRows) { row in
             posterRow(row.title, items: row.items, tourTarget: row.id == genreRows.first?.id)
           }

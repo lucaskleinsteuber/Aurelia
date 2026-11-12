@@ -18,7 +18,9 @@ struct TVPlayerView: View {
   private enum Control: Hashable {
     case surface, close, backward, play, forward, timeline, audio, subtitles, rate, sleep, together,
       retry,
-      closeMenu, upNextPlay, upNextCancel, skipIntro
+      closeMenu, upNextPlay, upNextCancel, skipIntro, suggestionPlay, suggestionCredits,
+      suggestionDone, endDone
+    case endSuggestion(Int)
     case dialogueBoost(DialogueBoost)
     case volumeLeveling(VolumeLeveling)
     case audioTrack(Int32)
@@ -55,7 +57,7 @@ struct TVPlayerView: View {
           .accessibilityLabel("Show playback controls").accessibilityIdentifier(
             "player-wake-surface")
       }
-      if preShow == nil,
+      if preShow == nil, !controller.showsSuggestionEndScreen,
         (controller.controlsVisible && !controller.isStarting) || controller.errorMessage != nil
       {
         controls
@@ -75,6 +77,14 @@ struct TVPlayerView: View {
         controller.trackMenu == nil, controller.errorMessage == nil
       {
         skipIntroButton
+      }
+      if controller.showsSuggestion, let first = controller.suggestions.first,
+        !controller.controlsVisible, controller.trackMenu == nil
+      {
+        suggestionCard(first)
+      }
+      if controller.showsSuggestionEndScreen, !controller.suggestions.isEmpty {
+        suggestionEndScreen.transition(.opacity)
       }
       if let menu = controller.trackMenu { menuView(menu) }
       if let preShow {
@@ -111,6 +121,15 @@ struct TVPlayerView: View {
     }
     .onChange(of: controller.upNext != nil) { _, shown in
       if shown, !controller.controlsVisible, controller.trackMenu == nil { focus = .upNextPlay }
+    }
+    .onChange(of: controller.showsSuggestion) { _, shown in
+      if shown, !controller.controlsVisible, controller.trackMenu == nil { focus = .suggestionPlay }
+    }
+    .onChange(of: controller.showsSuggestionEndScreen) { _, shown in
+      if shown { focus = .endSuggestion(0) }
+    }
+    .onChange(of: controller.suggestionToStart) { _, item in
+      if let item { model.suggestedPlaybackItem = item }
     }
     .onChange(of: controller.showsSkipIntro) { _, shown in
       if shown, !controller.controlsVisible, controller.trackMenu == nil { focus = .skipIntro }
@@ -487,6 +506,77 @@ struct TVPlayerView: View {
     .padding(.trailing, 80).padding(.bottom, 70)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
     .focusSection()
+  }
+
+  /// After a movie or a series' last episode, from the credits on: the server's suggestion,
+  /// without a countdown.
+  private func suggestionCard(_ suggestion: TVMediaSuggestion) -> some View {
+    VStack(alignment: .leading, spacing: 18) {
+      Text("UP NEXT").font(.system(size: 20, weight: .bold)).tracking(1.2)
+        .foregroundStyle(.secondary)
+      Text(suggestion.item.title).font(.system(size: 28, weight: .semibold)).lineLimit(2)
+      Text(TVPlayerPolicy.suggestionCaption(suggestion)).font(.system(size: 22))
+        .foregroundStyle(.secondary).lineLimit(2)
+      HStack(spacing: 18) {
+        Button {
+          controller.playSuggestion(suggestion.item)
+        } label: {
+          Label("Watch Now", systemImage: "play.fill")
+        }
+        .buttonStyle(TVButtonStyle()).focusEffectDisabled().focused($focus, equals: .suggestionPlay)
+        .accessibilityIdentifier("player-suggestion-play")
+        Button("Watch Credits") { controller.dismissSuggestion() }
+          .buttonStyle(TVButtonStyle()).focusEffectDisabled()
+          .focused($focus, equals: .suggestionCredits)
+          .accessibilityHint("Keeps playing the credits")
+          .accessibilityIdentifier("player-suggestion-credits")
+        Button("Done") { controller.doneWithSuggestions() }
+          .buttonStyle(TVButtonStyle()).focusEffectDisabled().focused($focus, equals: .suggestionDone)
+          .accessibilityHint("Closes the player")
+          .accessibilityIdentifier("player-suggestion-done")
+      }
+    }
+    .padding(30)
+    .frame(width: 760, alignment: .leading)
+    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+    .padding(.trailing, 80).padding(.bottom, 70)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+    .focusSection()
+    .accessibilityIdentifier("player-suggestion")
+  }
+
+  /// When the file ended: the suggestion and two more, and Done.
+  private var suggestionEndScreen: some View {
+    let list = Array(controller.suggestions.prefix(3))
+    return ZStack {
+      Color.black.opacity(0.82).ignoresSafeArea()
+      VStack(spacing: 40) {
+        Text("What's Next").font(.system(size: 52, weight: .bold))
+        HStack(alignment: .top, spacing: 60) {
+          ForEach(Array(list.enumerated()), id: \.element.id) { index, suggestion in
+            Button {
+              controller.playSuggestion(suggestion.item)
+            } label: {
+              VStack(alignment: .leading, spacing: 10) {
+                TVPosterLabel(item: suggestion.item)
+                Text(TVPlayerPolicy.suggestionCaption(suggestion)).font(.system(size: 20))
+                  .foregroundStyle(.secondary).lineLimit(2)
+              }
+              .frame(width: TVDesign.posterWidth)
+            }
+            .buttonStyle(.borderless)
+            .focused($focus, equals: .endSuggestion(index))
+            .accessibilityHint("Watch now")
+            .accessibilityIdentifier("player-end-suggestion-\(index)")
+          }
+        }
+        .focusSection()
+        Button("Done") { controller.doneWithSuggestions() }
+          .buttonStyle(TVButtonStyle()).focusEffectDisabled().focused($focus, equals: .endDone)
+          .accessibilityIdentifier("player-end-suggestions-done")
+      }
+    }
+    .accessibilityIdentifier("player-end-suggestions")
   }
 
   private func upNextCard(_ upNext: TVUpNext) -> some View {

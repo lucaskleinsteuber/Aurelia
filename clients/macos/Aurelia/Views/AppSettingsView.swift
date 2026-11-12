@@ -775,6 +775,18 @@ struct AppSettingsView: View {
             .font(.caption).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
           }
+          VStack(alignment: .leading, spacing: 2) {
+            Toggle(
+              "Play Suggestions Automatically",
+              isOn: $playbackPreferences.preferences.playSuggestionsAutomatically
+            )
+            .accessibilityIdentifier("playback-play-suggestions")
+            Text(
+              "When a movie or a series' last episode reaches its credits, your server suggests what to watch next, with Watch Now, Watch Credits and Done. Turned on, the suggestion starts by itself when the title ends; otherwise an end screen shows it with two more."
+            )
+            .font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+          }
         }
 
         LabeledContent("Start Over If Barely Started") {

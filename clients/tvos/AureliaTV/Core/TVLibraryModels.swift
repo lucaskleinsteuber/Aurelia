@@ -196,6 +196,30 @@ struct TVHome: Codable, Equatable, Sendable {
   let favorites: [TVCatalogItem]
   let collections: [TVCollection]
   let recommendationChangesAt: String
+  /// "Because You Watched …" rails; servers before 2.11.0 send none.
+  var becauseYouWatched: [TVHomeSuggestionRail]? = nil
+}
+
+/// What to watch next with its reason in words ("suggestions-v1").
+struct TVMediaSuggestion: Codable, Equatable, Sendable, Identifiable {
+  let item: TVCatalogItem
+  let kind: String
+  let reason: String
+
+  var id: UUID { item.id }
+}
+
+struct TVMediaSuggestionsResponse: Codable, Equatable, Sendable {
+  let mediaId: UUID
+  let suggestions: [TVMediaSuggestion]
+}
+
+struct TVHomeSuggestionRail: Codable, Equatable, Sendable, Identifiable {
+  let sourceId: UUID
+  let sourceTitle: String
+  let suggestions: [TVMediaSuggestion]
+
+  var id: UUID { sourceId }
 }
 
 enum TVWatchScope: String, Codable, Sendable { case title, season, series }
