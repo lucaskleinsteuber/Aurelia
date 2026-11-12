@@ -292,7 +292,7 @@ These rules apply to every task in this repository.
   registered Macs); both architectures are still built and published, and GitHub's Latest stays at
   the last stable Mac release. Everyone without a self-built Mac app uses Aurelia in a browser, so
   the browser gets every Mac feature. Exception (owner, 12.11.2026): Mac 2.12.1 (170) was released as stable
-  together with Server 2.12.0 and Linux 2.3.0 at the owner's explicit request.
+  together with Server 2.12.0 and Linux 2.3.0 and 2.4.0 at the owner's explicit request.
 - The main `lucaskleinsteuber/Aurelia` repository is public and stays public (owner's
   decision, 06.11.2026). Never change its visibility. Updates of the Mac app, the Linux app and
   the Linux server, the one-line Linux install and the Docker build read the public release feed

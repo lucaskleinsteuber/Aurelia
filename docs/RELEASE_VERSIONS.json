@@ -13,20 +13,20 @@
   },
   {
     "product": "Linux Desktop",
-    "version": "2.3.0",
-    "build": 28,
-    "tag": "linux-app-2.3.0-28"
+    "version": "2.4.0",
+    "build": 29,
+    "tag": "linux-app-2.4.0-29"
   },
   {
     "product": "Apple TV",
-    "version": "2.3.0",
-    "build": 38,
+    "version": "2.4.0",
+    "build": 39,
     "guide": "docs/APPLE_TV.md"
   },
   {
     "product": "iPhone & iPad",
-    "version": "2.6.0",
-    "build": 22,
+    "version": "2.7.0",
+    "build": 23,
     "guide": "docs/IOS_APP.md"
   }
 ]

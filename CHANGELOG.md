@@ -13,6 +13,16 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## [Linux app 2.4.0 (29), Apple TV 2.4.0 (39) and iPhone & iPad 2.7.0 (23)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/linux-app-2.4.0-29) - 12.11.2026
+
+### Added
+
+- Linux, Apple TV and iPhone & iPad: Statistics › Monthly Wrapped plays any past month, chosen by year, as on the Mac and in the browser.
+
+### Fixed
+
+- Apple TV: the Wrapped cards in Statistics no longer show a grey or white edge around them when focused, and Watch History rows keep their poster inside the row's rounded shape.
+
 ## [Server 2.12.0 (161), Mac 2.12.1 (170), Linux app 2.3.0 (28), Apple TV 2.3.0 (38) and iPhone & iPad 2.6.0 (22)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/2.12.1-170) - 12.11.2026
 
 The first stable releases since 2.0.0; they include every beta since then.

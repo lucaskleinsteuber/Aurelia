@@ -1,6 +1,6 @@
 // The TV client has its own release lifecycle, independent of the Mac/server.
-MARKETING_VERSION = 2.3.0
-CURRENT_PROJECT_VERSION = 38
+MARKETING_VERSION = 2.4.0
+CURRENT_PROJECT_VERSION = 39
 TVOS_DEPLOYMENT_TARGET = 26.0
 TVVLCKIT_ROOT = $(SRCROOT)/Dependencies
 // "Aurelia Test" for the separate test edition (AURELIA_TEST_EDITION=1 in the build scripts).
