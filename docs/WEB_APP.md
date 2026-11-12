@@ -197,6 +197,15 @@ administrator, shared collections; movie pages offer their TMDB franchise as a c
 
 ## Settings
 
+Edit Metadata › **Intro and Credits** shows an episode's times with where they came from, lets
+them be typed, reset or the season re-analyzed, and opens **Edit Intro…** and **Edit Credits…**: the
+episode's picture (played in the browser when it can play the file, otherwise the server's
+stills), a film strip and yellow handles; Play Selection loops the yellow part, Mute silences the
+preview, the arrow buttons nudge by a tenth of a second, No Intro/No Credits saves that there is
+none. Every button says what it does when pointed at. Settings › Server › **Intros and Credits**
+shows the detection's progress, the episode it is on, the time left and each series with
+Re-analyze, and turns detection and the pictures on or off.
+
 Name and Picture crops a chosen photo in the browser: drag the circle and zoom, then Use Photo
 draws a square JPEG that is uploaded on Save.
 

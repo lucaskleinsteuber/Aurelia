@@ -229,10 +229,13 @@ public sealed class MetadataEditorSheet : UserControl
     private readonly TextBox studios = new() { PlaceholderText = "Studios, separated by commas" };
     private readonly TextBox country = new() { PlaceholderText = "Country of Origin", Width = 200 };
 
-    public MetadataEditorSheet(AdminScope scope, Guid mediaId)
+    private readonly Aurelia.Linux.Core.Playback.IVideoEngineFactory? engines;
+
+    public MetadataEditorSheet(AdminScope scope, Guid mediaId, Aurelia.Linux.Core.Playback.IVideoEngineFactory? engines = null)
     {
         this.scope = scope;
         this.mediaId = mediaId;
+        this.engines = engines;
         Width = 700;
         Height = 640;
         AutomationProperties.SetName(title, "Title");
@@ -362,6 +365,8 @@ public sealed class MetadataEditorSheet : UserControl
         {
             source.Add(Note("Edit an individual episode to change its video file."));
         }
+        if (document.Kind is MediaKind.Episode or MediaKind.Series && scope.Client.Library.Supports(ServerFeatures.MediaSegments))
+            body.Children.Add(Card(Group("Intro and Credits", "IconPlay", new SegmentsPanel(scope, mediaId, document.Kind, engines))));
         if (document.Kind is MediaKind.Movie or MediaKind.Episode)
             body.Children.Add(Card(Group("Subtitles", "IconSubtitles", new SubtitlePanel(scope, mediaId))));
         body.Children.Add(Card(Group("Source", "IconServer", [.. source])));

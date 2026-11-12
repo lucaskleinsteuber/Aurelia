@@ -335,7 +335,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
 
     private LibraryShell NewShell()
     {
-        var created = new LibraryShell { LeadingInset = Chrome.LeadingWidth, Session = Session };
+        var created = new LibraryShell { LeadingInset = Chrome.LeadingWidth, Session = Session, Engines = services.Engines };
         if (Remote is not null) created.AttachRemote(Remote);
         created.PlayRequested += (item, resume) => _ = PlayAsync(item, resume);
         created.Together = this;

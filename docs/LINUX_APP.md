@@ -311,6 +311,11 @@ server's playlists and segments. Server management shows the server's **Video Co
   server with `media-segments-v2`) or in the last seconds of the countdown, and the next episode
   starts at the natural end unless the card was cancelled. In the credits its second button is
   **Watch Credits**, and the countdown starting the next episode counts this one as watched.
+- Edit Metadata › **Intro and Credits** and the server page's **Intros and Credits** work as on
+  the Mac: typed corrections, Reset to Detected, Re-analyze, the trim editor (its own ticket,
+  relay and decoder, a film strip of the server's stills, yellow handles, Play Selection in a
+  loop, Mute, nudges by a tenth of a second, No Intro/No Credits), and the detection's progress,
+  current episode, time left and each series.
 - **Cinema Mode** (Settings › Playback, with a server that lists trailers): before a film that
   starts from its beginning comes one of Aurelia's made-up ads, trailers of films nobody has
   watched yet (each through its own ticket and relay, revoked afterwards) and the curtain, which

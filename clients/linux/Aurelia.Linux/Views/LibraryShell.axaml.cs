@@ -47,6 +47,9 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
     private bool restoring;
     private RemotePlayback? remote;
 
+    /// <summary>The decoder factory, for previews outside the player such as the intro and credits editor.</summary>
+    public Aurelia.Linux.Core.Playback.IVideoEngineFactory? Engines { get; set; }
+
     public LibraryShell()
     {
         InitializeComponent();
@@ -302,7 +305,7 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
         var scope = new AdminScope(session, Sheets);
         var changed = action switch
         {
-            TitleAction.EditMetadata => await Sheets.ShowAsync(new MetadataEditorSheet(scope, item.Id)),
+            TitleAction.EditMetadata => await Sheets.ShowAsync(new MetadataEditorSheet(scope, item.Id, Engines)),
             TitleAction.FindMatch => await Sheets.ShowAsync(new MetadataMatchSheet(scope, item.Id, item.Title)),
             _ => await TitleAdmin.RemoveAsync(scope, item),
         };

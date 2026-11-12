@@ -1643,3 +1643,86 @@ export function setupProblem({ code, ownerName, password, repeat }) {
   if (password !== repeat) return "The passwords don’t match.";
   return null;
 }
+
+// MARK: Intro and credits (as on the Mac)
+
+/** "1:24" for a segment time field (whole seconds), "" for none. */
+export function segmentTimeText(milliseconds) {
+  return Number.isFinite(milliseconds) ? clock(Math.floor(milliseconds / 1000)) : "";
+}
+
+/** An empty field is "none" (null); otherwise a time like 1:24 or 1:02:30, or undefined when it isn't one. */
+export function parseSegmentTime(text) {
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) return null;
+  const parts = trimmed.split(":");
+  if (parts.length < 1 || parts.length > 3 || parts.some((part) => !/^\d+$/.test(part))) return undefined;
+  const numbers = parts.map(Number);
+  if (numbers.slice(1).some((value) => value >= 60)) return undefined;
+  return numbers.reduce((total, value) => total * 60 + value, 0) * 1000;
+}
+
+/** The request for the three fields, or null when one isn't a time. An intro without a start begins at 0. */
+export function segmentRequest(introStart, introEnd, creditsStart) {
+  const start = parseSegmentTime(introStart);
+  const end = parseSegmentTime(introEnd);
+  const credits = parseSegmentTime(creditsStart);
+  if (start === undefined || end === undefined || credits === undefined) return null;
+  return { introStartMilliseconds: end == null ? null : (start ?? 0), introEndMilliseconds: end, creditsStartMilliseconds: credits };
+}
+
+/** Where a time came from, as the Mac says it. */
+export function segmentOrigin(source, confidence = 0) {
+  switch (source) {
+    case "detected": return `Detected (${Math.round(confidence * 100)} % sure)`;
+    case "chapters": return "From chapters";
+    case "manual": return "Set by hand";
+    default: return "Not found";
+  }
+}
+
+/** The stretch of the episode the trim editor's film strip shows, in milliseconds. */
+export function segmentTrimSpan(part, duration, start, end) {
+  if (!(duration > 0)) return { lower: 0, upper: 1 };
+  if (part === "intro") {
+    const window = Math.min(720_000, Math.floor(duration * 2 / 5));
+    return { lower: 0, upper: Math.max(1, Math.min(duration, Math.max(window, (end ?? 0) + 60_000))) };
+  }
+  return { lower: Math.max(0, Math.min(duration - 600_000, (start ?? duration) - 60_000)), upper: duration };
+}
+
+/** Where a new intro or credits begins when none is known yet. */
+export function segmentTrimInitial(part, span) {
+  return part === "intro"
+    ? { start: span.lower, end: Math.min(span.upper, span.lower + 30_000) }
+    : { start: Math.max(span.lower, span.upper - 60_000), end: span.upper };
+}
+
+/** Keeps the start at least a second before the end and both inside the strip. */
+export function segmentTrimClamp(start, end, span) {
+  const e = Math.min(Math.max(end, span.lower + 1000), span.upper);
+  return { start: Math.min(Math.max(start, span.lower), e - 1000), end: e };
+}
+
+/** "4:15.3" */
+export function segmentTrimLabel(milliseconds) {
+  const tenths = Math.floor(Math.max(0, milliseconds) / 100);
+  return `${clock(Math.floor(tenths / 10))}.${tenths % 10}`;
+}
+
+/** Share of the episodes the server has examined, 0 to 1. */
+export function segmentProgress(settings) {
+  const pending = settings?.pendingCount ?? 0;
+  const total = Math.max(settings?.totalCount ?? 0, pending + (settings?.analyzedCount ?? 0) + (settings?.noResultCount ?? 0));
+  return total === 0 ? 1 : (total - pending) / total;
+}
+
+/** "About 3 h 20 min left" for the detection's estimate, or "" without one. */
+export function segmentRemaining(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "";
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  if (minutes < 60) return `About ${minutes} min left`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `About ${hours} h${rest ? ` ${rest} min` : ""} left`;
+}

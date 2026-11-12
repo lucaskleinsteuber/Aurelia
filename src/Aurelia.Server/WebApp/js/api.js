@@ -244,6 +244,16 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     serverPower: (options = {}) => request("/api/v1/server/power", options),
     serverTranscoding: (options = {}) => request("/api/v1/server/transcoding", options),
     saveServerPower: (body) => request("/api/v1/server/power", { method: "PUT", body }),
+    // Intro and credits ("media-segments-v2")
+    mediaSegments: (mediaId, options = {}) => request(`/api/v1/media/${id(mediaId)}/segments`, options),
+    saveMediaSegments: (mediaId, body) => request(`/api/v1/media/${id(mediaId)}/segments`, { method: "PUT", body }),
+    resetMediaSegments: (mediaId) => request(`/api/v1/media/${id(mediaId)}/segments`, { method: "DELETE" }),
+    reanalyzeMediaSegments: (mediaId) => request(`/api/v1/media/${id(mediaId)}/segments/reanalyze`, { method: "POST" }),
+    serverMediaSegments: (options = {}) => request("/api/v1/server/media-segments", options),
+    saveServerMediaSegments: (body) => request("/api/v1/server/media-segments", { method: "PUT", body }),
+    mediaSegmentSeries: (options = {}) => request("/api/v1/server/media-segments/series", options),
+    reanalyzeSeriesSegments: (seriesId) => request("/api/v1/server/media-segments/reanalyze", { method: "POST", body: seriesId ? { seriesId } : {} }),
+
     serverScrubPreviews: (options = {}) => request("/api/v1/server/scrub-previews", options),
     saveServerScrubPreviews: (body) => request("/api/v1/server/scrub-previews", { method: "PUT", body }),
     deleteServerScrubPreviews: () => request("/api/v1/server/scrub-previews", { method: "DELETE" }),

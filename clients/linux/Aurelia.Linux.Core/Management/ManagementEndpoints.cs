@@ -33,6 +33,28 @@ public sealed partial class ManagementClient
 
     public Task<TranscodingStatusResponse> TranscodingAsync() => GetAsync<TranscodingStatusResponse>("/api/v1/server/transcoding");
 
+    // Intro and credits ("media-segments-v2").
+    public Task<MediaSegmentsResponse> MediaSegmentsAsync(Guid mediaId) => GetAsync<MediaSegmentsResponse>($"/api/v1/media/{mediaId}/segments");
+
+    public Task<MediaSegmentsResponse> SaveMediaSegmentsAsync(Guid mediaId, SetMediaSegmentsRequest request) =>
+        SendAsync<MediaSegmentsResponse>(HttpMethod.Put, $"/api/v1/media/{mediaId}/segments", request);
+
+    public Task<MediaSegmentsResponse> ResetMediaSegmentsAsync(Guid mediaId) =>
+        SendAsync<MediaSegmentsResponse>(HttpMethod.Delete, $"/api/v1/media/{mediaId}/segments", null);
+
+    public Task ReanalyzeMediaSegmentsAsync(Guid mediaId) => SendAsync<JsonNode>(HttpMethod.Post, $"/api/v1/media/{mediaId}/segments/reanalyze", null);
+
+    public Task<MediaSegmentSettingsResponse> ServerMediaSegmentsAsync() => GetAsync<MediaSegmentSettingsResponse>("/api/v1/server/media-segments");
+
+    public Task<MediaSegmentSettingsResponse> SaveServerMediaSegmentsAsync(UpdateMediaSegmentSettingsRequest request) =>
+        SendAsync<MediaSegmentSettingsResponse>(HttpMethod.Put, "/api/v1/server/media-segments", request);
+
+    public Task<IReadOnlyList<MediaSegmentSeriesStatus>> MediaSegmentSeriesAsync() =>
+        GetAsync<IReadOnlyList<MediaSegmentSeriesStatus>>("/api/v1/server/media-segments/series");
+
+    public Task<MediaSegmentSettingsResponse> ReanalyzeAllSegmentsAsync(Guid? seriesId) =>
+        SendAsync<MediaSegmentSettingsResponse>(HttpMethod.Post, "/api/v1/server/media-segments/reanalyze", new ReanalyzeMediaSegmentsRequest(seriesId));
+
     public Task<ScrubPreviewSettingsResponse> ScrubPreviewsAsync() => GetAsync<ScrubPreviewSettingsResponse>("/api/v1/server/scrub-previews");
 
     public Task<ScrubPreviewSettingsResponse> SaveScrubPreviewsAsync(UpdateScrubPreviewSettingsRequest request) =>

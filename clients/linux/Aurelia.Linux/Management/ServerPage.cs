@@ -91,6 +91,7 @@ public sealed class ServerPage : StackPanel
         if (Hosting == ServerHosting.LinuxPackage) Children.Add(await UpdatesAsync());
         Children.Add(await EssentialsAsync());
         Children.Add(await ScrubPreviewsAsync());
+        if (scope.IsOwner && Client.Library.Supports(ServerFeatures.MediaSegments)) Children.Add(await ServerSegmentsSection.BuildAsync(scope));
         if (await VideoConversionAsync() is { } conversion) Children.Add(conversion);
         var advanced = new Expander { Header = "Advanced Settings", IsExpanded = showsAdvanced, HorizontalAlignment = HorizontalAlignment.Stretch };
         var advancedContent = new StackPanel { Spacing = 22, Margin = new Thickness(0, 12, 0, 0) };

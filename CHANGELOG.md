@@ -15,6 +15,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
+- Browser and Linux: Edit Metadata › Intro and Credits with typed corrections, Reset to Detected, Re-analyze and the trim editor (picture, film strip, yellow handles, Play Selection, Mute, nudges, No Intro/No Credits, every button explained), and the server settings' Intros and Credits with progress, the current episode, the time left, each series with Re-analyze and the pictures switch.
 - Apple TV: Watch History, Statistics and Wrapped on the profile page, as on the iPhone: the history by day with removing and clearing, watch time, streaks, a chart of the last weeks, top titles and genres, a year in review and Wrapped as slides driven by the remote.
 - iPhone & iPad: chapters as a menu and marks on the timeline, scene notes in the player (add, edit, delete, shown at their moment), Movie Night's *Tonight's program* card with era and length, collections to create, rename, fill and delete, and a crop for an own profile photo.
 - Browser: an own profile photo is cropped to a circle before it is uploaded.

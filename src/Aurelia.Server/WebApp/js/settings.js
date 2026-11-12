@@ -19,6 +19,7 @@ import { createServerUpdates } from "./server-updates.js";
 import { createAdminTools } from "./settings-admin.js";
 import { createImportPreview } from "./import-preview.js";
 import { cropPhoto } from "./photo-crop.js";
+import { serverSegmentsSection, SEGMENTS_FEATURE } from "./segments-view.js";
 
 const CATEGORIES = [
   { id: "general", label: "General", symbol: "gear", adminOnly: false },
@@ -668,6 +669,8 @@ export function createSettings(app) {
       updatesView?.element ?? null,
 
       permissions.owner && scrubPreviews ? scrubPreviewsSection(scrubPreviews, refresh) : null,
+
+      permissions.owner && state.server?.capabilities?.includes(SEGMENTS_FEATURE) ? serverSegmentsSection({ api, section, row, toggle }) : null,
 
       transcoding ? videoConversionSection(transcodingSummary(transcoding), transcoding.hint) : section("Live Conversion", "tv", "Live decoding, remuxing and streaming for browser playback.",
         row("Status", value(state.server?.capabilities?.includes("live-conversion-v1") ? "Active" : "Not available")),

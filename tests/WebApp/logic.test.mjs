@@ -484,3 +484,35 @@ test("a profile photo crop becomes whole pixels inside the picture", () => {
   assert.equal(pixels.x + pixels.width, 4000);
   assert.deepEqual(logic.cropPixels({ x: 0.999, y: 0, width: 0, height: 0 }, 10, 10), { x: 10 - 1, y: 0, width: 1, height: 1 });
 });
+
+test("intro and credits fields read and write minutes:seconds like the Mac", () => {
+  assert.equal(logic.segmentTimeText(84_500), "1:24");
+  assert.equal(logic.segmentTimeText(null), "");
+  assert.equal(logic.parseSegmentTime(""), null);
+  assert.equal(logic.parseSegmentTime("1:02:30"), 3_750_000);
+  assert.equal(logic.parseSegmentTime("1:75"), undefined);
+  assert.equal(logic.parseSegmentTime("abc"), undefined);
+  assert.deepEqual(logic.segmentRequest("", "1:30", "42:10"), { introStartMilliseconds: 0, introEndMilliseconds: 90_000, creditsStartMilliseconds: 2_530_000 });
+  assert.deepEqual(logic.segmentRequest("0:10", "", ""), { introStartMilliseconds: null, introEndMilliseconds: null, creditsStartMilliseconds: null });
+  assert.equal(logic.segmentRequest("x", "", ""), null);
+  assert.equal(logic.segmentOrigin("detected", 0.874), "Detected (87 % sure)");
+  assert.equal(logic.segmentOrigin("manual"), "Set by hand");
+});
+
+test("the trim editor's strip and handles follow the Mac's rules", () => {
+  assert.deepEqual(logic.segmentTrimSpan("intro", 2_700_000, null, null), { lower: 0, upper: 720_000 });
+  assert.deepEqual(logic.segmentTrimSpan("intro", 2_700_000, 0, 900_000), { lower: 0, upper: 960_000 });
+  assert.deepEqual(logic.segmentTrimSpan("credits", 2_700_000, 2_500_000, null), { lower: 2_100_000, upper: 2_700_000 });
+  assert.deepEqual(logic.segmentTrimInitial("intro", { lower: 0, upper: 720_000 }), { start: 0, end: 30_000 });
+  assert.deepEqual(logic.segmentTrimInitial("credits", { lower: 2_100_000, upper: 2_700_000 }), { start: 2_640_000, end: 2_700_000 });
+  assert.deepEqual(logic.segmentTrimClamp(50_000, 40_000, { lower: 0, upper: 720_000 }), { start: 39_000, end: 40_000 });
+  assert.equal(logic.segmentTrimLabel(255_340), "4:15.3");
+});
+
+test("the detection's progress and time left read like the Mac", () => {
+  assert.equal(logic.segmentProgress({ pendingCount: 25, analyzedCount: 70, noResultCount: 5, totalCount: 100 }), 0.75);
+  assert.equal(logic.segmentProgress({ pendingCount: 0, analyzedCount: 0, noResultCount: 0 }), 1);
+  assert.equal(logic.segmentRemaining(12_000), "About 3 h 20 min left");
+  assert.equal(logic.segmentRemaining(600), "About 10 min left");
+  assert.equal(logic.segmentRemaining(null), "");
+});

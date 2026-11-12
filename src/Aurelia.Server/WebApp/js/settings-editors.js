@@ -4,6 +4,7 @@ import { h, clear } from "./dom.js";
 import { loadAllPages } from "./api.js";
 import { libraryPayload, managementPermissions, metadataPayload, profilePayload, waitForLibraryOperation, artworkUrl } from "./logic.js";
 import { createMetadataExtras } from "./metadata-extras.js";
+import { segmentsSection, SEGMENTS_FEATURE } from "./segments-view.js";
 
 const input = (value = "", attributes = {}) => h("input", { class: "text-field", value: String(value ?? ""), ...attributes });
 const field = (title, control, note) => h("label", { class: "editor-field" }, h("span", { class: "editor-field-title" }, title), control,
@@ -347,13 +348,17 @@ export function createManagementEditors(app) {
         makeField("Country of Origin", "country", "country", { maxlength: 128 }), h("p", { class: "muted small" }, "Choose one country. Foreign content ratings are not automatically converted to FSK."));
       delete extras.relativeSourcePath;
       const { artwork, credits, source, subtitles, removal } = metadataExtras.sections({ item, document, context, changes, automatic, extras, changed: () => { validate(); } });
+      const capabilities = state.server?.capabilities ?? [];
+      const segments = capabilities.includes(SEGMENTS_FEATURE) && (document.kind === "episode" || document.kind === "series")
+        ? segmentsSection({ api, item, kind: document.kind, canPreview: capabilities.includes("scrub-previews-v1") || capabilities.includes("live-conversion-v1") })
+        : null;
       const reload = button("Reload", () => {
         // Reload is explicit: keep a conflict draft until the user chooses to discard it.
         const confirm = button("Discard Draft and Reload", () => context.run(load), "danger-button");
         reload.replaceWith(confirm);
       });
       context.body.append(h("p", { class: "muted small" }, "Manual changes survive scans and provider refreshes. Your video files are never changed."),
-        ...[titleAndYear, overview, genres, production, artwork, credits, matchingSection(item, context, load), source, subtitles, reload, removal].filter(Boolean));
+        ...[titleAndYear, overview, genres, production, artwork, credits, segments, matchingSection(item, context, load), source, subtitles, reload, removal].filter(Boolean));
       name.textContent = document.values.title;
       validate();
       context.clean(); context.ready();
