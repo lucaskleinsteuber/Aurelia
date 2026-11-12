@@ -158,6 +158,20 @@ final class IOSPlaybackController: ObservableObject {
     engine.onTerminal = { [weak self] terminal in self?.engineTerminated(terminal) }
   }
 
+  /// Cinema mode's pre-show before this title, or nil when it gets none: only a film (no series
+  /// queue) on a live player, with cinema mode on and nobody watching along. The server says
+  /// whether the title is a film by listing trailers for it.
+  func cinemaPreShow(capabilities: [String], watchingTogether: Bool) async -> IOSCinemaPreShow? {
+    guard runtime.managesAudioSession, !isOffline, !started, !closed,
+      IOSCinemaPlan.wanted(
+        preferences: preferences, isEpisode: seriesID != nil || !queue.isEmpty,
+        capabilities: capabilities, watchingTogether: watchingTogether)
+    else { return nil }
+    return await IOSCinemaPreShow.prepare(
+      api: api, film: mediaID, title: title, preferences: preferences, startOver: startOver,
+      fingerprint: connection.fingerprint, token: session.token)
+  }
+
   func start() {
     guard !started, !closed else { return }
     started = true

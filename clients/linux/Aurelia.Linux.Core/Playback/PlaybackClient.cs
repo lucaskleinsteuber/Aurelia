@@ -44,6 +44,11 @@ public sealed class PlaybackClient(AureliaApi api, LibraryClient library)
     public Task<IReadOnlyList<LiveSubtitleTrack>> SubtitlesAsync(PlaybackSourceResponse ticket, CancellationToken cancellation) =>
         Send<IReadOnlyList<LiveSubtitleTrack>>(HttpMethod.Get, ticket.StreamPath.TrimEnd('/') + "/subtitles", null, cancellation);
 
+    /// <summary>Trailers of films this profile hasn't watched, for cinema mode before <paramref name="mediaId"/>.</summary>
+    public async Task<IReadOnlyList<CinemaTrailer>> CinemaTrailersAsync(Guid mediaId, int count, CancellationToken cancellation) =>
+        (await Send<CinemaTrailersResponse>(HttpMethod.Get,
+            $"/api/v1/media/{mediaId}/cinema-trailers?count={count.ToString(CultureInfo.InvariantCulture)}", null, cancellation)).Trailers;
+
     public Task SleepTimerEndedAsync(CancellationToken cancellation) =>
         Send<AureliaApi.NoContent>(HttpMethod.Post, "/api/v1/playback/sleep-timer-ended", null, cancellation);
 

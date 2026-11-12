@@ -540,6 +540,15 @@ public sealed class SettingsView : UserControl
             Toggle("Offer Next Episode When Credits Begin", "Up Next appears when the credits begin, with the countdown above and Watch Credits. Turned off, or for episodes without known credits, it appears in the last seconds.",
                 current.UpNextAtCredits, value => Save(PlaybackPreferences.Load(Prefs.Store) with { UpNextAtCredits = value })),
             Toggle("Prevent Sleep During Playback", "The screen stays on while a title plays.", current.PreventSleep, value => Save(PlaybackPreferences.Load(Prefs.Store) with { PreventSleep = value }))));
+        if (shell?.Client?.Supports(Aurelia.Contracts.ServerFeatures.CinemaTrailers) == true)
+        {
+            page.Children.Add(Section("Cinema Mode",
+                Toggle("Cinema Mode", "A night at the cinema: before a film that starts from the beginning comes one of Aurelia's made-up ads (nothing is for sale), trailers of films you haven't watched, and the curtain.",
+                    current.CinemaMode, value => Save(PlaybackPreferences.Load(Prefs.Store) with { CinemaMode = value })),
+                Toggle("Ads", "Aurelia's own made-up ads.", current.CinemaAds, value => Save(PlaybackPreferences.Load(Prefs.Store) with { CinemaAds = value })),
+                Choice("Trailers", "From the trailer files in your film folders.", [(0, "None"), (1, "1 Trailer"), (2, "2 Trailers"), (3, "3 Trailers")],
+                    current.CinemaTrailers, value => Save(PlaybackPreferences.Load(Prefs.Store) with { CinemaTrailers = value }))));
+        }
         if (shell?.Client?.SupportsAdaptiveStreaming == true)
         {
             page.Children.Add(Section("Streaming",

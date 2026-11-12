@@ -13,6 +13,9 @@ struct IOSPlayerView: View {
   @FocusState private var keyboard: Bool
   /// Brief indicator for skips made while the controls are hidden.
   @State private var skip: IOSSkipIndicator?
+  /// Cinema mode's ad, trailers and curtain before a film.
+  @State private var preShow: IOSCinemaPreShow?
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   init(makeController: @escaping @MainActor () -> IOSPlaybackController) {
     _controller = StateObject(wrappedValue: makeController())
@@ -67,6 +70,21 @@ struct IOSPlayerView: View {
       if !controller.isOffline, let party = model.watchParty {
         IOSWatchTogetherNotice(session: party)
       }
+      if let preShow {
+        IOSCinemaPreShowView(show: preShow, reduceMotion: reduceMotion)
+          .ignoresSafeArea()
+          .transition(.opacity)
+          .overlay(alignment: .topLeading) {
+            Button {
+              preShow.stop()
+              controller.close()
+            } label: {
+              Image(systemName: "xmark").font(.headline).frame(width: 44, height: 44)
+            }
+            .buttonStyle(.glass).padding(16)
+            .accessibilityLabel("Close")
+          }
+      }
     }
     .animation(.easeInOut(duration: 0.45), value: controller.isStarting)
     .persistentSystemOverlays(controller.controlsVisible ? .automatic : .hidden)
@@ -78,10 +96,14 @@ struct IOSPlayerView: View {
       keyboard = true
       // A party this device is in follows into the player before it starts.
       if !controller.isOffline { model.attachWatchParty(to: controller) }
-      controller.start()
       configurePreviews()
     }
+    .task { await startWithPreShow() }
+    .onChange(of: controller.isStarting) { _, starting in
+      if !starting { preShow?.filmStarted() }
+    }
     .onDisappear {
+      preShow?.stop()
       previews.reset()
       model.playerClosed(controller)
       controller.close()
@@ -407,6 +429,25 @@ struct IOSPlayerView: View {
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(controller.progressMessage ?? "Loading")
     .accessibilityIdentifier("player-start-screen")
+  }
+
+  /// Cinema mode: the ad and trailers before a film, when it gets them. The film starts behind
+  /// the curtain, which opens once its picture moves.
+  private func startWithPreShow() async {
+    guard
+      let show = await controller.cinemaPreShow(
+        capabilities: model.capabilities?.capabilities ?? [],
+        watchingTogether: model.watchParty != nil),
+      !Task.isCancelled
+    else {
+      controller.start()
+      return
+    }
+    show.onFeature = { [controller] in controller.start() }
+    preShow = show
+    await show.run()
+    controller.start()
+    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.4)) { preShow = nil }
   }
 
   private var skipIntroButton: some View {

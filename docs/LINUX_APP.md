@@ -311,6 +311,11 @@ server's playlists and segments. Server management shows the server's **Video Co
   server with `media-segments-v2`) or in the last seconds of the countdown, and the next episode
   starts at the natural end unless the card was cancelled. In the credits its second button is
   **Watch Credits**, and the countdown starting the next episode counts this one as watched.
+- **Cinema Mode** (Settings › Playback, with a server that lists trailers): before a film that
+  starts from its beginning comes one of Aurelia's made-up ads, trailers of films nobody has
+  watched yet (each through its own ticket and relay, revoked afterwards) and the curtain, which
+  opens once the film plays behind it. Skip (→) moves on, Start Film (Enter) goes straight to the
+  film, Escape closes the player.
 - **Skip Intro** (also Enter or S) appears while an episode's intro plays, above the controls
   while they show. Settings › Playback › Intros chooses Don't Offer, Show Skip Intro or Skip
   Automatically; Offer Next Episode When Credits Begin can be turned off.

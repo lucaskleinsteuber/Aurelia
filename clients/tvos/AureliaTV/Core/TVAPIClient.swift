@@ -342,6 +342,13 @@ struct TVAPIClient: Sendable {
     _ = try validatedStreamURL(path: ticket.streamPath)
     return ticket
   }
+  /// Trailers of films nobody in this profile has watched yet, for cinema mode before `mediaID`.
+  func cinemaTrailers(mediaID: UUID, count: Int) async throws -> [TVCinemaTrailer] {
+    let response: TVCinemaTrailersResponse = try await get(
+      "/api/v1/media/\(mediaID.uuidString.lowercased())/cinema-trailers?count=\(count)")
+    return response.trailers
+  }
+
   func revokeTicket(id: UUID) async throws {
     _ = try await send("/api/v1/playback/\(id.uuidString)", method: "DELETE")
   }

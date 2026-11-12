@@ -196,6 +196,8 @@ struct IOSCapabilities: Codable, Equatable, Sendable {
   var supportsScrubPreviews: Bool { capabilities?.contains("scrub-previews-v1") == true }
   /// Movie Night: the household swipes one deck until everyone likes a title.
   var supportsMovieNight: Bool { capabilities?.contains("movie-night-v1") == true }
+  /// Cinema mode's trailers before a film.
+  var supportsCinema: Bool { capabilities?.contains(IOSCinemaPlan.feature) == true }
   /// The year as slides with the server's lines.
   var supportsWrapped: Bool { capabilities?.contains("year-wrapped-v1") == true }
   /// One month as slides, from the 2nd of the following month.

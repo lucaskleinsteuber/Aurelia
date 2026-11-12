@@ -33,6 +33,28 @@ struct TVPlaybackSettingsView: View {
             "Offer Next Episode When Credits Begin", value: value.upNextAtCredits ? "On" : "Off",
             id: "settings-up-next-credits"
           ) { value.upNextAtCredits.toggle() }
+          if model.capabilities?.supportsCinema == true {
+            Spacer().frame(height: 18)
+            row("Cinema Mode", value: value.cinemaMode ? "On" : "Off", id: "settings-cinema") {
+              value.cinemaMode.toggle()
+            }
+            if value.cinemaMode {
+              row("Ads", value: value.cinemaAds ? "On" : "Off", id: "settings-cinema-ads") {
+                value.cinemaAds.toggle()
+              }
+              row(
+                "Trailers",
+                value: value.cinemaTrailers == 0
+                  ? "None" : value.cinemaTrailers == 1 ? "1 Trailer" : "\(value.cinemaTrailers) Trailers",
+                id: "settings-cinema-trailers"
+              ) { value.cinemaTrailers = (value.cinemaTrailers + 1) % 4 }
+              Text(
+                "Before a film that starts from the beginning: one of Aurelia's made-up ads (nothing is for sale), trailers of films nobody has watched yet, and the curtain."
+              )
+              .font(.system(size: 22)).foregroundStyle(.secondary)
+              .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10)
+            }
+          }
           row("Dialogue Boost", value: value.dialogueBoost.title, id: "settings-dialogue-boost") {
             value.dialogueBoost = Self.next(after: value.dialogueBoost, in: DialogueBoost.allCases)
           }

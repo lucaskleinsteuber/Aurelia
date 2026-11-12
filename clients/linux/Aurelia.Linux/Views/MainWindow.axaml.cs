@@ -706,7 +706,39 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         PlayerHost.Content = view;
         PlayerHost.IsVisible = true;
         await outbox.FlushAsync(player.Client, CancellationToken.None);
-        await player.StartAsync(item, resume, startAt);
+        // Cinema mode: an ad, trailers and the curtain before a film that starts from its beginning.
+        var preShow = await CinemaPreShow.PrepareAsync(player.Client, services.Engines, services.Time, action => Dispatcher.UIThread.Post(action),
+            item, resume, startAt, PlaybackPreferences.Load(services.Settings), services.Settings, WatchParty is not null);
+        if (preShow is null || Player != player)
+        {
+            await player.StartAsync(item, resume, startAt);
+            return;
+        }
+        var started = false;
+        Task StartFilm()
+        {
+            if (started) return Task.CompletedTask;
+            started = true;
+            return player.StartAsync(item, resume, startAt);
+        }
+        var curtain = new CinemaView(preShow, () => _ = player.CloseAsync());
+        void FilmMoving(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(PlaybackController.State) && player.State == PlayerState.Playing) preShow.FilmStarted();
+        }
+        player.PropertyChanged += FilmMoving;
+        player.Closed += preShow.Stop;
+        preShow.Feature = StartFilm;
+        PlayerHost.Content = new Grid { Children = { view, curtain } };
+        curtain.Focus();
+        await preShow.RunAsync();
+        player.PropertyChanged -= FilmMoving;
+        if (Player == player)
+        {
+            PlayerHost.Content = view;
+            await StartFilm();
+        }
+        curtain.Dispose();
     }
 
     private ProfilePickerView ProfilePicker()

@@ -135,3 +135,91 @@ struct TVScrubAndUpNextTests {
     #expect(ticket.segments?.intro?.end == 2_000)
   }
 }
+
+@Suite("TV cinema mode")
+struct TVCinemaTests {
+  private func item(_ id: UUID, parent: UUID? = nil, kind: TVMediaKind = .trailer) throws
+    -> TVCatalogItem
+  {
+    let json = """
+      {"id":"\(id)","kind":"\(kind.rawValue)","title":"Synthetic","originalTitle":null,"year":2024,
+      "overview":null,"genres":[],"poster":null,"backdrop":null,"availability":"available",
+      "isFavorite":false,"progress":null,"addedAt":"2026-01-01T00:00:00Z","parentTitle":null,
+      "seasonNumber":null,"episodeNumber":null,"parentId":\(parent.map { "\"\($0)\"" } ?? "null"),
+      "watchState":null,"libraryAvailability":null}
+      """
+    return try JSONDecoder().decode(TVCatalogItem.self, from: Data(json.utf8))
+  }
+
+  @Test func onlyFilmsWithCinemaModeAndATrailerServerGetAPreShow() {
+    var preferences = TVPlaybackPreferences()
+    #expect(
+      !TVCinemaPlan.wanted(
+        preferences: preferences, isEpisode: false, capabilities: [TVCinemaPlan.feature],
+        watchingTogether: false))
+    preferences.cinemaMode = true
+    #expect(
+      TVCinemaPlan.wanted(
+        preferences: preferences, isEpisode: false, capabilities: [TVCinemaPlan.feature],
+        watchingTogether: false))
+    #expect(
+      !TVCinemaPlan.wanted(
+        preferences: preferences, isEpisode: true, capabilities: [TVCinemaPlan.feature],
+        watchingTogether: false))
+    #expect(
+      !TVCinemaPlan.wanted(
+        preferences: preferences, isEpisode: false, capabilities: [], watchingTogether: false))
+    #expect(
+      !TVCinemaPlan.wanted(
+        preferences: preferences, isEpisode: false, capabilities: [TVCinemaPlan.feature],
+        watchingTogether: true))
+    preferences.cinemaAds = false
+    preferences.cinemaTrailers = 0
+    #expect(
+      !TVCinemaPlan.wanted(
+        preferences: preferences, isEpisode: false, capabilities: [TVCinemaPlan.feature],
+        watchingTogether: false))
+  }
+
+  @Test func aFilmPickedUpInTheMiddleGetsNoPreShow() throws {
+    let progress = try JSONDecoder().decode(
+      TVPlaybackProgress.self,
+      from: Data(
+        """
+        {"mediaId":"00000000-0000-0000-0000-000000000002","positionMilliseconds":600000,
+        "durationMilliseconds":6000000,"isCompleted":false,"revision":1}
+        """.utf8))
+    #expect(
+      !TVCinemaPlan.startsAtBeginning(startOver: false, progress: progress, automaticResume: true))
+    #expect(
+      TVCinemaPlan.startsAtBeginning(startOver: true, progress: progress, automaticResume: true))
+    #expect(
+      TVCinemaPlan.startsAtBeginning(startOver: false, progress: progress, automaticResume: false))
+    #expect(TVCinemaPlan.startsAtBeginning(startOver: false, progress: nil, automaticResume: true))
+  }
+
+  @Test func actsLeaveOutTheFilmsOwnTrailerAndEndWithTheCurtain() throws {
+    let film = UUID()
+    let other = UUID()
+    let own = TVCinemaTrailer(
+      trailer: try item(UUID(), parent: film), title: try item(film, kind: .movie))
+    let foreign = TVCinemaTrailer(
+      trailer: try item(UUID(), parent: other), title: try item(other, kind: .movie))
+    let acts = TVCinemaPlan.acts(ad: .popcorn, trailers: [own, foreign], film: film, title: "Film")
+    #expect(acts == [.ad(.popcorn), .trailer(foreign), .feature(title: "Film")])
+    #expect(TVCinemaPlan.acts(ad: nil, trailers: [own], film: film, title: "Film").isEmpty)
+    #expect(TVCinemaPlan.ad(after: nil) == .iceCream)
+    #expect(TVCinemaPlan.ad(after: "phones") == .iceCream)
+    #expect(TVCinemaPlan.ad(after: "iceCream") == .popcorn)
+  }
+
+  @Test func cinemaChoicesDecodeWithDefaults() throws {
+    let old = try JSONDecoder().decode(TVPlaybackPreferences.self, from: Data("{}".utf8))
+    #expect(!old.cinemaMode)
+    #expect(old.cinemaAds)
+    #expect(old.cinemaTrailers == 2)
+    var odd = TVPlaybackPreferences()
+    odd.cinemaTrailers = 9
+    #expect(odd.normalized.cinemaTrailers == 3)
+  }
+}

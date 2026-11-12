@@ -76,6 +76,11 @@ struct IOSPlaybackPreferences: Codable, Equatable, Sendable {
   var introSkipping: IOSIntroSkipping = .button
   /// Up Next appears when the credits begin, not only in the last seconds.
   var upNextAtCredits = true
+  /// Before a film that starts from its beginning: a made-up ad, trailers and the curtain.
+  var cinemaMode = false
+  var cinemaAds = true
+  /// How many trailers of films nobody has watched yet, 0 to 3.
+  var cinemaTrailers = 2
   /// Compatibility accessor for older code and the persisted Night Mode key.
   var nightMode: Bool {
     get { volumeLeveling != .off }
@@ -85,6 +90,7 @@ struct IOSPlaybackPreferences: Codable, Equatable, Sendable {
   var normalized: Self {
     var value = self
     if !Self.supportedRates.contains(value.defaultPlaybackRate) { value.defaultPlaybackRate = 1 }
+    value.cinemaTrailers = min(max(value.cinemaTrailers, 0), 3)
     value.controlsDelay = value.controlsDelay.isFinite ? min(max(value.controlsDelay, 1), 10) : 4
     value.seekInterval = min(max(value.seekInterval, 5), 60)
     value.preferredAudioTrack = value.preferredAudioTrack.map {
@@ -101,7 +107,8 @@ struct IOSPlaybackPreferences: Codable, Equatable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case automaticResume, automaticallyPlayNextEpisode, defaultPlaybackRate, controlsDelay
     case seekInterval, preferredAudioTrack, preferredSubtitleTrack, nightMode, dialogueBoost,
-      volumeLeveling, streamingQuality, introSkipping, upNextAtCredits
+      volumeLeveling, streamingQuality, introSkipping, upNextAtCredits, cinemaMode, cinemaAds,
+      cinemaTrailers
   }
 
   init(from decoder: Decoder) throws {
@@ -126,6 +133,9 @@ struct IOSPlaybackPreferences: Codable, Equatable, Sendable {
     introSkipping =
       (try? values.decodeIfPresent(IOSIntroSkipping.self, forKey: .introSkipping)) ?? .button
     upNextAtCredits = try values.decodeIfPresent(Bool.self, forKey: .upNextAtCredits) ?? true
+    cinemaMode = try values.decodeIfPresent(Bool.self, forKey: .cinemaMode) ?? false
+    cinemaAds = try values.decodeIfPresent(Bool.self, forKey: .cinemaAds) ?? true
+    cinemaTrailers = try values.decodeIfPresent(Int.self, forKey: .cinemaTrailers) ?? 2
   }
 
   func encode(to encoder: Encoder) throws {
@@ -143,6 +153,9 @@ struct IOSPlaybackPreferences: Codable, Equatable, Sendable {
     try values.encode(streamingQuality, forKey: .streamingQuality)
     try values.encode(introSkipping, forKey: .introSkipping)
     try values.encode(upNextAtCredits, forKey: .upNextAtCredits)
+    try values.encode(cinemaMode, forKey: .cinemaMode)
+    try values.encode(cinemaAds, forKey: .cinemaAds)
+    try values.encode(cinemaTrailers, forKey: .cinemaTrailers)
   }
 
   /// These preferences with a series' own track choices, where it has them.

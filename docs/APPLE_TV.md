@@ -69,6 +69,10 @@ the focus: Select skips, Back lets the intro play. When the credits begin, Up Ne
 with **Watch Credits**. Settings › Playback › Intros and Offer Next Episode When Credits Begin
 choose how.
 
+**Cinema Mode** (Settings › Playback) plays one of Aurelia's made-up ads, trailers of films
+nobody has watched yet and the curtain before a film that starts from its beginning, as on the
+Mac. Skip and Start Film take the focus; Back leaves the player.
+
 **Movie Night** on Home turns the Apple TV into the screen everyone looks at: it shows who
 joined from their phones, how far each has swiped, and the match as a ticket with Play already
 selected, so one click starts it. The remote can swipe too (**Swipe with the Remote**). Back

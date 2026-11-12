@@ -11,6 +11,9 @@ struct TVPlayerView: View {
   @State private var lastTransport: Control = .play
   /// Brief indicator for skips made while the controls are hidden.
   @State private var skip: TVSkipIndicator?
+  /// Cinema mode's ad, trailers and curtain before a film.
+  @State private var preShow: TVCinemaPreShow?
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private enum Control: Hashable {
     case surface, close, backward, play, forward, timeline, audio, subtitles, rate, sleep, together,
@@ -37,7 +40,7 @@ struct TVPlayerView: View {
       if controller.isStarting && controller.errorMessage == nil {
         startScreen.transition(.opacity)
       }
-      if !controller.controlsVisible || controller.isStarting {
+      if (!controller.controlsVisible || controller.isStarting) && preShow == nil {
         Color.clear.contentShape(Rectangle()).focusable().focusEffectDisabled()
           .focused($focus, equals: .surface)
           .onTapGesture { controller.userInteracted() }
@@ -52,7 +55,9 @@ struct TVPlayerView: View {
           .accessibilityLabel("Show playback controls").accessibilityIdentifier(
             "player-wake-surface")
       }
-      if (controller.controlsVisible && !controller.isStarting) || controller.errorMessage != nil {
+      if preShow == nil,
+        (controller.controlsVisible && !controller.isStarting) || controller.errorMessage != nil
+      {
         controls
       }
       if let skip, !controller.controlsVisible { skipIndicator(skip) }
@@ -72,6 +77,11 @@ struct TVPlayerView: View {
         skipIntroButton
       }
       if let menu = controller.trackMenu { menuView(menu) }
+      if let preShow {
+        TVCinemaPreShowView(show: preShow, reduceMotion: reduceMotion)
+          .ignoresSafeArea()
+          .transition(.opacity)
+      }
       if let party = model.watchParty { TVWatchTogetherNotice(session: party) }
     }
     .animation(.easeInOut(duration: 0.45), value: controller.isStarting)
@@ -79,10 +89,14 @@ struct TVPlayerView: View {
     .onAppear {
       // A party this Apple TV is in follows into the player before it starts.
       model.attachWatchParty(to: controller)
-      controller.start()
       configurePreviews()
     }
+    .task { await startWithPreShow() }
+    .onChange(of: controller.isStarting) { _, starting in
+      if !starting { preShow?.filmStarted() }
+    }
     .onDisappear {
+      preShow?.stop()
       previews.reset()
       model.playerClosed(controller)
       controller.close()
@@ -102,7 +116,11 @@ struct TVPlayerView: View {
       if shown, !controller.controlsVisible, controller.trackMenu == nil { focus = .skipIntro }
       else if !shown, focus == .skipIntro { focus = .surface }
     }
-    .onPlayPauseCommand { controller.togglePlayPause() }.onExitCommand { controller.back() }
+    .onPlayPauseCommand { if preShow == nil { controller.togglePlayPause() } }
+    .onExitCommand {
+      preShow?.stop()
+      controller.back()
+    }
     .onChange(of: focus) { _, value in
       if let value, value.isTransport { lastTransport = value }
       if controller.controlsVisible, value != .surface {
@@ -435,6 +453,25 @@ struct TVPlayerView: View {
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(controller.progressMessage ?? "Loading")
     .accessibilityIdentifier("player-start-screen")
+  }
+
+  /// Cinema mode: the ad and trailers before a film, when it gets them. The film starts behind
+  /// the curtain, which opens once its picture moves.
+  private func startWithPreShow() async {
+    guard
+      let show = await controller.cinemaPreShow(
+        capabilities: model.capabilities?.capabilities ?? [],
+        watchingTogether: model.watchParty != nil),
+      !Task.isCancelled
+    else {
+      controller.start()
+      return
+    }
+    show.onFeature = { [controller] in controller.start() }
+    preShow = show
+    await show.run()
+    controller.start()
+    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.4)) { preShow = nil }
   }
 
   private var skipIntroButton: some View {

@@ -38,6 +38,25 @@ struct IOSPlaybackSettingsView: View {
           "Your server finds where an episode's intro and credits are. Show Skip Intro offers a button while the intro plays; Skip Automatically jumps past it once per episode, but never when you go back into it yourself. Up Next appears when the credits begin, with Watch Credits."
         )
       }
+      if model.capabilities?.supportsCinema == true {
+        Section {
+          Toggle("Cinema Mode", isOn: $value.cinemaMode)
+            .accessibilityIdentifier("settings-cinema")
+          if value.cinemaMode {
+            Toggle("Ads", isOn: $value.cinemaAds).accessibilityIdentifier("settings-cinema-ads")
+            Picker("Trailers", selection: $value.cinemaTrailers) {
+              Text("None").tag(0)
+              Text("1 Trailer").tag(1)
+              Text("2 Trailers").tag(2)
+              Text("3 Trailers").tag(3)
+            }.accessibilityIdentifier("settings-cinema-trailers")
+          }
+        } footer: {
+          Text(
+            "Before a film that starts from the beginning: one of Aurelia's made-up ads (nothing is for sale), trailers of films nobody has watched yet, and the curtain."
+          )
+        }
+      }
       if model.supportsAdaptiveStreaming {
         Section {
           Picker("Streaming Quality", selection: $value.streamingQuality) {

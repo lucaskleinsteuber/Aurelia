@@ -23,7 +23,10 @@ public sealed record PlaybackPreferences(
     bool FillsScreen = false,
     StreamingQuality StreamingQuality = StreamingQuality.Original,
     IntroSkipping IntroSkipping = IntroSkipping.Button,
-    bool UpNextAtCredits = true)
+    bool UpNextAtCredits = true,
+    bool CinemaMode = false,
+    bool CinemaAds = true,
+    int CinemaTrailers = 2)
 {
     [JsonIgnore]
     public VolumeLeveling EffectiveLeveling => VolumeLeveling ?? (NightMode ? Playback.VolumeLeveling.Standard : Playback.VolumeLeveling.Off);
@@ -45,6 +48,7 @@ public sealed record PlaybackPreferences(
             DialogueBoost = Enum.IsDefined(DialogueBoost) ? DialogueBoost : Playback.DialogueBoost.Off,
             StreamingQuality = Enum.IsDefined(StreamingQuality) ? StreamingQuality : Playback.StreamingQuality.Original,
             IntroSkipping = Enum.IsDefined(IntroSkipping) ? IntroSkipping : Playback.IntroSkipping.Button,
+            CinemaTrailers = Math.Clamp(CinemaTrailers, 0, 3),
             VolumeLeveling = Enum.IsDefined(EffectiveLeveling) ? EffectiveLeveling : Playback.VolumeLeveling.Off,
             NightMode = Enum.IsDefined(EffectiveLeveling) && EffectiveLeveling != Playback.VolumeLeveling.Off,
             UpNextCountdownSeconds = Countdowns.Contains(UpNextCountdownSeconds) ? UpNextCountdownSeconds : defaults.UpNextCountdownSeconds,
