@@ -285,3 +285,50 @@ struct MonthlyWrappedButton: View {
     .accessibilityIdentifier("monthly-wrapped")
   }
 }
+
+/// Every month's Wrapped, not only the newest: a year to choose and its ready months to play.
+struct MonthlyWrappedArchive: View {
+  @EnvironmentObject private var model: AppModel
+  let activityYears: [Int]
+  @State private var year: Int?
+
+  var body: some View {
+    let years = WrappedStory.wrappedYears(activityYears: activityYears)
+    let shownYear = year.flatMap { years.contains($0) ? $0 : nil } ?? years.first ?? 0
+    let months = WrappedStory.readyMonths(year: shownYear).reversed()
+    AureliaSettingsSection(
+      "Monthly Wrapped", symbol: "calendar",
+      description: "Play any month again. A month is ready from the 2nd of the next month."
+    ) {
+      VStack(alignment: .leading, spacing: 14) {
+        Picker("Year", selection: Binding(get: { shownYear }, set: { year = $0 })) {
+          ForEach(years, id: \.self) { Text(String($0)).tag($0) }
+        }
+        .frame(width: 160)
+        .accessibilityIdentifier("wrapped-archive-year")
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 116, maximum: 160), spacing: 10)], alignment: .leading, spacing: 10) {
+          ForEach(Array(months), id: \.self) { month in
+            Button {
+              model.wrappedLaunch = WrappedLaunch(year: shownYear, month: month)
+            } label: {
+              VStack(alignment: .leading, spacing: 4) {
+                Text(String(WrappedStory.monthName(month).prefix(3)))
+                  .font(.system(size: 22, weight: .black)).tracking(-0.8)
+                Text(WrappedStory.monthName(month)).font(.caption.weight(.semibold)).opacity(0.85)
+              }
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .padding(12)
+              .foregroundStyle(Color(wrappedHex: 0x22000F))
+              .background(Color(wrappedHex: 0xFF4D88).opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+              .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(AureliaPressableButtonStyle())
+            .accessibilityLabel("Play \(WrappedStory.monthName(month)) \(String(shownYear)) Wrapped")
+            .accessibilityIdentifier("wrapped-month-\(month)")
+          }
+        }
+      }
+    }
+    .accessibilityIdentifier("monthly-wrapped-archive")
+  }
+}

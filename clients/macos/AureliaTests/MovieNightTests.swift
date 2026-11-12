@@ -133,6 +133,17 @@ struct MovieNightTests {
     #expect(!WrappedStory.monthIsNew(today: day(2026, 11, 9), calendar: calendar))
   }
 
+  @Test func pastMonthsOfWrappedAreListedByYear() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "UTC")!
+    let today = calendar.date(from: DateComponents(year: 2026, month: 11, day: 12, hour: 12))!
+    #expect(WrappedStory.readyMonths(year: 2026, today: today, calendar: calendar) == Array(1...10))
+    #expect(WrappedStory.readyMonths(year: 2025, today: today, calendar: calendar) == Array(1...12))
+    #expect(WrappedStory.readyMonths(year: 2027, today: today, calendar: calendar).isEmpty)
+    #expect(WrappedStory.wrappedYears(activityYears: [2024, 2026, 2027], today: today, calendar: calendar) == [2026, 2024])
+    #expect(WrappedStory.wrappedYears(activityYears: [], today: today, calendar: calendar) == [2026])
+  }
+
   @Test func wrappedSlidesDecodeTheServersFields() throws {
     let json = """
       {"year":2026,"profileName":"Invented","slides":[{"kind":"hours","eyebrow":"Time well spent?",

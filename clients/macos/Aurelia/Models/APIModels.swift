@@ -1718,6 +1718,26 @@ enum WrappedStory {
     return (calendar.component(.year, from: month), number, monthName(number))
   }
 
+  /// The months of `year` whose Wrapped is ready: every month of a past year, up to the newest
+  /// ready month in its year, none later.
+  static func readyMonths(
+    year: Int, today: Date = Date(), calendar: Calendar = .current
+  ) -> [Int] {
+    let ready = readyMonth(today: today, calendar: calendar)
+    if year < ready.year { return Array(1...12) }
+    if year == ready.year { return Array(1...ready.month) }
+    return []
+  }
+
+  /// The years that can have a monthly Wrapped: those with viewing activity, and the newest
+  /// ready month's year, newest first.
+  static func wrappedYears(
+    activityYears: [Int], today: Date = Date(), calendar: Calendar = .current
+  ) -> [Int] {
+    let ready = readyMonth(today: today, calendar: calendar).year
+    return Array(Set(activityYears.filter { $0 <= ready } + [ready])).sorted(by: >)
+  }
+
   /// Home shows the new month in its first week, from the 2nd to the 8th.
   static func monthIsNew(today: Date = Date(), calendar: Calendar = .current) -> Bool {
     (2...8).contains(calendar.component(.day, from: today))

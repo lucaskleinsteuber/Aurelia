@@ -588,18 +588,7 @@ struct MediaDetailView: View {
                 profile: credit.profile,
                 subtitle: credit.subtitle)
             } label: {
-              VStack(spacing: 8) {
-                AuthenticatedArtwork(artwork: credit.profile, symbol: "person.fill")
-                  .frame(width: 112, height: 112)
-                  .clipShape(Circle())
-                  .overlay { Circle().stroke(.white.opacity(0.1), lineWidth: 1) }
-                Text(credit.name).font(.callout.weight(.semibold)).lineLimit(1)
-                if let subtitle = credit.subtitle {
-                  Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                }
-              }
-              .frame(width: 132)
-              .contentShape(Rectangle())
+              PersonCreditCard(credit: credit)
             }
             .buttonStyle(AureliaCardButtonStyle())
             .accessibilityIdentifier("person-\(credit.id)")
@@ -977,6 +966,33 @@ private struct EpisodeCard: View {
     }
     .shadow(color: .black.opacity(hovering ? 0.34 : 0), radius: 14, y: 8)
     .scaleEffect(hovering && !reduceMotion ? 1.012 : 1)
+    .animation(reduceMotion ? nil : AureliaDesign.responsiveSpring, value: hovering)
+    .onHover { hovering = $0 }
+  }
+}
+
+/// A person in Cast & Crew. Pointing at it lifts the photo like an episode card, so it reads as
+/// something to open.
+private struct PersonCreditCard: View {
+  let credit: PersonCardPresentation
+  @State private var hovering = false
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
+
+  var body: some View {
+    VStack(spacing: 8) {
+      AuthenticatedArtwork(artwork: credit.profile, symbol: "person.fill")
+        .frame(width: 112, height: 112)
+        .clipShape(Circle())
+        .overlay { Circle().stroke(.white.opacity(hovering ? 0.35 : 0.1), lineWidth: hovering ? 1.5 : 1) }
+        .shadow(color: .black.opacity(hovering ? 0.34 : 0), radius: 14, y: 8)
+        .scaleEffect(hovering && !reduceMotion ? 1.04 : 1)
+      Text(credit.name).font(.callout.weight(.semibold)).lineLimit(1)
+      if let subtitle = credit.subtitle {
+        Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+      }
+    }
+    .frame(width: 132)
+    .contentShape(Rectangle())
     .animation(reduceMotion ? nil : AureliaDesign.responsiveSpring, value: hovering)
     .onHover { hovering = $0 }
   }

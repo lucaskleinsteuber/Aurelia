@@ -348,13 +348,17 @@ private struct CompactHeaderModifier: ViewModifier {
       }
       .overlay(alignment: .top) {
         // Only present while needed, so the page never exposes a second, hidden Back button.
-        if scrolledPast {
-          AureliaCompactHeader(title: title, isVisible: true, onBack: onBack)
-            .transition(.opacity.combined(with: .offset(y: reduceMotion ? 0 : -8)))
+        // The animation belongs to the header alone: on the whole page it re-laid every section
+        // with motion while scrolling, so the page stuttered and its information flew in.
+        ZStack(alignment: .top) {
+          if scrolledPast {
+            AureliaCompactHeader(title: title, isVisible: true, onBack: onBack)
+              .transition(.opacity.combined(with: .offset(y: reduceMotion ? 0 : -8)))
+          }
         }
+        .animation(
+          reduceMotion ? .easeOut(duration: 0.12) : .smooth(duration: 0.28), value: scrolledPast)
       }
-      .animation(
-        reduceMotion ? .easeOut(duration: 0.12) : .smooth(duration: 0.28), value: scrolledPast)
   }
 }
 

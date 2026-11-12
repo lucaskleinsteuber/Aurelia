@@ -343,10 +343,17 @@ struct LibraryShellView: View {
         .opacity(selection == nil ? 1 : 0)
         .allowsHitTesting(selection == nil)
         .accessibilityHidden(selection != nil)
-      if let activeSelection = selection {
-        // A detail page rises gently into place; going back fades it away over the page.
-        selectedPage(activeSelection)
-          .id(activeSelection)
+      // A detail page rises gently into place; going back fades it away over the page. The pages
+      // it was opened from stay alive underneath, hidden, so Back returns to them exactly where
+      // they were scrolled, as the browsing page does.
+      let pages = selection.map { backStack + [$0] } ?? []
+      ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
+        let isTop = index == pages.count - 1
+        selectedPage(page)
+          .id(page)
+          .opacity(isTop ? 1 : 0)
+          .allowsHitTesting(isTop)
+          .accessibilityHidden(!isTop)
           .transition(
             reduceMotion
               ? .opacity
@@ -354,7 +361,7 @@ struct LibraryShellView: View {
                 insertion: .opacity.combined(with: .scale(scale: 0.985)),
                 removal: .opacity.combined(with: .scale(scale: 1.01)))
           )
-          .zIndex(1)
+          .zIndex(Double(index + 1))
       }
     }
     .animation(
@@ -753,9 +760,13 @@ private struct LibraryPage: View {
     ScrollView {
       VStack(alignment: .leading, spacing: AureliaDesign.sectionSpacing) {
         if loadedContext == context {
+          // Library, Recently Added, Movies and TV Shows rise in like Home, Watchlist and
+          // Collections, so every section arrives the same way.
           libraryHeader
+            .aureliaRiseIn(0)
           if section == .library, search.isEmpty, !hasFilters, !model.collections.isEmpty {
             collectionRow
+              .aureliaRiseIn(1)
           }
         } else {
           Text(section.title)
@@ -791,6 +802,7 @@ private struct LibraryPage: View {
           }
         } else {
           resultSections
+            .aureliaRiseIn(2)
         }
       }
       .padding(AureliaDesign.pagePadding)

@@ -69,7 +69,10 @@ struct ActivityStatisticsView: View {
           empty
         } else {
           summary(stats)
-          if model.supportsMonthlyWrapped { MonthlyWrappedButton() }
+          if model.supportsMonthlyWrapped {
+            MonthlyWrappedButton()
+            MonthlyWrappedArchive(activityYears: stats.yearsAvailable ?? [])
+          }
           highlights(stats)
           if !stats.weeklyHours.isEmpty { weeks(WatchTime.lastWeeks(stats.weeklyHours)) }
           if let titles = stats.topTitles, !titles.isEmpty {
