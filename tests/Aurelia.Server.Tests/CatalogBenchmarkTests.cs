@@ -16,8 +16,8 @@ namespace Aurelia.Server.Tests;
 
 public sealed class CatalogBenchmarkTests(ITestOutputHelper output)
 {
-    [Theory]
-    [Trait("Category", "CatalogBenchmark")]
+    [BenchmarkTheory]
+    [Trait("Category", "Benchmark")]
     [InlineData(1_000)]
     [InlineData(10_000)]
     [InlineData(50_000)]

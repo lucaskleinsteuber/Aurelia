@@ -348,6 +348,25 @@ struct IOSAdministrationTests {
     #expect(IOSWakeOnLan.resolveIPv4("fe80::1").isEmpty)
   }
 
+  @Test func performanceReadsTheServerMeasurements() throws {
+    let performance = try JSONDecoder().decode(
+      IOSServerPerformance.self,
+      from: Data(
+        """
+        {"since":"2026-11-13T08:00:00Z","slowRequestMilliseconds":500,"slowQueryMilliseconds":100,
+        "requests":42,"p95Milliseconds":131.5,
+        "endpoints":[{"method":"GET","route":"/api/v1/catalog/items/{mediaId:guid}","count":40,"errors":0,
+        "slowCount":0,"medianMilliseconds":12.4,"p95Milliseconds":19.9,"maxMilliseconds":22,"queriesPerRequest":13}],
+        "slowQueries":[{"at":"2026-11-13T08:01:00Z","milliseconds":250.5,"kind":"SELECT","statement":"SELECT ?",
+        "endpoint":"GET /api/v1/home","warmUp":true}],"later":1}
+        """.utf8))
+    #expect(performance.endpoints.first?.queriesPerRequest == 13)
+    #expect(IOSPerformanceText.route(performance.endpoints[0].route) == "/catalog/items/‹mediaId›")
+    #expect(IOSPerformanceText.route("/web/{**file}") == "/web/‹file›")
+    #expect(IOSPerformanceText.duration(12.4) == "12 ms")
+    #expect(IOSPerformanceText.duration(1460) == "1.5 s")
+  }
+
   // MARK: Helpers
 
   private func api(_ transport: IOSAdminTestTransport) -> IOSAPIClient {

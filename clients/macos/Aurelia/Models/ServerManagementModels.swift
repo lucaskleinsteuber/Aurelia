@@ -339,3 +339,56 @@ struct TranscodingStatus: Decodable, Equatable, Sendable {
     return "\(session.quality) · \(state)"
   }
 }
+
+/// What the server measured about itself (server 2.14.0, `GET /api/v1/server/health/performance`).
+struct ServerPerformanceResponse: Decodable, Sendable {
+  let since: String
+  let slowRequestMilliseconds: Int
+  let slowQueryMilliseconds: Int
+  let requests: Int64
+  let p95Milliseconds: Double
+  let endpoints: [ServerEndpointTiming]
+  let slowQueries: [ServerSlowQuery]
+}
+
+struct ServerEndpointTiming: Decodable, Sendable, Identifiable {
+  var id: String { method + " " + route }
+  let method: String
+  let route: String
+  let count: Int64
+  let errors: Int64
+  let slowCount: Int64
+  let medianMilliseconds: Double
+  let p95Milliseconds: Double
+  let maxMilliseconds: Double
+  let queriesPerRequest: Double
+}
+
+struct ServerSlowQuery: Decodable, Sendable, Identifiable {
+  var id: String { at + statement }
+  let at: String
+  let milliseconds: Double
+  let kind: String
+  let statement: String
+  let endpoint: String?
+  let warmUp: Bool
+}
+
+enum ServerPerformanceText {
+  /// "12 ms", "1.4 s".
+  static func duration(_ milliseconds: Double) -> String {
+    milliseconds >= 1000
+      ? String(format: "%.1f s", milliseconds / 1000) : "\(Int(milliseconds.rounded())) ms"
+  }
+  /// "/catalog/items/{id}" instead of "/api/v1/catalog/items/{mediaId:guid}".
+  static func route(_ route: String) -> String {
+    var text = route.hasPrefix("/api/v1") ? String(route.dropFirst(7)) : route
+    while let open = text.firstIndex(of: "{"), let close = text[open...].firstIndex(of: "}") {
+      let inner = text[text.index(after: open)..<close]
+      let name = (inner.split(separator: ":").first.map(String.init) ?? String(inner))
+        .trimmingCharacters(in: CharacterSet(charactersIn: "*"))
+      text.replaceSubrange(open...close, with: "‹\(name)›")
+    }
+    return text.isEmpty ? "/" : text
+  }
+}

@@ -38,8 +38,15 @@ public static class ServerManagementEndpoints
             .RequireAuthorization("Administrator");
         app.MapGet("/api/v1/server/health", (ServerHealthService health, CancellationToken token) => health.GetHealthAsync(token))
             .RequireAuthorization("Administrator");
-        server.MapGet("/diagnostics/export", (ServerDiagnosticsStore diagnostics, ServerConfigurationStore configuration) => new
-        { formatVersion = 1, version = ServerProductVersion.Current, policy = new { configuration.Current.DeviceSessionDays, configuration.Current.GlobalStreamLimit, configuration.Current.UserStreamLimit }, events = diagnostics.Read() });
+        app.MapGet("/api/v1/server/health/performance", (ServerPerformanceStore performance) => performance.Read())
+            .RequireAuthorization("Administrator");
+        app.MapDelete("/api/v1/server/health/performance", (ServerPerformanceStore performance) =>
+        {
+            performance.Reset();
+            return Results.NoContent();
+        }).RequireAuthorization("Owner");
+        server.MapGet("/diagnostics/export", (ServerDiagnosticsStore diagnostics, ServerConfigurationStore configuration, ServerPerformanceStore performance) => new
+        { formatVersion = 1, version = ServerProductVersion.Current, policy = new { configuration.Current.DeviceSessionDays, configuration.Current.GlobalStreamLimit, configuration.Current.UserStreamLimit }, events = diagnostics.Read(), performance = performance.Read() });
         server.MapGet("/backups", (DatabaseBackupService backups) => backups.ListBackups().OrderByDescending(value => value.CreatedAt).Select(value => new
         { name = Path.GetFileName(value.Path), kind = value.Kind.ToString().ToLowerInvariant(), value.CreatedAt, bytes = new FileInfo(value.Path).Length }));
         server.MapPost("/backups/database", async (DatabaseBackupService backups, CancellationToken token) => new

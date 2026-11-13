@@ -53,6 +53,12 @@ extension IOSAPIClient {
 
   func serverStatus() async throws -> IOSServerStatus { try await admin("/api/v1/server/status") }
   func serverHealth() async throws -> IOSServerHealth { try await admin("/api/v1/server/health") }
+  func serverPerformance() async throws -> IOSServerPerformance {
+    try await admin("/api/v1/server/health/performance")
+  }
+  func resetServerPerformance() async throws {
+    try await adminSend("/api/v1/server/health/performance", method: "DELETE")
+  }
   func serverCapabilities() async throws -> IOSServerCapabilities {
     try await admin("/api/v1/server/capabilities")
   }

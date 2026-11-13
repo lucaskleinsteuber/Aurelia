@@ -10,7 +10,8 @@ import {
   ageLimitSummary, loadManagementSections, managementPermissions, normalizeGeneralPreferences, parsePicture,
   rateLabel, scrubPreviewUsageText, shownName, transcodingSummary, DIALOGUE_BOOST_CHOICES, VOLUME_LEVELING_CHOICES, INTRO_SKIPPING_CHOICES,
   TOP_BAR_SECTIONS, moveSection, POWER_IDLE_CHOICES, powerPayload, wakeOnAccessOffered, rememberWakeOnAccess,
-  powerModesFor, appHostName, SERVER_POLICY_FIELDS, serverPolicyDraft
+  powerModesFor, appHostName, SERVER_POLICY_FIELDS, serverPolicyDraft,
+  performanceDuration, performanceRoute, performanceSummary
 } from "./logic.js";
 import { loadPreferences, savePreferences } from "./player.js";
 import { applyAppearance, loadGeneral, saveGeneral } from "./preferences.js";
@@ -181,6 +182,38 @@ export function createSettings(app) {
       h("div", { class: "settings-rows" }, children.filter(Boolean)));
     el._searchMeta = { title, description: description ?? "", rows: [] };
     return el;
+  }
+
+  /** Performance: how long the server takes to answer, and which database queries were slow. */
+  function performanceSection(performance, owner, refresh) {
+    const summary = performanceSummary(performance);
+    const table = summary.endpoints.length
+      ? h("table", { class: "performance-table" },
+        h("thead", {}, h("tr", {}, ...["Endpoint", "Requests", "Median", "95 %", "Slowest", "Queries"].map((label) => h("th", {}, label)))),
+        h("tbody", {}, ...summary.endpoints.map((endpoint) => h("tr", {},
+          h("td", { title: `${endpoint.method} ${endpoint.route}` }, `${endpoint.method} ${performanceRoute(endpoint.route)}`),
+          h("td", {}, String(endpoint.count)),
+          h("td", {}, performanceDuration(endpoint.medianMilliseconds)),
+          h("td", { class: endpoint.p95Milliseconds >= performance.slowRequestMilliseconds ? "error-text" : null }, performanceDuration(endpoint.p95Milliseconds)),
+          h("td", {}, performanceDuration(endpoint.maxMilliseconds)),
+          h("td", {}, Number(endpoint.queriesPerRequest ?? 0).toFixed(1))))))
+      : h("p", { class: "muted small" }, "Nothing measured yet.");
+    const queries = summary.allQueries.length
+      ? h("details", { class: "performance-queries" },
+        h("summary", {}, `Slow Database Queries (${summary.allQueries.length}, over ${performance.slowQueryMilliseconds} ms)`),
+        ...summary.allQueries.slice(0, 50).map((query) => h("div", { class: "settings-card small" },
+          h("div", { class: "settings-card-main" },
+            h("div", {}, `${performanceDuration(query.milliseconds)} · ${query.kind}${query.warmUp ? " · while starting" : ""}`),
+            h("div", { class: "muted small" }, `${query.endpoint ?? "Background work"} · ${new Date(query.at).toLocaleString()}`),
+            h("code", { class: "performance-statement" }, query.statement)))))
+      : null;
+    return section("Performance", "arrow", `How long the server takes to answer, measured by the server since ${new Date(performance.since).toLocaleString()}. Streams and waiting requests are left out.`,
+      row("Requests", value(String(performance.requests))),
+      row("95 % Answered Within", value(performanceDuration(performance.p95Milliseconds))),
+      row("Slow Queries", value(String(summary.slowQueries.length))),
+      h("div", { class: "performance-table-wrap" }, table),
+      queries,
+      owner ? h("div", { class: "button-row" }, button("Reset Measurements", () => api.resetServerPerformance(), "Measurements reset.", "secondary-button", refresh)) : null);
   }
 
   function dangerSection(title, symbol, description, ...children) {
@@ -627,7 +660,7 @@ export function createSettings(app) {
   // MARK: Server Sections
 
   function serverSections(sections, refresh) {
-    const { status, health, scrubPreviews, backups, issues, transcoding } = sections ?? {};
+    const { status, health, performance, scrubPreviews, backups, issues, transcoding } = sections ?? {};
     const permissions = managementPermissions(state.profile);
 
     return [
@@ -680,6 +713,8 @@ export function createSettings(app) {
             h("div", { class: "settings-card-main" },
               h("div", { class: issue.severity === "error" ? "error-text" : "muted" }, issue.code),
               h("div", { class: "muted small" }, new Date(issue.at).toLocaleString()))))) : null) : null,
+
+      performance ? performanceSection(performance, permissions.owner, refresh) : null,
 
       updatesView?.element ?? null,
 

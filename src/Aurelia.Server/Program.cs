@@ -115,9 +115,13 @@ builder.Services.AddDataProtection()
 builder.Services.AddSingleton<DatabaseChangeSignal>();
 builder.Services.AddSingleton<DatabaseSaveSignal>();
 builder.Services.AddSingleton<DatabaseCommitSignal>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton<ServerPerformanceStore>();
+builder.Services.AddHostedService(services => services.GetRequiredService<ServerPerformanceStore>());
+builder.Services.AddSingleton<SlowQueryInterceptor>();
 builder.Services.AddDbContext<AureliaDbContext>((services, options) =>
     options.UseSqlite(connectionString).AddInterceptors(services.GetRequiredService<DatabaseSaveSignal>(), services.GetRequiredService<DatabaseCommitSignal>(),
-        SqliteWriteMode.Interceptor));
+        SqliteWriteMode.Interceptor, services.GetRequiredService<SlowQueryInterceptor>()));
 builder.Services.AddSingleton<TokenService>();
 builder.Services.AddSingleton<SessionActivityRecorder>();
 builder.Services.AddSingleton<DatabaseBackupService>();
@@ -373,7 +377,23 @@ app.Use(async (context, next) =>
         await context.Response.WriteAsJsonAsync(new ApiProblem("request_too_large", "The request is larger than the server accepts."));
         return;
     }
-    await next(context);
+    if (ServerPerformanceStore.Measures(context.Request))
+    {
+        var clock = context.RequestServices.GetRequiredService<TimeProvider>();
+        var startedAt = clock.GetTimestamp();
+        try { await next(context); }
+        finally
+        {
+            if (ServerPerformanceStore.EndpointKey(context) is { } endpoint)
+                context.RequestServices.GetRequiredService<ServerPerformanceStore>().RecordRequest(endpoint,
+                    clock.GetElapsedTime(startedAt).TotalMilliseconds, context.Response.StatusCode,
+                    context.Items[ServerPerformanceStore.QueryCountItem] is long queries ? queries : 0);
+        }
+    }
+    else
+    {
+        await next(context);
+    }
     if (context.Response.StatusCode >= 400 && context.Items["Aurelia.FailureRecorded"] is not true)
     {
         var status = context.Response.StatusCode;

@@ -40,6 +40,11 @@ endpoint or a client can be checked against it.
   compared; only the times are stored, in the database.
 - **Diagnostics are redacted.** Tokens, passwords, PINs and full paths do not appear in
   logs, Server Health or exported diagnostics.
+- **Performance measurements keep no contents.** Server Health › Performance stores, for seven
+  days in `server-performance.json` in the data folder, how long each endpoint took (by its route
+  template, such as `GET /api/v1/catalog/items/{mediaId:guid}`, never the address with its
+  values), how many database queries it ran, and the 200 most recent queries over 100 ms as SQL
+  with every value replaced by `?`. Owners and administrators read it; only the owner resets it.
 
 ## Who may do what
 

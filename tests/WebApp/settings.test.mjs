@@ -422,3 +422,35 @@ test("a server inside the Aurelia app only keeps running or stops, is never woke
   rememberHosting(undefined, storage);
   assert.equal(rememberedHosting(storage), "linuxApp", "an older server says nothing and changes nothing");
 });
+
+test("performance reads like the Mac: short durations, routes without constraints, slowest first", async () => {
+  const { performanceDuration, performanceRoute, performanceSummary } = await import("../../src/Aurelia.Server/WebApp/js/logic.js");
+  assert.equal(performanceDuration(12.6), "13 ms");
+  assert.equal(performanceDuration(1460), "1.5 s");
+  assert.equal(performanceDuration(undefined), "0 ms");
+  assert.equal(performanceRoute("/api/v1/catalog/items/{mediaId:guid}"), "/catalog/items/‹mediaId›");
+  assert.equal(performanceRoute("/web/{**file}"), "/web/‹file›");
+  assert.equal(performanceRoute("/api/v1"), "/");
+  const summary = performanceSummary({
+    endpoints: [
+      { route: "/a", p95Milliseconds: 5, count: 9 },
+      { route: "/b", p95Milliseconds: 80, count: 1 },
+      { route: "/c", p95Milliseconds: 5, count: 20 },
+    ],
+    slowQueries: [{ warmUp: true }, { warmUp: false }],
+  }, 2);
+  assert.deepEqual(summary.endpoints.map((endpoint) => endpoint.route), ["/b", "/c"]);
+  assert.equal(summary.slowQueries.length, 1);
+  assert.equal(summary.allQueries.length, 2);
+  assert.equal(performanceSummary(null), null);
+});
+
+test("an older server without measurements still shows the rest of the server page", async () => {
+  const { api } = sectionApi();
+  api.serverPerformance = async () => { throw Object.assign(new Error("Not found"), { status: 404 }); };
+  const sections = await loadManagementSections(api, { role: "owner" });
+  assert.equal(sections.performance, null);
+  assert.deepEqual(sections.issues, []);
+  api.serverPerformance = async () => { throw Object.assign(new Error("Expired"), { code: "management_locked" }); };
+  await assert.rejects(loadManagementSections(api, { role: "owner" }), /Expired/);
+});

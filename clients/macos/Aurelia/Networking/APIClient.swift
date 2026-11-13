@@ -426,6 +426,12 @@ struct APIClient: Sendable {
   func serverHealth() async throws -> ServerHealthResponse {
     try await get("/api/v1/server/health")
   }
+  func serverPerformance() async throws -> ServerPerformanceResponse {
+    try await get("/api/v1/server/health/performance")
+  }
+  func resetServerPerformance() async throws {
+    _ = try await perform(path: "/api/v1/server/health/performance", method: "DELETE")
+  }
   func serverUsers() async throws -> [UserAccessSummary] { try await get("/api/v1/server/users") }
   func deleteProfile(id: UUID) async throws {
     _ = try await perform(path: "/api/v1/users/\(id.uuidString.lowercased())", method: "DELETE")

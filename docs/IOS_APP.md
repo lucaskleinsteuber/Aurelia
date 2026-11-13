@@ -53,7 +53,8 @@ its screens are its own:
   OpenSubtitles, unused artwork and search. *Profiles and Devices*: profiles with name, picture,
   role, PIN, children's age limit, screen time and content access, codes for new devices or the
   code a device shows, and signed-in devices. *Server*: status, health, restart, devices and
-  backups, scrub previews, intros and credits, speech recognition, video conversion, limits,
+  backups, Performance (response times and slow queries), scrub previews, intros and credits,
+  speech recognition, video conversion, limits,
   maintenance, background jobs, backups (check, encrypted backup saved through the share sheet,
   restore from a file) and diagnostics. *Power*, *Server Updates* and the *Danger Zone* appear
   when the server offers them. The network is shown but changed on the server computer, because

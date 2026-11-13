@@ -11,6 +11,11 @@ public sealed partial class ManagementClient
 
     public Task<ServerHealthResponse> HealthAsync() => GetAsync<ServerHealthResponse>("/api/v1/server/health");
 
+    /// <summary>What the server measured about itself (server 2.14.0).</summary>
+    public Task<ServerPerformanceResponse> PerformanceAsync() => GetAsync<ServerPerformanceResponse>("/api/v1/server/health/performance");
+
+    public Task ResetPerformanceAsync() => SendAsync<JsonNode>(HttpMethod.Delete, "/api/v1/server/health/performance", null);
+
     public Task<ServerManagementCapabilities> CapabilitiesAsync() => GetAsync<ServerManagementCapabilities>("/api/v1/server/capabilities");
 
     /// <summary>The server's settings as JSON, so fields this app does not know are kept when saving.</summary>

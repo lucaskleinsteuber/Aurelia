@@ -54,7 +54,8 @@ When Unused* stops the server after a while without anyone watching; opening any
 it again.
 
 *Settings › Server* holds network access (*Allow HTTPS access from LAN / private VPN*), Bonjour,
-devices and backups, scrub previews, Server Health and the server's own updates.
+devices and backups, scrub previews, Server Health (with *Performance*: response times per
+endpoint and slow database queries, measured by the server) and the server's own updates.
 
 ## Settings at a glance
 

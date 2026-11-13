@@ -245,7 +245,8 @@ draws a square JPEG that is uploaded on Save.
   or installed from the Linux package, which restores at its restart), an Import Preview for a
   new storage location (*Review Before Importing*: what each folder and file becomes, corrected
   before anything is imported),
-  restart, a diagnostics report, Server Health and server updates.
+  restart, a diagnostics report, Server Health with Performance (response times per endpoint and
+  slow database queries) and server updates.
 - Not in a browser: subtitles written from speech (macOS speech recognition), offline downloads
   and sending Wake-on-LAN (see Wake When a Device Connects above).
 - A few changes that cannot be undone ask for the server password once more, exactly as on the

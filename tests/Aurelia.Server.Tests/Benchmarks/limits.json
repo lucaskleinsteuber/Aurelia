@@ -1,0 +1,11 @@
+{
+  "home": { "maxMilliseconds": 450, "maxQueries": 22 },
+  "series-page": { "maxMilliseconds": 75, "maxQueries": 6 },
+  "movies-deep-page": { "maxMilliseconds": 60, "maxQueries": 6 },
+  "series-detail": { "maxMilliseconds": 75, "maxQueries": 13 },
+  "search": { "maxMilliseconds": 75, "maxQueries": 7 },
+  "history": { "maxMilliseconds": 50, "maxQueries": 4 },
+  "sync-changes": { "maxMilliseconds": 50, "maxQueries": null },
+  "playback-plan": { "maxMilliseconds": 60, "maxQueries": 8 },
+  "collection": { "maxMilliseconds": 225, "maxQueries": 6 }
+}

@@ -51,6 +51,11 @@ shows how.
 **Posters and details are missing.** TMDB must be turned on with your own token under
 *Settings › Metadata*. The artwork store has a limit of 1 GB; Server Health shows how much is used.
 
+**Is something slower than before?** *Settings › Server › Performance* (Mac, Linux, browser,
+iPhone and iPad) shows how long each part of the server took over the last days and which
+database queries were slow. Include it when you report a slow screen: the diagnostics report
+carries the same numbers without any titles or paths.
+
 **Updating the server.** On Linux run `sudo aurelia update`, or use *Settings › Updates › Server
 Updates* in the Mac or Linux app. Accounts, library and settings stay.
 

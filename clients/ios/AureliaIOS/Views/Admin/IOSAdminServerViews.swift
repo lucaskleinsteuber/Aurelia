@@ -73,6 +73,11 @@ private struct IOSAdminServerContent: View {
         }
       }
       IOSServerHealthSection(health: overview.health)
+      Section {
+        NavigationLink("Performance") { IOSAdminPerformanceView() }
+      } footer: {
+        Text("How long the server takes to answer and which database queries were slow.")
+      }
       if let configuration = overview.configuration {
         Section {
           IOSPolicyToggle(configuration: configuration, key: "pairingEnabled", label: "Allow New Devices")
@@ -924,5 +929,79 @@ private struct IOSAdminDiagnosticsView: View {
     .navigationTitle("Diagnostics")
     .navigationBarTitleDisplayMode(.inline)
     .onDisappear { if let report { try? FileManager.default.removeItem(at: report) } }
+  }
+}
+
+/// Performance: response times per endpoint and slow database queries, measured by the server.
+private struct IOSAdminPerformanceView: View {
+  @EnvironmentObject private var admin: IOSAdministrationModel
+  @State private var confirmation: IOSAdminConfirmation?
+
+  var body: some View {
+    IOSAdminLoader { try await $0.serverPerformance() } content: { performance, reload in
+      Form {
+        Section {
+          LabeledContent("Requests", value: performance.requests.formatted())
+          LabeledContent(
+            "95 % Answered Within", value: IOSPerformanceText.duration(performance.p95Milliseconds))
+          LabeledContent(
+            "Slow Queries", value: "\(performance.slowQueries.filter { !$0.warmUp }.count)")
+        } footer: {
+          Text(
+            "Measured by the server since \(IOSAdminFormat.date(performance.since)). Streams and waiting requests are left out."
+          )
+        }
+        Section("Slowest Endpoints") {
+          if performance.endpoints.isEmpty { Text("Nothing measured yet").foregroundStyle(.secondary) }
+          ForEach(performance.endpoints.prefix(15)) { endpoint in
+            VStack(alignment: .leading, spacing: 3) {
+              Text("\(endpoint.method) \(IOSPerformanceText.route(endpoint.route))")
+                .font(.subheadline.monospaced()).lineLimit(2)
+              Text(
+                "median \(IOSPerformanceText.duration(endpoint.medianMilliseconds)) · 95 % \(IOSPerformanceText.duration(endpoint.p95Milliseconds)) · \(endpoint.count) requests · \(String(format: "%.1f", endpoint.queriesPerRequest)) queries"
+              )
+              .font(.caption)
+              .foregroundStyle(
+                endpoint.p95Milliseconds >= Double(performance.slowRequestMilliseconds)
+                  ? Color.orange : .secondary)
+            }
+          }
+        }
+        if !performance.slowQueries.isEmpty {
+          Section("Slow Database Queries (over \(performance.slowQueryMilliseconds) ms)") {
+            ForEach(performance.slowQueries.prefix(50)) { query in
+              VStack(alignment: .leading, spacing: 3) {
+                Text(
+                  "\(IOSPerformanceText.duration(query.milliseconds)) · \(query.kind)\(query.warmUp ? " · while starting" : "")"
+                )
+                .font(.subheadline.weight(.semibold))
+                Text("\(query.endpoint ?? "Background work") · \(IOSAdminFormat.relative(query.at))")
+                  .font(.caption).foregroundStyle(.secondary)
+                Text(query.statement).font(.caption2.monospaced()).textSelection(.enabled)
+                  .lineLimit(6)
+              }
+            }
+          }
+        }
+        if admin.permissions.owner {
+          Section {
+            Button("Reset Measurements", role: .destructive) {
+              confirmation = IOSAdminConfirmation(
+                title: "Reset all measurements?",
+                message: "The server starts measuring again from now.", action: "Reset"
+              ) {
+                Task { await admin.perform { try await $0.resetServerPerformance() } }
+              }
+            }
+          }
+        }
+      }
+      .scrollContentBackground(.hidden)
+      .background(IOSDesign.canvas.ignoresSafeArea())
+      .refreshable { await reload() }
+    }
+    .navigationTitle("Performance")
+    .navigationBarTitleDisplayMode(.inline)
+    .adminConfirmation($confirmation)
   }
 }

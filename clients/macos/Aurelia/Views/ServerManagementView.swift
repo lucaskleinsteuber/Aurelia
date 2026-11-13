@@ -120,6 +120,9 @@ struct ServerManagementView: View {
     if let health {
       ServerHealthCard(health: health)
     }
+    if let client, health != nil {
+      ServerPerformanceCard(client: client)
+    }
     if let configuration, let client {
       ServerEssentialsEditor(configuration: configuration, client: client) {
         self.configuration = $0

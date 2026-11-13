@@ -48,6 +48,7 @@ Use the pinned SDKs; the scripts find them. Run the checks for what you changed:
 dotnet format Aurelia.slnx --verify-no-changes   # server formatting
 dotnet build Aurelia.slnx -c Release             # server, warning-free
 dotnet test Aurelia.slnx -c Release              # server tests
+zsh scripts/test-server-benchmarks.sh            # server benchmarks: time and query limits, before every server version
 node --test "tests/WebApp/*.test.mjs"            # browser app
 zsh scripts/test-linux-app.sh                    # Linux app (headless, no screen needed)
 AURELIA_LOGIC_ONLY=1 zsh scripts/test-macos.sh   # Mac app without UI tests

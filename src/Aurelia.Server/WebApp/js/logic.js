@@ -23,6 +23,13 @@ export async function loadManagementSections(api, profile, { signal } = {}) {
   const sections = { jobs, libraries: [], devices: [], users: [], backups: [], issues: [] };
   const readers = { devices: () => api.devices({ signal }) };
   if (typeof api.serverHealth === "function") readers.health = () => api.serverHealth({ signal });
+  // Older servers have no measurements; the page then shows the rest.
+  if (typeof api.serverPerformance === "function") {
+    readers.performance = () => api.serverPerformance({ signal }).catch((error) => {
+      if (error?.name === "AbortError" || error?.status === 401 || error?.code === "management_locked") throw error;
+      return null;
+    });
+  }
   if (permissions.storage) readers.libraries = () => api.libraries({ signal });
   if (permissions.owner) {
     Object.assign(readers, {
@@ -49,6 +56,28 @@ export async function loadManagementSections(api, profile, { signal } = {}) {
     }
   }));
   return sections;
+}
+
+/** "12 ms" or "1.4 s", for Settings › Server › Performance. */
+export function performanceDuration(milliseconds) {
+  const value = Number(milliseconds) || 0;
+  return value >= 1000 ? `${(value / 1000).toFixed(1)} s` : `${Math.round(value)} ms`;
+}
+
+/** "/catalog/items/‹mediaId›" for the route template "/api/v1/catalog/items/{mediaId:guid}". */
+export function performanceRoute(route) {
+  const text = String(route ?? "").replace(/^\/api\/v1/, "").replace(/\{\*{0,2}([A-Za-z0-9_]+)(?::[^}]*)?\}/g, "‹$1›");
+  return text || "/";
+}
+
+/** The slowest endpoints first, at most `limit`, and the slow queries outside the start-up minute. */
+export function performanceSummary(performance, limit = 10) {
+  if (!performance) return null;
+  return {
+    endpoints: [...(performance.endpoints ?? [])].sort((a, b) => b.p95Milliseconds - a.p95Milliseconds || b.count - a.count).slice(0, limit),
+    slowQueries: (performance.slowQueries ?? []).filter((query) => !query.warmUp),
+    allQueries: performance.slowQueries ?? [],
+  };
 }
 
 /**

@@ -88,6 +88,7 @@ public sealed class ServerPage : StackPanel
         }
         Children.Add(Summary());
         Children.Add(Health());
+        if (await PerformanceAsync() is { } performance) Children.Add(performance);
         if (Hosting == ServerHosting.LinuxPackage) Children.Add(await UpdatesAsync());
         Children.Add(await EssentialsAsync());
         Children.Add(await ScrubPreviewsAsync());
@@ -458,6 +459,73 @@ public sealed class ServerPage : StackPanel
     }
 
     /// <summary>How the server converts video; older servers without the status show nothing.</summary>
+    /// <summary>Performance: response times per endpoint and slow database queries, measured by the server.</summary>
+    private async Task<Control?> PerformanceAsync()
+    {
+        ServerPerformanceResponse current;
+        try { current = await Client.PerformanceAsync(); }
+        catch (Exception error) when (error is AureliaApiException or HttpRequestException or TaskCanceledException) { return null; }
+        var slow = current.SlowQueries.Count(query => !query.WarmUp);
+        var grid = new UniformGrid { Columns = 3 };
+        grid.Children.Add(Fact("Requests", current.Requests.ToString("N0", System.Globalization.CultureInfo.InvariantCulture), small: true));
+        grid.Children.Add(Fact("95 % Answered Within", PerformanceText.Duration(current.P95Milliseconds), small: true));
+        grid.Children.Add(Fact("Slow Queries", slow.ToString(System.Globalization.CultureInfo.InvariantCulture), small: true));
+        var panel = Block(Note($"How long the server takes to answer, measured by the server since {Date(current.Since)}. Streams and waiting requests are left out."), grid);
+        if (current.Endpoints.Count == 0) panel.Children.Add(Note("Nothing measured yet."));
+        else
+        {
+            var table = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto,Auto,Auto"), ColumnSpacing = 14, RowSpacing = 4 };
+            var headers = new[] { "Slowest Endpoints", "Requests", "Median", "95 %", "Queries" };
+            for (var column = 0; column < headers.Length; column++)
+                table.Children.Add(Cell(headers[column], 0, column, subdued: true));
+            var row = 1;
+            foreach (var endpoint in current.Endpoints.Take(10))
+            {
+                table.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+                table.Children.Add(Cell($"{endpoint.Method} {PerformanceText.Route(endpoint.Route)}", row, 0));
+                table.Children.Add(Cell(endpoint.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), row, 1));
+                table.Children.Add(Cell(PerformanceText.Duration(endpoint.MedianMilliseconds), row, 2));
+                table.Children.Add(Cell(PerformanceText.Duration(endpoint.P95Milliseconds), row, 3));
+                table.Children.Add(Cell(endpoint.QueriesPerRequest.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture), row, 4));
+                row++;
+            }
+            table.RowDefinitions.Insert(0, new RowDefinition(GridLength.Auto));
+            panel.Children.Add(table);
+        }
+        if (current.SlowQueries.Count > 0)
+        {
+            var queries = new StackPanel { Spacing = 8 };
+            foreach (var query in current.SlowQueries.Take(50))
+                queries.Children.Add(new StackPanel
+                {
+                    Spacing = 2,
+                    Children =
+                    {
+                        new TextBlock { Text = $"{PerformanceText.Duration(query.Milliseconds)} · {query.Kind}{(query.WarmUp ? " · while starting" : "")} · {Date(query.At)}", FontWeight = FontWeight.SemiBold, FontSize = 12 },
+                        new TextBlock { Text = query.Endpoint ?? "Background work", Classes = { "subdued" }, FontSize = 11 },
+                        new SelectableTextBlock { Text = query.Statement, FontFamily = new FontFamily("monospace"), FontSize = 11, TextWrapping = TextWrapping.Wrap },
+                    },
+                });
+            panel.Children.Add(new Expander { Header = $"Slow Database Queries ({current.SlowQueries.Count}, over {current.SlowQueryMilliseconds} ms)", Content = queries, HorizontalAlignment = HorizontalAlignment.Stretch });
+        }
+        if (scope.IsOwner)
+            panel.Children.Add(Buttons(Button("Reset Measurements", async () =>
+            {
+                if (await scope.RunAsync(() => Client.ResetPerformanceAsync(), message)) await ReloadAsync();
+            })));
+        return Section("Performance", panel);
+
+        static TextBlock Cell(string text, int row, int column, bool subdued = false)
+        {
+            var cell = new TextBlock { Text = text, FontSize = subdued ? 11 : 12, TextTrimming = TextTrimming.CharacterEllipsis };
+            if (subdued) cell.Classes.Add("subdued");
+            if (column > 0) cell.HorizontalAlignment = HorizontalAlignment.Right;
+            Grid.SetRow(cell, row);
+            Grid.SetColumn(cell, column);
+            return cell;
+        }
+    }
+
     private async Task<Control?> VideoConversionAsync()
     {
         TranscodingStatusResponse status;

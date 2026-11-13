@@ -216,7 +216,7 @@ and they fail.
   inside Aurelia on a Mac or Linux PC only keeps running or stops after the unused minutes (exit
   status 76) and starts again when Aurelia's window is opened. Other devices then show "Start
   Aurelia on Your Linux PC" instead of trying Wake-on-LAN.
-- Server: summary with state, facts and Restart Server; health; for a Linux package server its
+- Server: summary with state, facts and Restart Server; health; Performance (response times per endpoint and slow database queries, measured by the server); for a Linux package server its
   updates; new devices and automatic backups with Back Up Now; scrub previews; and
   under Advanced Settings the details, network (a reversible trial for desktop-hosted servers;
   a standalone Linux server is set up with `sudo aurelia setup`), sign-in and streaming limits, library maintenance and job queue, backups

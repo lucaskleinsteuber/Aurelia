@@ -266,6 +266,9 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     lockManagement: () => request("/api/v1/management/lock", { method: "POST" }),
     serverStatus: (options = {}) => request("/api/v1/server/status", options),
     serverHealth: (options = {}) => request("/api/v1/server/health", options),
+    /** What the server measured about itself: response times per endpoint and slow queries. */
+    serverPerformance: (options = {}) => request("/api/v1/server/health/performance", options),
+    resetServerPerformance: () => request("/api/v1/server/health/performance", { method: "DELETE" }),
     serverUpdates: (options = {}) => request("/api/v1/server/updates", options),
     checkForUpdates: (options = {}) => request("/api/v1/server/updates/check", { ...options, method: "POST" }),
     serverPower: (options = {}) => request("/api/v1/server/power", options),

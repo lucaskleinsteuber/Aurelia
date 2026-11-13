@@ -2168,3 +2168,13 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
   .wish-hit-row .wish-poster { width: 44px; }
   .wish-hit-action { grid-column: 1 / -1; justify-self: start; }
 }
+
+/* Settings › Server › Performance */
+.performance-table-wrap { overflow-x: auto; padding: 4px 0; }
+.performance-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.performance-table th { text-align: right; font-weight: 600; color: var(--muted, #9aa0a6); padding: 4px 8px; font-size: 0.75rem; }
+.performance-table td { text-align: right; padding: 4px 8px; white-space: nowrap; }
+.performance-table th:first-child, .performance-table td:first-child { text-align: left; max-width: 22rem; overflow: hidden; text-overflow: ellipsis; }
+.performance-queries { padding: 6px 0; }
+.performance-queries summary { cursor: pointer; padding: 6px 0; }
+.performance-statement { display: block; font-size: 0.75rem; white-space: pre-wrap; word-break: break-word; user-select: text; }
