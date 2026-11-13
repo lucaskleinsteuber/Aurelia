@@ -830,6 +830,12 @@ struct IOSServerPower: Codable, Equatable, Sendable {
   var wakeSupport: String? = nil
   var hosting: String? = nil
   var afterSleepTimer: Bool? = nil
+  /// From server 2.16.0, the Wake-on-LAN check: "wired", "wifi" or "other".
+  var network: String? = nil
+  /// The card's wake letters right now; "g" means a Wake-on-LAN call wakes it.
+  var wakeOn: String? = nil
+  /// The sleep "sleep" mode gives: "deep" (suspend to RAM), "light" (s2idle) or "none".
+  var sleepKind: String? = nil
 }
 
 struct IOSScrubPreviewSettings: Codable, Equatable, Sendable {

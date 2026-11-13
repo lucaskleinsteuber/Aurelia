@@ -20,9 +20,15 @@ public sealed record AdministrationApprovalResponse(string Token, DateTimeOffset
 /// by the Mac or Linux app offers only "off" and "stop", where "stop" ends the server after the
 /// unused minutes until someone opens Aurelia on that computer. AfterSleepTimer: power down five
 /// minutes after a player's sleep timer ended (on by default).
+/// From 2.16.0, the Wake-on-LAN check of a Linux package server (empty when unknown, on older
+/// servers and on servers hosted by an app): Network is how the computer reaches the home network
+/// ("wired", "wifi" or "other"); WakeOn is the card's current ethtool wake letters ("g" means a
+/// Wake-on-LAN packet wakes it now); SleepKind is the sleep "sleep" mode uses ("deep": suspend to
+/// RAM, fans off; "light": only s2idle; "none": the computer can't sleep).
 /// </summary>
 public sealed record ServerPowerSettings(bool Available, string Mode, int IdleMinutes, string? AwakeFrom, string? AwakeUntil,
-    bool WakeOnAccess = false, string WakeSupport = "", string Hosting = "server", bool AfterSleepTimer = true);
+    bool WakeOnAccess = false, string WakeSupport = "", string Hosting = "server", bool AfterSleepTimer = true,
+    string Network = "", string WakeOn = "", string SleepKind = "");
 /// <summary>WakeOnAccess and AfterSleepTimer null keep the stored choice, so clients that don't know them never change them.</summary>
 public sealed record UpdateServerPowerSettingsRequest(string Mode, int IdleMinutes, string? AwakeFrom, string? AwakeUntil,
     bool? WakeOnAccess = null, bool? AfterSleepTimer = null);

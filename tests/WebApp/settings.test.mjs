@@ -5,7 +5,7 @@ import {
   managementPermissions, metadataPayload, cropFrame, normalizeGeneralPreferences, normalizePreferences,
   profilePayload, scrubPreviewBucketSeconds, scrubPreviewFrameUrl, scrubPreviewUsageText, transcodingSummary, waitForLibraryOperation,
   POWER_MODES, powerPayload, wakeOnAccessOffered, rememberWakeOnAccess, remembersWakeOnAccess, wakeRetryDelay,
-  powerModesFor, appHostName, rememberHosting, rememberedHosting
+  powerModesFor, appHostName, rememberHosting, rememberedHosting, wakeCheck
 } from "../../src/Aurelia.Server/WebApp/js/logic.js";
 
 test("management permissions keep owner settings and selected-title storage restrictions", () => {
@@ -453,4 +453,28 @@ test("an older server without measurements still shows the rest of the server pa
   assert.deepEqual(sections.issues, []);
   api.serverPerformance = async () => { throw Object.assign(new Error("Expired"), { code: "management_locked" }); };
   await assert.rejects(loadManagementSections(api, { role: "owner" }), /Expired/);
+});
+
+test("the Wake-on-LAN check says what the server found and what only a test shows", () => {
+  const server = { available: true, hosting: "linuxServer", wakeSupport: "pumbg", network: "wired", wakeOn: "g", sleepKind: "deep" };
+  assert.equal(wakeCheck(server, "off"), null);
+  assert.equal(wakeCheck(server, "stop"), null, "a stopped Aurelia needs no Wake-on-LAN");
+  assert.equal(wakeCheck({ ...server, hosting: "macApp" }, "sleep"), null);
+  assert.equal(wakeCheck({ ...server, available: false }, "sleep"), null);
+
+  const titles = (check) => check.items.map((item) => `${item.state}: ${item.title}`);
+  assert.deepEqual(titles(wakeCheck(server, "sleep")),
+    ["ok: Connected by cable", "ok: Wake-on-LAN is on", "ok: Real sleep", "info: Try it once"]);
+  assert.deepEqual(titles(wakeCheck(server, "shutdown")),
+    ["ok: Connected by cable", "ok: Wake-on-LAN is on", "info: Waking from off needs the BIOS", "info: Try it once"]);
+  assert.match(wakeCheck(server, "shutdown").items[2].detail, /Power On By PCI-E/);
+  assert.match(wakeCheck(server, "sleep").footer, /Wi-Fi/);
+
+  assert.deepEqual(titles(wakeCheck({ ...server, network: "wifi", wakeOn: "d", sleepKind: "light" }, "sleep")),
+    ["problem: Connected by Wi-Fi", "warning: Wake-on-LAN is off right now", "warning: Only light sleep", "info: Try it once"]);
+  assert.deepEqual(titles(wakeCheck({ ...server, wakeSupport: "d", sleepKind: "none" }, "sleep")).slice(1, 3),
+    ["problem: The network card can't wake the computer", "problem: This computer can't sleep"]);
+  // An older server, or one that hasn't restarted since the update, knows nothing yet.
+  assert.deepEqual(titles(wakeCheck({ available: true, mode: "sleep", wakeSupport: "pumbg" })),
+    ["info: Network card not checked yet", "info: Try it once"]);
 });

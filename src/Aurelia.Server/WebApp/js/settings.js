@@ -10,7 +10,7 @@ import {
   ageLimitSummary, loadManagementSections, managementPermissions, normalizeGeneralPreferences, parsePicture,
   rateLabel, scrubPreviewUsageText, shownName, transcodingSummary, DIALOGUE_BOOST_CHOICES, VOLUME_LEVELING_CHOICES, INTRO_SKIPPING_CHOICES,
   TOP_BAR_SECTIONS, moveSection, POWER_IDLE_CHOICES, powerPayload, wakeOnAccessOffered, rememberWakeOnAccess,
-  powerModesFor, appHostName, SERVER_POLICY_FIELDS, serverPolicyDraft,
+  powerModesFor, appHostName, wakeCheck, SERVER_POLICY_FIELDS, serverPolicyDraft,
   performanceDuration, performanceRoute, performanceSummary
 } from "./logic.js";
 import { loadPreferences, savePreferences } from "./player.js";
@@ -869,8 +869,25 @@ export function createSettings(app) {
       row("Also After a Sleep Timer Ends", toggle(draft.afterSleepTimer, (on) => { draft.afterSleepTimer = on; }, "Also After a Sleep Timer Ends"),
         "When a player's sleep timer ends and nothing plays for five more minutes, it happens right away, at any time of day."),
       row("Keep Running at Set Hours", awakeToggle), hoursRow];
+    const checkRows = h("div", { class: "wake-check" });
+    const checkSection = section("Wake-on-LAN Check", "checkCircle",
+      "Aurelia on a Mac, Linux PC, iPhone or iPad wakes the server with a Wake-on-LAN call. What this server knows about it, for the choice above:",
+      checkRows);
     function update() {
       explanation.textContent = modes.find((choice) => choice.id === draft.mode)?.explanation ?? "";
+      const check = wakeCheck(power, draft.mode);
+      checkSection.hidden = !check;
+      clear(checkRows);
+      if (check) {
+        const symbols = { ok: "checkCircle", warning: "warning", problem: "warning", info: "circle" };
+        const labels = { ok: "Fine", warning: "Check this", problem: "Problem", info: "Note" };
+        for (const item of check.items) {
+          checkRows.append(h("div", { class: `wake-check-item ${item.state}` },
+            icon(symbols[item.state], { size: 18, label: labels[item.state] }),
+            h("div", {}, h("div", { class: "wake-check-title" }, item.title), h("div", { class: "muted small" }, item.detail))));
+        }
+        checkRows.append(h("p", { class: "muted small" }, check.footer));
+      }
       for (const element of unused) element.hidden = draft.mode === "off";
       hoursRow.hidden = draft.mode === "off" || !draft.awakeHours;
       hoursNote.textContent = draft.mode === "stop"
@@ -887,6 +904,7 @@ export function createSettings(app) {
         : "What the server computer does while nobody watches, browses or changes anything.",
         row("When Unused", mode), explanation, ...unused, wakeRow,
         h("div", { class: "button-row" }, save)),
+      checkSection,
     ];
   }
 

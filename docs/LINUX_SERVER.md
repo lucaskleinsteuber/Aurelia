@@ -178,14 +178,16 @@ so the apps and the browser don't show them there.
   Server stops and systemd listens on its port instead (`aurelia-start.socket`). When a Mac or
   Apple TV connects, Aurelia starts again within seconds; the app's first attempt is dropped and
   it tries again by itself.
-- **Put the computer to sleep** suspends it to RAM, using a few watts. Aurelia on a Mac wakes it
-  when you open it (Wake-on-LAN). An Apple TV
+- **Put the computer to sleep** suspends it to RAM: fans and disks stop and it uses a few watts.
+  Aurelia on a Mac, Linux PC or iPhone wakes it when you open it (Wake-on-LAN), in about 10 to 20
+  seconds, because the computer continues where it stopped. An Apple TV
   cannot send Wake-on-LAN packets: open Aurelia on a Mac first. Someone signed in over SSH keeps
-  the computer awake.
+  the computer awake. Usually the best choice.
 - **Shut down the computer** turns it off and uses almost nothing. Wake-on-LAN starts it again,
-  which takes about a minute, and only when the BIOS allows Wake-on-LAN while the computer is off
-  (often "Wake on LAN from S5", with "ErP" off). With awake hours the BIOS clock starts it at
-  their start, if the computer supports that.
+  which takes 30 to 60 seconds because the BIOS and Linux start from scratch, and only when the
+  BIOS allows Wake-on-LAN while the computer is off (often "Wake on LAN from S5" or "Power On By
+  PCI-E", with "ErP" off). With awake hours the BIOS clock starts it at their start, if the
+  computer supports that.
 - **Wake when a device connects** (`--wake-on-access on`, or the switch of the same name) lets the
   network card also wake the computer when a device sends it anything directly
   (`ethtool wol ug`). A browser that opens the server's address then wakes it, and the page loads
@@ -207,6 +209,26 @@ so the apps and the browser don't show them there.
 Wake-on-LAN is allowed by the installer for the network card that leads to the home network.
 Some computers also need it allowed in the BIOS (often "Power On By PCI-E" on, "ErP" off), and a
 computer whose BIOS battery is empty forgets that after a power cut.
+
+### Checking Wake-on-LAN
+
+Settings › Power shows a **Wake-on-LAN Check** while the server sleeps or turns off, and
+`sudo aurelia sleep status` prints the same. At every start and before powering down,
+`aurelia-wake-on-lan` notes whether the card is wired or Wi-Fi and how it is set
+(`wake-on-lan-status` in the data folder); the server reads which sleep the kernel uses from
+`/sys/power`.
+
+- **Connected by cable**: almost no computer wakes over Wi-Fi, so the server needs a network cable
+  to the router.
+- **Wake-on-LAN is on**: the card reports `Wake-on: g`. A card that can't (`Supports Wake-on`
+  without `g`) needs "Stop only Aurelia Server" or another network card or USB adapter.
+- **Real sleep**: `/sys/power/mem_sleep` uses `deep` (suspend to RAM). With only `s2idle` the
+  computer sleeps lightly; it may use more power, and some cards don't wake it from there.
+- **Waking from off** can't be read by any program: it depends on the BIOS setting above. Try it
+  once: let the server turn off, then open Aurelia on a Mac, Linux PC or iPhone.
+
+Most desktop PCs connected by cable, even old ones, wake from sleep. Wi-Fi, many laptops and some
+USB network adapters can't be woken.
 
 ## Removing
 

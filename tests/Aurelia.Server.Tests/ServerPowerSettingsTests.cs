@@ -109,6 +109,51 @@ public sealed class ServerPowerSettingsTests
     }
 
     [Fact]
+    public void TheWakeOnLanCheckReportsTheCardTheConnectionAndTheSleepTheComputerOffers()
+    {
+        using var fixture = new Fixture(available: true);
+        // Nothing known yet: the wake script hasn't run, and this is not Linux.
+        Assert.Equal(("", "", ""), Check(fixture.Store.Read()));
+
+        File.WriteAllLines(fixture.WakeStatusPath, ["NETWORK=wired", "WAKE_ON=g"]);
+        fixture.WritePower("freeze mem disk\n", "s2idle [deep]\n");
+        Assert.Equal(("wired", "g", "deep"), Check(fixture.Store.Read()));
+
+        fixture.WritePower("freeze mem\n", "[s2idle] deep\n");
+        Assert.Equal("light", fixture.Store.Read().SleepKind);
+        fixture.WritePower("freeze mem\n", "[s2idle]\n");
+        Assert.Equal("light", fixture.Store.Read().SleepKind);
+        fixture.WritePower("freeze disk\n", "[s2idle]\n");
+        Assert.Equal("none", fixture.Store.Read().SleepKind);
+        // A kernel before mem_sleep only knew suspend to RAM.
+        fixture.WritePower("mem disk\n", null);
+        Assert.Equal("deep", fixture.Store.Read().SleepKind);
+
+        File.WriteAllLines(fixture.WakeStatusPath, ["NETWORK=wifi", "WAKE_ON=d"]);
+        Assert.Equal(("wifi", "d"), (fixture.Store.Read().Network, fixture.Store.Read().WakeOn));
+        // Only the two known values are read; anything else in the file is ignored.
+        File.WriteAllLines(fixture.WakeStatusPath, ["NETWORK=pumbg", "WAKE_ON=wired", "WAKE_ON=g; reboot", "MODE=sleep", "NETWORK = wired"]);
+        Assert.Equal(("", ""), (fixture.Store.Read().Network, fixture.Store.Read().WakeOn));
+        File.WriteAllText(fixture.WakeStatusPath, "NETWORK=wired\n" + new string('#', 300));
+        Assert.Equal("", fixture.Store.Read().Network);
+    }
+
+    [Fact]
+    public void ServersThatCantPowerDownTheirComputerHaveNoWakeOnLanCheck()
+    {
+        foreach (var (available, hosting) in new (bool? Available, string? Hosting)[] { (null, ServerHosting.MacApp), (false, null) })
+        {
+            using var fixture = new Fixture(available, hosting);
+            File.WriteAllLines(fixture.WakeStatusPath, ["NETWORK=wired", "WAKE_ON=g"]);
+            fixture.WritePower("freeze mem disk\n", "s2idle [deep]\n");
+            Assert.Equal(("", "", ""), Check(fixture.Store.Read()));
+        }
+    }
+
+    private static (string, string, string) Check(ServerPowerSettings settings) =>
+        (settings.Network, settings.WakeOn, settings.SleepKind);
+
+    [Fact]
     public void UnknownOrMalformedLinesAreIgnored()
     {
         using var fixture = new Fixture(available: true);
@@ -154,12 +199,24 @@ public sealed class ServerPowerSettingsTests
         public ServerPowerSettingsStore Store { get; }
         public string SettingsPath => Path.Combine(root.FullName, ServerPowerSettingsStore.FileName);
         public string WakeSupportPath => Path.Combine(root.FullName, ServerPowerSettingsStore.WakeSupportFileName);
+        public string WakeStatusPath => Path.Combine(root.FullName, ServerPowerSettingsStore.WakeStatusFileName);
+        private string SystemPower => Path.Combine(root.FullName, "sys-power");
 
         public Fixture(bool? available, string? hosting = null)
         {
             var runtime = new ServerRuntimeOptions(root.FullName, Path.Combine(root.FullName, "unused.db"),
                 "http://127.0.0.1:43110", "Synthetic", false, 43111, "", "", null);
-            Store = new ServerPowerSettingsStore(runtime, available, hosting);
+            Store = new ServerPowerSettingsStore(runtime, available, hosting, SystemPower);
+        }
+
+        /// <summary>Stands in for /sys/power: its state and, unless null, mem_sleep.</summary>
+        public void WritePower(string state, string? memSleep)
+        {
+            Directory.CreateDirectory(SystemPower);
+            File.WriteAllText(Path.Combine(SystemPower, "state"), state);
+            var memSleepPath = Path.Combine(SystemPower, "mem_sleep");
+            if (memSleep is null) File.Delete(memSleepPath);
+            else File.WriteAllText(memSleepPath, memSleep);
         }
 
         public void Dispose() => root.Delete(recursive: true);

@@ -316,8 +316,11 @@ public sealed class ServerPage : StackPanel
         var byApp = HostedByApp(power.Hosting);
         var computer = power.Hosting == "macApp" ? "the Mac" : power.Hosting == "linuxApp" ? "the Linux PC" : "the server computer";
         var panel = Block();
+        var checkPanel = Block();
+        var checkSection = Section("Wake-on-LAN Check", checkPanel);
         void Build()
         {
+            BuildWakeCheck(checkPanel, checkSection, power, mode);
             panel.Children.Clear();
             panel.Children.Add(Note(byApp
                 ? $"Aurelia Server runs inside the Aurelia app on {computer}. It can stop when nobody uses it, so the computer may sleep."
@@ -378,7 +381,29 @@ public sealed class ServerPage : StackPanel
             panel.Children.Add(note);
         }
         Build();
-        return Section("When Nobody Uses Aurelia", panel);
+        return new StackPanel { Spacing = 22, Children = { Section("When Nobody Uses Aurelia", panel), checkSection } };
+    }
+
+    private static void BuildWakeCheck(StackPanel panel, Control section, ServerPowerSettings power, string mode)
+    {
+        var items = WakeCheckText.Items(power, mode);
+        section.IsVisible = items is not null;
+        panel.Children.Clear();
+        if (items is null) return;
+        panel.Children.Add(Note(WakeCheckText.Intro));
+        foreach (var item in items)
+        {
+            var (glyph, label, color) = WakeCheckText.Mark(item.State);
+            var mark = new TextBlock { Text = glyph, Width = 18, FontWeight = FontWeight.Bold, Foreground = new SolidColorBrush(Color.Parse(color)) };
+            AutomationProperties.SetName(mark, label);
+            var text = new StackPanel { Spacing = 2, Children = { new TextBlock { Text = item.Title, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap }, Note(item.Detail) } };
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("24,*") };
+            Grid.SetColumn(text, 1);
+            row.Children.Add(mark);
+            row.Children.Add(text);
+            panel.Children.Add(row);
+        }
+        panel.Children.Add(Note(WakeCheckText.Footer));
     }
 
     /// <summary>A server the Aurelia app hosts on a Mac or Linux PC only keeps running or stops.</summary>
@@ -398,8 +423,8 @@ public sealed class ServerPage : StackPanel
     {
         ("stop", true) => $"Aurelia Server stops, and {computer} may sleep as usual. Other devices then show “Start Aurelia on {computer}”; opening Aurelia there starts it again. Nothing can wake it over the network.",
         ("stop", false) => "Only Aurelia Server stops; the computer stays on for its other work, such as a NAS. It starts again within seconds when any device connects, a browser too.",
-        ("sleep", _) => "The whole computer sleeps and uses only a few watts. Aurelia on a computer wakes it when you open it, and so can a router such as a FRITZ!Box (Wake-on-LAN); an Apple TV can't, so open Aurelia on a computer first. Waking takes a few seconds.",
-        ("shutdown", _) => "The computer turns off and uses almost nothing. Aurelia on a computer starts it with Wake-on-LAN, which takes about a minute, and only if the computer's BIOS allows Wake-on-LAN while it is off (often called “Wake on LAN from S5”).",
+        ("sleep", _) => "The whole computer sleeps: fans and disks stop, and it uses only a few watts. Aurelia on a computer wakes it when you open it, and so can a router such as a FRITZ!Box (Wake-on-LAN); an Apple TV can't, so open Aurelia on a computer first. Waking takes about 10 to 20 seconds. Usually the best choice.",
+        ("shutdown", _) => "The computer turns off and uses almost nothing. Aurelia on a computer starts it with Wake-on-LAN, which takes 30 to 60 seconds because the whole computer starts up, and only if its BIOS allows Wake-on-LAN while it is off (see the check below).",
         (_, true) => $"Aurelia Server runs as long as the Aurelia app does. While the computer sleeps or is turned off, other devices show “Start Aurelia on {computer}”.",
         _ => "Aurelia Server and the computer keep running: ready at any moment, using the most power.",
     };

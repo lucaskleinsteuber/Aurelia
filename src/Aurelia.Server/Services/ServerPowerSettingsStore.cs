@@ -10,12 +10,16 @@ namespace Aurelia.Server.Services;
 /// package's root-run <c>aurelia-autosleep</c> and the <c>aurelia sleep</c> command read them as
 /// plain KEY=value lines. Elsewhere than in the Linux package nothing would act on them, so they
 /// are reported as unavailable and cannot be changed. The package's root-run wake script leaves the
-/// network card's wake abilities in <c>wake-on-lan-support</c>, so the server needs no network rights.
+/// network card's wake abilities in <c>wake-on-lan-support</c> and how the card is connected and set
+/// in <c>wake-on-lan-status</c>, so the server needs no network rights. Which sleep the computer
+/// offers is read from <c>/sys/power</c>, which every user may read.
 /// </summary>
-public sealed partial class ServerPowerSettingsStore(ServerRuntimeOptions runtime, bool? available = null, string? hosting = null)
+public sealed partial class ServerPowerSettingsStore(ServerRuntimeOptions runtime, bool? available = null, string? hosting = null,
+    string? systemPowerDirectory = null)
 {
     public const string FileName = "sleep-settings";
     public const string WakeSupportFileName = "wake-on-lan-support";
+    public const string WakeStatusFileName = "wake-on-lan-status";
     public const int DefaultIdleMinutes = 15;
     public const int MinimumIdleMinutes = 5;
     public const int MaximumIdleMinutes = 24 * 60;
@@ -42,8 +46,11 @@ public sealed partial class ServerPowerSettingsStore(ServerRuntimeOptions runtim
             var mode = values.GetValueOrDefault("MODE") is { } stored && Modes.Contains(stored) ? stored : "off";
             // A host app's server can't sleep or turn off its computer; anything else stored counts as stop.
             if (ByApp && mode is "sleep" or "shutdown") mode = "stop";
+            var check = Available && !ByApp;
+            var status = check ? WakeStatus() : [];
             return new(Available, mode, idle, from, until, !ByApp && values.GetValueOrDefault("WAKE_ON_ACCESS") == "on",
-                ByApp ? "" : WakeSupport(), Hosting, values.GetValueOrDefault("AFTER_SLEEP_TIMER") != "off");
+                ByApp ? "" : WakeSupport(), Hosting, values.GetValueOrDefault("AFTER_SLEEP_TIMER") != "off",
+                status.GetValueOrDefault("NETWORK", ""), status.GetValueOrDefault("WAKE_ON", ""), check ? SleepKind() : "");
         }
     }
 
@@ -118,10 +125,57 @@ public sealed partial class ServerPowerSettingsStore(ServerRuntimeOptions runtim
         return new string(letters.Distinct().ToArray());
     }
 
+    /// <summary>NETWORK and WAKE_ON as the wake script found them at the last start or power-down.</summary>
+    private Dictionary<string, string> WakeStatus()
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        var info = new FileInfo(Path.Combine(runtime.DataDirectory, WakeStatusFileName));
+        if (!info.Exists || info.LinkTarget is not null || info.Length > 256) return values;
+        foreach (var line in File.ReadLines(info.FullName))
+        {
+            var match = WakeStatusLine().Match(line);
+            if (!match.Success) continue;
+            if (match.Groups[1].Success) values["NETWORK"] = match.Groups[2].Value;
+            else values["WAKE_ON"] = match.Groups[4].Value;
+        }
+        return values;
+    }
+
+    /// <summary>
+    /// The sleep that `echo mem` (the sleep mode) gives: "deep" is suspend to RAM, where fans and
+    /// disks stop; "light" is s2idle, which the card may not wake from; "none" when the computer
+    /// can't sleep; empty when unknown (not Linux).
+    /// </summary>
+    private string SleepKind()
+    {
+        var directory = systemPowerDirectory ?? "/sys/power";
+        try
+        {
+            var statePath = Path.Combine(directory, "state");
+            if (!File.Exists(statePath)) return "";
+            if (!File.ReadAllText(statePath).Split([' ', '\n'], StringSplitOptions.RemoveEmptyEntries).Contains("mem")) return "none";
+            var memSleepPath = Path.Combine(directory, "mem_sleep");
+            // Kernels before mem_sleep only knew suspend to RAM.
+            if (!File.Exists(memSleepPath)) return "deep";
+            var chosen = SelectedMemSleep().Match(File.ReadAllText(memSleepPath));
+            return chosen.Success && chosen.Groups[1].Value == "deep" ? "deep" : "light";
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return "";
+        }
+    }
+
     private static string? Time(string? value) => value is not null && TimeOfDay().IsMatch(value) ? value : null;
 
     [GeneratedRegex(@"^(MODE|IDLE_MINUTES|AWAKE_FROM|AWAKE_UNTIL|WAKE_ON_ACCESS|AFTER_SLEEP_TIMER)=([a-z0-9:]*)\z")]
     private static partial Regex SettingLine();
+
+    [GeneratedRegex(@"^(?:(NETWORK)=(wired|wifi|other)|(WAKE_ON)=([pumbagsfd]{1,9}))\z")]
+    private static partial Regex WakeStatusLine();
+
+    [GeneratedRegex(@"\[([a-z0-9]+)\]")]
+    private static partial Regex SelectedMemSleep();
 
     [GeneratedRegex(@"^([01][0-9]|2[0-3]):[0-5][0-9]\z")]
     private static partial Regex TimeOfDay();

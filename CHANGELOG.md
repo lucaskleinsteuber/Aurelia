@@ -31,6 +31,11 @@ versioned commit, so their skipped numbers are preserved.
 - Server and all apps: when a device signs in for the first time, the owner's open apps say so at once (the Mac also as a notification) with That Was Me and Block. Blocking signs the device out and keeps it from signing in or pairing again until it is unblocked. Every app now tells the server which device it is.
 - iPhone, iPad and Mac: Face ID or Touch ID can unlock server management instead of the Server Password; the key stays in the device's Secure Enclave. The owner can require it for administrators, and Linux and the browser then ask an iPhone, iPad or Mac to confirm with a code. On the server computer itself the Server Password always works.
 - iPhone & iPad: Wake Server on the "server is off" screen sends Wake-on-LAN for two minutes and connects once the server answers; Settings › Server shows whether waking can work and sends a wake signal.
+- Server, Mac, browser, Linux and iPhone & iPad: Settings › Power has a Wake-on-LAN Check while the server sleeps or turns off. It shows whether the computer is connected by cable, whether its network card can wake it and is switched on, and whether it has real sleep. It explains the BIOS settings that waking from off needs and how to try it. `sudo aurelia sleep status` shows the same.
+
+### Changed
+
+- All apps: the power choices say how long waking takes: about 10 to 20 seconds from sleep, and 30 to 60 seconds from off, because the whole computer starts up.
 
 ### Fixed
 

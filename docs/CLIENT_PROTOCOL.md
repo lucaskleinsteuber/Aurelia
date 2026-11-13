@@ -67,6 +67,12 @@ not answer, asks to start Aurelia on that Mac or Linux PC instead of sending Wak
 `off` and `stop`, and with `stop` it ends itself after the unused minutes (or five minutes after a
 player's sleep timer, `afterSleepTimer`) with exit status 76, which its app treats as "stopped
 until Aurelia is opened here", not as a crash.
+From 2.16.0 a Linux package server's power settings also carry its Wake-on-LAN check, each empty
+when unknown: `network` (`wired`, `wifi` or `other`), `wakeOn` (the network card's current ethtool
+wake letters; `g` means a Wake-on-LAN packet wakes it) and `sleepKind` (`deep` for suspend to RAM,
+`light` for s2idle only, `none` when the computer can't sleep). The clients show them under
+Settings › Power › Wake-on-LAN Check while the chosen mode is `sleep` or `shutdown`; whether the
+BIOS wakes a computer that is off can't be read and is explained instead.
 
 ## Web browser sign-in
 

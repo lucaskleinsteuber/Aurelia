@@ -90,6 +90,9 @@ struct ServerPowerEditor: View {
           .frame(maxWidth: .infinity, alignment: .leading).disabled(working)
         }
         .accessibilityIdentifier("server-power")
+        if let check = draft.wakeCheck {
+          ServerWakeCheckSection(items: check)
+        }
       } else if stored != nil {
         Text(
           "This server can't save power from Aurelia: it follows its computer's own energy settings."
@@ -230,9 +233,9 @@ struct ServerPowerEditor: View {
     case ("stop", false):
       "Only Aurelia Server stops; the computer stays on for its other work, such as a NAS. It starts again within seconds when any device connects, a browser too."
     case ("sleep", _):
-      "The whole computer sleeps and uses only a few watts. Aurelia on a Mac wakes it when you open it, and so can a router such as a FRITZ!Box (Wake-on-LAN); an Apple TV can't, so open Aurelia on a Mac first. Waking takes a few seconds."
+      "The whole computer sleeps: fans and disks stop, and it uses only a few watts. Aurelia on a Mac wakes it when you open it, and so can a router such as a FRITZ!Box (Wake-on-LAN); an Apple TV can't, so open Aurelia on a Mac first. Waking takes about 10 to 20 seconds. Usually the best choice."
     case ("shutdown", _):
-      "The computer turns off and uses almost nothing. Aurelia on a Mac starts it with Wake-on-LAN, which takes about a minute, and only if the computer's BIOS allows Wake-on-LAN while it is off (often called “Wake on LAN from S5”)."
+      "The computer turns off and uses almost nothing. Aurelia on a Mac starts it with Wake-on-LAN, which takes 30 to 60 seconds because the whole computer starts up, and only if its BIOS allows Wake-on-LAN while it is off (see the check below)."
     default:
       hostedByApp
         ? "Aurelia Server runs as long as the Aurelia app does. While the computer sleeps or is turned off, other devices show “Start Aurelia on \(hostName)”."
@@ -252,6 +255,69 @@ struct ServerPowerEditor: View {
   static func label(_ minutes: Int) -> String {
     if minutes < 60 || minutes % 60 != 0 { return "\(minutes) minutes" }
     return minutes == 60 ? "1 hour" : "\(minutes / 60) hours"
+  }
+}
+
+/// Settings › Power › Wake-on-LAN Check: what the server knows about being woken in the chosen
+/// mode, with what to change and what only a test shows.
+struct ServerWakeCheckSection: View {
+  let items: [ServerWakeCheckItem]
+
+  var body: some View {
+    AureliaSettingsSection(
+      "Wake-on-LAN Check",
+      symbol: "checkmark.shield",
+      description:
+        "Aurelia on a Mac, Linux PC, iPhone or iPad wakes the server with a Wake-on-LAN call. What this server knows about it, for the choice above:"
+    ) {
+      VStack(alignment: .leading, spacing: 12) {
+        ForEach(items, id: \.title) { item in
+          HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: Self.symbol(item.state))
+              .foregroundStyle(Self.color(item.state))
+              .accessibilityLabel(Self.label(item.state))
+            VStack(alignment: .leading, spacing: 2) {
+              Text(item.title).fontWeight(.semibold)
+              Text(item.detail).font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+          }
+          .accessibilityElement(children: .combine)
+        }
+        Text(ServerPowerSettings.wakeCheckFooter)
+          .font(.caption).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .accessibilityIdentifier("server-wake-check")
+  }
+
+  static func symbol(_ state: ServerWakeCheckItem.State) -> String {
+    switch state {
+    case .ok: "checkmark.circle.fill"
+    case .warning: "exclamationmark.triangle.fill"
+    case .problem: "xmark.octagon.fill"
+    case .info: "info.circle"
+    }
+  }
+
+  static func color(_ state: ServerWakeCheckItem.State) -> Color {
+    switch state {
+    case .ok: .green
+    case .warning: .orange
+    case .problem: .red
+    case .info: .secondary
+    }
+  }
+
+  static func label(_ state: ServerWakeCheckItem.State) -> String {
+    switch state {
+    case .ok: "Fine"
+    case .warning: "Check this"
+    case .problem: "Problem"
+    case .info: "Note"
+    }
   }
 }
 

@@ -868,6 +868,13 @@ body[data-subtitle-background="solid"] video::cue { background-color: #000; }
 .inline-control.small { font-size: 13px; color: var(--muted); }
 .text-field.time-field { flex: 0 0 auto; min-width: 0; width: 112px; height: 38px; padding: 0 10px; }
 .settings-rows > .power-explanation { margin: -4px 0 6px; max-width: 62ch; }
+.wake-check { display: grid; gap: 12px; max-width: 70ch; }
+.wake-check-item { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; align-items: start; }
+.wake-check-item > .icon { margin-top: 2px; color: var(--muted, currentColor); }
+.wake-check-item.ok > .icon { color: #4cc38a; }
+.wake-check-item.warning > .icon { color: var(--warning); }
+.wake-check-item.problem > .icon { color: var(--danger); }
+.wake-check-title { font-weight: 600; }
 .settings-slider { width: 180px; }
 .stepper { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--hairline); background: var(--raised); color: var(--text); font-size: 18px; line-height: 1; }
 .secondary-button.danger { color: var(--danger); }

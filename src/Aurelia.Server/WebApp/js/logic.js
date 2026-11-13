@@ -119,8 +119,8 @@ export function serverPolicyDraft(stored, changes) {
 export const POWER_MODES = Object.freeze([
   { id: "off", label: "Keep Running", explanation: "Aurelia and the computer keep running: ready at any moment, using the most power." },
   { id: "stop", label: "Stop Only Aurelia Server", explanation: "Only Aurelia stops. The computer stays on for its other work, and Aurelia starts again within seconds when any device connects, a browser too." },
-  { id: "sleep", label: "Put the Computer to Sleep", explanation: "The whole computer sleeps and uses only a few watts. Aurelia on a Mac wakes it when you open it, and a router such as a FRITZ!Box can wake it too (Wake-on-LAN). Waking takes a few seconds." },
-  { id: "shutdown", label: "Shut Down the Computer", explanation: "The computer turns off and uses almost nothing. Wake-on-LAN starts it again, which takes about a minute, and only if the computer's BIOS allows Wake-on-LAN while it is off (often “Wake on LAN from S5”)." },
+  { id: "sleep", label: "Put the Computer to Sleep", explanation: "The whole computer sleeps: fans and disks stop, and it uses only a few watts. Aurelia on a Mac wakes it when you open it, and a router such as a FRITZ!Box can wake it too (Wake-on-LAN). Waking takes about 10 to 20 seconds. Usually the best choice." },
+  { id: "shutdown", label: "Shut Down the Computer", explanation: "The computer turns off and uses almost nothing. Wake-on-LAN starts it again, which takes 30 to 60 seconds because the whole computer starts up, and only if its BIOS allows Wake-on-LAN while it is off (see the check below)." },
 ]);
 
 export function hostedByApp(hosting) {
@@ -146,6 +146,45 @@ export const POWER_IDLE_CHOICES = Object.freeze([5, 10, 15, 30, 45, 60, 90, 120,
 /** Whether the network card can wake the computer when a device connects directly, in a mode where that matters. */
 export function wakeOnAccessOffered(power, mode = power?.mode) {
   return !hostedByApp(power?.hosting) && (mode === "sleep" || mode === "shutdown") && String(power?.wakeSupport ?? "").includes("u");
+}
+
+export const WAKE_CHECK_FOOTER = "Most desktop PCs connected by cable wake from sleep, even old ones. Waking from off also needs the BIOS setting. Wi-Fi, many laptops and some USB network adapters can't be woken.";
+
+/**
+ * Settings › Power › Wake-on-LAN Check for a Linux package server that sleeps or turns off: what
+ * the server found about its network card, connection and sleep (from 2.16.0; older servers show
+ * "not checked yet"), what only a test can show, and what to change. Each item has a state "ok",
+ * "warning", "problem" or "info". Null where nothing wakes over the network.
+ */
+export function wakeCheck(power, mode = power?.mode) {
+  if (!power?.available || hostedByApp(power?.hosting) || (mode !== "sleep" && mode !== "shutdown")) return null;
+  const items = [];
+  const item = (state, title, detail) => items.push({ state, title, detail });
+  const network = String(power.network ?? "");
+  const wakeOn = String(power.wakeOn ?? "");
+  const support = String(power.wakeSupport ?? "");
+  if (network === "wired") item("ok", "Connected by cable", "Wake-on-LAN needs a network cable to the router, and this computer has one.");
+  else if (network === "wifi") item("problem", "Connected by Wi-Fi", "Almost no computer wakes over Wi-Fi. Connect it to the router with a network cable.");
+  else if (network) item("info", "Connection not recognized", "Wake-on-LAN needs a network cable to the router; Aurelia couldn't tell how this computer is connected.");
+  if (support && !support.includes("g")) {
+    item("problem", "The network card can't wake the computer", "Choose “Stop Only Aurelia Server” instead, or add a network card or USB network adapter that supports Wake-on-LAN.");
+  } else if (wakeOn.includes("g")) {
+    item("ok", "Wake-on-LAN is on", "The network card wakes the computer when it gets a Wake-on-LAN call.");
+  } else if (wakeOn) {
+    item("warning", "Wake-on-LAN is off right now", "Aurelia switches it on at every start and before powering down. If waking fails, restart the computer once.");
+  } else {
+    item("info", "Network card not checked yet", "The server checks its network card when the computer starts. Restart it once, or update Aurelia Server, to see it here.");
+  }
+  if (mode === "sleep") {
+    const sleep = String(power.sleepKind ?? "");
+    if (sleep === "deep") item("ok", "Real sleep", "Fans and disks stop, it uses only a few watts, and waking takes about 10 to 20 seconds.");
+    else if (sleep === "light") item("warning", "Only light sleep", "This computer offers only a lighter sleep (s2idle). It may use more power, and some network cards can't wake it. Try it once.");
+    else if (sleep === "none") item("problem", "This computer can't sleep", "Choose “Shut Down the Computer” or “Stop Only Aurelia Server” instead.");
+  } else {
+    item("info", "Waking from off needs the BIOS", "Aurelia can't check this from here. Open the BIOS setup (usually Del or F2 right after switching on), turn on “Wake on LAN”, “Power On By PCI-E” or “Resume by LAN”, and turn off “ErP” or “Deep Sleep”. Starting takes 30 to 60 seconds, because the whole computer starts up; waking from sleep is much faster.");
+  }
+  item("info", "Try it once", "Let the server power down, then open Aurelia on a Mac, Linux PC or iPhone: it sends the Wake-on-LAN call and connects once the server is back. If it stays off, its power button starts it as usual.");
+  return { items, footer: WAKE_CHECK_FOOTER };
 }
 
 /** The request for Settings › Power, or an error naming what to fix. */

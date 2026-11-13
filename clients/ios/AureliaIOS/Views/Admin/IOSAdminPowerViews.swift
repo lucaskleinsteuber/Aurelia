@@ -88,6 +88,26 @@ private struct IOSAdminPowerForm: View {
             }
           }
         }
+        if let check = IOSPowerRules.wakeCheck(power, mode: draft.mode) {
+          Section {
+            ForEach(check, id: \.title) { item in
+              HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: Self.symbol(item.state))
+                  .foregroundStyle(Self.color(item.state))
+                  .accessibilityLabel(Self.label(item.state))
+                VStack(alignment: .leading, spacing: 2) {
+                  Text(item.title).fontWeight(.semibold)
+                  Text(item.detail).font(.footnote).foregroundStyle(.secondary)
+                }
+              }
+              .accessibilityElement(children: .combine)
+            }
+          } header: {
+            Text("Wake-on-LAN Check")
+          } footer: {
+            Text(IOSPowerRules.wakeCheckFooter)
+          }
+        }
         if let problem { Section { Text(problem).foregroundStyle(.orange) } }
       }
     }
@@ -97,6 +117,33 @@ private struct IOSAdminPowerForm: View {
       ToolbarItem(placement: .confirmationAction) {
         Button("Save") { save() }.disabled(!changed || !power.available)
       }
+    }
+  }
+
+  static func symbol(_ state: IOSPowerRules.WakeCheckItem.State) -> String {
+    switch state {
+    case .ok: "checkmark.circle.fill"
+    case .warning: "exclamationmark.triangle.fill"
+    case .problem: "xmark.octagon.fill"
+    case .info: "info.circle"
+    }
+  }
+
+  static func color(_ state: IOSPowerRules.WakeCheckItem.State) -> Color {
+    switch state {
+    case .ok: .green
+    case .warning: .orange
+    case .problem: .red
+    case .info: .secondary
+    }
+  }
+
+  static func label(_ state: IOSPowerRules.WakeCheckItem.State) -> String {
+    switch state {
+    case .ok: "Fine"
+    case .warning: "Check this"
+    case .problem: "Problem"
+    case .info: "Note"
     }
   }
 

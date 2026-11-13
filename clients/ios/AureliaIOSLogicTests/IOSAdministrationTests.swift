@@ -159,6 +159,32 @@ struct IOSAdministrationTests {
     #expect(!IOSPowerRules.offersWakeOnAccess(noCard))
   }
 
+  @Test func theWakeOnLanCheckSaysWhatTheServerFoundAndWhatOnlyATestShows() throws {
+    var server = IOSServerPower(
+      available: true, mode: "sleep", idleMinutes: 15, awakeFrom: nil, awakeUntil: nil,
+      wakeSupport: "pumbg", hosting: "linuxServer", network: "wired", wakeOn: "g", sleepKind: "deep")
+    func titles(_ mode: String) -> [String] {
+      (IOSPowerRules.wakeCheck(server, mode: mode) ?? []).map { "\($0.state): \($0.title)" }
+    }
+    #expect(titles("sleep") == ["ok: Connected by cable", "ok: Wake-on-LAN is on", "ok: Real sleep", "info: Try it once"])
+    #expect(titles("shutdown") == ["ok: Connected by cable", "ok: Wake-on-LAN is on", "info: Waking from off needs the BIOS", "info: Try it once"])
+    #expect(IOSPowerRules.wakeCheck(server, mode: "off") == nil)
+    #expect(IOSPowerRules.wakeCheck(server, mode: "stop") == nil)
+    server.network = "wifi"
+    server.wakeOn = "d"
+    server.sleepKind = "light"
+    #expect(titles("sleep") == ["problem: Connected by Wi-Fi", "warning: Wake-on-LAN is off right now", "warning: Only light sleep", "info: Try it once"])
+    server.wakeSupport = "d"
+    server.sleepKind = "none"
+    #expect(Array(titles("sleep")[1...2]) == ["problem: The network card can't wake the computer", "problem: This computer can't sleep"])
+    server.hosting = "macApp"
+    #expect(IOSPowerRules.wakeCheck(server, mode: "sleep") == nil)
+    let older = try JSONDecoder().decode(
+      IOSServerPower.self,
+      from: Data(#"{"available":true,"mode":"sleep","idleMinutes":15,"wakeSupport":"pumbg"}"#.utf8))
+    #expect((IOSPowerRules.wakeCheck(older) ?? []).map(\.title) == ["Network card not checked yet", "Try it once"])
+  }
+
   @Test func powerPayloadChecksTimesAndAsksOnlyCapableCards() throws {
     let server = IOSServerPower(
       available: true, mode: "off", idleMinutes: 30, awakeFrom: nil, awakeUntil: nil,

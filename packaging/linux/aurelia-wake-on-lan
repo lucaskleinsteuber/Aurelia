@@ -5,7 +5,8 @@
 # address. Run at every start by aurelia-wake-on-lan.service and by aurelia-autosleep before the
 # computer sleeps or turns off, so a change made in the app counts at once.
 # It leaves the card's wake abilities in wake-on-lan-support in the server's data folder, so the
-# app can offer only what the card can do.
+# app can offer only what the card can do, and in wake-on-lan-status whether the card is wired or
+# Wi-Fi and how it is set now, for the app's Wake-on-LAN check.
 set -euo pipefail
 data=${AURELIA_DATA_DIR:-/var/lib/aurelia}
 . "${AURELIA_SLEEP_SETTINGS_LIBRARY:-/opt/aurelia/aurelia-sleep-settings}"
@@ -14,21 +15,38 @@ read_sleep_settings "$data/sleep-settings"
 device=$(ip -4 route show default | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
 [ -n "$device" ] || { echo "No network connection found." >&2; exit 1; }
 supports=$( { ethtool "$device" 2>/dev/null || true; } | awk -F': ' '/Supports Wake-on/ { print $2; exit }' | tr -cd 'pumbagsf')
-
-# Written as the server's own user: root never creates or replaces a file in that user's folder.
-if [ -d "$data" ] && id aurelia >/dev/null 2>&1; then
-  printf '%s\n' "$supports" \
-    | runuser -u aurelia -- /bin/sh -c 'umask 077; t=$(mktemp "$1.XXXXXX") && cat > "$t" && mv -f "$t" "$1"' sh "$data/wake-on-lan-support" \
-    || true
+network=other
+if [ -e "/sys/class/net/$device/wireless" ] || [ -e "/sys/class/net/$device/phy80211" ]; then
+  network=wifi
+elif [ -e "/sys/class/net/$device/device" ]; then
+  network=wired
 fi
 
+# Written as the server's own user: root never creates or replaces a file in that user's folder.
+leave() {
+  if [ -d "$data" ] && id aurelia >/dev/null 2>&1; then
+    printf '%s' "$2" \
+      | runuser -u aurelia -- /bin/sh -c 'umask 077; t=$(mktemp "$1.XXXXXX") && cat > "$t" && mv -f "$t" "$1"' sh "$data/$1" \
+      || true
+  fi
+}
+# The card's wake letters as they are now ("d": nothing wakes it).
+leave_status() {
+  local now
+  now=$( { ethtool "$device" 2>/dev/null || true; } | awk -F': ' '/^[[:space:]]*Wake-on:/ { print $2; exit }' | tr -cd 'pumbagsfd')
+  leave wake-on-lan-status "$(printf 'NETWORK=%s\nWAKE_ON=%s' "$network" "$now")"$'\n'
+}
+leave wake-on-lan-support "$supports"$'\n'
+
 if [[ "$supports" != *g* ]]; then
+  leave_status
   echo "The network card $device cannot be woken over the network." >&2
   exit 0
 fi
 wake=g
 if [ "$WAKE_ON_ACCESS" = on ] && [[ "$supports" == *u* ]]; then wake=ug; fi
 ethtool -s "$device" wol "$wake"
+leave_status
 if [ "$wake" = ug ]; then
   echo "Wake-on-LAN is on for $device ($(cat "/sys/class/net/$device/address")), also when a device connects directly."
 else

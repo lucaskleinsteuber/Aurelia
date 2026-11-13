@@ -381,7 +381,25 @@ case "$command" in
           echo "Power saving: off"
         fi
         device=$(ip -4 route show default | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
-        [ -n "$device" ] && echo "Wake address: $(cat "/sys/class/net/$device/address") ($device)"
+        if [ -n "$device" ]; then
+          echo "Wake address: $(cat "/sys/class/net/$device/address") ($device)"
+          wake_now=$( { ethtool "$device" 2>/dev/null || true; } | awk -F': ' '/^[[:space:]]*Wake-on:/ { print $2; exit }')
+          case "$wake_now" in
+            *g*) echo "Wake-on-LAN: on" ;;
+            "") echo "Wake-on-LAN: unknown (ethtool can't read this card)" ;;
+            *) echo "Wake-on-LAN: off right now; restart the computer once, or run: sudo systemctl restart aurelia-wake-on-lan" ;;
+          esac
+          [ -e "/sys/class/net/$device/wireless" ] && echo "Connected by Wi-Fi: almost no computer can be woken over Wi-Fi. Use a network cable."
+        fi
+        if grep -qw mem /sys/power/state 2>/dev/null; then
+          if [ ! -r /sys/power/mem_sleep ] || grep -q '\[deep\]' /sys/power/mem_sleep; then
+            echo "Sleep: suspend to RAM (fans and disks stop; waking takes seconds)"
+          else
+            echo "Sleep: only light sleep (s2idle); test once whether Wake-on-LAN wakes it"
+          fi
+        else
+          echo "Sleep: not possible on this computer; use 'sudo aurelia sleep shutdown' or 'server'"
+        fi
         ;;
       *) echo "Use: sudo aurelia sleep on | server | shutdown | off | status" >&2; exit 2 ;;
     esac

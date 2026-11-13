@@ -176,14 +176,70 @@ enum IOSPowerRules {
       .init(
         id: "sleep", label: "Put the Computer to Sleep",
         explanation:
-          "The whole computer sleeps and uses only a few watts. This iPhone wakes it with Wake-on-LAN when you open Aurelia. Waking takes a few seconds."
+          "The whole computer sleeps: fans and disks stop, and it uses only a few watts. This iPhone wakes it with Wake-on-LAN when you open Aurelia, in about 10 to 20 seconds. Usually the best choice."
       ),
       .init(
         id: "shutdown", label: "Shut Down the Computer",
         explanation:
-          "The computer turns off and uses almost nothing. Wake-on-LAN starts it again, which takes about a minute, and only if its BIOS allows Wake-on-LAN while it is off (often “Wake on LAN from S5”)."
+          "The computer turns off and uses almost nothing. Wake-on-LAN starts it again, which takes 30 to 60 seconds because the whole computer starts up, and only if its BIOS allows Wake-on-LAN while it is off (see the check below)."
       ),
     ]
+  }
+
+  struct WakeCheckItem: Equatable, Sendable {
+    enum State: Equatable, Sendable { case ok, warning, problem, info }
+    let state: State
+    let title: String
+    let detail: String
+  }
+
+  static let wakeCheckFooter =
+    "Most desktop PCs connected by cable wake from sleep, even old ones. Waking from off also needs the BIOS setting. Wi-Fi, many laptops and some USB network adapters can't be woken."
+
+  /// Settings › Power › Wake-on-LAN Check for the chosen mode: what the server found about its
+  /// network card, connection and sleep, what only a test shows, and what to change. Nil where
+  /// nothing wakes over the network. Same items and words as the Mac app and the browser.
+  static func wakeCheck(_ power: IOSServerPower, mode: String? = nil) -> [WakeCheckItem]? {
+    let mode = mode ?? power.mode
+    guard power.available, !hostedByApp(power.hosting), mode == "sleep" || mode == "shutdown" else { return nil }
+    var items: [WakeCheckItem] = []
+    func add(_ state: WakeCheckItem.State, _ title: String, _ detail: String) {
+      items.append(WakeCheckItem(state: state, title: title, detail: detail))
+    }
+    let network = power.network ?? "", wakeOn = power.wakeOn ?? "", support = power.wakeSupport ?? ""
+    switch network {
+    case "wired":
+      add(.ok, "Connected by cable", "Wake-on-LAN needs a network cable to the router, and this computer has one.")
+    case "wifi":
+      add(.problem, "Connected by Wi-Fi", "Almost no computer wakes over Wi-Fi. Connect it to the router with a network cable.")
+    case "": break
+    default:
+      add(.info, "Connection not recognized", "Wake-on-LAN needs a network cable to the router; Aurelia couldn't tell how this computer is connected.")
+    }
+    if !support.isEmpty && !support.contains("g") {
+      add(.problem, "The network card can't wake the computer", "Choose “Stop Only Aurelia Server” instead, or add a network card or USB network adapter that supports Wake-on-LAN.")
+    } else if wakeOn.contains("g") {
+      add(.ok, "Wake-on-LAN is on", "The network card wakes the computer when it gets a Wake-on-LAN call.")
+    } else if !wakeOn.isEmpty {
+      add(.warning, "Wake-on-LAN is off right now", "Aurelia switches it on at every start and before powering down. If waking fails, restart the computer once.")
+    } else {
+      add(.info, "Network card not checked yet", "The server checks its network card when the computer starts. Restart it once, or update Aurelia Server, to see it here.")
+    }
+    if mode == "sleep" {
+      switch power.sleepKind ?? "" {
+      case "deep":
+        add(.ok, "Real sleep", "Fans and disks stop, it uses only a few watts, and waking takes about 10 to 20 seconds.")
+      case "light":
+        add(.warning, "Only light sleep", "This computer offers only a lighter sleep (s2idle). It may use more power, and some network cards can't wake it. Try it once.")
+      case "none":
+        add(.problem, "This computer can't sleep", "Choose “Shut Down the Computer” or “Stop Only Aurelia Server” instead.")
+      default: break
+      }
+    } else {
+      add(.info, "Waking from off needs the BIOS", "Aurelia can't check this from here. Open the BIOS setup (usually Del or F2 right after switching on), turn on “Wake on LAN”, “Power On By PCI-E” or “Resume by LAN”, and turn off “ErP” or “Deep Sleep”. Starting takes 30 to 60 seconds, because the whole computer starts up; waking from sleep is much faster.")
+    }
+    add(.info, "Try it once", "Let the server power down, then open Aurelia on a Mac, Linux PC or iPhone: it sends the Wake-on-LAN call and connects once the server is back. If it stays off, its power button starts it as usual.")
+    return items
   }
 
   /// Wake When a Device Connects matters only while the computer sleeps or is off, and only on a
