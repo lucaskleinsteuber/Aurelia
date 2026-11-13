@@ -6,6 +6,7 @@ struct IOSRootView: View {
   @EnvironmentObject private var model: IOSAppModel
   @State private var tab: IOSLibraryTab = .home
   @State private var introductionReplay = false
+  @StateObject private var securityAlerts = IOSSecurityAlertCenter()
 
   private var guide: IOSSetupGuide { model.setupGuide }
   private var tabIndex: Binding<Int> {
@@ -95,6 +96,9 @@ struct IOSRootView: View {
             IOSLibraryTour(tab: tabIndex) { guide.tourShown() }.transition(.opacity)
           }
         }
+        .overlay(alignment: .top) { IOSSecurityAlertBanner(center: securityAlerts) }
+        .task(id: model.session?.sessionId) { securityAlerts.start(model: model) }
+        .onDisappear { securityAlerts.stop() }
         #if DEBUG
           .onAppear {
             switch IOSShowcasePage.current {

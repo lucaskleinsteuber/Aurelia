@@ -116,9 +116,45 @@ final class IOSAdministrationModel: ObservableObject {
       unlockRequested = false
       finishUnlock(true)
     } catch {
-      unlockError =
-        (error as? IOSCoreError)?.code == "invalid_credentials"
-        ? "The Server Password is incorrect." : Self.message(error)
+      switch (error as? IOSCoreError)?.code {
+      case "invalid_credentials": unlockError = "The Server Password is incorrect."
+      case "passkey_required":
+        unlockError =
+          "This server asks for Face ID or Touch ID instead of the Server Password. Set it up on this \(IOSDesign.deviceName) from the server computer, or unlock there."
+      default: unlockError = Self.message(error)
+      }
+    }
+  }
+
+  /// This profile's Face ID / Touch ID key on this device, if it has one.
+  var storedPasskey: IOSStoredPasskey? {
+    guard IOSSecureEnclaveSigner.isAvailable, let server = app?.connection?.serverID,
+      let profile = app?.session?.user.id
+    else { return nil }
+    return IOSPasskeyStore.load(server: server, profile: profile)
+  }
+
+  /// Unlocks with Face ID or Touch ID instead of the Server Password.
+  func unlockWithPasskey() async {
+    guard let client, let passkey = storedPasskey, !unlocking else { return }
+    unlocking = true
+    defer { unlocking = false }
+    do {
+      let expiry = try await client.unlockManagement(passkeyId: passkey.passkeyId, signer: passkey.signer)
+      managementExpiresAt = expiry
+      scheduleExpiry(expiry)
+      unlockRequested = false
+      finishUnlock(true)
+    } catch {
+      if (error as? IOSCoreError)?.code == "passkey_invalid", let server = app?.connection?.serverID,
+        let profile = app?.session?.user.id
+      {
+        // The server no longer knows this key (removed elsewhere): forget it here too.
+        IOSPasskeyStore.remove(server: server, profile: profile)
+        unlockError = "This \(IOSDesign.deviceName)'s key was removed on the server. Use the Server Password and set it up again."
+      } else if (error as? CancellationError) == nil {
+        unlockError = Self.message(error)
+      }
     }
   }
 
@@ -160,6 +196,17 @@ struct IOSManagementUnlockSheet: View {
   var body: some View {
     NavigationStack {
       Form {
+        if admin.storedPasskey != nil {
+          Section {
+            Button {
+              Task { await admin.unlockWithPasskey() }
+            } label: {
+              Label("Unlock with \(IOSSecureEnclaveSigner.biometryName)", systemImage: "faceid")
+            }
+            .disabled(admin.unlocking)
+            .accessibilityIdentifier("admin-unlock-passkey")
+          }
+        }
         Section {
           SecureField("Server Password", text: $password)
             .textContentType(.password)
@@ -195,7 +242,13 @@ struct IOSManagementUnlockSheet: View {
           }
         }
       }
-      .onAppear { focused = true }
+      .onAppear {
+        if admin.storedPasskey != nil {
+          Task { await admin.unlockWithPasskey() }
+        } else {
+          focused = true
+        }
+      }
       .onDisappear { password = "" }
     }
     .presentationDetents([.medium])

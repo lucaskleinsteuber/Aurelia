@@ -77,6 +77,9 @@
       </StackPanel>
     </Border>
 
+    <!-- The owner's notes about devices that signed in for the first time (Security). -->
+    <StackPanel x:Name="SecurityAlerts" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,16,0,0" Spacing="8" MaxWidth="600" />
+
     <!-- Remote control of another device that plays a title from here (Play On). -->
     <Border x:Name="RemoteBar" Classes="banner" IsVisible="False" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,24">
       <StackPanel Orientation="Horizontal" Spacing="12">

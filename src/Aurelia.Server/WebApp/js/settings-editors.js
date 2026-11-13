@@ -7,6 +7,7 @@ import { createMetadataExtras } from "./metadata-extras.js";
 import { segmentsSection, SEGMENTS_FEATURE } from "./segments-view.js";
 import { SCREEN_TIME_CAPABILITY, sameRules } from "./screen-time.js";
 import { screenTimeSection } from "./screen-time-view.js";
+import { remoteUnlockPanel } from "./security-view.js";
 
 const input = (value = "", attributes = {}) => h("input", { class: "text-field", value: String(value ?? ""), ...attributes });
 const field = (title, control, note) => h("label", { class: "editor-field" }, h("span", { class: "editor-field-title" }, title), control,
@@ -76,6 +77,12 @@ export function createManagementEditors(app) {
           password.value = "";
           if (!alive()) return;
           submit.disabled = false;
+          if (error.code === "passkey_required") {
+            clear(unlock);
+            message.textContent = "";
+            unlock.append(remoteUnlockPanel({ api, onUnlocked: async () => { if (!alive()) return; clear(unlock); await retry(); } }));
+            return;
+          }
           message.textContent = error.code === "invalid_credentials" ? "The Server Password is incorrect." : error.message;
           password.focus();
         }

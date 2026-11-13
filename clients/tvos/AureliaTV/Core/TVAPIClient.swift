@@ -624,6 +624,8 @@ struct TVAPIClient: Sendable {
     var request = URLRequest(url: url)
     request.cachePolicy = .reloadIgnoringLocalCacheData
     request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue(TVInstallation.identifier(), forHTTPHeaderField: "X-Aurelia-Installation")
+    request.setValue(TVInstallation.clientHeader, forHTTPHeaderField: "X-Aurelia-Client")
     let token: String?
     switch authentication {
     case .none: token = nil
@@ -683,5 +685,24 @@ struct TVAPIClient: Sendable {
     do { return try JSONDecoder().decode(type, from: data) } catch {
       throw TVCoreError.invalidResponse
     }
+  }
+}
+
+/// This app's own random identifier, sent as `X-Aurelia-Installation` so the owner can tell its
+/// devices apart in Settings › Security and block one. It identifies an installation, not a person.
+enum TVInstallation {
+  static let defaultsKey = "AureliaTVInstallationId"
+
+  static func identifier(defaults: UserDefaults = .standard) -> String {
+    if let saved = defaults.string(forKey: defaultsKey), UUID(uuidString: saved) != nil { return saved }
+    let created = UUID().uuidString
+    defaults.set(created, forKey: defaultsKey)
+    return created
+  }
+
+  /// "tvos/2.6.0".
+  static var clientHeader: String {
+    let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+    return "tvos/" + version.filter { $0.isNumber || $0 == "." }
   }
 }

@@ -22,6 +22,7 @@ public static class WebAppEndpoints
             if (string.IsNullOrEmpty(context.HttpContext.Request.Headers[WebCookies.Header]))
                 throw new AccountException("web_header_required", "This request must come from the Aurelia browser app.", 403);
             RequirePrivateTransport(context.HttpContext);
+            ClientIdentity.EnsureBrowserInstallation(context.HttpContext);
             return await next(context);
         });
 

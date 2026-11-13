@@ -601,6 +601,27 @@ Both changes refuse a title whose file is still available (`409 source_available
 scan would bring it back. Removing such a title is `DELETE /api/v1/media/{id}`, which needs the
 server password and keeps the file out of later scans. Paths are never returned, only file names.
 
+## Security
+
+Every client sends `X-Aurelia-Installation: <uuid>` (created once and kept) and
+`X-Aurelia-Client: <platform>/<version>` (`ios`, `macos`, `linux`, `tvos`); the browser's
+identifier is an HttpOnly cookie the server sets. Servers with capability `security-v1` add:
+
+- `GET /api/v1/server/security/events?outcome=&before=&limit=`, `GET …/devices`,
+  `POST …/devices/{id}/acknowledge`, `POST …/devices/{id}/block`, `GET …/blocked`,
+  `DELETE …/blocked/{id}` (approval), `GET/PUT …/settings` (PUT needs an approval): owner only.
+- `GET /api/v1/server/security/alerts?version=&waitSeconds=0..30`: a long-poll with new devices
+  (owner) and unlock requests this device can confirm.
+- `POST /api/v1/management/passkey-challenge`, `GET/POST/DELETE /api/v1/management/passkeys`
+  (register and remove need an approval), `POST /api/v1/management/passkey-unlock`,
+  `POST /api/v1/management/remote-unlock`, `GET …/remote-unlock/{id}`,
+  `POST …/remote-unlock/{id}/decide`.
+
+New error codes: `403 device_blocked` (sign-in or pairing from a blocked device),
+`403 passkey_required` (the password is refused while Face ID is required; offer Confirm on
+Another Device), `403 passkey_invalid` (a signature or challenge that doesn't fit) and
+`409 passkey_needed_first`. See [SECURITY_MODEL.md](SECURITY_MODEL.md#face-id-and-touch-id-instead-of-the-server-password).
+
 ## Family Wishes
 
 Servers with capability `wishes-v1` let household profiles request movies and TV series not yet in the library (`GET/POST /api/v1/wishes`, `GET /api/v1/wishes/summary`, `GET /api/v1/wishes/search`, `PUT /api/v1/wishes/{id}/support`, `PUT /api/v1/wishes/{id}/state`, `DELETE /api/v1/wishes/{id}`, `POST /api/v1/wishes/seen`, `GET /api/v1/wishes/poster`). See [Family Wishes](WISHES.md) for age-limit visibility, duplicate `"Me Too"` merging, `409 already_in_library` conflicts, and server-proxied TMDB poster caching.

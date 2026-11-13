@@ -42,6 +42,7 @@ public sealed class PeoplePage : StackPanel
             Button("Create Profile…", () => EditAsync(null), "primary"),
             Note("New profiles start without access to any titles until you choose them."))));
         Children.Add(Section("Devices", Block(Note("Connect another computer, an Apple TV or a web browser to this server, and sign out devices you no longer use."), devices)));
+        if (scope.IsOwner && scope.Session.Capabilities.Contains(ServerFeatures.Security)) Children.Add(new SecuritySection(scope));
         DetachedFromVisualTree += (_, _) => codeTimer?.Stop();
         Loading = ReloadAsync();
     }

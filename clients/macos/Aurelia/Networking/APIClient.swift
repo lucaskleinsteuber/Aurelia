@@ -1879,6 +1879,121 @@ struct APIClient: Sendable {
     }
   }
 
+  // MARK: Security ("security-v1")
+
+  func securityEvents(outcome: String? = nil, before: String? = nil) async throws -> ServerSecurityEventPage {
+    var path = "/api/v1/server/security/events?limit=100"
+    if let outcome { path += "&" + (try Self.query(name: "outcome", value: outcome)) }
+    if let before { path += "&" + (try Self.query(name: "before", value: before)) }
+    return try await get(path)
+  }
+  func securityDevices() async throws -> [ServerSecurityDevice] {
+    try await get("/api/v1/server/security/devices")
+  }
+  func acknowledgeDevice(id: UUID) async throws {
+    _ = try await perform(path: "/api/v1/server/security/devices/\(id.uuidString.lowercased())/acknowledge", method: "POST")
+  }
+  func blockDevice(id: UUID) async throws -> ServerBlockResult {
+    try Self.decode(
+      ServerBlockResult.self,
+      from: await perform(path: "/api/v1/server/security/devices/\(id.uuidString.lowercased())/block", method: "POST"))
+  }
+  func blockedDevices() async throws -> [ServerBlockedDevice] {
+    try await get("/api/v1/server/security/blocked")
+  }
+  func unblockDevice(id: UUID) async throws {
+    _ = try await perform(path: "/api/v1/server/security/blocked/\(id.uuidString.lowercased())", method: "DELETE")
+  }
+  func securitySettings() async throws -> ServerSecuritySettings {
+    try await get("/api/v1/server/security/settings")
+  }
+  func saveSecuritySettings(logDays: Int, requirePasskeys: Bool) async throws -> ServerSecuritySettings {
+    struct Payload: Encodable {
+      let securityLogDays: Int
+      let requirePasskeysForAdministrators: Bool
+    }
+    return try Self.decode(
+      ServerSecuritySettings.self,
+      from: await perform(
+        path: "/api/v1/server/security/settings", method: "PUT",
+        body: JSONEncoder().encode(Payload(securityLogDays: logDays, requirePasskeysForAdministrators: requirePasskeys))))
+  }
+  func securityAlerts(version: Int64, waitSeconds: Int) async throws -> ServerSecurityAlerts {
+    let wait = min(max(waitSeconds, 0), 30)
+    return try Self.decode(
+      ServerSecurityAlerts.self,
+      from: await perform(
+        path: "/api/v1/server/security/alerts?version=\(version)&waitSeconds=\(wait)",
+        timeout: TimeInterval(max(wait + 10, 15))))
+  }
+  func passkeys() async throws -> [ServerPasskey] { try await get("/api/v1/management/passkeys") }
+  func passkeyChallenge() async throws -> String {
+    struct Response: Decodable { let challenge: String }
+    return try Self.decode(
+      Response.self, from: await perform(path: "/api/v1/management/passkey-challenge", method: "POST")
+    ).challenge
+  }
+  /// Registers this Mac's key: proves it holds the private key by signing a fresh challenge.
+  func registerPasskey(name: String, signer: any PasskeySigner) async throws -> ServerPasskey {
+    let challenge = try await passkeyChallenge()
+    let signature = try await signer.sign(PasskeyMessage.data(purpose: "register", challenge: challenge))
+    struct Payload: Encodable {
+      let name: String
+      let publicKey: String
+      let challenge: String
+      let signature: String
+    }
+    return try Self.decode(
+      ServerPasskey.self,
+      from: await perform(
+        path: "/api/v1/management/passkeys", method: "POST",
+        body: JSONEncoder().encode(
+          Payload(
+            name: name, publicKey: signer.publicKey.base64EncodedString(), challenge: challenge,
+            signature: signature.base64EncodedString()))))
+  }
+  func removePasskey(id: UUID) async throws {
+    _ = try await perform(path: "/api/v1/management/passkeys/\(id.uuidString.lowercased())", method: "DELETE")
+  }
+  /// Unlocks management with Touch ID instead of the Server Password; returns the expiry.
+  func unlockManagement(passkeyId: UUID, signer: any PasskeySigner) async throws -> String {
+    let challenge = try await passkeyChallenge()
+    let signature = try await signer.sign(PasskeyMessage.data(purpose: "unlock", challenge: challenge))
+    struct Payload: Encodable {
+      let passkeyId: UUID
+      let challenge: String
+      let signature: String
+    }
+    struct Response: Decodable { let expiresAt: String }
+    return try Self.decode(
+      Response.self,
+      from: await perform(
+        path: "/api/v1/management/passkey-unlock", method: "POST",
+        body: JSONEncoder().encode(
+          Payload(passkeyId: passkeyId, challenge: challenge, signature: signature.base64EncodedString())))
+    ).expiresAt
+  }
+  /// Confirms (with this Mac's key) or denies another device's request to unlock management.
+  func decideRemoteUnlock(id: UUID, approve: Bool, passkeyId: UUID?, signer: (any PasskeySigner)?) async throws {
+    struct Payload: Encodable {
+      let approve: Bool
+      let passkeyId: UUID?
+      let challenge: String?
+      let signature: String?
+    }
+    var payload = Payload(approve: approve, passkeyId: nil, challenge: nil, signature: nil)
+    if approve {
+      guard let passkeyId, let signer else { throw APIClientError.invalidResponse }
+      let challenge = try await passkeyChallenge()
+      let signature = try await signer.sign(
+        PasskeyMessage.data(purpose: PasskeyMessage.remotePurpose(id), challenge: challenge))
+      payload = Payload(approve: true, passkeyId: passkeyId, challenge: challenge, signature: signature.base64EncodedString())
+    }
+    _ = try await perform(
+      path: "/api/v1/management/remote-unlock/\(id.uuidString.lowercased())/decide", method: "POST",
+      body: JSONEncoder().encode(payload))
+  }
+
   func serverCapabilities() async throws -> ServerCapabilities {
     try Self.decode(
       ServerCapabilities.self, from: await perform(path: "/api/v1/server/capabilities"))
@@ -2305,6 +2420,8 @@ struct APIClient: Sendable {
     request.httpMethod = method
     request.cachePolicy = .reloadIgnoringLocalCacheData
     request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue(AureliaInstallation.identifier(), forHTTPHeaderField: "X-Aurelia-Installation")
+    request.setValue(AureliaInstallation.clientHeader, forHTTPHeaderField: "X-Aurelia-Client")
     for (name, value) in additionalHeaders {
       request.setValue(value, forHTTPHeaderField: name)
     }

@@ -65,9 +65,13 @@ public sealed class DeviceTokenAuthenticationHandler(
             .SingleOrDefaultAsync(user => user.Id == viewing.UserId && user.IsEnabled, Context.RequestAborted);
         if (user is null) return AuthenticateResult.Fail("The profile is no longer available.");
 
-        if (session.LastSeenAt <= now.AddMinutes(-1))
+        var client = ClientIdentity.From(Context);
+        if (session.LastSeenAt <= now.AddMinutes(-1)
+            || (client.IpAddress is not null && client.IpAddress != session.LastIpAddress)
+            || (client.InstallationId is not null && session.InstallationId is null)
+            || (client.Platform is not null && session.Platform is null))
         {
-            await activity.RecordAsync(database, session.Id, now, Context.RequestAborted);
+            await activity.RecordAsync(database, session.Id, now, client, Context.RequestAborted);
         }
 
         var claims = new List<Claim>

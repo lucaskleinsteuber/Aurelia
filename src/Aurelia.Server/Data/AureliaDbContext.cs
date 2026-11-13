@@ -34,6 +34,9 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public DbSet<ServerUser> Users => Set<ServerUser>();
 
     public DbSet<DeviceSession> DeviceSessions => Set<DeviceSession>();
+    public DbSet<SecurityEvent> SecurityEvents => Set<SecurityEvent>();
+    public DbSet<BlockedDevice> BlockedDevices => Set<BlockedDevice>();
+    public DbSet<ManagementPasskey> ManagementPasskeys => Set<ManagementPasskey>();
 
     public DbSet<PairingCode> PairingCodes => Set<PairingCode>();
 
@@ -472,6 +475,42 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.HasIndex(user => user.NormalizedUsername).IsUnique();
         });
 
+        modelBuilder.Entity<SecurityEvent>(entity =>
+        {
+            entity.HasKey(value => value.Id);
+            entity.Property(value => value.At).HasConversion(dateTimeOffsetConverter);
+            entity.Property(value => value.Kind).HasMaxLength(48).IsRequired();
+            entity.Property(value => value.Outcome).HasMaxLength(16).IsRequired();
+            entity.Property(value => value.UserName).HasMaxLength(128);
+            entity.Property(value => value.DeviceName).HasMaxLength(128);
+            entity.Property(value => value.Platform).HasMaxLength(64);
+            entity.Property(value => value.IpAddress).HasMaxLength(64);
+            entity.Property(value => value.Detail).HasMaxLength(256);
+            entity.HasIndex(value => value.At);
+            entity.HasIndex(value => new { value.Outcome, value.At });
+        });
+        modelBuilder.Entity<BlockedDevice>(entity =>
+        {
+            entity.HasKey(value => value.Id);
+            entity.Property(value => value.InstallationId).HasMaxLength(64).IsRequired();
+            entity.Property(value => value.DeviceName).HasMaxLength(128).IsRequired();
+            entity.Property(value => value.Platform).HasMaxLength(64);
+            entity.Property(value => value.IpAddress).HasMaxLength(64);
+            entity.Property(value => value.BlockedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(value => value.InstallationId).IsUnique();
+        });
+        modelBuilder.Entity<ManagementPasskey>(entity =>
+        {
+            entity.HasKey(value => value.Id);
+            entity.Property(value => value.Name).HasMaxLength(128).IsRequired();
+            entity.Property(value => value.PublicKey).HasMaxLength(65).IsRequired();
+            entity.Property(value => value.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(value => value.LastUsedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.HasIndex(value => value.UserId);
+            entity.HasIndex(value => value.DeviceSessionId);
+            entity.HasOne(value => value.User).WithMany().HasForeignKey(value => value.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(value => value.DeviceSession).WithMany().HasForeignKey(value => value.DeviceSessionId).OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<DeviceSession>(entity =>
         {
             entity.HasKey(session => session.Id);
@@ -482,6 +521,13 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.Property(session => session.ExpiresAt).HasConversion(dateTimeOffsetConverter);
             entity.Property(session => session.RevokedAt)
                 .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(session => session.InstallationId).HasMaxLength(64);
+            entity.Property(session => session.Platform).HasMaxLength(64);
+            entity.Property(session => session.ClientVersion).HasMaxLength(32);
+            entity.Property(session => session.FirstIpAddress).HasMaxLength(64);
+            entity.Property(session => session.LastIpAddress).HasMaxLength(64);
+            entity.Property(session => session.AcknowledgedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.HasIndex(session => session.InstallationId);
             entity.HasIndex(session => session.TokenHash).IsUnique();
             entity.HasIndex(session => new { session.UserId, session.ExpiresAt });
             entity.HasOne(session => session.User)

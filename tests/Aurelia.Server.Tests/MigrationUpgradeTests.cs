@@ -71,7 +71,8 @@ public sealed class MigrationUpgradeTests
             };
             media.Metadata = new MediaMetadata { MediaItemId = media.Id, ManualTitle = "Existing Manual Title" };
             await SeedLegacyUserAsync(database, owner);
-            database.AddRange(device, legacyPairing, library, media);
+            await SeedLegacyDeviceAsync(database, device);
+            database.AddRange(legacyPairing, library, media);
             await database.SaveChangesAsync();
             var artworkId = Guid.NewGuid();
             await database.Database.ExecuteSqlInterpolatedAsync($"""
@@ -84,6 +85,7 @@ public sealed class MigrationUpgradeTests
             Assert.Equal(device.Id, retainedDevice.Id);
             Assert.Equal(device.TokenHash, retainedDevice.TokenHash);
             Assert.Null(retainedDevice.RevokedAt);
+            Assert.NotNull(retainedDevice.AcknowledgedAt);
             Assert.Null((await database.PairingCodes.AsNoTracking().SingleAsync()).ConsumedAt);
             Assert.Equal("Existing Manual Title", (await database.MediaMetadata.AsNoTracking().SingleAsync()).ManualTitle);
             var artwork = await database.ArtworkAssets.AsNoTracking().SingleAsync();
@@ -655,6 +657,15 @@ public sealed class MigrationUpgradeTests
     /// Writes a profile with only the columns an older schema has. The current model has newer columns
     /// (display name, picture, age limit), so EF cannot insert it before the upgrade runs.
     /// </summary>
+    private static async Task SeedLegacyDeviceAsync(AureliaDbContext database, DeviceSession device)
+    {
+        await database.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO DeviceSessions (Id, UserId, DeviceName, TokenHash, CreatedAt, LastSeenAt, ExpiresAt, RevokedAt)
+            VALUES ({device.Id}, {device.UserId}, {device.DeviceName}, {device.TokenHash}, {device.CreatedAt.ToUnixTimeMilliseconds()},
+                {device.LastSeenAt.ToUnixTimeMilliseconds()}, {device.ExpiresAt.ToUnixTimeMilliseconds()}, NULL);
+            """);
+    }
+
     private static async Task SeedLegacyUserAsync(AureliaDbContext database, ServerUser user)
     {
         var created = user.CreatedAt.ToUnixTimeMilliseconds();

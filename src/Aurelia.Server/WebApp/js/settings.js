@@ -22,6 +22,8 @@ import { createImportPreview } from "./import-preview.js";
 import { cropPhoto } from "./photo-crop.js";
 import { serverSegmentsSection, SEGMENTS_FEATURE } from "./segments-view.js";
 import { serverSpeechSection } from "./speech-view.js";
+import { supportsSecurity } from "./security.js";
+import { remoteUnlockPanel, securitySection } from "./security-view.js";
 
 const CATEGORIES = [
   { id: "general", label: "General", symbol: "gear", adminOnly: false },
@@ -650,6 +652,9 @@ export function createSettings(app) {
             openButton("Devices…", () => admin.userSessions(entry)),
             openButton("Password…", () => admin.resetPassword(entry))))),
         h("div", { class: "button-row" }, openButton("Create Profile…", () => editors.editProfile()))) : null,
+
+      permissions.owner && supportsSecurity(state.server)
+        ? securitySection({ api, app, kit: { section, row, value, select }, refresh }) : null,
     ].filter(Boolean);
   }
 
@@ -1278,6 +1283,11 @@ export function createSettings(app) {
       } catch (error) {
         submit.disabled = false;
         password.value = "";
+        if (error instanceof ApiError && error.code === "passkey_required") {
+          message.textContent = "";
+          form.replaceWith(remoteUnlockPanel({ api, onUnlocked: () => app.navigate({ name: "settings", page: "server" }, { replace: true }) }));
+          return;
+        }
         message.textContent = error instanceof ApiError && error.status === 401 ? "The Server Password is incorrect." : error.message;
         password.focus();
       }

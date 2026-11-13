@@ -52,7 +52,11 @@ its screens are its own:
   without information). *Metadata*: TMDB, finding or refreshing information, Review Matches,
   OpenSubtitles, unused artwork and search. *Profiles and Devices*: profiles with name, picture,
   role, PIN, children's age limit, screen time and content access, codes for new devices or the
-  code a device shows, and signed-in devices. *Server*: status, health, restart, devices and
+  code a device shows, and signed-in devices. *Security* (from 2.11.0): Face ID or Touch ID
+  instead of the Server Password, with the key in the Secure Enclave, and for the owner the
+  security log, new devices with That Was Me and Block, the block list and whether Face ID is
+  required for administrators; requests from Linux or a browser to confirm an unlock appear at the
+  top of the screen. *Server*: status, health, restart, devices and
   backups, Performance (response times and slow queries), scrub previews, intros and credits,
   speech recognition, video conversion, limits,
   maintenance, background jobs, backups (check, encrypted backup saved through the share sheet,
@@ -168,6 +172,8 @@ When the server supports `wishes-v1`, iPhone and iPad offer **Family Wishes** fr
   their /24 broadcast address; iOS may block the broadcast for apps without Apple's multicast
   permission, which needs a paid developer account. The direct packet reaches the server while the
   router still knows its address; otherwise wake it another way, such as from a Mac or the router.
+- New-device notes and unlock requests appear only while the app is open; there are no push
+  notifications. Face ID itself is checked on a real device; tests sign with a software key.
 - Server administration is checked by logic tests and against an isolated test server; there are
   no iOS UI tests.
 - The app is not published as a download; build it from source as above. Away from home it works

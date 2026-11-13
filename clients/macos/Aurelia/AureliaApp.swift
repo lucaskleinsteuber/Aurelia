@@ -4,13 +4,25 @@ import SwiftUI
 struct AureliaApp: App {
   @NSApplicationDelegateAdaptor(AureliaAppDelegate.self) private var appDelegate
   @StateObject private var model = AppModel()
+  @StateObject private var securityAlerts = SecurityAlertCenter()
   @Environment(\.scenePhase) private var scenePhase
   @FocusedObject private var player: PlaybackController?
+
+  /// Restarts the security watch when the server, profile or its features change.
+  private var securityAlertKey: String {
+    [
+      model.profile?.serverId.uuidString, model.profile?.user?.id.uuidString,
+      model.profile?.isViewingSession == true ? "viewing" : "device",
+      model.libraryCapabilities.contains("security-v1") ? "security" : "",
+    ].compactMap { $0 }.joined(separator: "|")
+  }
 
   var body: some Scene {
     WindowGroup {
       RootView()
         .environmentObject(model)
+        .overlay(alignment: .top) { SecurityAlertBanner(center: securityAlerts) }
+        .task(id: securityAlertKey) { securityAlerts.start(model: model) }
         .task {
           await model.start()
           VLCPlaybackEngine.warmUp()

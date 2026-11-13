@@ -28,7 +28,7 @@ public interface IServerTransport
 /// not from a certificate authority, so name and chain errors of the self-signed certificate are
 /// expected and ignored. Redirects and cookies are never followed or kept.
 /// </summary>
-public sealed class PinnedServerTransport : IServerTransport
+public sealed class PinnedServerTransport(string? installationId = null) : IServerTransport
 {
     public HttpClient CreateClient(Uri address, string? expectedFingerprint, CapturedFingerprint? captured, TimeSpan timeout)
     {
@@ -48,6 +48,10 @@ public sealed class PinnedServerTransport : IServerTransport
             captured?.Set(fingerprint);
             return expectedFingerprint is null || ServerIdentity.Matches(expectedFingerprint, fingerprint);
         };
-        return new HttpClient(handler) { BaseAddress = address, Timeout = timeout };
+        var client = new HttpClient(handler) { BaseAddress = address, Timeout = timeout };
+        // Which device this is, for the owner's Settings › Security (docs/CLIENT_PROTOCOL.md).
+        if (installationId is not null) client.DefaultRequestHeaders.TryAddWithoutValidation("X-Aurelia-Installation", installationId);
+        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Aurelia-Client", AureliaInstallation.ClientHeader);
+        return client;
     }
 }

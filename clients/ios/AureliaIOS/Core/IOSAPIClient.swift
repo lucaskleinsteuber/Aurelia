@@ -910,6 +910,8 @@ struct IOSAPIClient: Sendable {
     var request = URLRequest(url: url)
     request.cachePolicy = .reloadIgnoringLocalCacheData
     request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue(IOSInstallation.identifier(), forHTTPHeaderField: "X-Aurelia-Installation")
+    request.setValue(IOSInstallation.clientHeader, forHTTPHeaderField: "X-Aurelia-Client")
     let token: String?
     switch authentication {
     case .none: token = nil

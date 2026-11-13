@@ -24,13 +24,13 @@ public sealed class AdminScope
         this.session = session;
         Sheets = sheets;
         var library = session.Library ?? throw new InvalidOperationException("Open a profile first.");
-        Client = new ManagementClient(session.Api, library.Client, AskPasswordAsync);
+        Client = new ManagementClient(session.Api, library.Client, AskPasswordAsync, ConfirmElsewhereAsync);
     }
 
     public ManagementClient Client { get; private set; }
 
     public void RefreshClient() => Client = new ManagementClient(session.Api,
-        (session.Library ?? throw new InvalidOperationException("Open a profile first.")).Client, AskPasswordAsync);
+        (session.Library ?? throw new InvalidOperationException("Open a profile first.")).Client, AskPasswordAsync, ConfirmElsewhereAsync);
 
     public SheetHost Sheets { get; }
 
@@ -78,6 +78,8 @@ public sealed class AdminScope
     {
         AureliaApiException { Code: "management_locked" } => "Management is locked. Enter the Server Password to continue.",
         AureliaApiException { Code: "invalid_password" or "invalid_credentials" } => "The Server Password is not correct.",
+        AureliaApiException { Code: "passkey_required" } => "Face ID or Touch ID is required to manage this server. Confirm on an iPhone, iPad or Mac.",
+        AureliaApiException { Code: "device_blocked" } => "The owner has blocked this device.",
         AureliaApiException { Status: 403 } api when api.Code is "forbidden" or "owner_required" => "Only the server's owner can do this.",
         AureliaApiException api => api.Message,
         _ => "The server could not be reached. Check that it is running and try again.",
@@ -113,6 +115,72 @@ public sealed class AdminScope
             },
         });
         return entered ? password.Text : null;
+    }
+
+    /// <summary>
+    /// "Confirm on Another Device": when Face ID or Touch ID is required for administrators, an
+    /// iPhone, iPad or Mac of this profile (or the owner's) confirms, and this computer waits.
+    /// </summary>
+    internal async Task<bool> ConfirmElsewhereAsync(ManagementClient client)
+    {
+        RemoteUnlockStartResponse request;
+        try
+        {
+            request = await client.StartRemoteUnlockAsync();
+        }
+        catch (AureliaApiException)
+        {
+            return false;
+        }
+        using var waiting = new CancellationTokenSource(request.ExpiresAt - DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5));
+        var status = new TextBlock { Text = SecurityText.RemoteUnlockState("pending"), Classes = { "subdued" }, TextWrapping = TextWrapping.Wrap };
+        var cancel = new Button { Content = "Cancel", Classes = { "chip" }, IsCancel = true };
+        cancel.Click += (_, _) => Sheets.Close(false);
+        var sheet = new StackPanel
+        {
+            Spacing = 14,
+            Width = 420,
+            Children =
+            {
+                new TextBlock { Text = "Confirm on Another Device", FontSize = 18, FontWeight = FontWeight.Bold },
+                new TextBlock
+                {
+                    Text = $"{ServerName} requires Face ID or Touch ID to manage it. Confirm on an iPhone, iPad or Mac where you set it up, and check that it shows this code:",
+                    Classes = { "subdued" },
+                    TextWrapping = TextWrapping.Wrap,
+                },
+                new TextBlock { Text = request.Code, FontSize = 40, FontWeight = FontWeight.Bold, HorizontalAlignment = HorizontalAlignment.Center }
+                    .Also(code => AutomationProperties.SetName(code, "Confirmation code " + request.Code)),
+                status,
+                new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, HorizontalAlignment = HorizontalAlignment.Right, Children = { cancel } },
+            },
+        };
+        var shown = Sheets.ShowAsync(sheet);
+        var answered = client.WaitForRemoteUnlockAsync(request.Id, TimeSpan.FromSeconds(2), waiting.Token);
+        var first = await Task.WhenAny(shown, answered);
+        if (first == shown)
+        {
+            await waiting.CancelAsync();
+            return false;
+        }
+        bool approved;
+        try
+        {
+            approved = await answered;
+        }
+        catch (Exception failure) when (failure is OperationCanceledException or AureliaApiException or HttpRequestException)
+        {
+            approved = false;
+        }
+        if (approved)
+        {
+            Sheets.Close(true);
+            return true;
+        }
+        status.Text = SecurityText.RemoteUnlockState(waiting.IsCancellationRequested ? "expired" : "denied");
+        cancel.Content = "Close";
+        await shown;
+        return false;
     }
 
     public static TextBlock Message() => new()

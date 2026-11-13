@@ -18,7 +18,10 @@ public sealed class DeviceAuthorizationService(
     DeviceAuthorizationGuard guard,
     IDataProtectionProvider protection,
     ProfileSessionStore profiles,
-    CatalogMutationGate mutations)
+    CatalogMutationGate mutations,
+    IHttpContextAccessor http,
+    SecurityLog securityLog,
+    SecurityAlertSignal securityAlerts)
 {
     private const int PollIntervalSeconds = 5;
     private static readonly JsonSerializerOptions Json = CreateJsonOptions();
@@ -34,6 +37,9 @@ public sealed class DeviceAuthorizationService(
         var now = clock.GetUtcNow();
         if (!await database.Users.AnyAsync(user => user.IsEnabled && user.Role == UserRole.Owner, token))
             throw new AccountException("server_setup_required", "Set up an owner before pairing another device.", 409);
+        var identity = ClientIdentity.From(http.HttpContext);
+        if (identity.InstallationId is { } installation && await database.BlockedDevices.AnyAsync(blocked => blocked.InstallationId == installation, token))
+            throw AccountService.DeviceBlocked();
         if (await database.DeviceAuthorizationRequests.CountAsync(request => request.ExpiresAt > now, token) >= 1000)
             throw new AccountException("device_pairing_limit", "Too many pending device pairings. Try again shortly.", 429);
         string code;
@@ -107,6 +113,9 @@ public sealed class DeviceAuthorizationService(
                     ExpiresAt = now.AddDays(configuration.Current.DeviceSessionDays),
                 };
                 database.DeviceSessions.Add(session);
+                securityLog.Record("signed_in", SecurityLog.Succeeded, owner.Id, session.Id, "Code shown on the device",
+                    deviceName: request.DeviceName);
+                securityAlerts.Bump();
                 request.DeviceSession = session;
                 request.DeviceSessionId = session.Id;
                 request.ProtectedAuthentication = Protector(id).Protect(JsonSerializer.Serialize(

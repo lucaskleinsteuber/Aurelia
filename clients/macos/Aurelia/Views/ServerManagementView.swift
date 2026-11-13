@@ -38,6 +38,7 @@ struct ServerManagementView: View {
       if part == .people {
         profiles
         ServerDevicesSection()
+        ServerSecuritySection()
       } else if part == .power {
         powerParts
       } else {
@@ -267,16 +268,9 @@ struct ServerManagementView: View {
         guard deletionRun == run, model.isCurrentAdministration(generation), !Task.isCancelled
         else { return }
         if let failure = error as? APIClientError, failure.isManagementLocked {
-          do {
-            let password = try AdministrationPasswordPrompt.confirm(
-              serverName: model.profile?.name ?? "Aurelia")
-            _ = await model.unlockManagement(password: password)
-            delete(access)
-            return
-          } catch {
-            self.error = error.localizedDescription
-            return
-          }
+          guard await model.unlockManagementInteractively() else { return }
+          delete(access)
+          return
         }
         if let failure = error as? APIClientError, failure == .serverIdentityMismatch {
           model.handleAdministrationFailure(error, generation: generation)

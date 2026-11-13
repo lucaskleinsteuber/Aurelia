@@ -269,6 +269,20 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     /** What the server measured about itself: response times per endpoint and slow queries. */
     serverPerformance: (options = {}) => request("/api/v1/server/health/performance", options),
     resetServerPerformance: () => request("/api/v1/server/health/performance", { method: "DELETE" }),
+    // Security ("security-v1"): the log, signed-in devices, the block list and its settings
+    securityEvents: (query = "", options = {}) => request(`/api/v1/server/security/events${query ? `?${query}` : ""}`, options),
+    securityDevices: (options = {}) => request("/api/v1/server/security/devices", options),
+    acknowledgeDevice: (deviceId) => request(`/api/v1/server/security/devices/${id(deviceId)}/acknowledge`, { method: "POST" }),
+    blockDevice: (deviceId) => request(`/api/v1/server/security/devices/${id(deviceId)}/block`, { method: "POST" }),
+    blockedDevices: (options = {}) => request("/api/v1/server/security/blocked", options),
+    unblockDevice: (deviceId) => approved(`/api/v1/server/security/blocked/${id(deviceId)}`, { method: "DELETE" }),
+    securitySettings: (options = {}) => request("/api/v1/server/security/settings", options),
+    saveSecuritySettings: (body) => approved("/api/v1/server/security/settings", { method: "PUT", body }),
+    securityAlerts: (version, waitSeconds, options = {}) =>
+      request(`/api/v1/server/security/alerts?version=${encodeURIComponent(version)}&waitSeconds=${encodeURIComponent(waitSeconds)}`, options),
+    /** Asks an iPhone, iPad or Mac with Face ID or Touch ID to unlock server management here. */
+    startRemoteUnlock: () => request("/api/v1/management/remote-unlock", { method: "POST" }),
+    remoteUnlockStatus: (requestId, options = {}) => request(`/api/v1/management/remote-unlock/${id(requestId)}`, options),
     serverUpdates: (options = {}) => request("/api/v1/server/updates", options),
     checkForUpdates: (options = {}) => request("/api/v1/server/updates/check", { ...options, method: "POST" }),
     serverPower: (options = {}) => request("/api/v1/server/power", options),

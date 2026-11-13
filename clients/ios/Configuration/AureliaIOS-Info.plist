@@ -31,6 +31,8 @@
 	<array>
 		<string>_aurelia._tcp</string>
 	</array>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Face ID confirms changes to your Aurelia server, instead of the Server Password.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Aurelia finds and connects to your media server on your local network.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

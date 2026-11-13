@@ -37,7 +37,7 @@ public sealed record AppServices(
         return new(
             settings,
             DesktopButtonLayoutReader.Read(),
-            new PinnedServerTransport(),
+            new PinnedServerTransport(AureliaInstallation.Identifier(paths.ConfigDirectory)),
             new SecretServiceCredentialStore(),
             () => new MdnsServerDiscovery(),
             new UdpWakeOnLan(),

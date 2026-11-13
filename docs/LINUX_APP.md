@@ -216,6 +216,10 @@ and they fail.
   inside Aurelia on a Mac or Linux PC only keeps running or stops after the unused minutes (exit
   status 76) and starts again when Aurelia's window is opened. Other devices then show "Start
   Aurelia on Your Linux PC" instead of trying Wake-on-LAN.
+- Security (owner): the security log, signed-in devices with That Was Me and Block, the block
+  list and how long the log is kept, and a note at the top of the window when a new device signs
+  in. When Face ID or Touch ID is required for administrators, unlocking shows Confirm on Another
+  Device with a code.
 - Server: summary with state, facts and Restart Server; health; Performance (response times per endpoint and slow database queries, measured by the server); for a Linux package server its
   updates; new devices and automatic backups with Back Up Now; scrub previews; and
   under Advanced Settings the details, network (a reversible trial for desktop-hosted servers;

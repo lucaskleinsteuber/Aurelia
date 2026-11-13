@@ -116,6 +116,11 @@ builder.Services.AddSingleton<DatabaseChangeSignal>();
 builder.Services.AddSingleton<DatabaseSaveSignal>();
 builder.Services.AddSingleton<DatabaseCommitSignal>();
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton<SecuritySettingsStore>();
+builder.Services.AddSingleton<SecurityAlertSignal>();
+builder.Services.AddSingleton<PasskeyService>();
+builder.Services.AddSingleton<SecurityLog>();
+builder.Services.AddHostedService(services => services.GetRequiredService<SecurityLog>());
 builder.Services.AddSingleton<ServerPerformanceStore>();
 builder.Services.AddHostedService(services => services.GetRequiredService<ServerPerformanceStore>());
 builder.Services.AddSingleton<SlowQueryInterceptor>();
@@ -414,6 +419,8 @@ app.Use(async (context, next) =>
     {
         ServerRequestGuard.RequireManagement(context, context.RequestServices.GetRequiredService<ProfileSessionStore>());
         await ServerRequestGuard.RequireApprovalAsync(context, context.RequestServices.GetRequiredService<AdministrationApprovalStore>());
+        var securityChange = SecurityChangeClassifier.Classify(context.Request.Method, context.Request.Path.Value);
+        var securityTarget = securityChange is null ? null : await SecurityTargets.NameAsync(context, securityChange);
         if (context.User.Identity?.IsAuthenticated == true && context.Request.Path.StartsWithSegments("/api/v1/streams"))
         {
             var limits = context.RequestServices.GetRequiredService<ServerConfigurationStore>().Current;
@@ -427,6 +434,10 @@ app.Use(async (context, next) =>
         else await next(context);
         if (context.Items["Aurelia.AdministrationApproved"] is true && context.Response.StatusCode < 400)
             context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("owner_change_completed", "information", context.User.RequireUserId(), context.Response.StatusCode);
+        if (securityChange is not null && context.Response.StatusCode < 400 && context.User.Identity?.IsAuthenticated == true)
+            context.RequestServices.GetRequiredService<SecurityLog>().Record(context, securityChange.Kind, securityChange.Outcome,
+                securityTarget ?? (securityChange.Kind == "management_unlocked" ? "Server Password" : null),
+                securityChange.Kind == "profile_opened" ? securityChange.TargetId : null);
     }
     catch (AccountException exception) when (!context.Response.HasStarted)
     {
@@ -436,6 +447,9 @@ app.Use(async (context, next) =>
             ? "information" : exception.StatusCode >= 500 ? "error" : "warning";
         context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record(exception.Code, severity, context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, exception.StatusCode);
         context.Items["Aurelia.FailureRecorded"] = true;
+        if (SecurityChangeClassifier.FailureKind(exception.Code) is { } failure)
+            context.RequestServices.GetRequiredService<SecurityLog>().Record(context, failure, SecurityLog.Failed,
+                SecurityTargets.Path(context.Request.Path.Value));
         context.Response.StatusCode = exception.StatusCode;
         if (exception.StatusCode == 429) context.Response.Headers.RetryAfter = exception.Code == "device_pairing_slow_down" ? "5" : "60";
         await context.Response.WriteAsJsonAsync(new ApiProblem(exception.Code, exception.Message));
@@ -494,6 +508,7 @@ app.MapServerSpeech();
 app.MapWatchTogether();
 app.MapMovieNight();
 app.MapWishes();
+app.MapSecurityEndpoints();
 
 try
 {

@@ -55,9 +55,15 @@ public static class ProfileEndpoints
             service.SetPhotoAsync(context.User.RequireUserId(), context.User.RequireUserId(), context.Request.Body, context.RequestAborted)).RequireAuthorization();
 
         var management = app.MapGroup("/api/v1/management").RequireAuthorization("Administrator");
-        management.MapPost("/unlock", async (UnlockManagementRequest request, ProfileService service, ProfileSessionStore sessions, HttpContext context) =>
+        management.MapPost("/unlock", async (UnlockManagementRequest request, ProfileService service, ProfileSessionStore sessions,
+            SecuritySettingsStore security, HttpContext context) =>
         {
             RequirePrivateTransport(context);
+            // With Face ID or Touch ID required, the Server Password unlocks only on the server
+            // computer itself (the way back if every key is lost); other devices use a key or ask one.
+            if (security.Current.RequirePasskeysForAdministrators && !ClientIdentity.IsLoopback(context))
+                throw new AccountException("passkey_required",
+                    "Confirm with Face ID or Touch ID, or on a device that has it. The Server Password works only on the server computer now.", 403);
             var profileId = context.User.RequireProfileSessionId();
             var epoch = sessions.ManagementEpoch(profileId);
             await service.VerifyManagementAsync(context.User.RequireUserId(), request.Password, context.RequestAborted, context.User.RequireSessionId());

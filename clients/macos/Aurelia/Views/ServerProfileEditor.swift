@@ -559,16 +559,9 @@ struct ServerProfileEditor: View {
       } catch {
         guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
         if let failure = error as? APIClientError, failure.isManagementLocked {
-          do {
-            let password = try AdministrationPasswordPrompt.confirm(
-              serverName: model.profile?.name ?? "Aurelia")
-            _ = await model.unlockManagement(password: password)
-            save()
-            return
-          } catch {
-            self.error = error.localizedDescription
-            return
-          }
+          guard await model.unlockManagementInteractively() else { return }
+          save()
+          return
         }
         if reportManagementFailure(error, generation: generation) { return }
         self.error = error.localizedDescription

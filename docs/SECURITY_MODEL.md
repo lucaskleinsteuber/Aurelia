@@ -102,6 +102,55 @@ Older clients that send an approval with other requests still work; the server i
 where none is needed. A newer client that meets an older server answering `management_locked`
 or `approval_required` falls back to asking for the password first.
 
+## Security log, new devices and the block list
+
+Servers with `security-v1` keep a security log for the owner (Settings › Profiles and Devices ›
+Security on the Mac, Linux, in the browser and on iPhone & iPad):
+
+- sign-ins with the Server Password, a device code or a code the device shows, opened
+  profiles and management unlocks (with the password, Face ID or Touch ID, or confirmed on
+  another device);
+- failed attempts: a wrong Server Password, profile PIN or device code, pauses after too many
+  attempts, a blocked device that tried again, and a refused password while Face ID is required;
+- changes: storage locations added or removed, profiles created, changed or deleted, PINs and
+  passwords replaced, roles, screen time, server settings, network, power, backups, updates,
+  devices signed out, allowed, blocked or unblocked, and Face ID keys.
+
+Each entry has the time, the profile, the device's name, platform and IP address, and a short
+detail such as a profile's name or a storage location's folder name. It never holds a password,
+PIN, token, full path or title. The log is kept for 90 days (30 to 365, set by the owner).
+
+Every app sends `X-Aurelia-Installation` (a random identifier it creates once) and
+`X-Aurelia-Client` (`ios/2.11.0`, `macos/…`, `linux/…`, `tvos/…`); the browser keeps its
+identifier in an HttpOnly cookie. A device that signs in for the first time is **new** until the
+owner answers "That Was Me". The owner's apps show it at once while they are open (the Mac also
+as a notification); there are no push notifications, so a closed app sees it the next time.
+**Block** signs the device out at once and puts its identifier on the block list: signing in,
+pairing and device approval then answer `403 device_blocked`. The owner's current device can't
+block itself. Honest limit: blocking applies to the device as it identifies itself; someone who
+knows the Server Password or gets a new device code can still come in with a new identifier.
+Device codes and the Server Password remain the real protection.
+
+## Face ID and Touch ID instead of the Server Password
+
+On iPhone, iPad and the Mac, an owner or administrator can set up Face ID or Touch ID for
+management. The app creates a P-256 key in the device's Secure Enclave that only works after
+Face ID, Touch ID or the device passcode, and that never leaves the device or syncs. Only its
+public key is registered (`POST /api/v1/management/passkeys`, which needs the Server Password
+once). To unlock management, the app asks for a one-time challenge
+(`POST /api/v1/management/passkey-challenge`, valid for a minute, used once, bound to the
+profile session), signs `aurelia-passkey-v1|unlock|<challenge>` and sends it to
+`POST /api/v1/management/passkey-unlock`. The profile PIN is unchanged.
+
+The owner can require Face ID or Touch ID for administrators once their own profile has a key.
+Then `POST /api/v1/management/unlock` answers `403 passkey_required` for the password, except on
+the server computer itself (loopback), which stays the way back if every key is lost. Apps
+without a key (Linux, the browser) use **Confirm on Another Device**: they start a request
+(`POST /api/v1/management/remote-unlock`) and show its four-digit code; an iPhone, iPad or Mac
+of the same profile or the owner's shows the request and confirms it with Face ID or Touch ID
+(signing `remote:<request id>`), and the asking device is then unlocked for ten minutes.
+Requests last two minutes and are used once.
+
 ## Checking a change
 
 When adding an endpoint, decide which group above it belongs to and enforce it on the server,

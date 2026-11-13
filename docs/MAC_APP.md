@@ -57,6 +57,12 @@ it again.
 devices and backups, scrub previews, Server Health (with *Performance*: response times per
 endpoint and slow database queries, measured by the server) and the server's own updates.
 
+*Settings › Profiles and Devices › Security* sets up Touch ID for server management (the key
+stays in the Mac's Secure Enclave) and shows the owner the security log, signed-in devices with
+That Was Me and Block, the block list and the Face ID requirement for administrators. While
+Aurelia runs, a banner and a notification report a new device and requests from Linux or a
+browser to confirm an unlock with Touch ID.
+
 ## Settings at a glance
 
 | Section | What it holds |

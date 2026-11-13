@@ -9,6 +9,8 @@ import { PROFILE_SYMBOL_PATHS } from "./profile-symbols.js";
 import { createWatchTogether } from "./watch-together.js";
 import { createMovieNightView } from "./movie-night-view.js";
 import { createWishesView } from "./wishes-view.js";
+import { supportsSecurity } from "./security.js";
+import { createSecurityAlerts } from "./security-view.js";
 import { formatWishNotification, supportsWishes, wishBadgeCount } from "./wishes.js";
 import { openWrapped, readyMonth, readyMonths, wrappedYears, monthIsNew, MONTHS } from "./wrapped.js";
 import { Player } from "./player.js";
@@ -185,6 +187,8 @@ const wishes = createWishesView({
   handleError,
   onSummaryChanged: (summary) => setWishSummary(summary),
 });
+
+const securityAlerts = createSecurityAlerts({ api, toast, handleError: (error) => handleError(error) });
 
 function setWishSummary(summary, { notify = false } = {}) {
   const previous = state.wishSummary;
@@ -2253,6 +2257,8 @@ function startSync() {
   stopSync();
   const controller = new AbortController();
   state.sync = controller;
+  // The owner hears about devices that sign in for the first time.
+  if (logic.managementPermissions(state.profile).owner && supportsSecurity(state.server)) securityAlerts.start();
   (async () => {
     let after = 0;
     let generation;
@@ -2292,6 +2298,7 @@ function startSync() {
 function stopSync() {
   state.sync?.abort();
   state.sync = null;
+  securityAlerts.stop();
 }
 
 function refreshSoon({ forget = false } = {}) {

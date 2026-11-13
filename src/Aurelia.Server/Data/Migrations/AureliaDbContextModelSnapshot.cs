@@ -77,6 +77,44 @@ namespace Aurelia.Server.Data.Migrations
                     b.ToTable("ArtworkAssets");
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.BlockedDevice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("BlockedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("BlockedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DeviceName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("InstallationId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Platform")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InstallationId")
+                        .IsUnique();
+
+                    b.ToTable("BlockedDevices");
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.CollectionArtworkAsset", b =>
                 {
                     b.Property<Guid>("Id")
@@ -221,6 +259,13 @@ namespace Aurelia.Server.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<long?>("AcknowledgedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ClientVersion")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("CreatedAt")
                         .HasColumnType("INTEGER");
 
@@ -232,8 +277,24 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<long>("ExpiresAt")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("FirstIpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("InstallationId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastIpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("LastSeenAt")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("Platform")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
 
                     b.Property<long?>("RevokedAt")
                         .HasColumnType("INTEGER");
@@ -247,6 +308,8 @@ namespace Aurelia.Server.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("InstallationId");
 
                     b.HasIndex("TokenHash")
                         .IsUnique();
@@ -711,10 +774,46 @@ namespace Aurelia.Server.Data.Migrations
                     b.ToTable("LibraryStateMutations");
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.ManagementPasskey", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("DeviceSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("LastUsedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("PublicKey")
+                        .IsRequired()
+                        .HasMaxLength(65)
+                        .HasColumnType("BLOB");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeviceSessionId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("ManagementPasskeys");
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.MediaCollectionMember", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedNever()
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("CollectionId")
@@ -1686,6 +1785,60 @@ namespace Aurelia.Server.Data.Migrations
                     b.ToTable("ScreenTimeRules");
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.SecurityEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("At")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Detail")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DeviceName")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DeviceSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(48)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Platform")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UserName")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("At");
+
+                    b.HasIndex("Outcome", "At");
+
+                    b.ToTable("SecurityEvents");
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.ServerAdministrationCredential", b =>
                 {
                     b.Property<int>("Id")
@@ -2011,11 +2164,11 @@ namespace Aurelia.Server.Data.Migrations
 
                     b.HasIndex("State", "CreatedAt");
 
-                    b.HasIndex("UserId", "State", "SeenByWisherAt");
-
                     b.HasIndex("Provider", "ProviderMediaId", "Kind")
                         .IsUnique()
                         .HasFilter("\"State\" = 'Open' AND \"Provider\" IS NOT NULL AND \"ProviderMediaId\" IS NOT NULL");
+
+                    b.HasIndex("UserId", "State", "SeenByWisherAt");
 
                     b.ToTable("Wishes");
                 });
@@ -2047,6 +2200,17 @@ namespace Aurelia.Server.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Metadata");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.CollectionArtworkAsset", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.MediaCollectionRecord", "Collection")
+                        .WithMany("Artwork")
+                        .HasForeignKey("CollectionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Collection");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.ContinueWatchingState", b =>
@@ -2173,15 +2337,23 @@ namespace Aurelia.Server.Data.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("Aurelia.Server.Data.CollectionArtworkAsset", b =>
+            modelBuilder.Entity("Aurelia.Server.Data.ManagementPasskey", b =>
                 {
-                    b.HasOne("Aurelia.Server.Data.MediaCollectionRecord", "Collection")
-                        .WithMany("Artwork")
-                        .HasForeignKey("CollectionId")
+                    b.HasOne("Aurelia.Server.Data.DeviceSession", "DeviceSession")
+                        .WithMany()
+                        .HasForeignKey("DeviceSessionId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("Collection");
+                    b.HasOne("Aurelia.Server.Data.ServerUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("DeviceSession");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.MediaCollectionMember", b =>

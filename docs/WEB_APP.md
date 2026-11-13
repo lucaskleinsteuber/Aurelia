@@ -247,6 +247,10 @@ draws a square JPEG that is uploaded on Save.
   before anything is imported),
   restart, a diagnostics report, Server Health with Performance (response times per endpoint and
   slow database queries) and server updates.
+- Security for the owner: the security log, signed-in devices with That Was Me and Block, the
+  block list and how long the log is kept, and a note at the top of the page when a new device
+  signs in. Face ID and Touch ID are set up in the iPhone, iPad and Mac apps; when they are
+  required, the browser shows Confirm on Another Device with a code instead of the password.
 - Not in a browser: subtitles written from speech (macOS speech recognition), offline downloads
   and sending Wake-on-LAN (see Wake When a Device Connects above).
 - A few changes that cannot be undone ask for the server password once more, exactly as on the

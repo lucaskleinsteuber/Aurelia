@@ -307,7 +307,7 @@ public static class ApiEndpointMappings
     {
         if (!IsLoopback(context, environment))
         {
-            return Task.FromResult(Problem(
+            return Task.FromResult<IResult>(Problem(
                 "local_login_required",
                 "Password login is only available from the server computer. Use pairing on other devices.",
                 StatusCodes.Status403Forbidden));
@@ -1324,8 +1324,20 @@ public static class ApiEndpointMappings
         throw new AccountException("invalid_watch_scope", "Choose a valid title, season or series scope.", 400);
     }
 
-    private static IResult Problem(string code, string message, int statusCode)
+    private static ProblemResult Problem(string code, string message, int statusCode)
     {
-        return Results.Json(new ApiProblem(code, message), statusCode: statusCode);
+        return new ProblemResult(code, message, statusCode);
+    }
+
+    /// <summary>The usual error answer; a refused sign-in (a wrong password, PIN or code) also goes into the security log.</summary>
+    private sealed class ProblemResult(string code, string message, int statusCode) : IResult
+    {
+        public Task ExecuteAsync(HttpContext httpContext)
+        {
+            if (SecurityChangeClassifier.FailureKind(code) is { } failure)
+                httpContext.RequestServices.GetRequiredService<SecurityLog>().Record(httpContext, failure, SecurityLog.Failed,
+                    SecurityTargets.Path(httpContext.Request.Path.Value));
+            return Results.Json(new ApiProblem(code, message), statusCode: statusCode).ExecuteAsync(httpContext);
+        }
     }
 }

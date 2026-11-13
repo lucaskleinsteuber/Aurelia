@@ -11,14 +11,30 @@ public sealed class SessionActivityRecorder(TimeProvider clock, ServerDiagnostic
     private readonly Dictionary<Guid, DateTimeOffset> attempts = [];
     private DateTimeOffset nextWarning = DateTimeOffset.MinValue;
 
-    internal async Task RecordAsync(AureliaDbContext database, Guid id, DateTimeOffset now, CancellationToken token)
+    internal async Task RecordAsync(AureliaDbContext database, Guid id, DateTimeOffset now, CancellationToken token) =>
+        await RecordAsync(database, id, now, null, token);
+
+    /// <summary>
+    /// When the device was last seen and, from <paramref name="identity"/>, its address, kind and
+    /// version. An installation identifier is written once and never replaced, so a device can't
+    /// swap its name on the block list.
+    /// </summary>
+    internal async Task RecordAsync(AureliaDbContext database, Guid id, DateTimeOffset now, ClientIdentity? identity, CancellationToken token)
     {
+        var address = identity?.IpAddress;
+        var platform = identity?.Platform;
+        var version = identity?.Version;
+        var installation = identity?.InstallationId;
         await TryRecordAsync(id, async () =>
         {
-            var cutoff = now.AddMinutes(-1);
-            await database.DeviceSessions.Where(candidate => candidate.Id == id
-                    && candidate.LastSeenAt <= cutoff && candidate.RevokedAt == null)
-                .ExecuteUpdateAsync(update => update.SetProperty(candidate => candidate.LastSeenAt, now), token);
+            await database.DeviceSessions.Where(candidate => candidate.Id == id && candidate.RevokedAt == null)
+                .ExecuteUpdateAsync(update => update
+                    .SetProperty(candidate => candidate.LastSeenAt, now)
+                    .SetProperty(candidate => candidate.LastIpAddress, candidate => address ?? candidate.LastIpAddress)
+                    .SetProperty(candidate => candidate.FirstIpAddress, candidate => candidate.FirstIpAddress ?? address)
+                    .SetProperty(candidate => candidate.Platform, candidate => platform ?? candidate.Platform)
+                    .SetProperty(candidate => candidate.ClientVersion, candidate => version ?? candidate.ClientVersion)
+                    .SetProperty(candidate => candidate.InstallationId, candidate => candidate.InstallationId ?? installation), token);
         });
     }
 

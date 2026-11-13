@@ -13,8 +13,11 @@ namespace Aurelia.Linux.Core.Management;
 /// the client ask for a one-use approval for exactly that request (its method, path and the SHA-256
 /// of its exact bytes) and send it again. When management is locked, <paramref name="askPassword"/>
 /// asks for the Server Password, management is unlocked for ten minutes and the request is retried.
+/// When the owner requires Face ID or Touch ID for administrators, the password is refused
+/// ("passkey_required") and <paramref name="confirmElsewhere"/> asks an iPhone, iPad or Mac to confirm.
 /// </summary>
-public sealed partial class ManagementClient(AureliaApi api, LibraryClient library, Func<string, Task<string?>> askPassword)
+public sealed partial class ManagementClient(AureliaApi api, LibraryClient library, Func<string, Task<string?>> askPassword,
+    Func<ManagementClient, Task<bool>>? confirmElsewhere = null)
 {
     public LibraryClient Library { get; } = library;
 
@@ -67,8 +70,15 @@ public sealed partial class ManagementClient(AureliaApi api, LibraryClient libra
     public async Task UnlockAsync(string reason, CancellationToken cancellation = default)
     {
         var password = await askPassword(reason) ?? throw new OperationCanceledException("The Server Password was not entered.");
-        await AureliaApi.SendAsync<ManagementUnlockResponse>(Pinned, HttpMethod.Post, "/api/v1/management/unlock", Library.Profile.Token,
-            new UnlockManagementRequest(password), false, cancellation);
+        try
+        {
+            await AureliaApi.SendAsync<ManagementUnlockResponse>(Pinned, HttpMethod.Post, "/api/v1/management/unlock", Library.Profile.Token,
+                new UnlockManagementRequest(password), false, cancellation);
+        }
+        catch (AureliaApiException error) when (error.Code == "passkey_required" && confirmElsewhere is not null)
+        {
+            if (!await confirmElsewhere(this)) throw new OperationCanceledException("The unlock was not confirmed on another device.");
+        }
     }
 
     public static string PayloadHash(ReadOnlySpan<byte> payload) =>

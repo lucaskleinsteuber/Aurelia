@@ -45,6 +45,8 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
     private bool sidebarVisible = true;
     private double leadingInset;
     private AppSession? session;
+    /// <summary>Stops the owner's security notes for the profile that was open.</summary>
+    private Action? stopSecurityAlerts;
     private LibraryContext? context;
 
     /// <summary>The connected server's library client, for settings that depend on what the server offers.</summary>
@@ -412,6 +414,15 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
 
     private void AttachLibrary(LibraryStore? store)
     {
+        stopSecurityAlerts?.Invoke();
+        stopSecurityAlerts = null;
+        // The owner hears about devices that sign in for the first time.
+        if (store is not null && session is not null && store.Client.Profile.User.Role == UserRole.Owner
+            && session.Capabilities.Contains(ServerFeatures.Security))
+        {
+            var watcher = new SecurityAlertWatcher(new AdminScope(session, Sheets), SecurityAlerts);
+            stopSecurityAlerts = watcher.Dispose;
+        }
         if (context?.Store is { } old) old.PropertyChanged -= OnStoreChanged;
         pages.Clear();
         details.Clear();

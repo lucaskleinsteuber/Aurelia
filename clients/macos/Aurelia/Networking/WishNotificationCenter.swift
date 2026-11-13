@@ -90,6 +90,11 @@ final class SystemWishNotificationDeliverer: WishNotificationDelivering {
   }
 
   func post(identifier: String, title: String, body: String) async {
+    await post(identifier: identifier, title: title, body: body, category: WishNotificationCenter.categoryIdentifier)
+  }
+
+  /// Posts with another category, so a click only brings Aurelia forward instead of opening Wishes.
+  func post(identifier: String, title: String, body: String, category: String) async {
     guard Self.isAvailableInCurrentProcess else { return }
     let status = await authorizationStatus()
     guard status == .authorized || status == .provisional else { return }
@@ -97,7 +102,7 @@ final class SystemWishNotificationDeliverer: WishNotificationDelivering {
     content.title = title
     content.body = body
     content.sound = .default
-    content.categoryIdentifier = WishNotificationCenter.categoryIdentifier
+    content.categoryIdentifier = category
     let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
     try? await UNUserNotificationCenter.current().add(request)
   }

@@ -28,6 +28,13 @@ struct IOSAdministrationSection: View {
         } label: {
           Label("Profiles and Devices", systemImage: "person.2.badge.gearshape")
         }.accessibilityIdentifier("admin-people")
+        if model.capabilities?.capabilities?.contains("security-v1") == true {
+          NavigationLink {
+            IOSAdminSecurityView()
+          } label: {
+            Label("Security", systemImage: "lock.shield")
+          }.accessibilityIdentifier("admin-security")
+        }
         if permissions.owner {
           NavigationLink {
             IOSAdminServerView()

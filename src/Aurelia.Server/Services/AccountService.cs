@@ -17,7 +17,10 @@ public sealed class AccountService(
     ProfileSessionStore profiles,
     ProfileService profileService,
     CatalogMutationGate mutations,
-    PairingCodeAttemptGuard pairingAttempts)
+    PairingCodeAttemptGuard pairingAttempts,
+    IHttpContextAccessor http,
+    SecurityLog securityLog,
+    SecurityAlertSignal securityAlerts)
 {
     private static readonly TimeSpan PairingCodeLifetime = TimeSpan.FromMinutes(5);
 
@@ -54,9 +57,10 @@ public sealed class AccountService(
         using (await credentialAttempts.EnterAsync(cancellationToken)) user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
         database.Users.Add(user);
 
-        var response = CreateSession(user, deviceName, now);
+        var response = CreateSession(user, deviceName, now, acknowledged: true);
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        RecordSignIn(response, deviceName, "Set up the server");
         return response;
     }
 
@@ -77,8 +81,10 @@ public sealed class AccountService(
             await profileService.VerifyManagementAsync(user!.Id, request.Password, cancellationToken);
         else await VerifyPasswordAsync(user, request.Password, cancellationToken);
 
+        await RefuseBlockedAsync(cancellationToken);
         var response = CreateSession(user!, deviceName, DateTimeOffset.UtcNow);
         await database.SaveChangesAsync(cancellationToken);
+        RecordSignIn(response, deviceName, "Server Password");
         return response;
     }
 
@@ -229,10 +235,12 @@ public sealed class AccountService(
             throw InvalidPairingCode();
         }
 
+        await RefuseBlockedAsync(cancellationToken);
         code.ConsumedAt = now;
         var response = CreateSession(code.User, deviceName, now);
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        RecordSignIn(response, deviceName, "Device code");
         return response;
     }
 
@@ -285,12 +293,32 @@ public sealed class AccountService(
         profiles.RevokeDevice(targetSessionId);
     }
 
+    /// <summary>A device on the owner's block list may not sign in or pair again.</summary>
+    private async Task RefuseBlockedAsync(CancellationToken cancellationToken)
+    {
+        if (ClientIdentity.From(http.HttpContext).InstallationId is { } installation
+            && await database.BlockedDevices.AnyAsync(blocked => blocked.InstallationId == installation, cancellationToken))
+            throw DeviceBlocked();
+    }
+
+    public static AccountException DeviceBlocked() =>
+        new("device_blocked", "The owner blocked this device. Ask them to unblock it in Settings › Profiles and Devices › Security.", 403);
+
+    private void RecordSignIn(AuthenticationResponse response, string deviceName, string how)
+    {
+        securityLog.Record("signed_in", SecurityLog.Succeeded, response.User.Id, response.SessionId, how,
+            ClientIdentity.From(http.HttpContext), deviceName);
+        securityAlerts.Bump();
+    }
+
     private AuthenticationResponse CreateSession(
         ServerUser user,
         string deviceName,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        bool acknowledged = false)
     {
         var rawToken = tokenService.CreateDeviceToken();
+        var identity = ClientIdentity.From(http.HttpContext);
         var session = new DeviceSession
         {
             Id = Guid.NewGuid(),
@@ -301,6 +329,13 @@ public sealed class AccountService(
             CreatedAt = now,
             LastSeenAt = now,
             ExpiresAt = now.AddDays(configuration.Current.DeviceSessionDays),
+            InstallationId = identity.InstallationId,
+            Platform = identity.Platform,
+            ClientVersion = identity.Version,
+            FirstIpAddress = identity.IpAddress,
+            LastIpAddress = identity.IpAddress,
+            // The very first device, which set the server up, is the owner's own.
+            AcknowledgedAt = acknowledged ? now : null,
         };
         database.DeviceSessions.Add(session);
         return new AuthenticationResponse(

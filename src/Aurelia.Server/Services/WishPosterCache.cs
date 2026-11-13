@@ -222,7 +222,9 @@ public sealed class WishPosterCache
             .Where(file => file.LinkTarget is null)
             .OrderBy(file => file.LastWriteTimeUtc)
             .ToList();
-        usedBytes = files.Sum(file => file.Length);
+        // Files still being written (".pending") are not part of the cache yet; counting the one
+        // about to be stored would push out one poster too many.
+        usedBytes = files.Where(file => file.Extension != ".pending").Sum(file => file.Length);
         var stalePendingCutoff = now.UtcDateTime.AddMinutes(-5);
         foreach (var file in files)
         {
@@ -231,7 +233,7 @@ public sealed class WishPosterCache
             if (!isStalePending && !exceedsCap) continue;
             var length = file.Length;
             file.Delete();
-            usedBytes = Math.Max(0, usedBytes - length);
+            if (!isStalePending) usedBytes = Math.Max(0, usedBytes - length);
         }
         nextPrune = now.AddMinutes(1);
     }

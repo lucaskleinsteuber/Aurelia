@@ -626,9 +626,7 @@ struct LibraryResetSheet: View {
           try await client.resetLibrary(preview: preview)
         }
       } catch let failure as APIClientError where failure.isManagementLocked {
-        let password = try AdministrationPasswordPrompt.confirm(
-          serverName: model.profile?.name ?? "Aurelia")
-        _ = await model.unlockManagement(password: password)
+        guard await model.unlockManagementInteractively() else { return }
         accepted = try await model.currentAdministration {
           try await client.resetLibrary(preview: preview)
         }

@@ -2178,3 +2178,16 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .performance-queries { padding: 6px 0; }
 .performance-queries summary { cursor: pointer; padding: 6px 0; }
 .performance-statement { display: block; font-size: 0.75rem; white-space: pre-wrap; word-break: break-word; user-select: text; }
+
+/* Security: the owner's new-device notes, the log sheet and "Confirm on Another Device". */
+.security-alerts { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 60; display: grid; gap: 10px; width: min(560px, calc(100vw - 32px)); }
+.security-alert { display: grid; gap: 10px; padding: 14px 16px; border-radius: var(--card-radius); background: var(--raised); border: 1px solid var(--hairline); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35); animation: rise-in 0.3s var(--spring); }
+.security-alert-title { font-weight: 600; }
+.security-alert .button-row { justify-content: flex-end; }
+.tag.tag-new { background: var(--warning); color: #1b1e21; }
+.settings-subheading { margin: 12px 0 4px; font-size: 0.95rem; font-weight: 600; }
+.security-log-sheet { width: min(760px, calc(100vw - 32px)); }
+.security-log-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.security-log { max-height: 60vh; overflow-y: auto; margin: 12px 0; }
+.security-failed .settings-card-title { color: var(--warning); }
+.remote-unlock { display: grid; gap: 8px; }

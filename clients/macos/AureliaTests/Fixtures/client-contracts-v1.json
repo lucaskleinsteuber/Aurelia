@@ -81,7 +81,9 @@
       "server-speech-v1",
       "suggestions-v1",
       "screen-time-v1",
-      "wishes-v1"
+      "wishes-v1",
+      "security-v1",
+      "server-performance-v1"
     ]
   },
   "problem": {

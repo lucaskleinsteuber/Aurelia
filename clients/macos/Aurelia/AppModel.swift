@@ -3363,6 +3363,54 @@ final class AppModel: ObservableObject {
     }
   }
 
+  /// This profile's Touch ID key on this Mac, if it has one.
+  var storedPasskey: StoredPasskey? {
+    guard SecureEnclavePasskeySigner.isAvailable, let profile, let user = profile.user else { return nil }
+    return PasskeyStore.load(server: profile.serverId, profile: user.id)
+  }
+
+  /// Unlocks management with Touch ID when this Mac has a key for the profile, otherwise asks
+  /// for the Server Password. Returns whether management is unlocked.
+  func unlockManagementInteractively(serverName: String? = nil) async -> Bool {
+    if storedPasskey != nil, await unlockManagementWithPasskey() { return true }
+    guard let password = try? AdministrationPasswordPrompt.confirm(serverName: serverName ?? profile?.name ?? "Aurelia")
+    else { return false }
+    return await unlockManagement(password: password)
+  }
+
+  /// Unlocks with Touch ID instead of the Server Password.
+  func unlockManagementWithPasskey() async -> Bool {
+    guard let profile, profile.isViewingSession, profile.user?.role.canManageLibraries == true,
+      let passkey = storedPasskey
+    else { return false }
+    let generation = connectionGeneration
+    let attempt = UUID()
+    managementAttempt = attempt
+    do {
+      let expiry = try await APIClient(profile: profile).unlockManagement(
+        passkeyId: passkey.passkeyId, signer: passkey.signer)
+      guard isCurrent(generation), managementAttempt == attempt, let date = Self.sessionDate(expiry)
+      else { return false }
+      managementExpiresAt = date
+      managementExpiryTask?.cancel()
+      managementExpiryTask = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(max(0, date.timeIntervalSinceNow)))
+        guard !Task.isCancelled, self?.isCurrent(generation) == true else { return }
+        self?.managementExpiresAt = nil
+        self?.clearAdministrationState()
+      }
+      administrationErrorMessage = nil
+      await reloadAdministration()
+      return true
+    } catch {
+      if let failure = error as? APIClientError, failure.problemCode == "passkey_invalid", let user = profile.user {
+        // The server no longer knows this key: forget it here too and fall back to the password.
+        PasskeyStore.remove(server: profile.serverId, profile: user.id)
+      }
+      return false
+    }
+  }
+
   func lockManagement() async {
     managementAttempt = UUID()
     managementExpiryTask?.cancel()

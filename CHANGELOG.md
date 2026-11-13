@@ -27,6 +27,9 @@ versioned commit, so their skipped numbers are preserved.
 - Server: benchmark tests with a synthetic library of 20,000 episodes and 5,000 movies check Home, catalog pages, a series, search, history, sync, playback plans and collections against fixed limits for time and database queries (`scripts/test-server-benchmarks.sh`).
 - iPhone & iPad: Settings › Server Administration with everything the Mac, Linux app and browser manage: storage locations with a server folder browser, scans, Import Preview with corrections, Library Health, TMDB and OpenSubtitles, Review Matches, profiles (role, PIN, picture, age limit, screen time, content access), device codes and signed-in devices, server status and health, backups (check, encrypted backup to Files, restore), scrub previews, intros and credits, speech recognition, video conversion, limits, maintenance, diagnostics, power, server updates and the Danger Zone. On iPad, Settings has a sidebar like the Mac.
 - iPhone & iPad: protected changes ask once for the Server Password, which unlocks management for ten minutes and is never stored on the device.
+- Server and all apps: a security log for the owner in Settings › Profiles and Devices › Security on the Mac, Linux, in the browser and on iPhone & iPad. It shows who signed in when and from which device and IP address, failed attempts (wrong password, PIN or device code) and changes such as a removed storage location or a changed profile, never passwords, PINs or paths, and keeps them for 90 days (30 to 365).
+- Server and all apps: when a device signs in for the first time, the owner's open apps say so at once (the Mac also as a notification) with That Was Me and Block. Blocking signs the device out and keeps it from signing in or pairing again until it is unblocked. Every app now tells the server which device it is.
+- iPhone, iPad and Mac: Face ID or Touch ID can unlock server management instead of the Server Password; the key stays in the device's Secure Enclave. The owner can require it for administrators, and Linux and the browser then ask an iPhone, iPad or Mac to confirm with a code. On the server computer itself the Server Password always works.
 - iPhone & iPad: Wake Server on the "server is off" screen sends Wake-on-LAN for two minutes and connects once the server answers; Settings › Server shows whether waking can work and sends a wake signal.
 
 ### Fixed
@@ -34,6 +37,7 @@ versioned commit, so their skipped numbers are preserved.
 - iPhone & iPad: Wake-on-LAN also reaches a server found with Bonjour, whose name is now looked up to its IPv4 address.
 - Apple TV and iPhone & iPad: when the sleep timer's minutes run out, the player closes as on the other apps instead of only pausing. On Apple TV, the Menu button on the good-night screen now does the same as Done.
 - Browser and Mac: "Franchises in Library" and Save as Collection work again, and the browser can create and rename collections.
+- Server: the wish poster cache keeps as many posters as its size allows; it no longer removes one more than needed while saving a new one.
 - Server: removing or resetting a library no longer deletes smart lists and your own collections; a film that leaves a film series is removed from that collection.
 
 ## [Linux app 2.4.0 (29), Apple TV 2.4.0 (39) and iPhone & iPad 2.7.0 (23)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/linux-app-2.4.0-29) - 12.11.2026

@@ -555,4 +555,109 @@ extension IOSAPIClient {
   func removeSubtitleAccount() async throws -> IOSSubtitleProvider {
     try await admin("/api/v1/metadata/subtitles/account", method: "DELETE")
   }
+
+  // MARK: Security ("security-v1")
+
+  func securityEvents(outcome: String? = nil, before: String? = nil) async throws -> IOSSecurityEventPage {
+    var query = [URLQueryItem(name: "limit", value: "100")]
+    if let outcome { query.append(URLQueryItem(name: "outcome", value: outcome)) }
+    if let before { query.append(URLQueryItem(name: "before", value: before)) }
+    return try await admin("/api/v1/server/security/events", query: query)
+  }
+  func securityDevices() async throws -> [IOSSecurityDevice] {
+    try await admin("/api/v1/server/security/devices")
+  }
+  func acknowledgeDevice(id: UUID) async throws {
+    try await adminSend("/api/v1/server/security/devices/\(Self.id(id))/acknowledge", method: "POST")
+  }
+  func blockDevice(id: UUID) async throws -> IOSBlockResult {
+    try await admin("/api/v1/server/security/devices/\(Self.id(id))/block", method: "POST")
+  }
+  func blockedDevices() async throws -> [IOSBlockedDevice] {
+    try await admin("/api/v1/server/security/blocked")
+  }
+  func unblockDevice(id: UUID) async throws {
+    try await adminSend("/api/v1/server/security/blocked/\(Self.id(id))", method: "DELETE")
+  }
+  func securitySettings() async throws -> IOSSecuritySettings {
+    try await admin("/api/v1/server/security/settings")
+  }
+  func saveSecuritySettings(logDays: Int, requirePasskeys: Bool) async throws -> IOSSecuritySettings {
+    struct Payload: Encodable {
+      let securityLogDays: Int
+      let requirePasskeysForAdministrators: Bool
+    }
+    return try await admin(
+      "/api/v1/server/security/settings", method: "PUT",
+      json: Payload(securityLogDays: logDays, requirePasskeysForAdministrators: requirePasskeys))
+  }
+  /// Waits up to `waitSeconds` for a new device or unlock request after `version`.
+  func securityAlerts(version: Int64, waitSeconds: Int) async throws -> IOSSecurityAlerts {
+    try await admin(
+      "/api/v1/server/security/alerts",
+      query: [
+        URLQueryItem(name: "version", value: String(version)),
+        URLQueryItem(name: "waitSeconds", value: String(min(max(waitSeconds, 0), 30))),
+      ], longRunning: waitSeconds > 10)
+  }
+  func passkeys() async throws -> [IOSPasskey] { try await admin("/api/v1/management/passkeys") }
+  func passkeyChallenge() async throws -> String {
+    struct Response: Decodable { let challenge: String }
+    let response: Response = try await admin("/api/v1/management/passkey-challenge", method: "POST")
+    return response.challenge
+  }
+  /// Registers this device's key: proves it holds the private key by signing a fresh challenge.
+  func registerPasskey(name: String, signer: any IOSPasskeySigner) async throws -> IOSPasskey {
+    let challenge = try await passkeyChallenge()
+    let signature = try await signer.sign(IOSPasskeyMessage.data(purpose: "register", challenge: challenge))
+    struct Payload: Encodable {
+      let name: String
+      let publicKey: String
+      let challenge: String
+      let signature: String
+    }
+    return try await admin(
+      "/api/v1/management/passkeys", method: "POST",
+      json: Payload(
+        name: name, publicKey: signer.publicKey.base64EncodedString(), challenge: challenge,
+        signature: signature.base64EncodedString()))
+  }
+  func removePasskey(id: UUID) async throws {
+    try await adminSend("/api/v1/management/passkeys/\(Self.id(id))", method: "DELETE")
+  }
+  /// Unlocks management with Face ID or Touch ID instead of the Server Password.
+  func unlockManagement(passkeyId: UUID, signer: any IOSPasskeySigner) async throws -> Date {
+    let challenge = try await passkeyChallenge()
+    let signature = try await signer.sign(IOSPasskeyMessage.data(purpose: "unlock", challenge: challenge))
+    struct Payload: Encodable {
+      let passkeyId: UUID
+      let challenge: String
+      let signature: String
+    }
+    struct Response: Decodable { let expiresAt: String }
+    let response: Response = try await admin(
+      "/api/v1/management/passkey-unlock", method: "POST",
+      json: Payload(passkeyId: passkeyId, challenge: challenge, signature: signature.base64EncodedString()))
+    guard let date = IOSServerDate.parse(response.expiresAt) else { throw IOSCoreError.invalidResponse }
+    return date
+  }
+  /// Confirms (with this device's key) or denies another device's request to unlock management.
+  func decideRemoteUnlock(id: UUID, approve: Bool, passkeyId: UUID?, signer: (any IOSPasskeySigner)?) async throws {
+    struct Payload: Encodable {
+      let approve: Bool
+      let passkeyId: UUID?
+      let challenge: String?
+      let signature: String?
+    }
+    var payload = Payload(approve: approve, passkeyId: nil, challenge: nil, signature: nil)
+    if approve {
+      guard let passkeyId, let signer else { throw IOSCoreError.invalidRequest }
+      let challenge = try await passkeyChallenge()
+      let signature = try await signer.sign(
+        IOSPasskeyMessage.data(purpose: IOSPasskeyMessage.remotePurpose(id), challenge: challenge))
+      payload = Payload(
+        approve: true, passkeyId: passkeyId, challenge: challenge, signature: signature.base64EncodedString())
+    }
+    try await adminSend("/api/v1/management/remote-unlock/\(Self.id(id))/decide", method: "POST", json: payload)
+  }
 }

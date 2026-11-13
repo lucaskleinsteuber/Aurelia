@@ -93,6 +93,11 @@ public sealed class ServerRequestGuard
         if (HttpMethods.IsDelete(request.Method) && path.StartsWith("/api/v1/server/backups/transfers/", StringComparison.Ordinal)) return false;
         if (path.Contains("/exclusions/", StringComparison.Ordinal)) return false;
 
+        // 0. Critical: who may confirm management, and the security settings and block list.
+        if (IsPasskeyChange(request.Method, path)) return true;
+        if (HttpMethods.IsPut(request.Method) && path == "/api/v1/server/security/settings") return true;
+        if (HttpMethods.IsDelete(request.Method) && path.StartsWith("/api/v1/server/security/blocked/", StringComparison.Ordinal)) return true;
+
         // 1. Critical: Library reset and permanent media removal from library database
         if (path == "/api/v1/libraries/reset") return true;
         if (HttpMethods.IsDelete(request.Method) && path.StartsWith("/api/v1/media/", StringComparison.Ordinal)
@@ -120,6 +125,11 @@ public sealed class ServerRequestGuard
 
         return false;
     }
+
+    /// <summary>Adding or removing a Face ID / Touch ID key: administrators may do it for their own profile.</summary>
+    public static bool IsPasskeyChange(string method, string path) =>
+        (HttpMethods.IsPost(method) && path == "/api/v1/management/passkeys")
+        || (HttpMethods.IsDelete(method) && path.StartsWith("/api/v1/management/passkeys/", StringComparison.Ordinal));
 
     public static bool IsManagementRequest(HttpRequest request)
     {
@@ -171,7 +181,9 @@ public sealed class ServerRequestGuard
         if (!required) return;
         var reset = context.Request.Path.Equals(new PathString("/api/v1/libraries/reset"));
         var removal = HttpMethods.IsDelete(context.Request.Method) && context.Request.Path.StartsWithSegments("/api/v1/media") && (context.Request.Path.Value ?? "").Split('/').Length == 5;
-        if (!context.User.IsInRole(UserRole.Owner.ToString()) && !((reset || removal) && context.User.IsInRole(UserRole.Admin.ToString())))
+        var passkey = IsPasskeyChange(context.Request.Method, (context.Request.Path.Value ?? string.Empty).TrimEnd('/').ToLowerInvariant());
+        var adminAllowed = reset || removal || passkey;
+        if (!context.User.IsInRole(UserRole.Owner.ToString()) && !(adminAllowed && context.User.IsInRole(UserRole.Admin.ToString())))
             throw new AccountException("owner_required", "Only an owner may change global server settings.", 403);
 
         var sessions = context.RequestServices.GetRequiredService<ProfileSessionStore>();
@@ -201,7 +213,7 @@ public sealed class ServerRequestGuard
         var actorId = context.User.RequireUserId();
         if (!context.RequestServices.GetRequiredService<ProfileSessionStore>().IsActive(context.User.RequireProfileSessionId(), sessionId, actorId)
             || !await database.Users.AnyAsync(user => user.Id == actorId && user.IsEnabled
-                && (user.Role == UserRole.Owner || (reset || removal) && user.Role == UserRole.Admin), context.RequestAborted))
+                && (user.Role == UserRole.Owner || adminAllowed && user.Role == UserRole.Admin), context.RequestAborted))
             throw new AccountException("profile_session_revoked", "The viewing profile is no longer authorized for this action.", 403);
         if (!context.RequestServices.GetRequiredService<ProfileSessionStore>().ManagementGrantActive(context.User.RequireProfileSessionId(), managementGeneration))
             throw new AccountException("management_locked", "Unlock server management with the Server Password. Access lasts ten minutes.", 403);

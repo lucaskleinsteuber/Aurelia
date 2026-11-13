@@ -31,7 +31,7 @@ public sealed class WishTests
             await using (var preUpgrade = new AureliaDbContext(options))
             {
                 await preUpgrade.Database.GetService<IMigrator>().MigrateAsync("20261113100000_CollectionBoxSets");
-                Assert.Equal(["20261113120000_FamilyWishes"], await preUpgrade.Database.GetPendingMigrationsAsync());
+                Assert.Equal("20261113120000_FamilyWishes", (await preUpgrade.Database.GetPendingMigrationsAsync()).First());
             }
 
             using var factory = new AureliaServerFactory(dataDirectory);
