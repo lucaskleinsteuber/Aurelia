@@ -31,9 +31,13 @@ private struct IOSAdminPowerForm: View {
 
   var body: some View {
     Form {
+      IOSAdminPageHeader(
+        page: .power,
+        text: "What the server computer does when nobody uses Aurelia, and how devices wake it again.")
       if !power.available {
         Section {
-          Text("This server decides by itself when it runs.").foregroundStyle(.secondary)
+          Label(IOSUnavailableReason.power(hosting: power.hosting), systemImage: "info.circle")
+            .foregroundStyle(.secondary)
         }
       } else {
         Section {
@@ -199,6 +203,14 @@ private struct IOSAdminUpdatesForm: View {
 
   var body: some View {
     Form {
+      IOSAdminPageHeader(
+        page: .updates,
+        text: "Install a newer Aurelia Server. Your library, profiles and settings stay as they are.")
+      if !status.available {
+        Section {
+          Label(IOSUnavailableReason.updates, systemImage: "info.circle").foregroundStyle(.secondary)
+        }
+      }
       Section {
         LabeledContent("Installed", value: status.installed)
         LabeledContent("Newest", value: status.newest ?? "—")
@@ -247,7 +259,7 @@ struct IOSAdminDangerZoneView: View {
     IOSAdminLoader { try await $0.libraries() } content: { libraries, _ in
       IOSAdminResetForm(libraries: libraries)
     }
-    .navigationTitle("Danger Zone")
+    .navigationTitle("Reset Library")
     .navigationBarTitleDisplayMode(.inline)
   }
 }
@@ -297,8 +309,18 @@ private struct IOSAdminResetForm: View {
           Button("Reset Library", role: .destructive) {
             let chosen = preview
             Task {
-              if let mutation = await admin.value("Resetting…", { try await $0.resetLibrary(chosen) }) {
-                result = "Removed \(mutation.removedItems) titles. The video files are unchanged."
+              if var mutation = await admin.value("Resetting…", { try await $0.resetLibrary(chosen) }) {
+                // A large reset finishes in the background; follow it until it is done.
+                while mutation.state == "queued" || mutation.state == "running" {
+                  result = "Removing… \(mutation.removedItems) titles so far."
+                  try? await Task.sleep(for: .seconds(2))
+                  let id = mutation.id
+                  guard let next = try? await admin.run({ try await $0.libraryMutation(id: id) }) else { break }
+                  mutation = next
+                }
+                result =
+                  mutation.error.map { "The reset stopped: \($0)" }
+                  ?? "Removed \(mutation.removedItems) titles. The video files are unchanged."
                 self.preview = nil
                 typed = ""
                 selected = []

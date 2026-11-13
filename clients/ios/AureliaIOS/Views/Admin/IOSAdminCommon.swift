@@ -73,6 +73,13 @@ final class IOSAdministrationModel: ObservableObject {
     }
   }
 
+  /// A change whose progress and errors the caller shows itself, such as a button that reports
+  /// right in its row. Open screens reload when it worked.
+  func runChange(_ work: @Sendable (IOSAPIClient) async throws -> Void) async throws {
+    try await run(work)
+    revision += 1
+  }
+
   /// Like `perform`, for a request whose answer the screen needs; nil when it failed.
   func value<Value: Sendable>(
     _ activity: String? = nil, _ work: @Sendable (IOSAPIClient) async throws -> Value
@@ -265,59 +272,6 @@ struct IOSManagementUnlockSheet: View {
   }
 }
 
-/// The Settings tab: a list on iPhone, and on iPad the Mac's layout with the categories in a
-/// sidebar and the chosen one beside it.
-struct IOSSettingsTab: View {
-  @EnvironmentObject private var model: IOSAppModel
-  @Environment(\.horizontalSizeClass) private var sizeClass
-  @StateObject private var admin = IOSAdministrationModel()
-
-  var body: some View {
-    Group {
-      if sizeClass == .regular {
-        NavigationSplitView {
-          IOSConnectionMenu()
-        } detail: {
-          ContentUnavailableView(
-            "Settings", systemImage: "gearshape",
-            description: Text("Choose a category on the left."))
-        }
-        .navigationSplitViewStyle(.balanced)
-      } else {
-        NavigationStack { IOSConnectionMenu() }
-      }
-    }
-    .environmentObject(admin)
-    .onAppear { admin.attach(model) }
-    .onChange(of: model.session?.sessionId) { _, _ in admin.attach(model) }
-    .sheet(isPresented: $admin.unlockRequested, onDismiss: { admin.cancelUnlock() }) {
-      IOSManagementUnlockSheet(admin: admin, serverName: model.connection?.name ?? "Aurelia")
-    }
-    .alert(
-      "Server Administration",
-      isPresented: Binding(get: { admin.alert != nil }, set: { if !$0 { admin.alert = nil } })
-    ) {
-      Button("OK") { admin.alert = nil }
-    } message: {
-      Text(admin.alert ?? "")
-    }
-    .overlay(alignment: .bottom) {
-      if let activity = admin.activity {
-        HStack(spacing: 10) {
-          ProgressView()
-          Text(activity).font(.subheadline.weight(.semibold))
-        }
-        .padding(.horizontal, 18).padding(.vertical, 12)
-        .background(.ultraThinMaterial, in: Capsule())
-        .padding(.bottom, 12)
-        .transition(.move(edge: .bottom).combined(with: .opacity))
-        .accessibilityElement(children: .combine)
-      }
-    }
-    .animation(.easeOut(duration: 0.2), value: admin.activity)
-  }
-}
-
 /// Loads one screen's data with the administration model and shows waiting and errors the same
 /// way everywhere. Pull to refresh reloads it; a finished change elsewhere reloads it too.
 struct IOSAdminLoader<Value: Sendable, Content: View>: View {
@@ -415,5 +369,155 @@ enum IOSAdminFormat {
   static func relative(_ text: String?) -> String {
     guard let text, let date = IOSServerDate.parse(text) else { return "—" }
     return date.formatted(.relative(presentation: .named))
+  }
+}
+
+/// The first lines of a settings page: its icon, its name and one sentence about what it does,
+/// as on the Mac. Placed as the form's first section.
+struct IOSAdminPageHeader: View {
+  let systemImage: String
+  let title: String
+  let text: String
+  var tint: Color = .indigo
+
+  init(systemImage: String, title: String, text: String, tint: Color = .indigo) {
+    self.systemImage = systemImage
+    self.title = title
+    self.text = text
+    self.tint = tint
+  }
+
+  init(page: IOSSettingsPage, text: String) {
+    self.init(
+      systemImage: page.systemImage, title: page.title, text: text,
+      tint: IOSSettingsRowLabel.tint(page.group))
+  }
+
+  var body: some View {
+    Section {
+      HStack(alignment: .top, spacing: 14) {
+        Image(systemName: systemImage)
+          .font(.system(size: 22, weight: .semibold))
+          .foregroundStyle(.white)
+          .frame(width: 44, height: 44)
+          .background(tint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+          .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 4) {
+          Text(title).font(.headline)
+          Text(text).font(.subheadline).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+      .padding(.vertical, 4)
+      .accessibilityElement(children: .combine)
+    }
+  }
+}
+
+/// A switch's label with a line that says what it does.
+struct IOSAdminToggleLabel: View {
+  let title: String
+  let detail: String
+
+  init(_ title: String, _ detail: String) {
+    self.title = title
+    self.detail = detail
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(title)
+      // A fixed gray, so the line stays gray inside a tinted button too.
+      Text(detail).font(.caption).foregroundStyle(Color.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+}
+
+/// A button for a server action that shows its own progress, then "Done" or the problem right
+/// in its row, so you see what happened where you tapped.
+struct IOSAdminActionButton: View {
+  @EnvironmentObject private var admin: IOSAdministrationModel
+  let title: String
+  let systemImage: String
+  var detail: String?
+  var role: ButtonRole?
+  var doneText = "Done"
+  let work: @Sendable (IOSAPIClient) async throws -> Void
+  @State private var state: Phase = .idle
+
+  enum Phase: Equatable { case idle, running, done, failed(String) }
+
+  init(
+    _ title: String, systemImage: String, detail: String? = nil, role: ButtonRole? = nil,
+    doneText: String = "Done", work: @escaping @Sendable (IOSAPIClient) async throws -> Void
+  ) {
+    self.title = title
+    self.systemImage = systemImage
+    self.detail = detail
+    self.role = role
+    self.doneText = doneText
+    self.work = work
+  }
+
+  var body: some View {
+    Button(role: role) {
+      Task { await run() }
+    } label: {
+      HStack(alignment: .center, spacing: 10) {
+        Label {
+          VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+            if case .failed(let message) = state {
+              Text(message).font(.caption).foregroundStyle(.orange)
+            } else if let detail {
+              Text(detail).font(.caption).foregroundStyle(Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+          }
+        } icon: {
+          Image(systemName: systemImage)
+        }
+        Spacer(minLength: 8)
+        switch state {
+        case .running: ProgressView()
+        case .done:
+          Label(doneText, systemImage: "checkmark.circle.fill").labelStyle(.titleAndIcon)
+            .font(.caption.weight(.semibold)).foregroundStyle(.green)
+        default: EmptyView()
+        }
+      }
+    }
+    .disabled(state == .running)
+    .animation(.easeOut(duration: 0.2), value: state)
+  }
+
+  private func run() async {
+    state = .running
+    do {
+      try await admin.runChange(work)
+      state = .done
+      try? await Task.sleep(for: .seconds(3))
+      if state == .done { state = .idle }
+    } catch is CancellationError {
+      state = .idle
+    } catch {
+      state = .failed(IOSAdministrationModel.message(error))
+    }
+  }
+}
+
+/// A section that could not load, while the rest of the page still works.
+struct IOSAdminSectionProblem: View {
+  let message: String
+  let retry: () async -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Label("Couldn’t load this part", systemImage: "exclamationmark.triangle")
+        .foregroundStyle(.orange)
+      Text(message).font(.caption).foregroundStyle(.secondary)
+      Button("Try Again") { Task { await retry() } }.buttonStyle(.borderless)
+    }
   }
 }

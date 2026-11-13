@@ -7,6 +7,7 @@ struct IOSAdminPeopleView: View {
   struct Overview: Sendable {
     let users: [IOSUserAccessSummary]
     let devices: [IOSDeviceSession]
+    let configuration: IOSServerConfiguration?
   }
 
   var body: some View {
@@ -14,7 +15,9 @@ struct IOSAdminPeopleView: View {
     IOSAdminLoader { client in
       async let users = owner ? client.serverUsers() : []
       async let devices = client.ownDevices()
-      return Overview(users: try await users, devices: try await devices)
+      async let configuration = owner ? try? client.serverSettings() : nil
+      return Overview(
+        users: try await users, devices: try await devices, configuration: await configuration)
     } content: { overview, reload in
       IOSAdminPeopleContent(overview: overview, owner: owner, reload: reload)
     }
@@ -36,6 +39,11 @@ private struct IOSAdminPeopleContent: View {
 
   var body: some View {
     Form {
+      IOSAdminPageHeader(
+        page: .people,
+        text: owner
+          ? "Everyone in your household has a profile with their own progress and favorites. Here you add people, set up children’s profiles and let new devices in."
+          : "The devices signed in with your profile.")
       if owner {
         Section {
           ForEach(overview.users) { access in
@@ -62,8 +70,15 @@ private struct IOSAdminPeopleContent: View {
           .accessibilityIdentifier("admin-create-profile")
         } header: {
           Text("Profiles")
+        } footer: {
+          Text("Tap a profile to change its name, PIN, age limit, screen time or what it may watch.")
         }
         Section {
+          if let configuration = overview.configuration {
+            IOSPolicyToggle(
+              configuration: configuration, key: "pairingEnabled", label: "Allow New Devices",
+              detail: "When off, no new device can connect, even with a code.")
+          }
           Button {
             Task { code = await admin.value("Creating a code…") { try await $0.createPairingCode() } }
           } label: {
@@ -86,19 +101,18 @@ private struct IOSAdminPeopleContent: View {
         }
       }
       Section {
-        ForEach(overview.devices.filter { $0.isActive() }) { device in
-          IOSDeviceRow(device: device) {
-            confirmation = IOSAdminConfirmation(
-              title: "Sign out “\(device.deviceName)”?",
-              message: "It needs a new code to connect again.", action: "Sign Out"
-            ) {
-              let id = device.id
-              Task { await admin.perform { try await $0.revokeOwnDevice(id: id) } }
-            }
+        NavigationLink {
+          IOSAdminDevicesView()
+        } label: {
+          LabeledContent {
+            Text("\(overview.devices.filter { $0.isActive() }.count)")
+          } label: {
+            IOSAdminToggleLabel(
+              owner ? "Signed-In Devices" : "Your Devices",
+              owner ? "Every device signed in, with Sign Out and Block." : "Sign out a device you no longer use.")
           }
         }
-      } header: {
-        Text("Signed-In Devices")
+        .accessibilityIdentifier("admin-devices")
       }
     }
     .scrollContentBackground(.hidden)
@@ -114,6 +128,8 @@ private struct IOSAdminPeopleContent: View {
   static func detail(_ access: IOSUserAccessSummary) -> String {
     var parts = [access.user.roleTitle]
     if let limit = access.user.ageLimit { parts.append("FSK \(limit)") }
+    parts.append(access.user.pinProtectionEnabled == false ? "No PIN" : "PIN")
+    if access.user.accessMode == "selectedTitles" { parts.append("Chosen titles") }
     if !access.isEnabled { parts.append("Turned off") }
     return parts.joined(separator: " · ")
   }
@@ -765,5 +781,131 @@ private struct IOSAdminScreenTimeForm: View {
   static func time(_ date: Date) -> String {
     let components = Calendar.current.dateComponents([.hour, .minute], from: date)
     return String(format: "%02d:%02d", components.hour ?? 0, components.minute ?? 0)
+  }
+}
+
+/// Every device signed in (the owner, with Block and That Was Me) or your own devices.
+struct IOSAdminDevicesView: View {
+  @EnvironmentObject private var admin: IOSAdministrationModel
+  @EnvironmentObject private var model: IOSAppModel
+
+  enum Loaded: Sendable {
+    case all([IOSSecurityDevice])
+    case own([IOSDeviceSession])
+  }
+
+  var body: some View {
+    let everyone =
+      admin.permissions.owner && model.capabilities?.capabilities?.contains("security-v1") == true
+    IOSAdminLoader { client in
+      everyone ? Loaded.all(try await client.securityDevices()) : Loaded.own(try await client.ownDevices())
+    } content: { loaded, reload in
+      IOSAdminDevicesForm(loaded: loaded, reload: reload)
+    }
+    .navigationTitle(everyone ? "Signed-In Devices" : "Your Devices")
+    .navigationBarTitleDisplayMode(.inline)
+  }
+}
+
+private struct IOSAdminDevicesForm: View {
+  @EnvironmentObject private var admin: IOSAdministrationModel
+  let loaded: IOSAdminDevicesView.Loaded
+  let reload: () async -> Void
+  @State private var confirmation: IOSAdminConfirmation?
+
+  var body: some View {
+    Form {
+      switch loaded {
+      case .all(let devices):
+        let fresh = devices.filter(\.isNew)
+        if !fresh.isEmpty {
+          Section {
+            ForEach(fresh) { device in deviceRow(device) }
+          } header: {
+            Text("New")
+          } footer: {
+            Text("Signed in for the first time. Tap That Was Me if you know it, or Block it.")
+          }
+        }
+        Section {
+          ForEach(devices.filter { !$0.isNew }) { device in deviceRow(device) }
+        } header: {
+          Text("Known")
+        } footer: {
+          Text(
+            "Sign Out ends a device’s sign-in; it can connect again with a new code. Block also keeps it from connecting again until you unblock it under Security."
+          )
+        }
+      case .own(let devices):
+        Section {
+          ForEach(devices.filter { $0.isActive() }) { device in
+            HStack {
+              VStack(alignment: .leading, spacing: 2) {
+                Text(device.deviceName + (device.isCurrent ? " (This \(IOSDesign.deviceName))" : ""))
+                Text("Last used \(IOSAdminFormat.relative(device.lastSeenAt))")
+                  .font(.caption).foregroundStyle(.secondary)
+              }
+              Spacer()
+              if !device.isCurrent {
+                Button("Sign Out", role: .destructive) {
+                  confirmation = IOSAdminConfirmation(
+                    title: "Sign out “\(device.deviceName)”?",
+                    message: "It needs a new code to connect again.", action: "Sign Out"
+                  ) {
+                    let id = device.id
+                    Task { await admin.perform { try await $0.revokeOwnDevice(id: id) } }
+                  }
+                }
+                .buttonStyle(.borderless)
+              }
+            }
+          }
+        } footer: {
+          Text("A signed-out device needs a new code from the owner to connect again.")
+        }
+      }
+    }
+    .scrollContentBackground(.hidden)
+    .background(IOSDesign.canvas.ignoresSafeArea())
+    .refreshable { await reload() }
+    .adminConfirmation($confirmation)
+  }
+
+  private func deviceRow(_ device: IOSSecurityDevice) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      IOSSecurityDeviceRow(device: device, onBlock: { confirmBlock(device) })
+      if !device.isCurrent {
+        HStack(spacing: 18) {
+          if device.isNew {
+            Button("That Was Me") {
+              let id = device.id
+              Task { await admin.perform { try await $0.acknowledgeDevice(id: id) } }
+            }
+          }
+          Button("Sign Out", role: .destructive) {
+            confirmation = IOSAdminConfirmation(
+              title: "Sign out “\(device.deviceName)”?",
+              message: "It needs a new code to connect again.", action: "Sign Out"
+            ) {
+              let id = device.id
+              Task { await admin.perform { try await $0.revokeDevice(id: id) } }
+            }
+          }
+        }
+        .buttonStyle(.borderless)
+        .font(.callout)
+      }
+    }
+  }
+
+  private func confirmBlock(_ device: IOSSecurityDevice) {
+    confirmation = IOSAdminConfirmation(
+      title: "Block “\(device.deviceName)”?",
+      message: "It is signed out at once and can’t sign in or pair again until you unblock it.",
+      action: "Block"
+    ) {
+      let id = device.id
+      Task { await admin.perform("Blocking…") { _ = try await $0.blockDevice(id: id) } }
+    }
   }
 }

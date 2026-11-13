@@ -41,17 +41,26 @@ private struct IOSAdminServerContent: View {
   var body: some View {
     let status = overview.status
     Form {
-      Section("Your Server") {
-        LabeledContent("Status", value: status.readiness?.state.capitalized ?? status.state.capitalized)
+      IOSAdminPageHeader(
+        page: .server,
+        text:
+          "How your server is doing, what it does by itself, and its backups and network. Most people never need the sections further down.")
+      Section {
+        let healthy = IOSServerHealthText.isHealthy(overview.health, status: status)
+        LabeledContent("Status") {
+          HStack(spacing: 6) {
+            Image(systemName: healthy ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+            Text(status.readiness?.state.capitalized ?? status.state.capitalized)
+          }
+          .foregroundStyle(healthy ? Color.green : Color.orange)
+        }
         LabeledContent("Version", value: status.version)
         if let location = overview.capabilities?.location {
-          LabeledContent("Where", value: location)
+          LabeledContent("Runs On", value: location)
         }
-        LabeledContent("Profiles", value: "\(status.users)")
-        LabeledContent("Storage Locations", value: "\(status.libraries)")
         LabeledContent("Playing Now", value: "\(status.activeStreams)")
         if canRestart {
-          Button("Restart Server…") {
+          Button {
             confirmation = IOSAdminConfirmation(
               title: "Restart the server?",
               message: "Everything playing stops for a moment. Devices reconnect by themselves.",
@@ -59,69 +68,96 @@ private struct IOSAdminServerContent: View {
             ) {
               Task { await admin.perform("Restarting the server…") { _ = try await $0.restartServer() } }
             }
+          } label: {
+            Label("Restart Server…", systemImage: "arrow.clockwise.circle")
           }
           .accessibilityIdentifier("admin-restart")
+        }
+      } header: {
+        Text("Your Server")
+      } footer: {
+        if canRestart {
+          Text("A restart applies saved network settings and can clear a stuck job.")
         }
       }
       if let components = status.readiness?.components.filter({ $0.state != "ready" && $0.state != "ok" }),
         !components.isEmpty
       {
-        Section("Needs Attention") {
+        Section {
           ForEach(components) { component in
-            LabeledContent(component.title, value: component.detail)
+            VStack(alignment: .leading, spacing: 2) {
+              Label(component.title, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+              Text(component.detail).font(.caption).foregroundStyle(.secondary)
+            }
           }
+        } header: {
+          Text("Needs Attention")
         }
       }
       IOSServerHealthSection(health: overview.health)
       Section {
-        NavigationLink("Performance") { IOSAdminPerformanceView() }
-      } footer: {
-        Text("How long the server takes to answer and which database queries were slow.")
-      }
-      if let configuration = overview.configuration {
-        Section {
-          IOSPolicyToggle(configuration: configuration, key: "pairingEnabled", label: "Allow New Devices")
-          IOSPolicyToggle(
-            configuration: configuration, key: "automaticBackupsEnabled", label: "Automatic Backups")
-          Button("Back Up Now") {
-            Task { await admin.perform("Backing up the database…") { try await $0.createBackup() } }
-          }
-          .accessibilityIdentifier("admin-backup-now")
-        } header: {
-          Text("Devices and Backups")
-        } footer: {
-          Text("New devices still need a code from you. Backups keep the database, never videos.")
+        NavigationLink {
+          IOSAdminPerformanceView()
+        } label: {
+          IOSAdminToggleLabel("Performance", "How fast the server answers and which database queries were slow.")
         }
-      }
-      Section("Features") {
-        NavigationLink("Scrub Previews") { IOSAdminScrubPreviewsView() }
-        NavigationLink("Intros and Credits") { IOSAdminSegmentsView() }
-        NavigationLink("Speech Recognition") { IOSAdminSpeechView() }
-        NavigationLink("Video Conversion") { IOSAdminTranscodingView() }
       }
       Section {
-        NavigationLink("Server Details and Network") {
-          IOSAdminDetailsView(status: status, configuration: overview.configuration)
+        NavigationLink { IOSAdminScrubPreviewsView() } label: {
+          IOSAdminToggleLabel("Scrub Previews", "Small pictures while you scrub through a video.")
         }
-        if let configuration = overview.configuration {
-          NavigationLink("Sign-In and Streaming Limits") {
-            IOSAdminPolicyView(title: "Limits", groups: [.limits], configuration: configuration)
-          }
-          NavigationLink("Library Maintenance") {
-            IOSAdminPolicyView(
-              title: "Library Maintenance", groups: [.maintenance], configuration: configuration,
-              toggles: ["monitoringEnabled"])
-          }
+        NavigationLink { IOSAdminSegmentsView() } label: {
+          IOSAdminToggleLabel("Intros and Credits", "Finds them so players can offer Skip Intro.")
         }
-        NavigationLink("Background Jobs") { IOSAdminJobsView() }
-        NavigationLink("Backups") {
+        NavigationLink { IOSAdminSpeechView() } label: {
+          IOSAdminToggleLabel("Speech Recognition", "Writes and syncs subtitles from speech.")
+        }
+        NavigationLink { IOSAdminTranscodingView() } label: {
+          IOSAdminToggleLabel("Video Conversion", "Converts video live for devices that can’t play the original.")
+        }
+      } header: {
+        Text("What the Server Does by Itself")
+      } footer: {
+        Text("These run in the background and pause while someone watches.")
+      }
+      Section {
+        NavigationLink {
           IOSAdminBackupsView(
             configuration: overview.configuration,
             canRestore: canRestart, encrypted: overview.capabilities?.encryptedBackups != false)
+        } label: {
+          IOSAdminToggleLabel("Backups", "Automatic backups, Back Up Now, export and restore.")
         }
-        NavigationLink("Diagnostics") { IOSAdminDiagnosticsView(configuration: overview.configuration) }
+        .accessibilityIdentifier("admin-backups")
+        NavigationLink { IOSAdminJobsView() } label: {
+          IOSAdminToggleLabel("Background Jobs", "Running and recent scans and information lookups.")
+        }
+        NavigationLink { IOSAdminDiagnosticsView(configuration: overview.configuration) } label: {
+          IOSAdminToggleLabel("Diagnostics", "Recent problems and a report you can share.")
+        }
       } header: {
-        Text("Advanced")
+        Text("Maintenance")
+      }
+      Section {
+        NavigationLink {
+          IOSAdminDetailsView(status: status, configuration: overview.configuration)
+        } label: {
+          IOSAdminToggleLabel("Network", "Addresses, the server name and its certificate.")
+        }
+        if let configuration = overview.configuration {
+          NavigationLink {
+            IOSAdminPolicyView(
+              title: "Limits", groups: [.limits], configuration: configuration,
+              explanation:
+                "How long devices and profiles stay signed in, how many wrong tries are allowed, and how many videos can play at once.")
+          } label: {
+            IOSAdminToggleLabel("Sign-In and Streaming Limits", "How long sign-ins last and how many streams run at once.")
+          }
+        }
+      } header: {
+        Text("Network and Limits")
+      } footer: {
+        Text("Change these only if you know you need to; the defaults suit most homes.")
       }
     }
     .scrollContentBackground(.hidden)
@@ -132,16 +168,16 @@ private struct IOSAdminServerContent: View {
 }
 
 /// One switch of the owner's server policy, saved on change.
-private struct IOSPolicyToggle: View {
+struct IOSPolicyToggle: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   let configuration: IOSServerConfiguration
   let key: String
   let label: String
+  var detail: String?
   @State private var value: Bool?
 
   var body: some View {
     Toggle(
-      label,
       isOn: Binding(
         get: { value ?? configuration.stored[key]?.bool ?? false },
         set: { newValue in
@@ -153,7 +189,10 @@ private struct IOSPolicyToggle: View {
             }
             if !saved { value = nil }
           }
-        }))
+        })
+    ) {
+      if let detail { IOSAdminToggleLabel(label, detail) } else { Text(label) }
+    }
   }
 }
 
@@ -161,8 +200,23 @@ private struct IOSPolicyToggle: View {
 struct IOSServerHealthSection: View {
   let health: IOSServerHealth
 
+  @State private var expanded = false
+
   var body: some View {
-    Section("Server Health") {
+    Section {
+      Text(IOSServerHealthText.summary(health)).font(.subheadline)
+      DisclosureGroup("Details", isExpanded: $expanded) {
+        details
+      }
+    } header: {
+      Text("Server Health")
+    } footer: {
+      Text("Space, database size, what runs and recent problems. Open Details for each number.")
+    }
+  }
+
+  @ViewBuilder private var details: some View {
+    Group {
       LabeledContent("Running For", value: IOSAdminText.uptime(health.uptimeSeconds))
       LabeledContent("Free Space", value: IOSAdminText.bytes(health.freeDiskBytes))
       LabeledContent("Database", value: IOSAdminText.bytes(health.databaseBytes))
@@ -256,6 +310,7 @@ struct IOSAdminPolicyView: View {
   let groups: [IOSPolicyField.Group]
   let configuration: IOSServerConfiguration
   var toggles: [String] = []
+  var explanation: String?
   @State private var numbers: [String: Int] = [:]
   @State private var switches: [String: Bool] = [:]
 
@@ -265,6 +320,9 @@ struct IOSAdminPolicyView: View {
 
   var body: some View {
     IOSAdminForm(title: title) {
+      if let explanation {
+        Section { Text(explanation).font(.subheadline).foregroundStyle(.secondary) }
+      }
       if !toggles.isEmpty {
         Section {
           ForEach(toggles, id: \.self) { key in

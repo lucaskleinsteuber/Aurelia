@@ -2,7 +2,7 @@
   import Foundation
 
   enum IOSUITestScenario: String, Sendable {
-    case library, profiles, delayed, offline, limitedTracks, nextEpisode, showcase
+    case library, profiles, delayed, offline, limitedTracks, nextEpisode, showcase, admin
     static var current: Self? {
       guard ProcessInfo.processInfo.arguments.contains("--aurelia-ui-testing") else { return nil }
       return ProcessInfo.processInfo.environment["AURELIA_IOS_UI_SCENARIO"].flatMap(
@@ -27,6 +27,12 @@
         serverID: serverID, name: "Synthetic Server",
         baseURL: URL(string: "https://fixture.invalid:43111")!, fingerprint: fingerprint,
         deviceToken: String(repeating: "D", count: 43), deviceSessionID: serverID)
+    }
+    /// The owner, for the "admin" scenario's Settings screens.
+    static var ownerSession: IOSProfileSession {
+      IOSProfileSession(
+        user: IOSUser(id: profileID, username: "Alex", role: "owner"),
+        sessionId: profileID, token: String(repeating: "P", count: 43), expiresAt: expiry)
     }
     static var session: IOSProfileSession {
       IOSProfileSession(
@@ -209,6 +215,16 @@
       let payload =
         request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
         ?? [:]
+      if scenario == .admin,
+        let answer = IOSAdminFixture.answer(
+          path: path, method: request.httpMethod ?? "GET",
+          query: Dictionary(query.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { first, _ in first }))
+      {
+        return IOSHTTPResponse(
+          statusCode: 200, headers: ["Content-Type": "application/json"],
+          body: try JSONSerialization.data(withJSONObject: answer, options: [.fragmentsAllowed]),
+          fingerprint: IOSUITestFixtures.fingerprint)
+      }
       var status = 200
       let body: Any
       if path == "/api/v1/profiles" {

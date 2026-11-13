@@ -38,36 +38,42 @@ its screens are its own:
   like the iPhone passcode, seasons as a menu with the episodes listed below, and settings as an
   iOS form. The player works by touch; a hardware keyboard adds the arrow keys, Space and Escape.
   The app icon is the Mac app's Liquid Glass icon.
-- **Settings** hold everything that belongs to the profile on this device: Watch History (swipe to remove an entry, or clear it), Statistics with
-  watch time in minutes, hours and days, the last weeks as a chart, top titles and genres and a
-  year in review that also plays as Wrapped (full-screen slides: tap right or left, hold to
-  pause), and from the 2nd of a month last month's Wrapped (also on Home in that first week), Playback, the profile's own PIN (set, change, or turn off for ordinary
-  profiles), the size of the stored artwork with a button to clear it, and the server's name,
-  address and version.
-- **Server Administration** (from 2.9.0) gives the owner and administrators the settings the
-  Mac, the Linux app and the browser have, right below the profile in Settings; on an iPad
-  Settings shows a sidebar like the Mac. *Library*: storage locations (added with a browser of
-  the server's folders), scans, watching for changes, Import Preview with corrections, folders to
-  sort, files to check, left-out items and Library Health (duplicates, offline titles, titles
-  without information). *Metadata*: TMDB, finding or refreshing information, Review Matches,
-  OpenSubtitles, unused artwork and search. *Profiles and Devices*: profiles with name, picture,
-  role, PIN, children's age limit, screen time and content access, codes for new devices or the
-  code a device shows, and signed-in devices. *Security* (from 2.11.0): Face ID or Touch ID
-  instead of the Server Password, with the key in the Secure Enclave, and for the owner the
-  security log, new devices with That Was Me and Block, the block list and whether Face ID is
-  required for administrators; requests from Linux or a browser to confirm an unlock appear at the
-  top of the screen. *Server*: status, health, restart, devices and
-  backups, Performance (response times and slow queries), scrub previews, intros and credits,
-  speech recognition, video conversion, limits,
-  maintenance, background jobs, backups (check, encrypted backup saved through the share sheet,
-  restore from a file) and diagnostics. *Power*, *Server Updates* and the *Danger Zone* appear
-  when the server offers them. The network is shown but changed on the server computer, because
-  a change can cut the iPhone off. Visibility follows the server: the owner sees everything,
-  administrators the library and metadata, and storage needs the whole library. Changes that the
-  server protects ask once for the Server Password, which unlocks management for ten minutes and
-  is never stored; the app then asks the server for a one-time approval of exactly that change.
-  Changing titles one by one (the metadata editor, matches, artwork) stays on the Mac and in the
-  browser.
+- **Settings** (rebuilt in 2.12.0) is one list of pages, each with a line that says what it is
+  for; on an iPad the list is a sidebar like the Mac's, and the chosen page opens beside it with
+  its own back navigation. For the owner and administrators *Server* comes first, then *You*
+  (Name and Picture, Playback, Profile PIN, Watch History, Statistics with Wrapped, Family Wishes,
+  Downloads), *This iPhone* (notifications and stored artwork, About) and *Connection* (the
+  server's name and version, Wake-on-LAN and Disconnect). Every page starts with what it does,
+  every option explains itself, and actions report progress, "Done" or the problem in their own
+  row.
+- **Server Administration** (from 2.9.0, rebuilt in 2.12.0) gives the owner and administrators
+  what the Mac, the Linux app and the browser manage. *Library*: storage locations with Scan,
+  Watch for Changes, Review Import and Remove on each row (swipe or touch and hold); adding one or
+  more folders through a browser of the server's drives and folders (up, typed paths, "Use This
+  Folder"), with Review Before Importing on by default, after which the review opens or the first
+  scan starts; scans with what they found and their problems; Import Preview with selecting
+  several items, Analyze Again and corrections; folders to sort; files to check, assigned to a
+  movie or left out; left-out items; watching storage for changes and the scan schedule; Library
+  Health (duplicates, titles whose drive is away for 7, 30 or 90 days, and titles without
+  information matched on TMDB); and Reset Library, followed until it finishes. *Metadata*: TMDB,
+  finding or refreshing information, Review Matches, OpenSubtitles, unused artwork and search.
+  *Profiles and Devices*: profiles with name, picture, role, PIN, children's age limit, screen
+  time and content access, Allow New Devices, codes for new devices or the code a device shows,
+  and one page of signed-in devices with That Was Me, Sign Out and Block. *Security* (from
+  2.11.0): Face ID or Touch ID instead of the Server Password, with the key in the Secure Enclave,
+  and for the owner the security log, the block list and whether Face ID is required for
+  administrators; requests from Linux or a browser to confirm an unlock appear at the top of the
+  screen. *Server*: status, health in one line with details, restart, Performance, what the server
+  does by itself (scrub previews, intros and credits, speech recognition, video conversion),
+  maintenance (backups with check, encrypted backup through the share sheet and restore from a
+  file; background jobs; diagnostics) and network and limits. *Power* and *Server Updates* say
+  why when this server can't use them. The network is shown but changed on the server computer,
+  because a change can cut the iPhone off. Visibility follows the server: the owner sees
+  everything, administrators the library and metadata, and storage needs the whole library.
+  Changes that the server protects ask once for the Server Password (or Face ID), which unlocks
+  management for ten minutes and is never stored; the app then asks the server for a one-time
+  approval of exactly that change. Changing titles one by one (the metadata editor, artwork)
+  stays on the Mac and in the browser.
 - **Wake Server**: when the saved server doesn't answer, *Wake Server* sends a Wake-on-LAN packet
   now and every ten seconds for two minutes and connects as soon as it answers. Settings › Server
   shows whether waking can work (how many network cards the server reported) and sends one packet
@@ -174,7 +180,7 @@ When the server supports `wishes-v1`, iPhone and iPad offer **Family Wishes** fr
   router still knows its address; otherwise wake it another way, such as from a Mac or the router.
 - New-device notes and unlock requests appear only while the app is open; there are no push
   notifications. Face ID itself is checked on a real device; tests sign with a software key.
-- Server administration is checked by logic tests and against an isolated test server; there are
-  no iOS UI tests.
+- Server administration is checked by logic tests, against an isolated test server and with
+  simulator screenshots of invented data (the debug "admin" scenario); there are no iOS UI tests.
 - The app is not published as a download; build it from source as above. Away from home it works
   through a VPN, see [Watching away from home](REMOTE_ACCESS.md).

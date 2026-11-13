@@ -19,6 +19,7 @@ struct IOSAdminSecurityView: View {
       async let passkeys = client.passkeys()
       async let settings = owner ? try? client.securitySettings() : nil
       async let devices = owner ? (try? client.securityDevices()) ?? [] : []
+      // Devices are listed under Profiles and Devices; here only how many are new.
       async let blocked = owner ? (try? client.blockedDevices()) ?? [] : []
       return Overview(
         settings: await settings, passkeys: try await passkeys, devices: await devices, blocked: await blocked)
@@ -45,6 +46,11 @@ private struct IOSAdminSecurityContent: View {
 
   var body: some View {
     Form {
+      IOSAdminPageHeader(
+        page: .security,
+        text: owner
+          ? "Who signed in when and from where, \(biometry) instead of the Server Password, and devices you blocked."
+          : "\(biometry) instead of the Server Password for your profile on this \(IOSDesign.deviceName).")
       Section {
         if !IOSSecureEnclaveSigner.isAvailable {
           Text("This \(IOSDesign.deviceName) can't keep a Face ID or Touch ID key.")
@@ -159,21 +165,18 @@ private struct IOSAdminSecurityContent: View {
   }
 
   @ViewBuilder private var devicesSection: some View {
-    Section("Signed-In Devices") {
-      ForEach(overview.devices) { device in
-        IOSSecurityDeviceRow(device: device, onBlock: { confirmBlock(device) })
+    Section {
+      NavigationLink {
+        IOSAdminDevicesView()
+      } label: {
+        LabeledContent {
+          let fresh = overview.devices.filter(\.isNew).count
+          Text(fresh > 0 ? "\(fresh) new" : "\(overview.devices.count)")
+            .foregroundStyle(fresh > 0 ? Color.orange : .secondary)
+        } label: {
+          IOSAdminToggleLabel("Signed-In Devices", "Sign out or block a device, and confirm new ones.")
+        }
       }
-    }
-  }
-
-  private func confirmBlock(_ device: IOSSecurityDevice) {
-    confirmation = IOSAdminConfirmation(
-      title: "Block “\(device.deviceName)”?",
-      message: "It is signed out at once and can't sign in or pair again until you unblock it.",
-      action: "Block"
-    ) {
-      let id = device.id
-      Task { await admin.perform("Blocking…") { _ = try await $0.blockDevice(id: id) } }
     }
   }
 

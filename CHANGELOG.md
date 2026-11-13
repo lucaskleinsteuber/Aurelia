@@ -35,6 +35,8 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Changed
 
+- iPhone & iPad: Settings is rebuilt. Every page says what it is for, every option explains itself, and actions show their progress, "Done" or the problem in their own row. For administrators the server pages come first; nothing appears twice any more (one devices page, backups only under Server, one Connection page). On iPad, pages opened inside a page (a storage location, a profile, Library Health) work again, and the sidebar marks the chosen page.
+- iPhone & iPad: the Library acts instead of only showing. Each storage location has Scan, Watch for Changes, Review Import and Remove on its row; adding takes several folders at once with Review Before Importing on, then opens the review or starts the first scan; the folder browser goes up, takes a typed path and uses a drive directly. Import Preview corrects several items at once and can analyze again; files to check can be assigned to a movie; titles without information can be matched on TMDB; offline titles can be listed after 7, 30 or 90 days. Power and Server Updates say why when the server can't use them.
 - All apps: the power choices say how long waking takes: about 10 to 20 seconds from sleep, and 30 to 60 seconds from off, because the whole computer starts up.
 
 ### Fixed

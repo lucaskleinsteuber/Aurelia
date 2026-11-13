@@ -195,13 +195,15 @@ final class IOSAppModel: ObservableObject {
           capabilities: [
             "device-authorization-v1", "library-state-v1", "watchlist-people-v1",
             "scrub-previews-v1",
-          ])
+          ] + (scenario == .admin ? ["security-v1"] : []))
         if scenario == .profiles {
           phase = .profiles
           await refreshProfiles()
         } else {
           let fixture =
-            scenario == .showcase ? IOSShowcaseTransport.session : IOSUITestFixtures.session
+            scenario == .showcase
+            ? IOSShowcaseTransport.session
+            : scenario == .admin ? IOSUITestFixtures.ownerSession : IOSUITestFixtures.session
           session = fixture
           phase = .library
           activateProgress(connection: IOSUITestFixtures.connection, session: fixture)

@@ -41,11 +41,14 @@ private struct IOSAdminMetadataContent: View {
 
   var body: some View {
     Form {
+      IOSAdminPageHeader(
+        page: .metadata,
+        text:
+          "Posters, descriptions, cast and ratings come from TMDB, subtitles from OpenSubtitles. Aurelia finds them by the file and folder names.")
       if let provider = overview.provider {
         Section {
           if provider.hasToken {
             Toggle(
-              "Look Up Movie and TV Information",
               isOn: Binding(
                 get: { provider.enabled },
                 set: { enabled in
@@ -55,7 +58,11 @@ private struct IOSAdminMetadataContent: View {
                       _ = try await $0.saveMetadataProvider(enabled: enabled, token: nil, language: language)
                     }
                   }
-                }))
+                })
+            ) {
+              IOSAdminToggleLabel(
+                "Look Up Movie and TV Information", "New titles get posters and descriptions by themselves.")
+            }
             LabeledContent(
               "Artwork",
               value: "\(IOSAdminText.bytes(provider.artworkBytes)) of \(IOSAdminText.bytes(provider.artworkLimitBytes))")
@@ -71,6 +78,10 @@ private struct IOSAdminMetadataContent: View {
               }
             }
           } else if owner {
+            Text(
+              "Aurelia needs a free TMDB key to find posters and descriptions. Create one at themoviedb.org under Settings › API and paste the “API Read Access Token” here."
+            )
+            .font(.subheadline).foregroundStyle(.secondary)
             SecureField("TMDB API Read Access Token", text: $token)
               .textInputAutocapitalization(.never).autocorrectionDisabled()
             Button("Turn On") {
@@ -108,47 +119,56 @@ private struct IOSAdminMetadataContent: View {
           if let last = overview.jobs.first {
             Text(last.summary).font(.caption).foregroundStyle(.secondary)
           }
-          Button("Find Missing Information") {
-            Task { await admin.perform("Looking up missing information…") { _ = try await $0.startMetadataJob() } }
-          }
+          IOSAdminActionButton(
+            "Find Missing Information", systemImage: "magnifyingglass",
+            detail: "Looks up only titles that have no information yet.", doneText: "Started"
+          ) { _ = try await $0.startMetadataJob() }
           if owner {
-            Button("Refresh All Information") {
-              Task {
-                await admin.perform("Refreshing all information…") {
-                  _ = try await $0.startMetadataJob(fullRefresh: true)
-                }
-              }
-            }
+            IOSAdminActionButton(
+              "Refresh All Information", systemImage: "arrow.triangle.2.circlepath",
+              detail: "Looks up every title again, for example after changing the language. Takes a while.",
+              doneText: "Started"
+            ) { _ = try await $0.startMetadataJob(fullRefresh: true) }
           }
         }
         NavigationLink {
           IOSAdminMetadataReviewsView()
         } label: {
-          LabeledContent("Review Matches", value: "\(overview.reviews.count)")
+          LabeledContent {
+            Text("\(overview.reviews.count)")
+          } label: {
+            IOSAdminToggleLabel("Review Matches", "Titles where Aurelia wasn’t sure it found the right one.")
+          }
         }
       } header: {
         Text("Library Information")
+      } footer: {
+        Text("Titles without any match are under Library › Library Health › Without Information.")
       }
       if let subtitles = overview.subtitles, owner {
         Section {
           NavigationLink {
             IOSAdminSubtitlesView(provider: subtitles)
           } label: {
-            LabeledContent(
-              "OpenSubtitles",
-              value: subtitles.hasApiKey ? (subtitles.enabled ? "On" : "Off") : "Not Set Up")
+            LabeledContent {
+              Text(subtitles.hasApiKey ? (subtitles.enabled ? "On" : "Off") : "Not Set Up")
+            } label: {
+              IOSAdminToggleLabel("OpenSubtitles", "Downloads subtitles in your languages when a title has none.")
+            }
           }
         } header: {
           Text("Subtitle Downloads")
         }
       }
       Section {
-        Button("Remove Unused Artwork") {
-          Task { await admin.perform("Removing unused artwork…") { try await $0.pruneArtwork() } }
-        }
-        Button("Rebuild Search") {
-          Task { await admin.perform("Rebuilding search…") { try await $0.rebuildSearch() } }
-        }
+        IOSAdminActionButton(
+          "Remove Unused Artwork", systemImage: "photo.stack",
+          detail: "Frees space taken by posters of titles that are gone."
+        ) { try await $0.pruneArtwork() }
+        IOSAdminActionButton(
+          "Rebuild Search", systemImage: "text.magnifyingglass",
+          detail: "Use this if search misses titles you know are there."
+        ) { try await $0.rebuildSearch() }
       } header: {
         Text("Artwork and Search")
       } footer: {

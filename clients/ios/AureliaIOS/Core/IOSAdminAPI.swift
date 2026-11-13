@@ -535,6 +535,25 @@ extension IOSAPIClient {
   func clearMetadataMatch(mediaId: UUID) async throws {
     try await adminSend("/api/v1/media/\(Self.id(mediaId))/metadata/match", method: "DELETE")
   }
+  /// Movie and TV candidates for a title without information, as the Mac's "Match…".
+  func searchMetadata(mediaId: UUID, query: String) async throws -> [IOSMetadataCandidate] {
+    try await admin(
+      "/api/v1/media/\(Self.id(mediaId))/metadata/search",
+      query: [URLQueryItem(name: "query", value: query)])
+  }
+  /// Movies in one storage location, to assign a file under review to.
+  func searchMovies(_ query: String, library: UUID) async throws -> [IOSCatalogItem] {
+    let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return [] }
+    let page: IOSPage<IOSCatalogItem> = try await admin(
+      "/api/v1/catalog/search",
+      query: [
+        URLQueryItem(name: "query", value: trimmed), URLQueryItem(name: "kind", value: "movie"),
+        URLQueryItem(name: "libraryId", value: Self.id(library)),
+        URLQueryItem(name: "offset", value: "0"), URLQueryItem(name: "limit", value: "25"),
+      ])
+    return page.items
+  }
   func pruneArtwork() async throws {
     try await adminSend("/api/v1/metadata/artwork/prune", method: "POST")
   }
