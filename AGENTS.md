@@ -4,6 +4,9 @@ These rules apply to every task in this repository.
 
 ## Scope and product direction
 
+- When the owner brings a new feature, first ask which clients it should come to
+  (Mac, Linux, browser, iPhone & iPad, Apple TV) before planning or building it
+  (owner's decision, 13.11.2026). The server part follows from that answer.
 - Aurelia is a self-hosted media server with native clients. Do not replace it
   with a browser-only product or a shortcut that merely opens localhost.
 - The server also serves a browser app (`src/Aurelia.Server/WebApp`, see
@@ -343,7 +346,8 @@ These rules apply to every task in this repository.
   with `scripts/publish-release.sh --server`. Push the source first. The Mac release
   contains the arm64 and x64 DMGs. The server release has a
   `server-<version>-<build>` tag with Linux x64 and arm64 packages. Verify all
-  release downloads. After a server release, update the owner's Linux server with
-  `sudo aurelia update --yes`. For the first standalone server release, follow the
+  release downloads. Never update the owner's own server yourself, not after a release
+  and not to test one (owner's decision, 13.11.2026): the owner updates it. Say which
+  version is ready instead. For the first standalone server release, follow the
   compatibility note in `docs/LINUX_SERVER.md` if Latest is still a combined release.
   tvOS builds are not published.
