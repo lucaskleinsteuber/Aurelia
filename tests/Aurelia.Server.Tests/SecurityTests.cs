@@ -100,7 +100,9 @@ public sealed class SecurityTests
 
         var failed = await GetAsync<SecurityEventPage>(client, owner.Token, "/api/v1/server/security/events?outcome=failed");
         Assert.All(failed.Events, entry => Assert.Equal("failed", entry.Outcome));
-        var serialized = System.Text.Json.JsonSerializer.Serialize(events);
+        // Ids and times are random digits that may contain a PIN by chance; secrets never hide in them.
+        var serialized = System.Text.RegularExpressions.Regex.Replace(System.Text.Json.JsonSerializer.Serialize(events),
+            @"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{4}-\d{2}-\d{2}T[0-9:.]+(Z|[+-]\d{2}:\d{2})?", "-");
         foreach (var secret in new[] { "4821", "9999", ApiTestClient.TestPin, "correct horse battery staple", owner.Token, paired.Token })
             Assert.DoesNotContain(secret, serialized);
     }
