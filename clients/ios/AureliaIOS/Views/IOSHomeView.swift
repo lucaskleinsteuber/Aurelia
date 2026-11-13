@@ -142,7 +142,12 @@ struct IOSHomeView: View {
           {
             ContentUnavailableView(
               "Your Library Is Empty", systemImage: "film",
-              description: Text("Add a storage location in Aurelia on your Mac."))
+              description: Text(
+                IOSAdminPermissions(
+                  role: model.session?.user.role, accessMode: model.session?.user.accessMode
+                ).storage
+                  ? "Add a storage location in Settings › Library."
+                  : "Add a storage location in Aurelia on your Mac."))
           }
         }
         if model.homeLoading && model.home == nil {

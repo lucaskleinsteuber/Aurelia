@@ -817,6 +817,57 @@ struct IOSAPIClient: Sendable {
     _ = try await send(path, method: "DELETE")
   }
 
+  // Server administration (see IOSAdminAPI.swift). A protected change is refused with
+  // `approval_required` before anything happens; the app then gets a one-time approval for exactly
+  // this method, address and body and sends it once more. `longRunning` uses its own connection
+  // with long timeouts, for backups and checks that take minutes.
+  func adminData(
+    _ path: String, method: String = "GET", query: [URLQueryItem] = [], body: Data? = nil,
+    contentType: String = "application/json", longRunning: Bool = false
+  ) async throws -> Data {
+    let base = try request(path, query: query, authentication: .profile)
+    guard let url = base.url else { throw IOSCoreError.invalidAddress }
+    let transport: any IOSHTTPTransport =
+      longRunning && self.transport is IOSURLSessionTransport
+      ? IOSLongRunningTransport() : self.transport
+    return try await IOSApprovalExecutor.execute { approval in
+      var request = base
+      request.httpMethod = method
+      request.httpBody = body
+      if body != nil { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
+      if let approval { request.setValue(approval, forHTTPHeaderField: "X-Aurelia-Approval") }
+      return try await execute(request, using: transport).body
+    } approve: {
+      struct Confirmation: Encodable {
+        let action: String
+        let payloadHash: String
+      }
+      struct Approval: Decodable { let token: String }
+      let confirmation = Confirmation(
+        action: try IOSApprovalExecutor.action(method: method, url: url),
+        payloadHash: IOSApprovalExecutor.payloadHash(body))
+      let data = try await send(
+        "/api/v1/management/approval", method: "POST", body: JSONEncoder().encode(confirmation))
+      let token = try Self.decode(Approval.self, data: data).token
+      guard (16...1024).contains(token.utf8.count), !token.contains(where: \.isWhitespace) else {
+        throw IOSCoreError.invalidResponse
+      }
+      return token
+    }
+  }
+
+  /// The profile's request for a file the server sends (a backup or a diagnostics report),
+  /// for `IOSLongRunningTransport.download`.
+  func adminFileRequest(_ path: String, method: String = "GET") throws -> URLRequest {
+    var request = try request(path, authentication: .profile)
+    request.httpMethod = method
+    return request
+  }
+
+  static func decodeAdmin<Value: Decodable>(_ type: Value.Type, data: Data) throws -> Value {
+    try decode(type, data: data)
+  }
+
   private enum Authentication { case none, device, profile }
 
   private func get<Value: Decodable>(_ path: String, authentication: Authentication = .profile)
@@ -880,6 +931,11 @@ struct IOSAPIClient: Sendable {
     return request
   }
   private func execute(_ request: URLRequest) async throws -> IOSHTTPResponse {
+    try await execute(request, using: transport)
+  }
+  private func execute(_ request: URLRequest, using transport: any IOSHTTPTransport) async throws
+    -> IOSHTTPResponse
+  {
     try Task.checkCancellation()
     let response = try await transport.execute(request, trust: .pinned(fingerprint))
     try Task.checkCancellation()

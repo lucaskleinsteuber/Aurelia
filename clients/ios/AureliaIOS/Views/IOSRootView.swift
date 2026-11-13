@@ -74,7 +74,7 @@ struct IOSRootView: View {
           NavigationStack { IOSBrowseDestination(section: .search) }.tabItem {
             Label("Search", systemImage: "magnifyingglass")
           }.tag(IOSLibraryTab.search)
-          NavigationStack { IOSConnectionMenu() }
+          IOSSettingsTab()
             .tabItem { Label("Settings", systemImage: "gearshape") }
             .badge(model.supportsWishes ? model.wishBadgeCount : 0)
             .tag(IOSLibraryTab.profile)
@@ -245,12 +245,26 @@ struct IOSSavedServerView: View {
         }
         .frame(maxWidth: 420)
         ZStack {
-          if model.isBusy {
+          if model.isWakingServer {
+            ProgressView("Wake signal sent. Waiting for the server…")
+          } else if model.isBusy {
             ProgressView("Waiting for the server…")
           } else {
-            Button("Try Again") { Task { await model.reconnect(userInitiated: true) } }
-              .buttonStyle(IOSButtonStyle(kind: .primary))
-              .accessibilityIdentifier("tv-server-retry")
+            HStack(spacing: 12) {
+              if model.wakeOnLanStatus.canWake {
+                Button {
+                  Task { await model.wakeServerNow() }
+                } label: {
+                  Label("Wake Server", systemImage: "power")
+                }
+                .buttonStyle(IOSButtonStyle(kind: .primary))
+                .accessibilityIdentifier("server-wake")
+              }
+              Button("Try Again") { Task { await model.reconnect(userInitiated: true) } }
+                .buttonStyle(
+                  IOSButtonStyle(kind: model.wakeOnLanStatus.canWake ? .secondary : .primary))
+                .accessibilityIdentifier("tv-server-retry")
+            }
           }
         }.frame(minHeight: 56)
       } else {
@@ -419,6 +433,7 @@ struct IOSConnectionMenu: View {
           Label("Switch Profile", systemImage: "person.2")
         }
       }
+      IOSAdministrationSection()
       Section {
         if model.supportsWishes {
           NavigationLink {
@@ -516,6 +531,7 @@ struct IOSConnectionMenu: View {
       Section("Server") {
         LabeledContent("Name", value: model.connection?.name ?? "Aurelia Server")
         LabeledContent("Version", value: serverVersion ?? "…")
+        IOSWakeOnLanRows()
       }
       Section {
         Button(role: .destructive) {

@@ -229,6 +229,8 @@ struct IOSUser: Codable, Equatable, Sendable {
   var pictureRevision: Int64? = nil
   /// A children's profile's highest FSK age, nil for none.
   var ageLimit: Int? = nil
+  /// "entireLibrary" or "selectedTitles"; an administrator with chosen titles can't manage storage.
+  var accessMode: String? = nil
 
   var shownName: String {
     if let displayName, !displayName.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -337,6 +339,18 @@ enum IOSProfilePIN {
 
   static func isValid(_ value: String) -> Bool {
     (4...8).contains(value.utf8.count) && value.utf8.allSatisfy { (48...57).contains($0) }
+  }
+
+  /// Feedback while a new PIN is typed, as on the Mac: wrong characters at once, length only
+  /// once something was entered.
+  static func problem(_ pin: String) -> String? {
+    if pin.isEmpty { return nil }
+    if !pin.utf8.allSatisfy({ (48...57).contains($0) }) {
+      return "A PIN can only contain numbers (0–9). Letters are not allowed."
+    }
+    if pin.count > 8 { return "A PIN can have at most 8 digits." }
+    if pin.count < 4 { return "A PIN needs at least 4 digits." }
+    return nil
   }
 }
 

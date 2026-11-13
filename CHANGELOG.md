@@ -23,8 +23,13 @@ versioned commit, so their skipped numbers are preserved.
 - Server, browser, Mac, Linux and iPhone & iPad: a family wish list. Anyone can wish for a movie or show found on TMDB (or typed in when TMDB is off), and others can add "Me Too". Administrators see a count of open wishes and mark them fulfilled or declined; a wish is fulfilled by itself when the title arrives in the library, and the person who wished sees "Your wish is here". Mac and iPhone also notify while the app runs. Children's profiles see only wishes within their age limit and their own. Apple TV shows the wish list.
 - All apps: Settings › Playback can show a good-night screen when the sleep timer ends (off by default). It says when the server goes to sleep or turns off afterwards, and closes by itself after five minutes.
 
+- iPhone & iPad: Settings › Server Administration with everything the Mac, Linux app and browser manage: storage locations with a server folder browser, scans, Import Preview with corrections, Library Health, TMDB and OpenSubtitles, Review Matches, profiles (role, PIN, picture, age limit, screen time, content access), device codes and signed-in devices, server status and health, backups (check, encrypted backup to Files, restore), scrub previews, intros and credits, speech recognition, video conversion, limits, maintenance, diagnostics, power, server updates and the Danger Zone. On iPad, Settings has a sidebar like the Mac.
+- iPhone & iPad: protected changes ask once for the Server Password, which unlocks management for ten minutes and is never stored on the device.
+- iPhone & iPad: Wake Server on the "server is off" screen sends Wake-on-LAN for two minutes and connects once the server answers; Settings › Server shows whether waking can work and sends a wake signal.
+
 ### Fixed
 
+- iPhone & iPad: Wake-on-LAN also reaches a server found with Bonjour, whose name is now looked up to its IPv4 address.
 - Apple TV and iPhone & iPad: when the sleep timer's minutes run out, the player closes as on the other apps instead of only pausing. On Apple TV, the Menu button on the good-night screen now does the same as Done.
 - Browser and Mac: "Franchises in Library" and Save as Collection work again, and the browser can create and rename collections.
 - Server: removing or resetting a library no longer deletes smart lists and your own collections; a film that leaves a film series is removed from that collection.

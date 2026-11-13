@@ -32,8 +32,9 @@ not know it. Compare the fingerprint the browser shows with the one in the app, 
 
 **It went to sleep and does not wake up.** Wake-on-LAN must be allowed in the computer's firmware
 (BIOS/UEFI) and works only over a network cable on most computers. The Mac and Linux apps wake
-it when they open; iOS and tvOS may block the broadcast that wakes it, so open Aurelia on a Mac or
-Linux PC first. Away from home, wake it
+it when they open. On iPhone and iPad, *Wake Server* on the "server is off" screen sends the
+packet for two minutes, and Settings › Server › Wake-on-LAN says whether it can work; iOS and
+tvOS may block the broadcast part, so if nothing happens open Aurelia on a Mac or Linux PC first. Away from home, wake it
 through your router (for example the MyFRITZ!App) or keep it awake during set hours with
 `sudo aurelia sleep server --awake 17:00-23:30`. See
 [power saving](LINUX_SERVER.md#saving-power).

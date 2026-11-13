@@ -38,13 +38,35 @@ its screens are its own:
   like the iPhone passcode, seasons as a menu with the episodes listed below, and settings as an
   iOS form. The player works by touch; a hardware keyboard adds the arrow keys, Space and Escape.
   The app icon is the Mac app's Liquid Glass icon.
-- **Settings** hold everything that belongs to the profile on this device and nothing that
-  manages the server: Watch History (swipe to remove an entry, or clear it), Statistics with
+- **Settings** hold everything that belongs to the profile on this device: Watch History (swipe to remove an entry, or clear it), Statistics with
   watch time in minutes, hours and days, the last weeks as a chart, top titles and genres and a
   year in review that also plays as Wrapped (full-screen slides: tap right or left, hold to
   pause), and from the 2nd of a month last month's Wrapped (also on Home in that first week), Playback, the profile's own PIN (set, change, or turn off for ordinary
   profiles), the size of the stored artwork with a button to clear it, and the server's name,
   address and version.
+- **Server Administration** (from 2.9.0) gives the owner and administrators the settings the
+  Mac, the Linux app and the browser have, right below the profile in Settings; on an iPad
+  Settings shows a sidebar like the Mac. *Library*: storage locations (added with a browser of
+  the server's folders), scans, watching for changes, Import Preview with corrections, folders to
+  sort, files to check, left-out items and Library Health (duplicates, offline titles, titles
+  without information). *Metadata*: TMDB, finding or refreshing information, Review Matches,
+  OpenSubtitles, unused artwork and search. *Profiles and Devices*: profiles with name, picture,
+  role, PIN, children's age limit, screen time and content access, codes for new devices or the
+  code a device shows, and signed-in devices. *Server*: status, health, restart, devices and
+  backups, scrub previews, intros and credits, speech recognition, video conversion, limits,
+  maintenance, background jobs, backups (check, encrypted backup saved through the share sheet,
+  restore from a file) and diagnostics. *Power*, *Server Updates* and the *Danger Zone* appear
+  when the server offers them. The network is shown but changed on the server computer, because
+  a change can cut the iPhone off. Visibility follows the server: the owner sees everything,
+  administrators the library and metadata, and storage needs the whole library. Changes that the
+  server protects ask once for the Server Password, which unlocks management for ten minutes and
+  is never stored; the app then asks the server for a one-time approval of exactly that change.
+  Changing titles one by one (the metadata editor, matches, artwork) stays on the Mac and in the
+  browser.
+- **Wake Server**: when the saved server doesn't answer, *Wake Server* sends a Wake-on-LAN packet
+  now and every ten seconds for two minutes and connects as soon as it answers. Settings › Server
+  shows whether waking can work (how many network cards the server reported) and sends one packet
+  on request. A server found with Bonjour is looked up to its IPv4 address so waking reaches it.
 - **Movie Night** starts from Home, or joins a night someone else started there: everyone swipes
   the same posters (right for yes, left for nope, or the buttons), and the first title all
   voters like shows as a ticket with Play. Closing it leaves the night.
@@ -141,8 +163,11 @@ When the server supports `wishes-v1`, iPhone and iPad offer **Family Wishes** fr
 ## Known limits
 
 - Automated tests never play a real title; playback is checked by hand on real devices.
-- Waking a sleeping server sends a broadcast, which iOS may block for apps without Apple's
-  multicast permission; the server then has to be woken another way.
-- No UI tests yet; the logic tests cover the shared core.
+- Waking a sleeping server sends the packet straight to the server's last IPv4 addresses and to
+  their /24 broadcast address; iOS may block the broadcast for apps without Apple's multicast
+  permission, which needs a paid developer account. The direct packet reaches the server while the
+  router still knows its address; otherwise wake it another way, such as from a Mac or the router.
+- Server administration is checked by logic tests and against an isolated test server; there are
+  no iOS UI tests.
 - The app is not published as a download; build it from source as above. Away from home it works
   through a VPN, see [Watching away from home](REMOTE_ACCESS.md).

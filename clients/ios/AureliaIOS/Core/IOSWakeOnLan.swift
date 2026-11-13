@@ -51,6 +51,47 @@ enum IOSWakeOnLan {
     if let data = try? JSONEncoder().encode(all) { defaults.set(data, forKey: defaultsKey) }
   }
 
+  /// Remembers like `remember`, then looks up the IPv4 address behind a name such as
+  /// "Server.local", so Wake Server also works for a server found with Bonjour. The lookup runs in
+  /// the background; a name that doesn't resolve changes nothing.
+  static func rememberResolving(serverID: UUID, info: IOSServerInfo?, hosts: [String]) {
+    remember(serverID: serverID, info: info, hosts: hosts)
+    let names = hosts.filter { !isIPv4($0) }
+    guard !names.isEmpty else { return }
+    Task.detached(priority: .utility) {
+      let resolved = names.flatMap(resolveIPv4)
+      guard !resolved.isEmpty else { return }
+      remember(serverID: serverID, info: nil, hosts: resolved)
+    }
+  }
+
+  /// The IPv4 addresses of a host name, at most four, or none.
+  static func resolveIPv4(_ host: String) -> [String] {
+    let name = host.hasSuffix(".") ? String(host.dropLast()) : host
+    guard !name.isEmpty, !isIPv4(name), !name.contains(":") else { return [] }
+    var hints = addrinfo()
+    hints.ai_family = AF_INET
+    hints.ai_socktype = SOCK_DGRAM
+    var result: UnsafeMutablePointer<addrinfo>?
+    guard getaddrinfo(name, nil, &hints, &result) == 0, let first = result else { return [] }
+    defer { freeaddrinfo(first) }
+    var addresses: [String] = []
+    var current: UnsafeMutablePointer<addrinfo>? = first
+    while let entry = current, addresses.count < 4 {
+      if entry.pointee.ai_family == AF_INET, let address = entry.pointee.ai_addr {
+        var text = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+        address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { pointer in
+          var raw = pointer.pointee.sin_addr
+          _ = inet_ntop(AF_INET, &raw, &text, socklen_t(INET_ADDRSTRLEN))
+        }
+        let value = String(decoding: text.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        if isIPv4(value), !addresses.contains(value) { addresses.append(value) }
+      }
+      current = entry.pointee.ai_next
+    }
+    return addresses
+  }
+
   /// Forgets a server this device no longer connects to.
   static func forget(serverID: UUID, defaults: UserDefaults = .standard) {
     var all = load(defaults)
@@ -128,6 +169,36 @@ enum IOSWakeOnLan {
         }
       }
     }
+  }
+
+  /// What Settings shows about waking this server, and whether Wake Server can do anything.
+  struct Status: Equatable, Sendable {
+    let cards: Int
+    let addresses: Int
+    let appHost: String?
+
+    var canWake: Bool { appHost == nil && cards > 0 && addresses > 0 }
+    var summary: String {
+      if let appHost { return "Starts with Aurelia on the \(appHost)" }
+      if cards == 0 { return "Not reported by the server" }
+      if addresses == 0 { return "Connect once to learn its address" }
+      return cards == 1 ? "Ready · 1 network card" : "Ready · \(cards) network cards"
+    }
+  }
+
+  static func status(for serverID: UUID, defaults: UserDefaults = .standard) -> Status {
+    let target = target(for: serverID, defaults: defaults)
+    return Status(
+      cards: (target?.hardwareAddresses ?? []).compactMap(hardwareAddress).count,
+      addresses: target?.ipv4Hosts.count ?? 0,
+      appHost: appHost(for: serverID, defaults: defaults))
+  }
+
+  /// When Wake Server sends the packet again and how long it waits for the server, like the Mac:
+  /// a new packet every 10 seconds for two minutes.
+  enum Plan {
+    static let resendSeconds = 10
+    static let totalSeconds = 120
   }
 
   private static func load(_ defaults: UserDefaults) -> [String: Target] {

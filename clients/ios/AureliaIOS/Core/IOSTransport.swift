@@ -134,3 +134,89 @@ final class IOSPinnedSessionPool: @unchecked Sendable {
     "\(IOSServerAddress.trustHost(host))|\(fingerprint.uppercased())|\(lane.rawValue)"
   }
 }
+
+/// A connection of its own for administration that takes minutes: making or checking a backup,
+/// and moving an encrypted backup between this device and the server. Every connection still
+/// checks the pinned server identity.
+struct IOSLongRunningTransport: IOSHTTPTransport {
+  static func session(host: String, fingerprint: String) -> (URLSession, IOSTLSTrustDelegate) {
+    let delegate = IOSTLSTrustDelegate(mode: .pinned(fingerprint), allowedHost: host)
+    let configuration = IOSPinnedSessionPool.configuration()
+    configuration.timeoutIntervalForRequest = 300
+    configuration.timeoutIntervalForResource = 3600
+    return (URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil), delegate)
+  }
+
+  func execute(_ request: URLRequest, trust: IOSTrustMode) async throws -> IOSHTTPResponse {
+    guard let url = request.url, url.scheme == "https", let host = url.host,
+      case .pinned(let fingerprint) = trust
+    else { throw IOSCoreError.invalidAddress }
+    let (session, delegate) = Self.session(host: host, fingerprint: fingerprint)
+    defer { session.finishTasksAndInvalidate() }
+    let data: Data
+    let response: URLResponse
+    do {
+      (data, response) = try await session.data(for: request)
+    } catch {
+      if delegate.didRejectTrust { throw IOSCoreError.identityMismatch }
+      throw error
+    }
+    return try Self.response(response, body: data, delegate: delegate)
+  }
+
+  /// Saves what the server sends into `destination`, replacing a file already there.
+  func download(_ request: URLRequest, fingerprint: String, to destination: URL) async throws {
+    guard let host = request.url?.host, request.url?.scheme == "https" else {
+      throw IOSCoreError.invalidAddress
+    }
+    let (session, delegate) = Self.session(host: host, fingerprint: fingerprint)
+    defer { session.finishTasksAndInvalidate() }
+    let temporary: URL
+    let response: URLResponse
+    do {
+      (temporary, response) = try await session.download(for: request)
+    } catch {
+      if delegate.didRejectTrust { throw IOSCoreError.identityMismatch }
+      throw error
+    }
+    defer { try? FileManager.default.removeItem(at: temporary) }
+    try Task.checkCancellation()
+    _ = try Self.response(response, body: Data(), delegate: delegate)
+    if FileManager.default.fileExists(atPath: destination.path) {
+      try FileManager.default.removeItem(at: destination)
+    }
+    try FileManager.default.moveItem(at: temporary, to: destination)
+  }
+
+  /// Sends a file as it is, such as an encrypted backup to restore.
+  func upload(_ request: URLRequest, fingerprint: String, from file: URL) async throws
+    -> IOSHTTPResponse
+  {
+    guard let host = request.url?.host, request.url?.scheme == "https" else {
+      throw IOSCoreError.invalidAddress
+    }
+    let (session, delegate) = Self.session(host: host, fingerprint: fingerprint)
+    defer { session.finishTasksAndInvalidate() }
+    let data: Data
+    let response: URLResponse
+    do {
+      (data, response) = try await session.upload(for: request, fromFile: file)
+    } catch {
+      if delegate.didRejectTrust { throw IOSCoreError.identityMismatch }
+      throw error
+    }
+    return try Self.response(response, body: data, delegate: delegate)
+  }
+
+  private static func response(
+    _ response: URLResponse, body: Data, delegate: IOSTLSTrustDelegate
+  ) throws -> IOSHTTPResponse {
+    guard let http = response as? HTTPURLResponse else { throw IOSCoreError.invalidResponse }
+    let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, item in
+      if let name = item.key as? String, let value = item.value as? String { result[name] = value }
+    }
+    return IOSHTTPResponse(
+      statusCode: http.statusCode, headers: headers, body: body,
+      fingerprint: delegate.capturedFingerprint)
+  }
+}

@@ -282,7 +282,7 @@ final class IOSAppModel: ObservableObject {
       savedServerUnreachable = false
       let discovered = browser.servers.filter { $0.serverID == saved.serverID }
         .flatMap { [$0.baseURL] + $0.alternativeURLs }
-      IOSWakeOnLan.remember(
+      IOSWakeOnLan.rememberResolving(
         serverID: saved.serverID, info: candidate.info,
         hosts: ([candidate.baseURL] + discovered).compactMap(\.host))
       try await loadProfiles(run: run)
@@ -302,6 +302,35 @@ final class IOSAppModel: ObservableObject {
   }
 
   private func allowWaking() { wakeAllowedUntil = Date().addingTimeInterval(600) }
+
+  /// What Settings shows about waking the saved server.
+  var wakeOnLanStatus: IOSWakeOnLan.Status {
+    connection.map { IOSWakeOnLan.status(for: $0.serverID) }
+      ?? IOSWakeOnLan.Status(cards: 0, addresses: 0, appHost: nil)
+  }
+  /// Whether Wake Server is waiting for the server it woke.
+  @Published private(set) var isWakingServer = false
+
+  /// Sends the Wake-on-LAN packet once, when someone asks for it.
+  func sendWakeSignal() {
+    guard let saved = connection else { return }
+    IOSWakeOnLan.wake(serverID: saved.serverID)
+  }
+
+  /// Wake Server on the "server is off" screen: sends the packet now and again every ten seconds,
+  /// and connects as soon as the server answers, for up to two minutes.
+  func wakeServerNow() async {
+    guard let saved = connection, !isWakingServer, wakeOnLanStatus.canWake else { return }
+    isWakingServer = true
+    defer { isWakingServer = false }
+    allowWaking()
+    let deadline = Date().addingTimeInterval(TimeInterval(IOSWakeOnLan.Plan.totalSeconds))
+    while Date() < deadline, phase == .connection, connection?.serverID == saved.serverID {
+      IOSWakeOnLan.wake(serverID: saved.serverID)
+      do { try await Task.sleep(for: .seconds(IOSWakeOnLan.Plan.resendSeconds)) } catch { return }
+      if !isBusy { await reconnect() }
+    }
+  }
 
   private func wakeIfAllowed(_ serverID: UUID) {
     guard isForeground, let until = wakeAllowedUntil, until > Date() else { return }
@@ -344,7 +373,7 @@ final class IOSAppModel: ObservableObject {
           digits, deviceName: deviceName)
         guard current(run) else { return }
         let paired = try inspected.connection(authentication: auth)
-        IOSWakeOnLan.remember(
+        IOSWakeOnLan.rememberResolving(
           serverID: inspected.info.serverId, info: inspected.info,
           hosts: [inspected.baseURL.host].compactMap { $0 })
         try saveCredentials(paired)
