@@ -559,8 +559,12 @@ struct IOSPlayerView: View {
   /// Screen time is over (docs/SCREEN_TIME.md): a calm moon, the profile's name and when Aurelia
   /// opens again. Done closes the player; a whole-profile lock then returns to "Who's watching?".
   private var goodNightScreen: some View {
-    let words = IOSScreenTimeText.goodNight(
-      controller.screenTime, name: model.session?.user.shownName ?? "")
+    let profileName = model.session?.user.shownName ?? ""
+    let words =
+      controller.showsSleepTimerGoodNight
+      ? IOSScreenTimeText.goodNight(
+        sleepTimerStatus: controller.sleepTimerEndedStatus, name: profileName)
+      : IOSScreenTimeText.goodNight(controller.screenTime, name: profileName)
     return ZStack {
       RadialGradient(
         colors: [Color(red: 0.16, green: 0.2, blue: 0.38), Color(red: 0.02, green: 0.02, blue: 0.06)],
@@ -574,7 +578,9 @@ struct IOSPlayerView: View {
           .shadow(color: Color(red: 0.95, green: 0.89, blue: 0.66).opacity(0.45), radius: 20)
           .accessibilityHidden(true)
         Text(words.title).font(.largeTitle.weight(.bold)).foregroundStyle(.white)
-        Text(words.text).font(.title3).foregroundStyle(.white.opacity(0.75))
+        if !words.text.isEmpty {
+          Text(words.text).font(.title3).foregroundStyle(.white.opacity(0.75))
+        }
         Button("Done") { goodNightDone() }
           .buttonStyle(.glassProminent)
           .controlSize(.large)
@@ -584,13 +590,21 @@ struct IOSPlayerView: View {
       .multilineTextAlignment(.center)
       .padding(32)
     }
+    .contentShape(Rectangle())
+    .onTapGesture {
+      if controller.showsSleepTimerGoodNight {
+        goodNightDone()
+      }
+    }
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("player-good-night")
   }
 
   private func goodNightDone() {
-    let wholeProfile = controller.screenTime?.closesWholeProfile == true
-    controller.close()
+    let wholeProfile = IOSSleepTimerGoodNightPolicy.shouldCloseWholeProfile(
+      closesWholeProfile: controller.screenTime?.closesWholeProfile == true,
+      showsSleepTimerGoodNight: controller.showsSleepTimerGoodNight)
+    controller.dismissSleepGoodNight()
     if wholeProfile { Task { await model.switchProfile() } }
   }
 

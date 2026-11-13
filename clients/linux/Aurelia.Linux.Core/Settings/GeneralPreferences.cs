@@ -22,6 +22,7 @@ public sealed class GeneralPreferences(ISettingsStore store)
     public const string RestsWhenUnusedKey = "restsWhenUnused";
     public const string RestMinutesKey = "restMinutes";
     public const string ActivityPageKey = "settingsActivityPage";
+    public const string WishNotificationsEnabledKey = "wishNotificationsEnabled";
     public static readonly int[] RestMinuteChoices = [5, 10, 15, 30, 60];
 
     public ISettingsStore Store { get; } = store;
@@ -78,6 +79,12 @@ public sealed class GeneralPreferences(ISettingsStore store)
     {
         get => Store.Read<string>(ActivityPageKey) == "history" ? "history" : "statistics";
         set => Store.Write(ActivityPageKey, value == "history" ? "history" : "statistics");
+    }
+
+    public bool WishNotificationsEnabled
+    {
+        get => Store.Read<bool?>(WishNotificationsEnabledKey) ?? true;
+        set => Store.Write(WishNotificationsEnabledKey, value);
     }
 
     /// <summary>

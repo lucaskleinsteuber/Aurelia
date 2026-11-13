@@ -39,6 +39,8 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
 
     public bool SupportsCollectionsV3 => Supports(ServerFeatures.CollectionsV3);
 
+    public bool SupportsWishes => Supports(ServerFeatures.Wishes);
+
     public Task<HomeResponse> HomeAsync(CancellationToken cancellation) => Get<HomeResponse>("/api/v1/home", cancellation);
 
     /// <summary>
@@ -301,6 +303,97 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
 
     public Task LeaveMovieNightAsync(Guid nightId, CancellationToken cancellation) =>
         Send<AureliaApi.NoContent>(HttpMethod.Delete, $"/api/v1/movie-night/{nightId}/members/me", null, cancellation);
+
+    // Family Wishes.
+    public Task<WishSummaryResponse> WishSummaryAsync(CancellationToken cancellation) =>
+        Get<WishSummaryResponse>("/api/v1/wishes/summary", cancellation);
+
+    public Task<WishListResponse> WishesAsync(WishState? state, CancellationToken cancellation)
+    {
+        var path = state is { } value
+            ? $"/api/v1/wishes?state={value.ToString().ToLowerInvariant()}"
+            : "/api/v1/wishes";
+        return Get<WishListResponse>(path, cancellation);
+    }
+
+    public Task<WishSearchResponse> SearchWishesAsync(string query, MediaKind? kind, CancellationToken cancellation)
+    {
+        var path = "/api/v1/wishes/search?query=" + Uri.EscapeDataString(query);
+        if (kind is { } filter)
+            path += "&kind=" + (filter == MediaKind.Series ? "series" : "movie");
+        return Get<WishSearchResponse>(path, cancellation);
+    }
+
+    public async Task<CreateWishOutcome> CreateWishAsync(CreateWishRequest requestBody, CancellationToken cancellation)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/wishes");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Profile.Token);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Content = JsonContent.Create(requestBody, options: AureliaJson.Options);
+        HttpResponseMessage response;
+        try
+        {
+            response = await api.Pinned(Server.Address, Server.Fingerprint).SendAsync(request, cancellation);
+        }
+        catch (HttpRequestException)
+        {
+            throw AureliaApiException.Unreachable();
+        }
+        catch (TaskCanceledException) when (!cancellation.IsCancellationRequested)
+        {
+            throw AureliaApiException.Unreachable();
+        }
+        using (response)
+        {
+            if (response.StatusCode == HttpStatusCode.Conflict)
+            {
+                try
+                {
+                    var conflict = await response.Content.ReadFromJsonAsync<WishAlreadyInLibraryProblem>(AureliaJson.Options, cancellation);
+                    if (conflict is not null)
+                        return new CreateWishOutcome(CreateWishStatus.AlreadyInLibrary, Existing: conflict);
+                }
+                catch (System.Text.Json.JsonException)
+                {
+                }
+            }
+            if (!response.IsSuccessStatusCode) throw await AureliaApi.ProblemAsync(response, cancellation);
+            var created = await response.Content.ReadFromJsonAsync<CreateWishResponse>(AureliaJson.Options, cancellation)
+                ?? throw AureliaApiException.InvalidResponse();
+            return new CreateWishOutcome(
+                created.MergedIntoExistingSupport ? CreateWishStatus.MergedSupport : CreateWishStatus.Created,
+                Wish: created.Wish);
+        }
+    }
+
+    public Task<WishSummary> SetWishSupportAsync(Guid wishId, bool supported, CancellationToken cancellation) =>
+        Send<WishSummary>(HttpMethod.Put, $"/api/v1/wishes/{wishId}/support", new SetWishSupportRequest(supported), cancellation);
+
+    public Task<WishSummary> UpdateWishStateAsync(Guid wishId, UpdateWishStateRequest request, CancellationToken cancellation) =>
+        Send<WishSummary>(HttpMethod.Put, $"/api/v1/wishes/{wishId}/state", request, cancellation);
+
+    public Task DeleteWishAsync(Guid wishId, CancellationToken cancellation) =>
+        Send<AureliaApi.NoContent>(HttpMethod.Delete, $"/api/v1/wishes/{wishId}", null, cancellation);
+
+    public Task MarkWishesSeenAsync(CancellationToken cancellation) =>
+        Send<AureliaApi.NoContent>(HttpMethod.Post, "/api/v1/wishes/seen", new { }, cancellation);
+
+    public async Task<byte[]?> WishPosterAsync(string posterPath, CancellationToken cancellation, int width = 200)
+    {
+        var path = $"/api/v1/wishes/poster?path={Uri.EscapeDataString(posterPath)}&width={width.ToString(CultureInfo.InvariantCulture)}";
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Profile.Token);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("image/*"));
+        try
+        {
+            using var response = await api.Pinned(Server.Address, Server.Fingerprint).SendAsync(request, cancellation);
+            return response.IsSuccessStatusCode ? await response.Content.ReadAsByteArrayAsync(cancellation) : null;
+        }
+        catch (Exception error) when (error is HttpRequestException or TaskCanceledException)
+        {
+            return null;
+        }
+    }
 
     private static string ScopeName(WatchStateScope scope) => scope switch
     {

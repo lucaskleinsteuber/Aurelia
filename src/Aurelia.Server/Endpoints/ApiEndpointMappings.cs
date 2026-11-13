@@ -175,10 +175,15 @@ public static class ApiEndpointMappings
         var playback = api.MapGroup("/playback").RequireAuthorization();
         playback.MapDelete("/{playbackId:guid}", RevokePlaybackAsync);
         // A player's sleep timer ended; a server with sleep mode may sleep if nothing else plays.
-        playback.MapPost("/sleep-timer-ended", (ServerSleepSignal sleep) =>
+        playback.MapPost("/sleep-timer-ended", (ServerSleepSignal sleep, ServerPowerSettingsStore power) =>
         {
             sleep.SleepTimerEnded();
-            return Results.NoContent();
+            var settings = power.Read();
+            var powerMode = settings.Available ? settings.Mode : "off";
+            return Results.Ok(new SleepTimerEndedResponse(
+                powerMode,
+                settings.AfterSleepTimer,
+                (int)ServerSleepSignal.Delay.TotalMinutes));
         });
 
         api.MapMethods("/streams/{ticket}", [HttpMethods.Get, HttpMethods.Head], StreamAsync)

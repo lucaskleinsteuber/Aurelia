@@ -80,7 +80,8 @@
       "media-segments-v2",
       "server-speech-v1",
       "suggestions-v1",
-      "screen-time-v1"
+      "screen-time-v1",
+      "wishes-v1"
     ]
   },
   "problem": {

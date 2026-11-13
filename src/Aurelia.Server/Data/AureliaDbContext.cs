@@ -82,6 +82,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public DbSet<SyncChange> SyncChanges => Set<SyncChange>();
     public DbSet<MediaExclusion> MediaExclusions => Set<MediaExclusion>();
     public DbSet<LibraryMutation> LibraryMutations => Set<LibraryMutation>();
+    public DbSet<WishRecord> Wishes => Set<WishRecord>();
+    public DbSet<WishSupport> WishSupports => Set<WishSupport>();
 
     public override Task<int> SaveChangesAsync(
         CancellationToken cancellationToken = default)
@@ -403,6 +405,46 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
         modelBuilder.Entity<MediaSegment>().Property(segment => segment.AnalyzedFileModifiedAt).HasConversion(nullableDateTimeOffsetConverter);
         modelBuilder.Entity<ScreenTimeDay>().Property(day => day.LimitReachedAt).HasConversion(nullableDateTimeOffsetConverter);
         modelBuilder.Entity<ScreenTimeDay>().Property(day => day.LastReportAt).HasConversion(nullableDateTimeOffsetConverter);
+        modelBuilder.Entity<WishRecord>(entity =>
+        {
+            entity.HasKey(wish => wish.Id);
+            entity.Property(wish => wish.Kind).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(wish => wish.Provider).HasMaxLength(32);
+            entity.Property(wish => wish.ProviderMediaId).HasMaxLength(64);
+            entity.Property(wish => wish.Title).HasMaxLength(512).IsRequired();
+            entity.Property(wish => wish.Overview).HasMaxLength(4096);
+            entity.Property(wish => wish.PosterPath).HasMaxLength(512);
+            entity.Property(wish => wish.AgeRating).HasMaxLength(64);
+            entity.Property(wish => wish.Note).HasMaxLength(1000);
+            entity.Property(wish => wish.State).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(wish => wish.ResolutionNote).HasMaxLength(1000);
+            entity.Property(wish => wish.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(wish => wish.ResolvedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(wish => wish.SeenByWisherAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.HasIndex(wish => new { wish.State, wish.CreatedAt });
+            entity.HasIndex(wish => new { wish.UserId, wish.State, wish.SeenByWisherAt });
+            entity.HasIndex(wish => wish.ResolvedByUserId);
+            entity.HasIndex(wish => wish.FulfilledMediaItemId);
+            entity.HasIndex(wish => new { wish.Provider, wish.ProviderMediaId, wish.Kind })
+                .IsUnique()
+                .HasFilter("\"State\" = 'Open' AND \"Provider\" IS NOT NULL AND \"ProviderMediaId\" IS NOT NULL");
+            entity.HasOne(wish => wish.User).WithMany().HasForeignKey(wish => wish.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(wish => wish.ResolvedByUser).WithMany().HasForeignKey(wish => wish.ResolvedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(wish => wish.FulfilledMediaItem).WithMany().HasForeignKey(wish => wish.FulfilledMediaItemId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+        modelBuilder.Entity<WishSupport>(entity =>
+        {
+            entity.HasKey(support => new { support.WishId, support.UserId });
+            entity.Property(support => support.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(support => support.UserId);
+            entity.HasOne(support => support.Wish).WithMany(wish => wish.Supports).HasForeignKey(support => support.WishId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(support => support.User).WithMany().HasForeignKey(support => support.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<MediaKeywords>(entity =>
         {
             entity.HasKey(keywords => keywords.MediaItemId);

@@ -52,8 +52,10 @@ final class TVPlaybackController: ObservableObject {
   @Published private(set) var suggestionToStart: TVCatalogItem?
   /// A children's profile's screen time, from the ticket and then every minute (docs/SCREEN_TIME.md).
   @Published private(set) var screenTime: TVScreenTimeStatus?
-  /// Screen time is over: the good-night screen shows instead of the next title or an error.
+  /// Screen time or sleep timer is over: the good-night screen shows instead of the next title or an error.
   @Published private(set) var showsGoodNight = false
+  @Published private(set) var showsSleepTimerGoodNight = false
+  @Published private(set) var sleepTimerEndedStatus: TVSleepTimerEndedResponse?
   private var lastScreenTimeCheck = Date()
   private var screenTimeTask: Task<Void, Never>?
   /// A separate local relay for timeline previews; its reads are marked as previews, which
@@ -80,6 +82,7 @@ final class TVPlaybackController: ObservableObject {
   private let adaptiveStreaming: Bool
   private let preferencesStore: TVPlaybackPreferencesStore
   private var sleepTask: Task<Void, Never>?
+  private var sleepGoodNightAutoCloseTask: Task<Void, Never>?
   private var advanceTask: Task<Void, Never>?
   private var watchdogTask: Task<Void, Never>?
   private var audioSelectionTask: Task<Void, Never>?
@@ -212,7 +215,7 @@ final class TVPlaybackController: ObservableObject {
   }
 
   func togglePlayPause() {
-    guard !closed, errorMessage == nil else { return }
+    guard !closed, !showsGoodNight, errorMessage == nil else { return }
     if scrubPosition != nil { commitScrub() }
     wantsPlayback.toggle()
     if !wantsPlayback { isStarting = false }
@@ -390,19 +393,16 @@ final class TVPlaybackController: ObservableObject {
 
   func setSleepTimer(_ timer: TVSleepTimer) {
     sleepTask?.cancel()
+    sleepTask = nil
     sleepTimer = timer
     trackMenu = nil
     if case .minutes(let minutes) = timer {
+      let delay = Double(max(0, minutes)) * 60
+      let sleep = runtime.sleepTimerSleep
       sleepTask = Task { [weak self] in
-        do { try await Task.sleep(for: .seconds(Double(minutes) * 60)) } catch { return }
-        guard let self, !closed else { return }
-        wantsPlayback = false
-        engine.pause()
-        sleepTimer = .off
-        await saveProgress(finished: false)
-        userInteracted()
-        // Servers before 1.8.2 do not know the signal; nothing else depends on it.
-        try? await api.sleepTimerEnded()
+        do { try await sleep(delay) } catch { return }
+        guard let self else { return }
+        await self.finishSleepTimer()
       }
     }
     userInteracted()
@@ -585,7 +585,9 @@ final class TVPlaybackController: ObservableObject {
   }
 
   func back() {
-    if scrubPosition != nil {
+    if showsSleepTimerGoodNight {
+      dismissSleepGoodNight()
+    } else if scrubPosition != nil {
       cancelScrub()
     } else if showsSuggestionEndScreen {
       doneWithSuggestions()
@@ -639,13 +641,70 @@ final class TVPlaybackController: ObservableObject {
   /// The friendly end of the day; nothing else starts, and the view shows the moon.
   private func showGoodNight() {
     guard !closed, !showsGoodNight else { return }
+    wantsPlayback = false
     engine.pause()
+    runtime.setIdleTimerDisabled(false)
     upNext = nil
     showsSuggestion = false
     showsSuggestionEndScreen = false
     suggestionToStart = nil
+    trackMenu = nil
     controlsVisible = false
+    showsSleepTimerGoodNight = false
+    sleepTimerEndedStatus = nil
     showsGoodNight = true
+  }
+
+  private func finishSleepTimer() async {
+    guard !closed else { return }
+    wantsPlayback = false
+    engine.pause()
+    sleepTimer = .off
+    runtime.setIdleTimerDisabled(false)
+    await saveProgress(finished: false)
+    guard !closed else { return }
+    // Servers before 1.8.2 do not know the signal; servers before 2.13 return 204.
+    let status = try? await api.sleepTimerEnded()
+    guard !closed else { return }
+    if TVSleepTimerGoodNightPolicy.shouldShowGoodNight(
+      timerEnded: true,
+      showGoodNightOnSleepTimer: preferences.showGoodNightOnSleepTimer,
+      closed: closed)
+    {
+      showSleepTimerGoodNight(status: status)
+    } else {
+      close()
+    }
+  }
+
+  private func showSleepTimerGoodNight(status: TVSleepTimerEndedResponse?) {
+    guard !closed, !showsGoodNight else { return }
+    wantsPlayback = false
+    engine.pause()
+    runtime.setIdleTimerDisabled(false)
+    upNext = nil
+    showsSuggestion = false
+    showsSuggestionEndScreen = false
+    suggestionToStart = nil
+    trackMenu = nil
+    controlsVisible = false
+    sleepTimerEndedStatus = status
+    showsSleepTimerGoodNight = true
+    showsGoodNight = true
+    sleepGoodNightAutoCloseTask?.cancel()
+    let sleep = runtime.sleepTimerSleep
+    sleepGoodNightAutoCloseTask = Task { [weak self] in
+      do { try await sleep(TVSleepTimerGoodNightPolicy.autoCloseDurationSeconds) } catch { return }
+      guard let self, !self.closed else { return }
+      self.close()
+    }
+  }
+
+  func dismissSleepGoodNight() {
+    guard showsSleepTimerGoodNight else { return }
+    sleepGoodNightAutoCloseTask?.cancel()
+    sleepGoodNightAutoCloseTask = nil
+    close()
   }
 
   func close() {
@@ -808,6 +867,12 @@ final class TVPlaybackController: ObservableObject {
     assignIfChanged(&audioSelectionPending, engine.audioSelectionPending)
     assignIfChanged(&subtitleSelectionPending, engine.subtitleSelectionPending)
     assignIfChanged(&playbackRate, engine.playbackRate)
+    runtime.setIdleTimerDisabled(isPlaying && !showsGoodNight && !closed)
+    if showsGoodNight {
+      controlsVisible = false
+      if isPlaying { engine.pause() }
+      return
+    }
     if !wantsPlayback, isPlaying {
       engine.pause()
       return
@@ -940,8 +1005,9 @@ final class TVPlaybackController: ObservableObject {
       }
     } else {
       if sleepTimer == .endOfEpisode {
-        let api = api
-        Task { try? await api.sleepTimerEnded() }
+        sleepTimer = .off
+        advanceTask = Task { [weak self] in await self?.finishSleepTimer() }
+        return
       }
       close()
     }
@@ -1216,11 +1282,13 @@ final class TVPlaybackController: ObservableObject {
     openingTask?.cancel()
     renewalTask?.cancel()
     sleepTask?.cancel()
+    sleepGoodNightAutoCloseTask?.cancel()
     advanceTask?.cancel()
     watchdogTask?.cancel()
     cancelTrackSelections()
     progressTask?.cancel()
     controlsTask?.cancel()
+    runtime.setIdleTimerDisabled(false)
     relayGeneration = UUID()
     engine.stop()
     relay?.stop()

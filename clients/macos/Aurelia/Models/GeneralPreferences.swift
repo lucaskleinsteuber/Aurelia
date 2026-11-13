@@ -60,6 +60,7 @@ enum SidebarPreferences {
     .library,
     .collections,
     .watchlist,
+    .wishes,
     .recentlyAdded,
     .tvShows,
     .movies,
@@ -139,6 +140,8 @@ enum GeneralPreferenceKeys {
   static let showWatchlistInSidebar = "AureliaShowWatchlistInSidebar"
   static let showCollectionsInSidebar = "AureliaShowCollectionsInSidebar"
   static let hideOfflineTitles = "AureliaHideOfflineTitles"
+  static let wishNotificationsEnabled = "AureliaWishNotificationsEnabled"
+  static let wishNotificationsPrompted = "AureliaWishNotificationsPrompted"
 }
 
 /// What Settings › General changes in the library: rows, grids and poster size.

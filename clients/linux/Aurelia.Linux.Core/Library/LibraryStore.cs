@@ -10,7 +10,7 @@ namespace Aurelia.Linux.Core.Library;
 /// after a change it reloads what the change touched and raises <see cref="Changed"/>. When the
 /// server refuses the profile, <paramref name="onSessionFailure"/> returns the app to the picker.
 /// </summary>
-public sealed partial class LibraryStore(LibraryClient client, ArtworkCache artwork, GeneralPreferences preferences, Action<AureliaApiException> onSessionFailure)
+public sealed partial class LibraryStore(LibraryClient client, ArtworkCache artwork, GeneralPreferences preferences, Action<AureliaApiException> onSessionFailure, WishPosterCache? wishPosters = null)
     : ObservableObject
 {
     private const int BrowseCacheSize = 24;
@@ -20,6 +20,7 @@ public sealed partial class LibraryStore(LibraryClient client, ArtworkCache artw
     private IReadOnlyList<CatalogItemSummary> catalog = [];
     private IReadOnlyList<CollectionSummary> collections = [];
     private HashSet<Guid> watchlist = [];
+    private WishSummaryResponse? wishSummary;
     private bool isLoading;
     private string? error;
     private long revision;
@@ -30,9 +31,14 @@ public sealed partial class LibraryStore(LibraryClient client, ArtworkCache artw
     /// <summary>Raised after any data changed, so pages reload what they show.</summary>
     public event Action? Changed;
 
+    /// <summary>Raised when background sync sees a new wish (for admins) or fulfilled wish (for wishers).</summary>
+    public event Action<WishNotificationEvent>? WishNotificationRequested;
+
     public LibraryClient Client { get; } = client;
 
     public ArtworkCache Artwork { get; } = artwork;
+
+    public WishPosterCache WishPosters { get; } = wishPosters ?? new WishPosterCache(null);
 
     public GeneralPreferences Preferences { get; } = preferences;
 
@@ -75,6 +81,26 @@ public sealed partial class LibraryStore(LibraryClient client, ArtworkCache artw
 
     public bool CanManageMedia => Client.Profile.CanManageMedia;
 
+    public bool IsWishAdmin => WishPresentation.IsAdmin(Client.Profile.User);
+
+    public WishSummaryResponse? WishSummary
+    {
+        get => wishSummary;
+        private set
+        {
+            if (!SetProperty(ref wishSummary, value)) return;
+            OnPropertyChanged(nameof(WishBadgeCount));
+        }
+    }
+
+    public int WishBadgeCount => Client.SupportsWishes ? WishPresentation.BadgeCount(WishSummary, IsWishAdmin) : 0;
+
+    public void UpdateWishSummary(WishSummaryResponse summary)
+    {
+        WishSummary = summary;
+        NotifyChanged();
+    }
+
     public bool IsWatchlisted(Guid mediaId) => watchlist.Contains(mediaId);
 
     /// <summary>Loads Home, the catalog, collections and the watchlist together.</summary>
@@ -89,6 +115,7 @@ public sealed partial class LibraryStore(LibraryClient client, ArtworkCache artw
             var catalogTask = Client.BrowseAsync(new BrowseQuery(), null, CancellationToken.None);
             var collectionsTask = Client.CollectionsAsync(CancellationToken.None);
             var watchlistTask = Client.SupportsWatchlist ? Client.WatchlistAsync(CancellationToken.None) : Task.FromResult<WatchlistResponse?>(null)!;
+            var wishSummaryTask = RefreshWishSummaryAsync(notify: wishSummary is not null);
             // The first Home is shown as soon as it arrives; the whole catalog and every collection
             // of a large library take longer and fill in the rows after it.
             if (home is null)
@@ -99,7 +126,7 @@ public sealed partial class LibraryStore(LibraryClient client, ArtworkCache artw
                 Error = null;
                 NotifyChanged();
             }
-            await Task.WhenAll(homeTask, catalogTask, collectionsTask, watchlistTask);
+            await Task.WhenAll(homeTask, catalogTask, collectionsTask, watchlistTask, wishSummaryTask);
             if (request != homeRequest) return;
             Home = homeTask.Result;
             Catalog = catalogTask.Result;
@@ -170,6 +197,27 @@ public sealed partial class LibraryStore(LibraryClient client, ArtworkCache artw
         catch (AureliaApiException failure)
         {
             Report(failure);
+        }
+    }
+
+    public async Task RefreshWishSummaryAsync(bool notify)
+    {
+        if (!Client.SupportsWishes) return;
+        try
+        {
+            var previous = wishSummary;
+            var current = await Client.WishSummaryAsync(CancellationToken.None);
+            WishSummary = current;
+            NotifyChanged();
+            if (notify && Preferences.WishNotificationsEnabled
+                && WishPresentation.NotificationForChange(previous, current, IsWishAdmin) is { } notification)
+            {
+                WishNotificationRequested?.Invoke(notification);
+            }
+        }
+        catch (AureliaApiException)
+        {
+            // Keep wish badge updates non-blocking for library browsing.
         }
     }
 
@@ -381,6 +429,8 @@ public sealed partial class LibraryStore(LibraryClient client, ArtworkCache artw
             if (areas.Contains(SyncChangeArea.Collections)) Collections = await Client.CollectionsAsync(CancellationToken.None);
             if (areas.Contains(SyncChangeArea.UserState) && Client.SupportsWatchlist)
                 watchlist = [.. (await Client.WatchlistAsync(CancellationToken.None)).MediaIds];
+            if (areas.Contains(SyncChangeArea.UserState) && Client.SupportsWishes)
+                await RefreshWishSummaryAsync(notify: true);
             ClearBrowseCache();
             NotifyChanged();
         }

@@ -15,6 +15,8 @@ struct IOSPlaybackSettingsView: View {
           .accessibilityIdentifier("settings-resume")
         Toggle("Play Next Episode Automatically", isOn: $value.automaticallyPlayNextEpisode)
           .accessibilityIdentifier("settings-next")
+        Toggle("Show Good Night When the Sleep Timer Ends", isOn: $value.showGoodNightOnSleepTimer)
+          .accessibilityIdentifier("settings-sleep-good-night")
         Picker("Dialogue Boost", selection: $value.dialogueBoost) {
           ForEach(DialogueBoost.allCases, id: \.self) { Text($0.title).tag($0) }
         }.accessibilityIdentifier("settings-dialogue-boost")

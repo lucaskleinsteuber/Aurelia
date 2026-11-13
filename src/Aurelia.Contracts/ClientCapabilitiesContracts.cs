@@ -10,7 +10,7 @@ public static class ServerFeatures
         "library-state-v1", "server-readiness-v1", "device-authorization-v1", "artwork-variants-v1",
         "catalog-pages-500-v1", PreviewStreams, WebApp, ProfilePersonalization, AgeLimits,
         WebPairingCode, CinemaTrailers, MovieNight, YearWrapped, MonthlyWrapped, MediaSegments, ServerSpeech, Suggestions,
-        ScreenTime,
+        ScreenTime, Wishes,
     });
 
     /// <summary>
@@ -64,6 +64,9 @@ public static class ServerFeatures
 
     /// <summary>Bedtime, a daily limit and "one more episode" for children's profiles ("screen-time-v1", docs/SCREEN_TIME.md).</summary>
     public const string ScreenTime = "screen-time-v1";
+
+    /// <summary>Family wishlist ("wishes-v1", docs/WISHES.md).</summary>
+    public const string Wishes = "wishes-v1";
 
     /// <summary>
     /// User-created collections, smart lists, franchises, and collection management ("collections-v2").

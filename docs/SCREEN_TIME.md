@@ -71,3 +71,14 @@ hide the settings.
 - Only the database stores screen time: the rules, and each day's watched seconds and
   exceptions. Days older than 90 days are removed.
 - Owner and administrator profiles never have screen time.
+
+## Good Night after the sleep timer
+
+Any profile can turn on **Show Good Night When the Sleep Timer Ends** in **Playback Settings** (off by default, saved per client/device profile so existing settings keep working).
+
+- When a playback sleep timer (minutes or end of episode) expires, the player pauses playback, releases its screen-awake lock/inhibitor, and reports `POST /api/v1/playback/sleep-timer-ended`.
+- The server responds with `{ powerMode, afterSleepTimer, minutes }` (`200 OK`; older servers return `204` or `404`).
+- When the setting is off, the player returns directly to the library as before. When the setting is on, the player shows the Good-Night screen in sleep-timer mode instead:
+  - It greets the profile (`Good night, <name>` or `Good night`) and never shows screen-time wake times (`See you at …`).
+  - Only if `afterSleepTimer` is true and `powerMode` is `sleep` or `shutdown`, it notes when the server will sleep or turn off (`off`, `stop`, or `false` omit that line).
+  - Unlike a whole-profile screen-time lock, dismissing the Good-Night screen (click, tap, keyboard, Apple TV Menu/Done, or the 5-minute auto-close timer) returns to the library without switching or locking the profile.

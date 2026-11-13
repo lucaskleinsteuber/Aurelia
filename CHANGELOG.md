@@ -20,9 +20,12 @@ versioned commit, so their skipped numbers are preserved.
 - Mac, browser, Linux, Apple TV and iPhone & iPad: five minutes before the time, the player says it is the last episode and offers no Up Next. When time is up, a good-night screen shows the profile's name and when Aurelia opens again, instead of the next episode or an error. "Who's watching?" shows a closed profile with a moon and "Good night · back at 07:00".
 - Server, browser, Mac, Linux, iPhone & iPad and Apple TV: collections work like box sets. One can hold movies, whole series, single seasons (such as a show's Specials) and single episodes, in your own order or by release or title, with a description, a cover and a background picture. Without pictures of its own, a collection shows its film series' TMDB artwork or a cover made from its titles.
 - All apps: a collection's page shows its years, running time and how much of it is watched, and Play or Resume continues through it in order. Apple TV shows and plays collections; the other apps also edit them, add seasons and episodes and save a film series or universe as an editable collection.
+- Server, browser, Mac, Linux and iPhone & iPad: a family wish list. Anyone can wish for a movie or show found on TMDB (or typed in when TMDB is off), and others can add "Me Too". Administrators see a count of open wishes and mark them fulfilled or declined; a wish is fulfilled by itself when the title arrives in the library, and the person who wished sees "Your wish is here". Mac and iPhone also notify while the app runs. Children's profiles see only wishes within their age limit and their own. Apple TV shows the wish list.
+- All apps: Settings › Playback can show a good-night screen when the sleep timer ends (off by default). It says when the server goes to sleep or turns off afterwards, and closes by itself after five minutes.
 
 ### Fixed
 
+- Apple TV and iPhone & iPad: when the sleep timer's minutes run out, the player closes as on the other apps instead of only pausing. On Apple TV, the Menu button on the good-night screen now does the same as Done.
 - Browser and Mac: "Franchises in Library" and Save as Collection work again, and the browser can create and rename collections.
 - Server: removing or resetting a library no longer deletes smart lists and your own collections; a film that leaves a film series is removed from that collection.
 

@@ -52,7 +52,13 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
       if (response.ok) throw new ApiError(response.status, "invalid_response", "The server returned an unreadable answer. Try again.");
     }
     if (!response.ok) {
-      throw new ApiError(response.status, value?.code ?? `http_${response.status}`, value?.message ?? defaultMessage(response.status));
+      const error = new ApiError(response.status, value?.code ?? `http_${response.status}`, value?.message ?? defaultMessage(response.status));
+      if (value && typeof value === "object") {
+        if (value.mediaId != null) error.mediaId = value.mediaId;
+        if (value.title != null) error.mediaTitle = value.title;
+        if (value.kind != null) error.mediaKind = value.kind;
+      }
+      throw error;
     }
     return value;
   }
@@ -241,6 +247,16 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     removeSceneNote: (mediaId, noteId, revision, options = {}) =>
       request(`/api/v1/media/${id(mediaId)}/notes/${id(noteId)}?${new URLSearchParams({ revision })}`, { ...options, method: "DELETE" }),
     sleepTimerEnded: () => request("/api/v1/playback/sleep-timer-ended", { method: "POST", keepalive: true }),
+    // Family Wishes ("wishes-v1")
+    wishes: (state, options = {}) => request(state ? `/api/v1/wishes?${new URLSearchParams({ state })}` : "/api/v1/wishes", options),
+    wishSummary: (options = {}) => request("/api/v1/wishes/summary", options),
+    wishSearch: (query, kind, options = {}) =>
+      request(`/api/v1/wishes/search?${new URLSearchParams(kind ? { query, kind } : { query })}`, options),
+    createWish: (body, options = {}) => request("/api/v1/wishes", { ...options, method: "POST", body }),
+    deleteWish: (wishId, options = {}) => request(`/api/v1/wishes/${id(wishId)}`, { ...options, method: "DELETE" }),
+    setWishSupport: (wishId, supported, options = {}) => request(`/api/v1/wishes/${id(wishId)}/support`, { ...options, method: "PUT", body: { supported } }),
+    updateWishState: (wishId, body, options = {}) => request(`/api/v1/wishes/${id(wishId)}/state`, { ...options, method: "PUT", body }),
+    markWishesSeen: (options = {}) => request("/api/v1/wishes/seen", { ...options, method: "POST" }),
     revokePlayback: (playbackId) => request(`/api/v1/playback/${id(playbackId)}`, { method: "DELETE", keepalive: true }),
     progress: (mediaId) => request(`/api/v1/media/${id(mediaId)}/progress`),
     saveProgress: (mediaId, body, { keepalive = false } = {}) =>

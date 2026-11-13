@@ -37,10 +37,26 @@
                  AutomationProperties.Name="Library pages">
           <ListBox.ItemTemplate>
             <DataTemplate x:DataType="views:SidebarItem">
-              <StackPanel Orientation="Horizontal" Spacing="12" AutomationProperties.Name="{Binding Title}">
-                <PathIcon Data="{Binding Icon}" Width="18" Height="18" />
-                <TextBlock Text="{Binding Title}" VerticalAlignment="Center" />
-              </StackPanel>
+              <DockPanel AutomationProperties.Name="{Binding Title}">
+                <Border DockPanel.Dock="Right"
+                        IsVisible="{Binding HasBadge}"
+                        Background="{StaticResource AureliaAccentBrush}"
+                        CornerRadius="9"
+                        Padding="6,1"
+                        Margin="6,0,0,0"
+                        VerticalAlignment="Center">
+                  <TextBlock Text="{Binding BadgeText}"
+                             FontSize="11"
+                             FontWeight="SemiBold"
+                             Foreground="#0A0C12"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center" />
+                </Border>
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                  <PathIcon Data="{Binding Icon}" Width="18" Height="18" />
+                  <TextBlock Text="{Binding Title}" VerticalAlignment="Center" />
+                </StackPanel>
+              </DockPanel>
             </DataTemplate>
           </ListBox.ItemTemplate>
         </ListBox>

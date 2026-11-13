@@ -13,7 +13,8 @@ public sealed class MetadataService(
     ArtworkStore artworkStore,
     CatalogMutationGate mutations,
     MetadataJobStore jobs,
-    CollectionArtworkService? collectionArtwork = null)
+    CollectionArtworkService? collectionArtwork = null,
+    WishService? wishes = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -254,6 +255,8 @@ public sealed class MetadataService(
         await JoinUniversesAsync(item, provider.Keywords, cancellationToken);
         await database.SaveChangesAsync(cancellationToken);
         collectionArtwork?.DeleteFileNames(staleFiles);
+        if (wishes is not null)
+            await wishes.AutoFulfillForMediaAsync(item.Id, item.Kind, metadata.Provider, metadata.ProviderMediaId, cancellationToken);
         original.Metadata = metadata;
     }
 

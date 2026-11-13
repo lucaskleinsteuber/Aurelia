@@ -30,7 +30,9 @@ public sealed record SidebarLayout(IReadOnlyList<LibraryDestination> Order, IRea
 
     public static string FormatOrder(IEnumerable<LibraryDestination> order) => string.Join(',', order.Select(d => d.Identifier()));
 
-    /// <summary>The pages shown, in order. The Watchlist needs a server that supports it.</summary>
-    public IReadOnlyList<LibraryDestination> VisibleItems(bool supportsWatchlist) =>
-        Order.Where(d => !Hidden.Contains(d) && (supportsWatchlist || d != LibraryDestination.Watchlist)).ToList();
+    /// <summary>The pages shown, in order. The Watchlist and Wishes need a server that supports them.</summary>
+    public IReadOnlyList<LibraryDestination> VisibleItems(bool supportsWatchlist, bool supportsWishes = false) =>
+        Order.Where(d => !Hidden.Contains(d)
+            && (supportsWatchlist || d != LibraryDestination.Watchlist)
+            && (supportsWishes || d != LibraryDestination.Wishes)).ToList();
 }

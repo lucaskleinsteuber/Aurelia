@@ -202,6 +202,8 @@ builder.Services.AddSingleton<MovieNightService>();
 builder.Services.AddSingleton<MetadataProviderSettingsStore>();
 builder.Services.AddSingleton<ArtworkStore>();
 builder.Services.AddSingleton<ArtworkVariantStore>();
+builder.Services.AddSingleton<WishPosterCache>();
+builder.Services.AddScoped<WishService>();
 // Prepares common artwork widths in the background; tests drive it explicitly.
 if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService<ArtworkVariantWarmer>();
 if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService<QueryWarmer>();
@@ -471,6 +473,7 @@ app.MapSpeechSubtitles();
 app.MapServerSpeech();
 app.MapWatchTogether();
 app.MapMovieNight();
+app.MapWishes();
 
 try
 {

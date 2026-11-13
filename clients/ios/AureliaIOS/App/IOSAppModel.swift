@@ -43,6 +43,20 @@ final class IOSAppModel: ObservableObject {
   var supportsWrapped: Bool { capabilities?.supportsWrapped ?? false }
   var supportsMonthlyWrapped: Bool { capabilities?.supportsMonthlyWrapped ?? false }
   var supportsAdaptiveStreaming: Bool { capabilities?.supportsAdaptiveStreaming ?? false }
+  var supportsWishes: Bool { capabilities?.supportsWishes ?? false }
+  var isWishAdmin: Bool { IOSWishPresentation.isAdministrator(session?.user) }
+  @Published private(set) var wishSummary: IOSWishSummaryResponse?
+  @Published var wishNotificationsEnabled: Bool = IOSWishNotificationCenter.shared
+    .isEnabledInSettings
+  @Published var wishesPresented = false
+  let wishPosterBytes = IOSWishPosterByteCache()
+  private var previousWishSummary: IOSWishSummaryResponse?
+  private var wishSummaryTask: Task<Void, Never>?
+
+  var wishBadgeCount: Int {
+    guard supportsWishes else { return 0 }
+    return IOSWishPresentation.badgeCount(summary: wishSummary, isAdmin: isWishAdmin)
+  }
   @Published private(set) var homeLoading = false
   @Published private(set) var homeError: String?
   @Published private(set) var libraryRefresh = UUID()
@@ -754,6 +768,12 @@ final class IOSAppModel: ObservableObject {
     refreshTask?.cancel()
     refreshTask = nil
     deferredRefresh = false
+    wishSummaryTask?.cancel()
+    wishSummaryTask = nil
+    wishSummary = nil
+    previousWishSummary = nil
+    wishesPresented = false
+    wishPosterBytes.clear()
     Task { await artwork.clear() }
     playerPresented = false
     deactivateProgress()
@@ -793,6 +813,9 @@ final class IOSAppModel: ObservableObject {
       if let item = value.recommendation { mutationSummaries[item.id] = nil }
       home = value
       homeError = nil
+      if supportsWishes && wishSummary == nil {
+        Task { [weak self] in await self?.refreshWishSummary(notify: false) }
+      }
       if supportsWatchlist {
         await loadWatchlist()
       }
@@ -807,6 +830,63 @@ final class IOSAppModel: ObservableObject {
 
   func isWatchlisted(_ mediaId: UUID) -> Bool {
     watchlistIds.contains(mediaId)
+  }
+
+  func openWishesFromNotification() {
+    guard session != nil, supportsWishes else { return }
+    wishesPresented = true
+  }
+
+  func setWishNotificationsEnabled(_ enabled: Bool) async {
+    wishNotificationsEnabled = enabled
+    IOSWishNotificationCenter.shared.isEnabledInSettings = enabled
+    if enabled {
+      await IOSWishNotificationCenter.shared.requestPermissionOnFirstVisitIfNeeded()
+    }
+  }
+
+  func updateWishSummaryFromPage(_ summary: IOSWishSummaryResponse) {
+    wishSummary = summary
+    previousWishSummary = summary
+  }
+
+  func refreshWishSummary(notify: Bool) async {
+    guard let api = client, let sessionID = session?.sessionId, supportsWishes else { return }
+    wishSummaryTask?.cancel()
+    let task = Task { [weak self] in
+      guard let summary = try? await api.wishSummary() else { return }
+      guard let self, !Task.isCancelled, self.session?.sessionId == sessionID else { return }
+      let previous = self.previousWishSummary
+      self.wishSummary = summary
+      self.previousWishSummary = summary
+
+      guard notify,
+        let baseEvent = IOSWishPresentation.notificationEvent(
+          previous: previous, current: summary, isAdmin: self.isWishAdmin)
+      else { return }
+
+      var latestWish: IOSWishSummary?
+      if baseEvent.kind == .wishFulfilled,
+        let fulfilled = try? await api.wishes(state: .fulfilled, offset: 0, limit: 5),
+        !Task.isCancelled
+      {
+        latestWish = fulfilled.wishes.first {
+          $0.userId == self.session?.user.id || $0.seenByWisherAt == nil
+        } ?? fulfilled.wishes.first
+      } else if baseEvent.kind == .newWishes,
+        let opened = try? await api.wishes(state: .open, offset: 0, limit: 5),
+        !Task.isCancelled
+      {
+        latestWish = opened.wishes.first
+      }
+      if let event = IOSWishPresentation.notificationEvent(
+        previous: previous, current: summary, isAdmin: self.isWishAdmin, latestWish: latestWish)
+      {
+        await IOSWishNotificationCenter.shared.notify(event)
+      }
+    }
+    wishSummaryTask = task
+    await task.value
   }
 
   func loadWatchlist() async {
@@ -985,6 +1065,15 @@ final class IOSAppModel: ObservableObject {
             for id in result.changedMediaIds { mutationSummaries[id] = nil }
           }
           if result.resetRequired || !result.changedAreas.isEmpty { scheduleLibraryRefresh() }
+          if supportsWishes,
+            result.resetRequired
+              || result.changedAreas.contains(where: {
+                let area = $0.lowercased()
+                return area == "userstate" || area == "catalog"
+              })
+          {
+            Task { [weak self] in await self?.refreshWishSummary(notify: true) }
+          }
           // A well-behaved server long-polls. This also bounds an immediate empty response.
           try await Task.sleep(for: .seconds(1))
         } catch {

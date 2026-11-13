@@ -110,6 +110,8 @@ final class AppModel: ObservableObject {
   @Published private(set) var collections: [CollectionSummary] = []
   @Published private(set) var watchlistItems: [CatalogItemSummary] = []
   @Published private(set) var watchlistIds: Set<UUID> = []
+  @Published private(set) var wishSummary: WishSummaryResponse?
+  @Published var requestedDestination: LibraryDestination?
   @Published private(set) var playback: PlaybackPresentation?
   /// The Watch Together party this Mac is in, if any.
   @Published private(set) var watchParty: WatchTogetherSession?
@@ -129,6 +131,51 @@ final class AppModel: ObservableObject {
   }
   var supportsWatchlist: Bool {
     libraryCapabilities.contains("watchlist-people-v1")
+  }
+  var supportsWishes: Bool {
+    libraryCapabilities.contains(ServerFeatureNames.wishes)
+  }
+  var isWishAdmin: Bool {
+    WishPresentation.isAdministrator(profile?.user)
+  }
+  var wishBadgeCount: Int {
+    WishPresentation.badgeCount(summary: wishSummary, isAdmin: isWishAdmin)
+  }
+  func openWishes() {
+    requestedDestination = .wishes
+  }
+  func updateWishSummary(_ summary: WishSummaryResponse) {
+    wishSummary = summary
+  }
+  func refreshWishSummary(notify: Bool) async {
+    guard let profile, supportsWishes, !requiresProfileSelection else {
+      wishSummary = nil
+      return
+    }
+    let generation = connectionGeneration
+    let sessionUserId = profile.user?.id
+    let previous = wishSummary
+    guard let next = try? await APIClient(profile: profile).wishSummary() else { return }
+    guard isCurrent(generation), self.profile?.user?.id == sessionUserId else { return }
+    if notify,
+      WishPresentation.notificationEvent(
+        previous: previous, current: next, isAdmin: isWishAdmin) != nil,
+      WishNotificationCenter.shared.isEnabledInSettings
+    {
+      let latestList = try? await APIClient(profile: profile).wishes(limit: 5)
+      let matchedWish: WishSummary? =
+        next.newlyFulfilledCount > (previous?.newlyFulfilledCount ?? 0)
+        ? latestList?.wishes.first {
+          $0.state == .fulfilled && $0.seenByWisherAt == nil
+        }
+        : latestList?.wishes.first { $0.state == .open }
+      if let detailed = WishPresentation.notificationEvent(
+        previous: previous, current: next, isAdmin: isWishAdmin, latestWish: matchedWish)
+      {
+        await WishNotificationCenter.shared.notify(detailed)
+      }
+    }
+    wishSummary = next
   }
   @Published private(set) var hostSnapshot: NativeHostSnapshot = .stopped
   @Published private(set) var libraries: [LibrarySummary] = []
@@ -204,6 +251,7 @@ final class AppModel: ObservableObject {
   @Published var importPreviewLibrary: LibrarySummary?
 
   let artworkLoader = ArtworkLoader()
+  let wishPosterCache = WishPosterCache()
 
   private let store: any ServerProfileStore
   private let serverHost: NativeServerHost
@@ -1782,6 +1830,7 @@ final class AppModel: ObservableObject {
       watchlistItems = loadedWatchlist.items
       watchlistIds = Set(loadedWatchlist.mediaIds)
     }
+    await refreshWishSummary(notify: false)
     scheduleHomeRefresh()
     warmLibraryBrowsing()
     if !Self.isTestProcess, !NativePreflightIsolation.isRequested, let current = self.profile {
@@ -3194,6 +3243,7 @@ final class AppModel: ObservableObject {
         return false
       }
       clearPersonalViewState()
+    wishPosterCache.clear()
       let active = viewingProfile(response, device: device)
       acceptedProfile = active
       rememberForOffline(choice, pin: pin, serverId: device.serverId)
@@ -3253,6 +3303,7 @@ final class AppModel: ObservableObject {
     invalidateLibraryWork()
     managementExpiresAt = nil
     clearPersonalViewState()
+    wishPosterCache.clear()
     // The old controller keeps its old credential until its progress is saved.
     playback = nil
     await PlaybackShutdownCoordinator.shared.shutdown()
@@ -3267,6 +3318,7 @@ final class AppModel: ObservableObject {
     managementExpiryTask?.cancel()
     managementExpiresAt = nil
     clearPersonalViewState()
+    wishPosterCache.clear()
     profile = device
     isSelectingProfile = false
     isSwitchingProfile = false
@@ -3369,6 +3421,8 @@ final class AppModel: ObservableObject {
     collections = []
     watchlistItems = []
     watchlistIds = []
+    wishSummary = nil
+    wishPosterCache.clear()
     clearAdministrationState()
     artworkLoader.removeAll()
     isMediaManagerPresented = false
@@ -3469,6 +3523,8 @@ final class AppModel: ObservableObject {
     collections = []
     watchlistItems = []
     watchlistIds = []
+    wishSummary = nil
+    wishPosterCache.clear()
     libraries = []
     activeScans = []
     scanStatusUnavailable = []
@@ -3858,6 +3914,7 @@ final class AppModel: ObservableObject {
     managementExpiryTask?.cancel()
     managementExpiresAt = nil
     clearPersonalViewState()
+    wishPosterCache.clear()
     profile = nil
     deviceConnection = nil
     watchingProfiles = []
@@ -3966,8 +4023,11 @@ final class AppModel: ObservableObject {
           watchlistItems = loadedWatchlist.items
           watchlistIds = Set(loadedWatchlist.mediaIds)
         }
+        await refreshWishSummary(notify: true)
         sceneNotesVersion &+= 1
         catalogVisibilityRevision &+= 1
+      } else if changes.changedAreas.contains(.catalog) {
+        await refreshWishSummary(notify: true)
       }
       if !Self.isTestProcess, !NativePreflightIsolation.isRequested {
         PlaybackProgressOutbox.shared.activate(profile: profile)

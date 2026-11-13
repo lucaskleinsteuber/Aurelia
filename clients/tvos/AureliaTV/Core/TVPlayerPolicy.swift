@@ -314,3 +314,22 @@ struct TVRelayRequest: Equatable, Sendable {
 }
 
 enum TVRelayRequestError: Error { case invalidRequest }
+
+enum TVSleepTimerGoodNightPolicy {
+  static let autoCloseDurationSeconds: TimeInterval = 300
+
+  static func shouldShowGoodNight(
+    timerEnded: Bool,
+    showGoodNightOnSleepTimer: Bool,
+    closed: Bool
+  ) -> Bool {
+    !closed && timerEnded && showGoodNightOnSleepTimer
+  }
+
+  static func shouldCloseWholeProfile(
+    closesWholeProfile: Bool,
+    showsSleepTimerGoodNight: Bool
+  ) -> Bool {
+    closesWholeProfile && !showsSleepTimerGoodNight
+  }
+}

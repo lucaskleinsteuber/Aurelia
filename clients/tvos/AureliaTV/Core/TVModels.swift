@@ -201,6 +201,8 @@ struct TVCapabilities: Codable, Equatable, Sendable {
   var supportsCinema: Bool { capabilities?.contains(TVCinemaPlan.feature) == true }
   /// HLS in several qualities, converted live by the server.
   var supportsAdaptiveStreaming: Bool { capabilities?.contains("adaptive-streaming-v1") == true }
+  /// Family wishes for titles not yet in the library.
+  var supportsWishes: Bool { capabilities?.contains("wishes-v1") == true }
 }
 
 struct TVUser: Codable, Equatable, Sendable {

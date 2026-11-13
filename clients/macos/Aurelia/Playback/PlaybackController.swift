@@ -22,6 +22,8 @@ protocol PlaybackClientProtocol: AnyObject {
   func streamSubtitles(ticket: UUID) async throws -> [LiveSubtitleTrack]
   /// Tells the server a sleep timer ended, so a server in sleep mode can sleep if nothing plays.
   func sleepTimerEnded() async
+  /// Tells the server a sleep timer ended and returns its planned power action, if supported.
+  func sleepTimerEndedStatus() async -> SleepTimerEndedResponse?
   /// The watching profile's screen time now; nil when it has none.
   func ownScreenTime() async throws -> ScreenTimeStatus?
 }
@@ -34,6 +36,10 @@ extension PlaybackClientProtocol {
 extension PlaybackClientProtocol {
   var requiresProgressRevision: Bool { false }
   func sleepTimerEnded() async {}
+  func sleepTimerEndedStatus() async -> SleepTimerEndedResponse? {
+    await sleepTimerEnded()
+    return nil
+  }
   func playbackProgress(mediaId: UUID) async throws -> PlaybackProgressResponse {
     throw APIClientError.invalidResponse
   }
@@ -59,6 +65,10 @@ final class APIPlaybackClient: PlaybackClientProtocol {
 
   func sleepTimerEnded() async {
     // Servers before 1.8.2 do not know the signal; playback is not affected either way.
+    _ = try? await api.sleepTimerEnded()
+  }
+
+  func sleepTimerEndedStatus() async -> SleepTimerEndedResponse? {
     try? await api.sleepTimerEnded()
   }
 
@@ -180,8 +190,12 @@ final class PlaybackController: ObservableObject {
   @Published private(set) var sleepTimerFinished = false
   /// A children's profile's screen time, from the ticket and then every minute (docs/SCREEN_TIME.md).
   @Published private(set) var screenTime: ScreenTimeStatus?
-  /// Screen time is over: the good-night screen shows instead of the next title or an error.
+  /// Screen time or sleep timer ended: the good-night screen shows instead of the next title or an error.
   @Published private(set) var showsGoodNight = false
+  /// True when the good-night screen came from the sleep timer rather than a screen-time lock.
+  @Published private(set) var showsSleepTimerGoodNight = false
+  /// Server power response returned when the sleep timer finished.
+  @Published private(set) var sleepTimerEndedStatus: SleepTimerEndedResponse?
   /// The quiet "last episode" note, once per title.
   @Published private(set) var lastTitleNote: String?
   @Published var volume: Double = 1
@@ -246,6 +260,8 @@ final class PlaybackController: ObservableObject {
   private var queuedItems: [PlaybackQueueItem]
   private var previousItems: [PlaybackQueueItem]
   private var sleepTask: Task<Void, Never>?
+  private var sleepGoodNightTask: Task<Void, Never>?
+  private static let sleepGoodNightDuration: TimeInterval = 5 * 60
   private var sleepTimerSleep: @MainActor (TimeInterval) async throws -> Void = { delay in
     try await Task.sleep(for: .seconds(delay))
   }
@@ -826,9 +842,41 @@ final class PlaybackController: ObservableObject {
       self.pause()
       self.cancelRecoveryForSleep()
       self.engineUpdated()
-      self.sleepTimer = .off
       self.enqueueProgressSave(isFinished: false)
-      await self.client.sleepTimerEnded()
+      await self.finishSleepTimer()
+    }
+  }
+
+  func dismissSleepGoodNight() {
+    sleepGoodNightTask?.cancel()
+    sleepGoodNightTask = nil
+    showsSleepTimerGoodNight = false
+    sleepTimerEndedStatus = nil
+  }
+
+  private func finishSleepTimer() async {
+    sleepTimer = .off
+    endPlaybackActivity()
+    let sleep = sleepTimerSleep
+    if !preferences.showGoodNightOnSleepTimer {
+      _ = await client.sleepTimerEndedStatus()
+      sleepTimerFinished = true
+      return
+    }
+    showsSleepTimerGoodNight = true
+    showGoodNight()
+    sleepGoodNightTask?.cancel()
+    sleepGoodNightTask = Task { [weak self] in
+      guard let self else { return }
+      let ended = await self.client.sleepTimerEndedStatus()
+      guard !Task.isCancelled, self.showsSleepTimerGoodNight, !self.stopped else { return }
+      self.sleepTimerEndedStatus = ended
+      do {
+        try await sleep(Self.sleepGoodNightDuration)
+      } catch {
+        return
+      }
+      guard !Task.isCancelled, self.showsSleepTimerGoodNight, !self.stopped else { return }
       self.sleepTimerFinished = true
     }
   }
@@ -861,6 +909,8 @@ final class PlaybackController: ObservableObject {
     renewalTask = nil
     sleepTask?.cancel()
     sleepTask = nil
+    sleepGoodNightTask?.cancel()
+    sleepGoodNightTask = nil
     nextItemTask?.cancel()
     nextItemTask = nil
     endPlaybackActivity()
@@ -1147,9 +1197,10 @@ final class PlaybackController: ObservableObject {
       }
     }
     if sleepTimer == .endOfEpisode {
-      let client = client
-      Task { await client.sleepTimerEnded() }
-      sleepTimerFinished = true
+      Task { [weak self] in await self?.finishSleepTimer() }
+      sleepTimer = .off
+      endPlaybackActivity()
+      return
     }
     guard sleepTimer != .endOfEpisode,
       preferences.automaticallyPlayNextEpisode,
@@ -1575,7 +1626,7 @@ final class PlaybackController: ObservableObject {
     watchdogTask = nil
     if isPlaying { enqueueProgressSave(isFinished: false) }
     isPlaying = false
-    engine.pause()
+    applyPausedIntentIfNeeded()
     endPlaybackActivity()
     showsGoodNight = true
   }
@@ -1600,6 +1651,8 @@ final class PlaybackController: ObservableObject {
     wantsPlayback = false
     sleepTask?.cancel()
     sleepTask = nil
+    sleepGoodNightTask?.cancel()
+    sleepGoodNightTask = nil
     nextItemTask?.cancel()
     nextItemTask = nil
     relay?.stop()

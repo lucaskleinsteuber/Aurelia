@@ -337,3 +337,22 @@ enum IOSChapterPolicy {
       .filter { $0 > 0.001 && $0 < 0.999 }
   }
 }
+
+enum IOSSleepTimerGoodNightPolicy {
+  static let autoCloseDurationSeconds: TimeInterval = 300
+
+  static func shouldShowGoodNight(
+    timerEnded: Bool,
+    showGoodNightOnSleepTimer: Bool,
+    closed: Bool
+  ) -> Bool {
+    !closed && timerEnded && showGoodNightOnSleepTimer
+  }
+
+  static func shouldCloseWholeProfile(
+    closesWholeProfile: Bool,
+    showsSleepTimerGoodNight: Bool
+  ) -> Bool {
+    closesWholeProfile && !showsSleepTimerGoodNight
+  }
+}

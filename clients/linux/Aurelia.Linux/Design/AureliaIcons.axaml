@@ -35,6 +35,7 @@
   <StreamGeometry x:Key="IconBookmarkOutline">F0 M6.5 2 H17.5 A1.5 1.5 0 0 1 19 3.5 V22 L12 17.6 L5 22 V3.5 A1.5 1.5 0 0 1 6.5 2 Z M7 4 V18.4 L12 15.2 L17 18.4 V4 Z</StreamGeometry>
   <StreamGeometry x:Key="IconFavoriteOutline">F0 M12 2.5 L14.9 8.6 L21.5 9.3 L16.6 13.8 L18 20.4 L12 17 L6 20.4 L7.4 13.8 L2.5 9.3 L9.1 8.6 Z M12 7.2 L10.4 10.5 L6.8 10.9 L9.5 13.3 L8.7 16.9 L12 15 L15.3 16.9 L14.5 13.3 L17.2 10.9 L13.6 10.5 Z</StreamGeometry>
   <StreamGeometry x:Key="IconSparkle">F0 M12 2 L14 10 L22 12 L14 14 L12 22 L10 14 L2 12 L10 10 Z</StreamGeometry>
+  <StreamGeometry x:Key="IconWishes">F0 M12 2 L14 10 L22 12 L14 14 L12 22 L10 14 L2 12 L10 10 Z</StreamGeometry>
   <StreamGeometry x:Key="IconPause">F0 M6 4.5 H10 V19.5 H6 Z M14 4.5 H18 V19.5 H14 Z</StreamGeometry>
   <StreamGeometry x:Key="IconBackward">F0 M11 6 V18 L2.5 12 Z M21 6 V18 L12.5 12 Z</StreamGeometry>
   <StreamGeometry x:Key="IconForward">F0 M13 6 V18 L21.5 12 Z M3 6 V18 L11.5 12 Z</StreamGeometry>

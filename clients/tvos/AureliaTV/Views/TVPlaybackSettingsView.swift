@@ -33,6 +33,11 @@ struct TVPlaybackSettingsView: View {
             "Offer Next Episode When Credits Begin", value: value.upNextAtCredits ? "On" : "Off",
             id: "settings-up-next-credits"
           ) { value.upNextAtCredits.toggle() }
+          row(
+            "Show Good Night When the Sleep Timer Ends",
+            value: value.showGoodNightOnSleepTimer ? "On" : "Off",
+            id: "settings-sleep-good-night"
+          ) { value.showGoodNightOnSleepTimer.toggle() }
           if model.capabilities?.supportsSuggestions == true {
             row(
               "Play Suggestions Automatically",

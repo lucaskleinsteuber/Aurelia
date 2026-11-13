@@ -88,6 +88,9 @@ final class AureliaAppDelegate: NSObject, NSApplicationDelegate {
   private let termination = ApplicationTerminationCoordinator()
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    WishNotificationCenter.shared.installDelegateIfNeeded {
+      AppModel.active?.openWishes()
+    }
     NSApplication.shared.activate()
     Task {
       await AppModel.active?.start()

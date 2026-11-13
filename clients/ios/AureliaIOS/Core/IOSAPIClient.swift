@@ -552,8 +552,110 @@ struct IOSAPIClient: Sendable {
     return try await send("\(streamPath)/subtitles/\(max(0, index))", method: "GET")
   }
   /// A player's sleep timer ended: a server in sleep mode may sleep if nothing else plays.
-  func sleepTimerEnded() async throws {
-    _ = try await send("/api/v1/playback/sleep-timer-ended", method: "POST")
+  @discardableResult
+  func sleepTimerEnded() async throws -> IOSSleepTimerEndedResponse? {
+    let data = try await send("/api/v1/playback/sleep-timer-ended", method: "POST")
+    guard !data.isEmpty else { return nil }
+    return try? JSONDecoder().decode(IOSSleepTimerEndedResponse.self, from: data)
+  }
+
+  func wishes(state: IOSWishState? = nil, offset: Int = 0, limit: Int = IOSWishPresentation.pageSize)
+    async throws -> IOSWishListResponse
+  {
+    var query = [
+      URLQueryItem(name: "offset", value: String(max(0, offset))),
+      URLQueryItem(name: "limit", value: String(max(1, min(100, limit)))),
+    ]
+    if let state {
+      query.append(URLQueryItem(name: "state", value: state.rawValue))
+    }
+    return try Self.decode(
+      IOSWishListResponse.self, data: await send("/api/v1/wishes", query: query))
+  }
+
+  func wishSummary() async throws -> IOSWishSummaryResponse {
+    try await get("/api/v1/wishes/summary")
+  }
+
+  func wishSearch(query text: String, kind: IOSMediaKind? = nil) async throws -> IOSWishSearchResponse
+  {
+    var query = [URLQueryItem(name: "query", value: text)]
+    if let kind {
+      query.append(URLQueryItem(name: "kind", value: kind.rawValue))
+    }
+    return try Self.decode(
+      IOSWishSearchResponse.self, data: await send("/api/v1/wishes/search", query: query))
+  }
+
+  func createWish(_ requestBody: IOSCreateWishRequest) async throws -> IOSCreateWishOutcome {
+    var req = try request("/api/v1/wishes", authentication: .profile)
+    req.httpMethod = "POST"
+    req.httpBody = try JSONEncoder().encode(requestBody)
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    try Task.checkCancellation()
+    let response = try await transport.execute(req, trust: .pinned(fingerprint))
+    try Task.checkCancellation()
+    if let actual = response.fingerprint,
+      actual.caseInsensitiveCompare(fingerprint) != .orderedSame
+    {
+      throw IOSCoreError.identityMismatch
+    }
+    if response.statusCode == 409,
+      let problem = try? JSONDecoder().decode(
+        IOSWishAlreadyInLibraryProblem.self, from: response.body),
+      problem.code == "already_in_library"
+    {
+      return .alreadyInLibrary(problem)
+    }
+    try Self.requireSuccess(response)
+    return .created(try Self.decode(IOSCreateWishResponse.self, data: response.body))
+  }
+
+  func deleteWish(id: UUID) async throws {
+    _ = try await send("/api/v1/wishes/\(id.uuidString.lowercased())", method: "DELETE")
+  }
+
+  func setWishSupport(id: UUID, supported: Bool) async throws -> IOSWishSummary {
+    let body = try JSONEncoder().encode(IOSSetWishSupportRequest(supported: supported))
+    let data = try await send(
+      "/api/v1/wishes/\(id.uuidString.lowercased())/support", method: "POST", body: body)
+    return try Self.decode(IOSWishSummary.self, data: data)
+  }
+
+  func updateWishState(id: UUID, requestBody: IOSUpdateWishStateRequest) async throws
+    -> IOSWishSummary
+  {
+    let body = try JSONEncoder().encode(requestBody)
+    let data = try await send(
+      "/api/v1/wishes/\(id.uuidString.lowercased())/state", method: "POST", body: body)
+    return try Self.decode(IOSWishSummary.self, data: data)
+  }
+
+  @discardableResult
+  func markWishesSeen() async throws -> IOSWishSummaryResponse {
+    let data = try await send("/api/v1/wishes/seen", method: "POST")
+    return try Self.decode(IOSWishSummaryResponse.self, data: data)
+  }
+
+  func wishPosterData(path: String, width: Int = 342) async throws -> Data {
+    let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, trimmed.hasPrefix("/") else {
+      throw IOSCoreError.invalidRequest
+    }
+    let req = try request(
+      "/api/v1/wishes/poster",
+      query: [
+        URLQueryItem(name: "path", value: trimmed),
+        URLQueryItem(name: "width", value: String(width)),
+      ],
+      authentication: .profile)
+    let response = try await execute(req)
+    guard response.body.count <= 8 * 1024 * 1024,
+      response.header("Content-Type")?.lowercased().hasPrefix("image/") == true
+    else {
+      throw IOSCoreError.invalidResponse
+    }
+    return response.body
   }
 
   /// The watching profile's screen time now; nil when it has none.

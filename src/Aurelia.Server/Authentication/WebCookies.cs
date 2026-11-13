@@ -22,6 +22,7 @@ public static class WebCookies
         if (purpose == "profile") return request.Cookies[Profile];
         if (purpose.Length == 0 && (HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method))
             && (request.Path.StartsWithSegments("/api/v1/streams") || request.Path.StartsWithSegments("/api/v1/artwork")
+                || request.Path.StartsWithSegments("/api/v1/wishes/poster")
                 || (request.Path.StartsWithSegments("/api/v1/media") && IsMediaImage(request.Path.Value ?? string.Empty))))
             return request.Cookies[Profile];
         return null;

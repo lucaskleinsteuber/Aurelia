@@ -405,6 +405,8 @@ export function createSettings(app) {
         ], preferences.resumeThresholdSeconds, (sec) => save({ resumeThresholdSeconds: Number(sec) }), "Start Over If Barely Started"),
           "Resume starts from the beginning when less than this was watched."),
         row("Keep Screen On During Playback", toggle(preferences.keepScreenOn, (on) => save({ keepScreenOn: on }), "Keep Screen On During Playback")),
+        row("Show Good Night When the Sleep Timer Ends", toggle(preferences.showGoodNightOnSleepTimer, (on) => save({ showGoodNightOnSleepTimer: on }), "Show Good Night When the Sleep Timer Ends"),
+          "Instead of returning straight to the library, show the good-night screen and auto-close after 5 minutes."),
         row("Dialogue Boost", select(DIALOGUE_BOOST_CHOICES, preferences.dialogueBoost, (choice) => save({ dialogueBoost: choice }), "Dialogue Boost"),
           "Lifts voices and lowers rumbling bass, so speech is easier to follow."),
         row("Volume Leveling", select(VOLUME_LEVELING_CHOICES, preferences.volumeLeveling, (choice) => save({ volumeLeveling: choice }), "Volume Leveling"),

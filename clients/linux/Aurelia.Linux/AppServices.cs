@@ -27,7 +27,8 @@ public sealed record AppServices(
     Func<ILocalServerHost>? CreateHost = null,
     IHostingSystem? HostingSystem = null,
     AppUpdater? Updater = null,
-    OfflineDownloads? Downloads = null)
+    OfflineDownloads? Downloads = null,
+    IDesktopNotificationService? Notifications = null)
 {
     public static AppServices CreateDefault()
     {
@@ -52,12 +53,14 @@ public sealed record AppServices(
             AppInfo.IsTestEdition ? null : new AppUpdater(new GitHubReleaseSource(settings: settings,
                 auditPath: Path.Combine(paths.CacheDirectory, "updates", "public-test-audit.jsonl")), new LinuxPackageInstaller(), settings, paths.CacheDirectory, AppInfo.CurrentVersion, AppInfo.Build),
             // Downloads stay in this app's data folder, never next to the media.
-            new OfflineDownloads(Path.Combine(paths.DataDirectory ?? paths.StateDirectory, "Offline Titles")));
+            new OfflineDownloads(Path.Combine(paths.DataDirectory ?? paths.StateDirectory, "Offline Titles")),
+            new FreedesktopNotificationService());
     }
 
     /// <summary>Services that touch nothing outside the process, for tests.</summary>
     public static AppServices ForTests(ISettingsStore? settings = null, WindowButtonLayout? layout = null, IServerTransport? transport = null,
-        ICredentialStore? credentials = null, IVideoEngineFactory? engines = null, TimeProvider? time = null, ILocalServerHost? host = null) => new(
+        ICredentialStore? credentials = null, IVideoEngineFactory? engines = null, TimeProvider? time = null, ILocalServerHost? host = null,
+        IDesktopNotificationService? notifications = null) => new(
             settings ?? new MemorySettingsStore(),
             layout ?? WindowButtonLayout.Default,
             transport ?? new PinnedServerTransport(),
@@ -68,5 +71,6 @@ public sealed record AppServices(
             "Test PC",
             Engines: engines,
             CreateHost: host is null ? null : () => host,
-            HostingSystem: new NoHostingSystem());
+            HostingSystem: new NoHostingSystem(),
+            Notifications: notifications ?? new NoDesktopNotificationService());
 }

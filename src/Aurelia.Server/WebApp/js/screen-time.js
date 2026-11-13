@@ -34,6 +34,16 @@ export function clockTime(value) {
 /** The good-night screen's heading and line. */
 export function goodNight(status, name = "") {
   const who = String(name ?? "").trim();
+  if (status?.reason === "sleepTimer") {
+    const mins = Number.isFinite(status.minutes) && status.minutes > 0 ? Math.round(status.minutes) : 5;
+    const unit = mins === 1 ? "minute" : "minutes";
+    let detail = null;
+    if (status.afterSleepTimer) {
+      if (status.powerMode === "sleep") detail = `The server will go to sleep in ${mins} ${unit}.`;
+      else if (status.powerMode === "shutdown") detail = `The server will shut down in ${mins} ${unit}.`;
+    }
+    return { title: who ? `Good night, ${who}` : "Good night", text: detail ? `Sleep well. ${detail}` : "Sleep well." };
+  }
   const opens = clockTime(status?.opensAt);
   if (status?.reason === "limit")
     return { title: who ? `That's all for today, ${who}` : "That's all for today", text: opens ? `See you tomorrow at ${opens}.` : "See you tomorrow." };

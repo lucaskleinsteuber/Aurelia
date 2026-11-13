@@ -59,6 +59,8 @@ final class IOSPlaybackController: ObservableObject {
   @Published private(set) var screenTime: IOSScreenTimeStatus?
   /// Screen time is over: the good-night screen shows instead of the next title or an error.
   @Published private(set) var showsGoodNight = false
+  @Published private(set) var showsSleepTimerGoodNight = false
+  @Published private(set) var sleepTimerEndedStatus: IOSSleepTimerEndedResponse?
   private var lastScreenTimeCheck = Date()
   private var screenTimeTask: Task<Void, Never>?
   /// A separate local relay for timeline previews; its reads are marked as previews, which
@@ -85,6 +87,7 @@ final class IOSPlaybackController: ObservableObject {
   private let adaptiveStreaming: Bool
   private let preferencesStore: IOSPlaybackPreferencesStore
   private var sleepTask: Task<Void, Never>?
+  private var sleepGoodNightTask: Task<Void, Never>?
   private var advanceTask: Task<Void, Never>?
   private var watchdogTask: Task<Void, Never>?
   private var audioSelectionTask: Task<Void, Never>?
@@ -410,22 +413,71 @@ final class IOSPlaybackController: ObservableObject {
 
   func setSleepTimer(_ timer: IOSSleepTimer) {
     sleepTask?.cancel()
+    sleepTask = nil
     sleepTimer = timer
     trackMenu = nil
     if case .minutes(let minutes) = timer {
+      let wait = runtime.sleepTimerSleep
       sleepTask = Task { [weak self] in
-        do { try await Task.sleep(for: .seconds(Double(minutes) * 60)) } catch { return }
+        do { try await wait(Double(minutes) * 60) } catch { return }
         guard let self, !closed else { return }
-        wantsPlayback = false
-        engine.pause()
-        sleepTimer = .off
-        await saveProgress(finished: false)
-        userInteracted()
-        // Servers before 1.8.2 do not know the signal; nothing else depends on it.
-        try? await api.sleepTimerEnded()
+        await self.finishSleepTimer()
       }
     }
     userInteracted()
+  }
+
+  private func finishSleepTimer() async {
+    guard !closed else { return }
+    sleepTask?.cancel()
+    sleepTask = nil
+    sleepTimer = .off
+    wantsPlayback = false
+    if engine.isPlaying { engine.pause() }
+    runtime.setIdleTimerDisabled(false)
+
+    guard
+      IOSSleepTimerGoodNightPolicy.shouldShowGoodNight(
+        timerEnded: true,
+        showGoodNightOnSleepTimer: preferences.showGoodNightOnSleepTimer,
+        closed: closed)
+    else {
+      let api = api
+      Task { try? await api.sleepTimerEnded() }
+      close()
+      return
+    }
+
+    showsSleepTimerGoodNight = true
+    showGoodNight()
+    await saveProgress(finished: false)
+    guard !closed else { return }
+
+    sleepGoodNightTask?.cancel()
+    let api = api
+    let sleepWait = runtime.sleepTimerSleep
+    sleepGoodNightTask = Task { [weak self] in
+      let status = try? await api.sleepTimerEnded()
+      await MainActor.run {
+        guard let self, !self.closed else { return }
+        self.sleepTimerEndedStatus = status
+      }
+      do {
+        try await sleepWait(IOSSleepTimerGoodNightPolicy.autoCloseDurationSeconds)
+      } catch {
+        return
+      }
+      await MainActor.run {
+        guard let self, !self.closed else { return }
+        self.close()
+      }
+    }
+  }
+
+  func dismissSleepGoodNight() {
+    sleepGoodNightTask?.cancel()
+    sleepGoodNightTask = nil
+    close()
   }
 
   var nightMode: Bool { preferences.nightMode }
@@ -635,6 +687,8 @@ final class IOSPlaybackController: ObservableObject {
     } else if trackMenu != nil {
       trackMenu = nil
       userInteracted()
+    } else if showsSleepTimerGoodNight {
+      dismissSleepGoodNight()
     } else {
       close()
     }
@@ -674,7 +728,9 @@ final class IOSPlaybackController: ObservableObject {
   /// The friendly end of the day; nothing else starts, and the view shows the moon.
   private func showGoodNight() {
     guard !closed, !showsGoodNight else { return }
-    engine.pause()
+    wantsPlayback = false
+    if engine.isPlaying { engine.pause() }
+    runtime.setIdleTimerDisabled(false)
     upNext = nil
     showsSuggestion = false
     showsSuggestionEndScreen = false
@@ -780,6 +836,7 @@ final class IOSPlaybackController: ObservableObject {
       engine.load(
         url: playing.streamingQuality.playbackURL(for: localURL), resumeAt: resumeAt ?? resumePosition,
         paused: !wantsPlayback)
+      if !showsGoodNight { runtime.setIdleTimerDisabled(true) }
       if let error = engine.audioProcessingError {
         fail(error)
         return
@@ -977,11 +1034,11 @@ final class IOSPlaybackController: ObservableObject {
         controlsVisible = false
         showsSuggestionEndScreen = true
       }
-    } else {
-      if sleepTimer == .endOfEpisode {
-        let api = api
-        Task { try? await api.sleepTimerEnded() }
+    } else if sleepTimer == .endOfEpisode {
+      advanceTask = Task { [weak self] in
+        await self?.finishSleepTimer()
       }
+    } else {
       close()
     }
   }
@@ -1230,6 +1287,7 @@ final class IOSPlaybackController: ObservableObject {
     errorMessage = message
     progressMessage = nil
     controlsVisible = true
+    runtime.setIdleTimerDisabled(false)
   }
 
   private func sessionFailed(_ error: Error) {
@@ -1257,11 +1315,14 @@ final class IOSPlaybackController: ObservableObject {
     openingTask?.cancel()
     renewalTask?.cancel()
     sleepTask?.cancel()
+    sleepGoodNightTask?.cancel()
+    sleepGoodNightTask = nil
     advanceTask?.cancel()
     watchdogTask?.cancel()
     cancelTrackSelections()
     progressTask?.cancel()
     controlsTask?.cancel()
+    runtime.setIdleTimerDisabled(false)
     relayGeneration = UUID()
     engine.stop()
     relay?.stop()

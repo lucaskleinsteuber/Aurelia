@@ -19,7 +19,12 @@ using Avalonia.VisualTree;
 namespace Aurelia.Linux.Views;
 
 /// <summary>A row in the sidebar.</summary>
-public sealed record SidebarItem(LibraryDestination Destination, string Title, Geometry? Icon);
+public sealed record SidebarItem(LibraryDestination Destination, string Title, Geometry? Icon, int BadgeCount = 0)
+{
+    public bool HasBadge => BadgeCount > 0;
+
+    public string BadgeText => BadgeCount > 99 ? "99+" : BadgeCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
+}
 
 /// <summary>
 /// The window's frame: the blurred sidebar with the library pages, and the page beside it. Pages
@@ -326,7 +331,7 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
     public void ReloadSidebar()
     {
         if (context is null) return;
-        BuildSidebar(context.Store.Preferences.Sidebar(), context.Store.Client.SupportsWatchlist);
+        BuildSidebar(context.Store.Preferences.Sidebar(), context.Store.Client.SupportsWatchlist, context.Store.Client.SupportsWishes, context.Store.WishBadgeCount);
         ShowCurrentPage();
     }
 
@@ -414,7 +419,7 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
         if (store is not null)
         {
             store.PropertyChanged += OnStoreChanged;
-            BuildSidebar(store.Preferences.Sidebar(), store.Client.SupportsWatchlist);
+            BuildSidebar(store.Preferences.Sidebar(), store.Client.SupportsWatchlist, store.Client.SupportsWishes, store.WishBadgeCount);
             RestoreDestination(store);
         }
         ShowCurrentPage();
@@ -424,6 +429,10 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
     private void OnStoreChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(LibraryStore.Error)) UpdateError();
+        if (e.PropertyName is nameof(LibraryStore.WishBadgeCount) or nameof(LibraryStore.WishSummary) && context is { } open)
+        {
+            BuildSidebar(open.Store.Preferences.Sidebar(), open.Store.Client.SupportsWatchlist, open.Store.Client.SupportsWishes, open.Store.WishBadgeCount);
+        }
     }
 
     private void UpdateError()
@@ -445,21 +454,27 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
             "series" => LibraryDestination.TvShows,
             "collections" => LibraryDestination.Collections,
             "watchlist" => store.Client.SupportsWatchlist ? LibraryDestination.Watchlist : LibraryDestination.Library,
+            "wishes" => store.Client.SupportsWishes ? LibraryDestination.Wishes : LibraryDestination.Library,
             "recentlyAdded" => LibraryDestination.RecentlyAdded,
             _ => prefs.LastDestination(store.Client.Server.ServerId, store.Client.Profile.User.Id) ?? LibraryDestination.Home,
         };
         if (target == LibraryDestination.Watchlist && !store.Client.SupportsWatchlist) target = LibraryDestination.Home;
+        if (target == LibraryDestination.Wishes && !store.Client.SupportsWishes) target = LibraryDestination.Home;
         restoring = true;
         Destination = SidebarItems.Any(item => item.Destination == target) ? target : SidebarItems.Count > 0 ? SidebarItems[0].Destination : LibraryDestination.Library;
         restoring = false;
     }
 
-    private void BuildSidebar(SidebarLayout layout, bool supportsWatchlist)
+    private void BuildSidebar(SidebarLayout layout, bool supportsWatchlist, bool supportsWishes = false, int wishBadgeCount = 0)
     {
         var selected = SidebarList.SelectedItem as SidebarItem;
         restoring = true;
-        SidebarList.ItemsSource = layout.VisibleItems(supportsWatchlist)
-            .Select(destination => new SidebarItem(destination, destination.Title(), Icon(destination)))
+        SidebarList.ItemsSource = layout.VisibleItems(supportsWatchlist, supportsWishes)
+            .Select(destination => new SidebarItem(
+                destination,
+                destination.Title(),
+                Icon(destination),
+                destination == LibraryDestination.Wishes ? wishBadgeCount : 0))
             .ToList();
         SidebarList.SelectedItem = SidebarItems.FirstOrDefault(item => item.Destination == selected?.Destination) ?? (SidebarItems.Count > 0 ? SidebarItems[0] : null);
         restoring = false;
@@ -503,6 +518,7 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
             LibraryDestination.RecentlyAdded => new BrowsePage(context!, BrowseSection.RecentlyAdded),
             LibraryDestination.Collections => new CollectionsPage(context!),
             LibraryDestination.Watchlist => new WatchlistPage(context!),
+            LibraryDestination.Wishes => new WishesPage(context!),
             LibraryDestination.History => new HistoryPage(context!),
             LibraryDestination.Downloads => new DownloadsPage(context!),
             _ => new StatisticsPage(context!),

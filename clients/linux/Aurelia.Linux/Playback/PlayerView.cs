@@ -79,6 +79,7 @@ public sealed class PlayerView : UserControl, IDisposable
         },
     };
     private bool goodNightBuilt;
+    private TextBlock? goodNightSubtitle;
     /// <summary>The quiet "last episode" note while the last title of the day plays.</summary>
     private readonly Border lastTitle = new() { Classes = { "playerMaterial", "playerPill" }, IsVisible = false, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 96, 0, 0), IsHitTestVisible = false };
     private readonly TextBlock lastTitleText = new() { Foreground = Brushes.White, FontSize = 13 };
@@ -286,6 +287,7 @@ public sealed class PlayerView : UserControl, IDisposable
         chrome.Children.Add(bottom);
         chrome.Children.Add(conflict);
         lastTitle.Child = lastTitleText;
+        goodNight.PointerPressed += (_, _) => { if (controller.ShowsSleepTimerGoodNight) _ = controller.DismissSleepGoodNightAsync(); };
         Content = new Grid { Children = { surface, chrome, status, skipIntro, upNext, suggestionCard, endScreen, lastTitle, goodNight, noteCues, togetherNotice } };
         if (together is not null) together.WatchPartyChanged += ShowTogetherNotice;
 
@@ -535,11 +537,37 @@ public sealed class PlayerView : UserControl, IDisposable
         lastTitleText.Text = controller.LastTitleNote ?? "";
         lastTitle.IsVisible = controller.LastTitleNote is not null && chrome.IsVisible;
         goodNight.IsVisible = controller.ShowsGoodNight;
-        if (!goodNight.IsVisible || goodNightBuilt) return;
+        if (!goodNight.IsVisible)
+        {
+            goodNightBuilt = false;
+            goodNightSubtitle = null;
+            return;
+        }
+        var userName = Aurelia.Linux.Core.ProfileVisuals.ShownName(controller.Client.Library.Profile.User);
+        var words = controller.ShowsSleepTimerGoodNight
+            ? ScreenTimeText.GoodNight(controller.SleepTimerEndedStatus, userName)
+            : ScreenTimeText.GoodNight(controller.ScreenTime, userName);
+        if (goodNightBuilt)
+        {
+            if (controller.ShowsSleepTimerGoodNight && goodNightSubtitle is not null)
+            {
+                goodNightSubtitle.Text = words.Text;
+            }
+            return;
+        }
         goodNightBuilt = true;
-        var words = ScreenTimeText.GoodNight(controller.ScreenTime, Aurelia.Linux.Core.ProfileVisuals.ShownName(controller.Client.Library.Profile.User));
         var done = new Button { Content = "Done", Classes = { "primary" }, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 8, 0, 0) };
-        done.Click += (_, _) => _ = controller.CloseAsync();
+        done.Click += (_, _) => _ = controller.ShowsSleepTimerGoodNight ? controller.DismissSleepGoodNightAsync() : controller.CloseAsync();
+        goodNightSubtitle = new TextBlock
+        {
+            Text = words.Text,
+            FontSize = 18,
+            Foreground = Secondary,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            TextAlignment = TextAlignment.Center,
+            MaxWidth = 520,
+        };
         AutomationProperties.SetName(goodNight, words.Title);
         goodNight.Child = new StackPanel
         {
@@ -551,7 +579,7 @@ public sealed class PlayerView : UserControl, IDisposable
             {
                 new PathIcon { Data = Application.Current?.FindResource("IconSleep") as Geometry, Width = 80, Height = 80, Foreground = new SolidColorBrush(Color.FromRgb(0xF3, 0xE3, 0xA8)), HorizontalAlignment = HorizontalAlignment.Center },
                 new TextBlock { Text = words.Title, FontSize = 32, FontWeight = FontWeight.Bold, Foreground = Brushes.White, HorizontalAlignment = HorizontalAlignment.Center, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center },
-                new TextBlock { Text = words.Text, FontSize = 18, Foreground = Secondary, HorizontalAlignment = HorizontalAlignment.Center },
+                goodNightSubtitle,
                 done,
             },
         };
@@ -572,6 +600,15 @@ public sealed class PlayerView : UserControl, IDisposable
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
         ShowControls();
+        if (controller.ShowsSleepTimerGoodNight)
+        {
+            if (e.Key is not (Key.LeftShift or Key.RightShift or Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin))
+            {
+                _ = controller.DismissSleepGoodNightAsync();
+                e.Handled = true;
+            }
+            return;
+        }
         var handled = true;
         // Enter or S skips the intro while Skip Intro is offered.
         if (controller.ShowsSkipIntro && e.KeyModifiers == KeyModifiers.None && e.Key is Key.Enter or Key.Return or Key.S)

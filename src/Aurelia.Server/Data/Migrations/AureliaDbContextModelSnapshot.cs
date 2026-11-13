@@ -1933,6 +1933,111 @@ namespace Aurelia.Server.Data.Migrations
                     b.ToTable("WatchEvents");
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.WishRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AgeRating")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("FulfilledMediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Overview")
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PosterPath")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Provider")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderMediaId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResolutionNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("ResolvedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("ResolvedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("SeenByWisherAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Year")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FulfilledMediaItemId");
+
+                    b.HasIndex("ResolvedByUserId");
+
+                    b.HasIndex("State", "CreatedAt");
+
+                    b.HasIndex("UserId", "State", "SeenByWisherAt");
+
+                    b.HasIndex("Provider", "ProviderMediaId", "Kind")
+                        .IsUnique()
+                        .HasFilter("\"State\" = 'Open' AND \"Provider\" IS NOT NULL AND \"ProviderMediaId\" IS NOT NULL");
+
+                    b.ToTable("Wishes");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.WishSupport", b =>
+                {
+                    b.Property<Guid>("WishId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("WishId", "UserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("WishSupports");
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.ArtworkAsset", b =>
                 {
                     b.HasOne("Aurelia.Server.Data.MediaMetadata", "Metadata")
@@ -2407,6 +2512,50 @@ namespace Aurelia.Server.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.WishRecord", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.MediaItem", "FulfilledMediaItem")
+                        .WithMany()
+                        .HasForeignKey("FulfilledMediaItemId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Aurelia.Server.Data.ServerUser", "ResolvedByUser")
+                        .WithMany()
+                        .HasForeignKey("ResolvedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Aurelia.Server.Data.ServerUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FulfilledMediaItem");
+
+                    b.Navigation("ResolvedByUser");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.WishSupport", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.ServerUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aurelia.Server.Data.WishRecord", "Wish")
+                        .WithMany("Supports")
+                        .HasForeignKey("WishId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+
+                    b.Navigation("Wish");
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.DeviceSession", b =>
                 {
                     b.Navigation("PlaybackTickets");
@@ -2474,6 +2623,11 @@ namespace Aurelia.Server.Data.Migrations
                     b.Navigation("PlaybackTickets");
 
                     b.Navigation("Sessions");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.WishRecord", b =>
+                {
+                    b.Navigation("Supports");
                 });
 #pragma warning restore 612, 618
         }

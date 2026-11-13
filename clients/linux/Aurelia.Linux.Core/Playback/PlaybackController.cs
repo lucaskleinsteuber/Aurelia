@@ -95,6 +95,9 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     private bool pauseAfterReopen;
     private SleepTimer sleepTimer = SleepTimer.Off;
     private DateTimeOffset? sleepAt;
+    private bool showsSleepTimerGoodNight;
+    private SleepTimerEndedResponse? sleepTimerEndedStatus;
+    private CancellationTokenSource? sleepGoodNightCts;
     private bool upNextDismissed;
     /// <summary>Cancel in the last seconds: the title plays to its end and the player closes.</summary>
     private bool autoplayCancelled;
@@ -326,15 +329,42 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     /// <summary>The quiet "last episode" note while the last title of the day plays.</summary>
     public string? LastTitleNote => ScreenTime?.NoMoreTitles == true && !ShowsGoodNight ? ScreenTimeText.LastTitleNote(ScreenTime) : null;
 
+    public static readonly TimeSpan SleepGoodNightDuration = TimeSpan.FromMinutes(5);
+
     /// <summary>Screen time is over: the good-night screen shows instead of the next title or an error.</summary>
     public bool ShowsGoodNight
     {
         get => showsGoodNight;
-        private set { if (SetProperty(ref showsGoodNight, value)) OnPropertyChanged(nameof(LastTitleNote)); }
+        private set
+        {
+            if (!SetProperty(ref showsGoodNight, value)) return;
+            OnPropertyChanged(nameof(LastTitleNote));
+            OnPropertyChanged(nameof(GoodNightEndsProfile));
+        }
+    }
+
+    /// <summary>True when the good-night screen appeared after a sleep timer rather than screen time.</summary>
+    public bool ShowsSleepTimerGoodNight
+    {
+        get => showsSleepTimerGoodNight;
+        private set
+        {
+            if (!SetProperty(ref showsSleepTimerGoodNight, value)) return;
+            OnPropertyChanged(nameof(GoodNightEndsProfile));
+        }
+    }
+
+    public SleepTimerEndedResponse? SleepTimerEndedStatus
+    {
+        get => sleepTimerEndedStatus;
+        private set => SetProperty(ref sleepTimerEndedStatus, value);
     }
 
     /// <summary>Done on the good-night screen should end the profile: its whole profile is closed.</summary>
-    public bool GoodNightEndsProfile => ShowsGoodNight && ScreenTime?.LockScope == ScreenTimeLockScope.WholeProfile;
+    public bool GoodNightEndsProfile => ShowsGoodNight && !ShowsSleepTimerGoodNight && ScreenTime?.LockScope == ScreenTimeLockScope.WholeProfile;
+
+    /// <summary>Closes the sleep-timer good-night screen and returns to the library.</summary>
+    public Task DismissSleepGoodNightAsync() => CloseAsync();
 
     /// <summary>Raised after the player closed for a suggestion that should play now.</summary>
     public event Action<CatalogItemSummary>? SuggestionChosen;
@@ -705,6 +735,9 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     {
         if (closed) return;
         closed = true;
+        sleepGoodNightCts?.Cancel();
+        sleepGoodNightCts?.Dispose();
+        sleepGoodNightCts = null;
         Record(PlaybackDiagnosticKind.Stopped);
         clock?.Dispose();
         await SaveProgressAsync(finished: finishOnClose);
@@ -995,17 +1028,51 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
 
     private async Task SleepAsync()
     {
-        engine?.Pause();
+        var wasPlaying = State == PlayerState.Playing;
+        if (State != PlayerState.Paused) engine?.Pause();
         State = PlayerState.Paused;
         sleepAt = null;
         SleepTimer = SleepTimer.Off;
+        if (!Preferences.ShowGoodNightOnSleepTimer || ShowsGoodNight)
+        {
+            try
+            {
+                await client.SleepTimerEndedAsync(CancellationToken.None);
+            }
+            catch (AureliaApiException)
+            {
+            }
+            await CloseAsync();
+            return;
+        }
+        if (wasPlaying) await SaveProgressAsync(finished: false);
+        ShowsSleepTimerGoodNight = true;
+        await ShowGoodNightAsync();
         try
         {
-            await client.SleepTimerEndedAsync(CancellationToken.None);
+            SleepTimerEndedStatus = await client.SleepTimerEndedAsync(CancellationToken.None);
         }
         catch (AureliaApiException)
         {
         }
+        if (closed || !ShowsSleepTimerGoodNight) return;
+        sleepGoodNightCts?.Cancel();
+        sleepGoodNightCts?.Dispose();
+        sleepGoodNightCts = new CancellationTokenSource();
+        _ = AutoCloseSleepGoodNightAsync(sleepGoodNightCts.Token);
+    }
+
+    private async Task AutoCloseSleepGoodNightAsync(CancellationToken cancellation)
+    {
+        try
+        {
+            await Task.Delay(SleepGoodNightDuration, time, cancellation);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            return;
+        }
+        if (closed || !ShowsSleepTimerGoodNight) return;
         await CloseAsync();
     }
 
@@ -1089,8 +1156,15 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     private async Task ShowGoodNightAsync()
     {
         if (closed || ShowsGoodNight) return;
-        if (State == PlayerState.Playing) await SaveProgressAsync(finished: false);
-        engine?.Pause();
+        if (State == PlayerState.Playing)
+        {
+            await SaveProgressAsync(finished: false);
+            engine?.Pause();
+        }
+        else if (State != PlayerState.Paused)
+        {
+            engine?.Pause();
+        }
         State = PlayerState.Paused;
         Error = null;
         recoveryStarted = null;

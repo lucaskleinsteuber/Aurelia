@@ -1,6 +1,6 @@
 import SwiftUI
 
-private enum TVLibraryTab: Hashable { case home, movies, shows, search, profile }
+private enum TVLibraryTab: Hashable { case home, movies, shows, search, wishes, profile }
 
 struct TVRootView: View {
   @EnvironmentObject private var model: TVAppModel
@@ -71,6 +71,11 @@ struct TVRootView: View {
           NavigationStack { TVBrowseDestination(section: .search) }.tabItem {
             Label("Search", systemImage: "magnifyingglass")
           }.tag(TVLibraryTab.search)
+          if model.supportsWishes {
+            NavigationStack { TVWishesView() }
+              .tabItem { Label("Wishes", systemImage: "sparkles") }
+              .tag(TVLibraryTab.wishes)
+          }
           NavigationStack { TVConnectionMenu() }
             .tabItem {
               Label(model.session?.user.shownName ?? "Profile", systemImage: "person.crop.circle")

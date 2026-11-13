@@ -2030,3 +2030,141 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
   .box-member-actions { grid-column: 1 / -1; justify-content: flex-end; }
   .box-member-episodes { padding-left: 14px; }
 }
+
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: var(--accent, #ff3b30);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.nav-badge[hidden] { display: none; }
+
+.wishes-page {
+  width: min(1040px, calc(100% - 2 * var(--gutter)));
+  margin: 28px auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.wishes-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.wishes-head h1 { margin: 0 0 4px; font-size: 28px; }
+.wishes-tabs { margin-bottom: 4px; }
+
+.wish-banner, .wish-alert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+}
+.wish-alert { border-color: rgba(255, 90, 95, 0.45); }
+
+.wish-composer {
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.wish-composer-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.wish-kind-chips { display: flex; gap: 8px; }
+.wish-manual-form { display: flex; flex-direction: column; gap: 10px; }
+.wish-manual-fields { display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 10px; }
+.wish-search-bar { margin: 0; width: 100%; max-width: none; }
+.wish-search-results { display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow-y: auto; }
+.wish-hit-row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.wish-hit-row .wish-poster { width: 56px; border-radius: 8px; }
+.wish-hit-info { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.wish-hit-title { font-weight: 600; font-size: 15px; }
+.wish-hit-overview {
+  margin: 2px 0 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.wish-list { display: flex; flex-direction: column; gap: 12px; }
+.wish-card {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 16px;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+}
+.wish-poster { width: 92px; aspect-ratio: 2 / 3; border-radius: 10px; overflow: hidden; background: var(--raised); position: relative; }
+.wish-poster-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.wish-body { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.wish-top-line { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.wish-title { margin: 0; font-size: 18px; line-height: 1.25; }
+.wish-status.state-fulfilled { color: var(--success, #34c759); }
+.wish-status.state-declined { color: var(--muted); }
+.wish-note { margin: 2px 0 0; font-style: italic; }
+.wish-overview { margin: 2px 0 0; line-height: 1.45; }
+.wish-resolution { margin: 2px 0 0; color: var(--muted); }
+.wish-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hairline);
+}
+.wish-suggestion-chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.wish-actions { margin-top: 6px; }
+.wishes-more { display: flex; justify-content: center; padding: 8px 0; }
+
+@media (max-width: 600px) {
+  .wish-card { grid-template-columns: 68px minmax(0, 1fr); gap: 12px; padding: 12px; }
+  .wish-poster { width: 68px; }
+  .wish-manual-fields { grid-template-columns: 1fr; }
+  .wish-hit-row { grid-template-columns: 44px minmax(0, 1fr); }
+  .wish-hit-row .wish-poster { width: 44px; }
+  .wish-hit-action { grid-column: 1 / -1; justify-self: start; }
+}

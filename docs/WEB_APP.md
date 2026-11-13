@@ -156,8 +156,8 @@ Credits Begin can be turned off. Scene notes are private to the profile, as on t
 Time Range, edit Start and End as m:ss or h:mm:ss (optional milliseconds), or use the current
 position. Reload updates the list while preserving an unsaved draft. Load, remove and revision
 conflict failures remain visible; a conflict never replaces another device’s edit automatically.
-The sleep timer stops playback and informs the server when it actually ends, so the server’s
-existing sleep mode can take effect. Closing the player manually does not send that signal.
+The sleep timer stops playback, releases its wake lock and informs the server (`POST /api/v1/playback/sleep-timer-ended`, returning `{ powerMode, afterSleepTimer, minutes }`) when it actually ends, so the server's
+existing power settings can take effect. Closing the player manually does not send that signal. With Playback Settings › **Show Good Night When the Sleep Timer Ends** enabled (off by default), ending via the sleep timer shows the Good-Night screen with a sleep/shutdown countdown only when `afterSleepTimer` is true and `powerMode` is `sleep` or `shutdown`, dismisses on tap or key press, and auto-closes back to the library after five minutes without locking the profile.
 
 Play starts a title at 0:00. Resume and Continue Watching may use its saved position when
 Automatic Resume is enabled. Previous Episode and Next Episode, including Up Next and
@@ -198,6 +198,7 @@ order. Smart lists fill themselves by rules (genre, decade, rating, watch state,
 *Save as Collection* copies a film series or universe into an editable collection, and
 administrators manage shared collections.
 **Watch History** and **Statistics** in the profile menu show only your own profile's viewing.
+When the server advertises `wishes-v1`, **Family Wishes** (`/wishes`, `js/wishes.js`, `js/wishes-view.js`, tested in `tests/WebApp/wishes.test.mjs`) shows open, fulfilled and declined wishes with a sidebar badge (`openCount + newlyFulfilledCount` for administrators, `newlyFulfilledCount` for viewers), server-proxied TMDB search, manual fallback, `"Me Too"` voting, `"Your wish is here"` / `"New wish"` status updates, and a bounded LRU blob-URL poster cache.
 
 ## Settings
 
@@ -230,7 +231,7 @@ draws a square JPEG that is uploaded on Save.
   starting over when a title was barely started, the next episode and its Up Next countdown,
   default audio and subtitle languages (used until you choose tracks for a series), subtitle
   size and background, Dialogue Boost and Volume Leveling (the apps' presets, through Web Audio),
-  Cinema Mode, speed, volume, how long controls stay and the skip interval.
+  Cinema Mode, speed, volume, how long controls stay, **Show Good Night When the Sleep Timer Ends**, and the skip interval.
 - **Library**, **Metadata**, **Profiles and Devices**, **Server** and **Updates** are for owners
   and administrators, who are signed in with their PIN; they work without the server password.
   They cover storage locations (picked in a browser of the server's folders), files a scan leaves

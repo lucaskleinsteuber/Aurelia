@@ -72,6 +72,12 @@ struct IOSPlaybackRuntime {
   let managesAudioSession: Bool
   /// A second relay for timeline previews; nil keeps previews off, as in the UI tests.
   var makePreviewRelay: ((URL, String, String) throws -> any IOSPlaybackRelay)? = nil
+  var sleepTimerSleep: @Sendable (TimeInterval) async throws -> Void = { seconds in
+    try await Task.sleep(for: .seconds(seconds))
+  }
+  var setIdleTimerDisabled: @MainActor (Bool) -> Void = { disabled in
+    UIApplication.shared.isIdleTimerDisabled = disabled
+  }
 
   static func live() -> Self {
     Self(
@@ -84,6 +90,9 @@ struct IOSPlaybackRuntime {
         try IOSStreamRelay(
           sourceURL: url, publicKeyFingerprint: fingerprint, authorizationToken: token,
           streamPurpose: "preview")
+      },
+      setIdleTimerDisabled: { disabled in
+        UIApplication.shared.isIdleTimerDisabled = disabled
       })
   }
 }

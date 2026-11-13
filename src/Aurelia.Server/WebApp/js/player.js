@@ -27,6 +27,7 @@ import { codecSupport, liveProblem, mimeType, selectSubtitle, startTrack, subtit
 const SAVE_INTERVAL = 10_000;
 const RENEW_BEFORE = 5 * 60_000;
 const RENEW_RETRY_MS = 20_000;
+export const SLEEP_GOOD_NIGHT_CLOSE_MS = 5 * 60_000;
 const PREFERENCES_KEY = "aurelia.playback";
 
 export const UNPLAYABLE =
@@ -568,7 +569,14 @@ export class Player {
     if (this.closed || (event.repeat && /^[np]$/i.test(event.key))) return;
     const target = event.target;
     const dialog = target?.closest?.('dialog, [role="dialog"]');
-    if (dialog && dialog !== this.element) return;
+    if (dialog && dialog !== this.element && dialog !== this.endScreen) return;
+    if (this.goodNightActive) {
+      if (this.goodNightReason === "sleepTimer" && !event.repeat && !["Shift", "Control", "Alt", "Meta", "CapsLock"].includes(event.key)) {
+        event.preventDefault();
+        this.goodNightDone(this.goodNightStatus);
+      }
+      return;
+    }
     if (/^[np]$/i.test(event.key) && (this.popover?.hidden === false || target?.closest?.('[role="menu"]'))) return;
     if (target?.isContentEditable || target?.tagName === "SELECT") return;
     if ((target instanceof HTMLInputElement && target.type !== "range") || target instanceof HTMLTextAreaElement) return;
@@ -1109,20 +1117,25 @@ export class Player {
     this.sleepButton.classList.toggle("active", mode !== "off");
   }
 
-  /** The sleep timer pauses and closes the player, as the Mac app does. */
+  /** The sleep timer pauses and closes the player, or shows the good-night screen when chosen. */
   checkSleep() {
     if (this.closed) return;
     if (this.sleep.mode === "minutes" && Date.now() >= this.sleep.until) {
-      this.signalSleepEnded();
-      this.video.pause();
-      this.close();
+      this.sleep.mode = "off";
+      const sleepPromise = this.signalSleepEnded();
+      if (this.preferences?.showGoodNightOnSleepTimer) {
+        this.endForSleepTimer(sleepPromise);
+      } else {
+        this.video.pause();
+        this.close();
+      }
     }
   }
 
   signalSleepEnded() {
-    if (this.closed || this.sleep.notified) return;
+    if (this.closed || this.sleep.notified) return null;
     this.sleep.notified = true;
-    this.api.sleepTimerEnded().catch(() => {});
+    return Promise.resolve(this.api?.sleepTimerEnded?.()).catch(() => null);
   }
 
   // MARK: Scene notes
@@ -1366,7 +1379,9 @@ export class Player {
 
   async finish() {
     if (this.closed) return;
-    if (this.sleep.mode === "end") this.signalSleepEnded();
+    const sleepAtEnd = this.sleep.mode === "end";
+    const sleepPromise = sleepAtEnd ? this.signalSleepEnded() : null;
+    if (sleepAtEnd) this.sleep.mode = "off";
     this.updatePlayState();
     const video = this.video;
     if (this.saver && Number.isFinite(video.duration)) await this.saver.save(video.duration * 1000, video.duration * 1000, true);
@@ -1375,6 +1390,10 @@ export class Player {
     if (this.screenTime) await this.refreshScreenTime();
     if (this.closed) return;
     if (noMoreTitles(this.screenTime)) return this.showGoodNight();
+    if (sleepAtEnd) {
+      if (this.preferences?.showGoodNightOnSleepTimer) return this.endForSleepTimer(sleepPromise);
+      return this.close();
+    }
     if (this.onFinished) {
       const finished = this.onFinished;
       this.onFinished = null;
@@ -1516,29 +1535,61 @@ export class Player {
     }
   }
 
+  /** Pauses playback, releases wake lock, and shows Good Night with optional server-sleep notice. */
+  endForSleepTimer(sleepPromise) {
+    if (this.closed || this.goodNightActive) return;
+    this.keepAwake?.(false);
+    this.wakeLock?.release?.().catch(() => {});
+    this.wakeLock = null;
+    const initial = { reason: "sleepTimer" };
+    this.showGoodNight(initial);
+    Promise.resolve(sleepPromise).then((info) => {
+      if (this.closed || this.goodNightReason !== "sleepTimer" || !info || typeof info !== "object") return;
+      const merged = { reason: "sleepTimer", ...info };
+      this.goodNightStatus = merged;
+      if (this.goodNightTextEl) this.goodNightTextEl.textContent = goodNight(merged, this.profileName).text;
+    }, () => {});
+    this.after(() => this.goodNightDone(this.goodNightStatus), SLEEP_GOOD_NIGHT_CLOSE_MS);
+  }
+
   /** The friendly end of the day: a moon, the profile's name and when Aurelia opens again. */
   showGoodNight(status = this.screenTime) {
     if (this.closed) return;
     this.saveNow({ keepalive: true });
     this.video.pause();
+    this.keepAwake?.(false);
+    this.wakeLock?.release?.().catch(() => {});
+    this.wakeLock = null;
+    this.goodNightActive = true;
+    this.goodNightReason = status?.reason ?? "screenTime";
+    this.goodNightStatus = status;
     this.upNext.hidden = true;
     this.suggestionCard.hidden = true;
     this.notice.hidden = true;
     this.startScreen.hidden = true;
     const words = goodNight(status, this.profileName);
     clear(this.endScreen);
+    this.goodNightTextEl = h("p", { class: "good-night-text" }, words.text);
     this.endScreen.setAttribute("aria-label", words.title);
     this.endScreen.setAttribute("class", "suggestion-end good-night");
     this.endScreen.append(h("div", { class: "suggestion-end-panel good-night-panel" },
       h("div", { class: "good-night-moon", "aria-hidden": "true" }, icon("moonFill", { size: 72 })),
       h("h2", {}, words.title),
-      h("p", { class: "good-night-text" }, words.text),
-      h("button", { class: "primary-button", onclick: () => this.goodNightDone(status) }, "Done")));
+      this.goodNightTextEl,
+      h("button", { class: "primary-button", onclick: (event) => { event.stopPropagation?.(); this.goodNightDone(this.goodNightStatus); } }, "Done")));
+    if (status?.reason === "sleepTimer" && !this.endScreenSleepBound) {
+      this.endScreenSleepBound = true;
+      this.endScreen.addEventListener("click", () => {
+        if (this.goodNightActive && this.goodNightReason === "sleepTimer") this.goodNightDone(this.goodNightStatus);
+      });
+    }
     this.endScreen.hidden = false;
     this.endScreen.querySelector("button")?.focus();
   }
 
   goodNightDone(status) {
+    if (this.closed || this.goodNightCompleted) return;
+    this.goodNightCompleted = true;
     this.close();
     this.onGoodNight?.(status);
   }

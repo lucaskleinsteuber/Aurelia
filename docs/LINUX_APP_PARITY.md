@@ -78,6 +78,7 @@ source and coverage map; private test receipts record which tests actually ran f
 | Statistics and year in review | `Library/ActivityPages.StatisticsPage` | `LibraryScreenTests.HistoryAndStatisticsShowTheProfilesActivity`; `LibraryFlowTests.ReadsHistoryStatisticsAndSyncChanges`. |
 | Long-poll updates with per-session cursor and selective refresh | `Core/Library/LibrarySync`, `LibraryStore.ApplyChangesAsync` | `LibraryFlowTests.ReadsHistoryStatisticsAndSyncChanges`; cursor persistence and refresh plan are source reviewed. |
 | Prepare title details on pointer hover/focus | `MediaCards` → bounded 30-second prepared-detail cache (12 entries, two concurrent preparations) | `PreparedDetailTests.FocusingATitlePreparesItsMetadataWithoutOpeningAVideoStream`, `LeavingATitleBeforeTheDelayCancelsPreparation`, `PreparationIsBoundedReusedAndInvalidatedWhenTheCatalogChanges`. |
+| Family Wishes (TMDB search, `"Me Too"`, admin fulfillment, badges & desktop alerts) | `Library/WishesPage`, `Core/Library/WishPosterCache`, `Core/Platform/DesktopNotificationService` | `WishAndSleepGoodNightTests.WishPosterCacheDeduplicatesAndEnforcesDiskLimit`, `SidebarSettingsAndWishesPageWorkEndToEnd`, `FreedesktopNotificationsNoOpGracefullyAndStoreRefreshesOnUserStateSync`; live desktop D-Bus notification banners need desktop verification. |
 
 ## Playback
 
@@ -92,6 +93,7 @@ source and coverage map; private test receipts record which tests actually ran f
 | Night Mode compressor | New VLC engine instance at current position | `PlaybackControllerTests.NightModeReopensTheTitleAtTheSamePosition`. |
 | Chapters menu and timeline chapter markers | Engine chapter metadata, player menu and timeline marks | `PlayerViewTests.ChaptersShowAMenuAndTimelineMarkersAndSeekThroughTheEngine` uses a simulated engine. |
 | Sleep for minutes or end of episode, notify server | `PlaybackController.SetSleepTimer` | `PlaybackControllerTests.TheSleepTimerEndsPlaybackAndTellsTheServer`, `EndOfEpisodeSleepsInsteadOfPlayingOn`. |
+| Optional Good-Night screen when sleep timer ends | `PlaybackController`, `Playback/PlayerView`, `ScreenTimeText` | `WishAndSleepGoodNightTests.SleepTimerGoodNightReleasesWakeLockAndAutoClosesAfterFiveMinutes`, `DismissSleepGoodNightCancelsAutoCloseAndClosesImmediately`, `PlayerViewDisplaysAndDismissesSleepTimerGoodNightWithoutEndingProfile`. |
 | Previous/next episode and Up Next countdown with cancel | Controller and player card | `PlaybackControllerTests.ASeriesPlaysTheNextEpisodeAtTheNaturalEnd`, `UpNextShowsInTheCountdownAndCancelStopsAtTheEnd`; `PlayerViewTests.TheUpNextCardAppearsNearTheEndOfAnEpisode`. |
 | Persist progress every 15 seconds, pause, seek, close and end | `ProgressOutbox`, controller | `PlaybackControllerTests.SavesProgressWithItsRevisionOnPauseAndEveryFifteenSeconds`; disk replay is source reviewed. |
 | Progress conflict and explicit replacement | Conflict card, `KeepThisPositionAsync` | `PlaybackControllerTests.AConflictOffersToKeepThisComputersPosition`; `PlaybackFlowTests.SavesProgressWithRevisionsAndReportsAConflict`. |

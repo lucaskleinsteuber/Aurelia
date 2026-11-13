@@ -132,7 +132,11 @@ build folder is removed because the job keeps its own copy. An iPad gets its own
 The player works by touch: tap the picture to show or hide the controls, and drag along the
 timeline (or tap a place on it) to jump there. The buttons at the top choose the speed, the
 sound and subtitles (with Dialogue Boost and Volume Leveling) and the sleep timer in a short sheet. A hardware keyboard
-adds the arrow keys, Space and Escape.
+adds the arrow keys, Space and Escape. Ending a timed or end-of-episode sleep timer closes the player (instead of only pausing), releases `isIdleTimerDisabled`, and optionally shows the 5-minute Good-Night screen when **Settings › Playback › Show Good Night When the Sleep Timer Ends** is enabled.
+
+## Family Wishes
+
+When the server supports `wishes-v1`, iPhone and iPad offer **Family Wishes** from Home and Settings (with a badge showing open wishes for administrators or newly fulfilled wishes for members), including server-proxied TMDB search, manual fallback, `"Me Too"` voting, `"Your wish is here"` / `"New wish"` local notifications (opt-in in Settings), and bounded poster caching. See [Family Wishes](WISHES.md).
 
 ## Known limits
 

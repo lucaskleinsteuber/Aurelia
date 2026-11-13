@@ -58,8 +58,26 @@ public sealed class PlaybackClient(AureliaApi api, LibraryClient library)
     public async Task<ScreenTimeStatus?> ScreenTimeAsync(CancellationToken cancellation) =>
         (await Send<OwnScreenTimeResponse>(HttpMethod.Get, "/api/v1/profile/screen-time", null, cancellation)).Status;
 
-    public Task SleepTimerEndedAsync(CancellationToken cancellation) =>
-        Send<AureliaApi.NoContent>(HttpMethod.Post, "/api/v1/playback/sleep-timer-ended", null, cancellation);
+    public async Task<SleepTimerEndedResponse?> SleepTimerEndedAsync(CancellationToken cancellation)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/playback/sleep-timer-ended");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        using var response = await Pinned.SendAsync(request, cancellation);
+        if (!response.IsSuccessStatusCode) throw await AureliaApi.ProblemAsync(response, cancellation);
+        if (response.StatusCode == System.Net.HttpStatusCode.NoContent
+            || response.Content.Headers.ContentLength == 0) return null;
+        var text = await response.Content.ReadAsStringAsync(cancellation);
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<SleepTimerEndedResponse>(text, AureliaJson.Options);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
 
     public Task<IReadOnlyList<SceneNoteSummary>> NotesAsync(Guid mediaId, CancellationToken cancellation) =>
         Send<IReadOnlyList<SceneNoteSummary>>(HttpMethod.Get, $"/api/v1/media/{mediaId}/notes", null, cancellation);

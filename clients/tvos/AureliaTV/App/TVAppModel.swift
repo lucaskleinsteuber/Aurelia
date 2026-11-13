@@ -28,6 +28,7 @@ final class TVAppModel: ObservableObject {
   let movies = TVLibraryListing(kind: .movie)
   let shows = TVLibraryListing(kind: .series)
   let artwork = TVArtworkPipeline()
+  let wishPosterBytes = TVWishPosterByteCache()
   @Published var progressWarning: String?
   @Published private(set) var capabilities: TVCapabilities?
   @Published private(set) var watchlistItems: [TVCatalogItem] = []
@@ -40,6 +41,7 @@ final class TVAppModel: ObservableObject {
   var supportsSuggestions: Bool { capabilities?.supportsSuggestions ?? false }
   var supportsAdaptiveStreaming: Bool { capabilities?.supportsAdaptiveStreaming ?? false }
   var supportsCollectionsV3: Bool { capabilities?.supportsCollectionsV3 ?? false }
+  var supportsWishes: Bool { capabilities?.supportsWishes ?? false }
   @Published private(set) var homeLoading = false
   @Published private(set) var homeError: String?
   @Published private(set) var libraryRefresh = UUID()
@@ -713,6 +715,7 @@ final class TVAppModel: ObservableObject {
     refreshTask = nil
     deferredRefresh = false
     Task { await artwork.clear() }
+    wishPosterBytes.clear()
     playerPresented = false
     deactivateProgress()
   }

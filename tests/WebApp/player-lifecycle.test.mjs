@@ -199,3 +199,45 @@ test("cinema mode plans an ad, the other films' trailers and the curtain, only f
   assert.deepEqual(cinemaActs({ ad: "popcorn", trailers, film }).map((act) => act.kind), ["ad", "trailer", "feature"]);
   assert.deepEqual(cinemaActs({ ad: null, trailers: [trailers[1]], film }), [], "only the film's own trailer: nothing to show");
 });
+
+test("sleep timer with Good Night enabled keeps player open, releases wake lock, updates server sleep note, and dismisses after 5m or key/click", async (t) => {
+  installDOM(t);
+  const { SLEEP_GOOD_NIGHT_CLOSE_MS } = await import("../../src/Aurelia.Server/WebApp/js/player.js");
+  assert.equal(SLEEP_GOOD_NIGHT_CLOSE_MS, 5 * 60_000);
+
+  let released = false;
+  const scheduled = [];
+  const goodNightCalls = [];
+  const p = new Player({
+    api: { sleepTimerEnded: async () => ({ powerMode: "sleep", afterSleepTimer: true, minutes: 5 }) },
+    item: { id: "film-1", kind: "movie", title: "Sleepy Film" },
+    profileName: "Robin",
+    onGoodNight: (status) => goodNightCalls.push(status),
+    onClose() {},
+  });
+  p.preferences.showGoodNightOnSleepTimer = true;
+  p.saveNow = () => {};
+  p.updatePlayState = () => {};
+  p.video.pause = () => {};
+  p.close = () => { p.closed = true; };
+  p.wakeLock = { release: async () => { released = true; } };
+  p.after = (work, delay) => scheduled.push({ work, delay });
+  p.sleep = { mode: "minutes", until: 0, notified: false };
+
+  p.checkSleep();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(p.closed, false);
+  assert.equal(released, true);
+  assert.equal(p.endScreen.hidden, false);
+  assert.match(p.endScreen.textContent, /Good night, Robin/);
+  assert.match(p.endScreen.textContent, /The server will go to sleep in 5 minutes\./);
+  assert.equal(scheduled.some((entry) => entry.delay === 5 * 60_000), true);
+
+  // Key press while Good Night is visible dismisses immediately (even though endScreen is focused).
+  const keyEvent = Object.assign(new Event("keydown", { cancelable: true }), { key: " " });
+  p.key(keyEvent);
+  assert.equal(p.closed, true);
+  assert.equal(goodNightCalls.length, 1);
+  assert.equal(goodNightCalls[0].reason, "sleepTimer");
+});

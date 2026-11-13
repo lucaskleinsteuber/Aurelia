@@ -8,6 +8,8 @@ import * as logic from "./logic.js";
 import { PROFILE_SYMBOL_PATHS } from "./profile-symbols.js";
 import { createWatchTogether } from "./watch-together.js";
 import { createMovieNightView } from "./movie-night-view.js";
+import { createWishesView } from "./wishes-view.js";
+import { formatWishNotification, supportsWishes, wishBadgeCount } from "./wishes.js";
 import { openWrapped, readyMonth, readyMonths, wrappedYears, monthIsNew, MONTHS } from "./wrapped.js";
 import { Player } from "./player.js";
 import { clockTime, closedLabel } from "./screen-time.js";
@@ -50,6 +52,7 @@ const state = {
   retryTimer: null,
   offSince: null,
   watchlistIds: new Set(),
+  wishSummary: null,
 };
 
 // Settings › General: open on the chosen page when the app starts at Home.
@@ -173,6 +176,46 @@ const movieNight = createMovieNightView({
   navigate: (route) => navigate(route),
   deviceName: logic.deviceName(navigator.userAgent, navigator.maxTouchPoints),
 });
+
+const wishes = createWishesView({
+  api,
+  profile: () => state.profile,
+  navigate: (route) => navigate(route),
+  toast,
+  handleError,
+  onSummaryChanged: (summary) => setWishSummary(summary),
+});
+
+function setWishSummary(summary, { notify = false } = {}) {
+  const previous = state.wishSummary;
+  state.wishSummary = summary ? { openCount: summary.openCount ?? 0, newlyFulfilledCount: summary.newlyFulfilledCount ?? 0 } : null;
+  if (notify) {
+    const note = formatWishNotification(previous, state.wishSummary, state.profile);
+    if (note) {
+      toast(note.body);
+      if (typeof Notification === "function" && Notification.permission === "granted") {
+        const browserNote = new Notification(note.title, { body: note.body });
+        browserNote.onclick = () => { window.focus?.(); navigate(logic.parseRoute(note.route)); };
+      }
+    }
+  }
+  updateWishBadges();
+}
+
+function refreshWishSummary({ notify = false } = {}) {
+  if (!state.profile || !supportsWishes(state.server)) return Promise.resolve();
+  return api.wishSummary().then((summary) => {
+    if (state.profile) setWishSummary(summary, { notify });
+  }, () => {});
+}
+
+function updateWishBadges() {
+  const count = supportsWishes(state.server) ? wishBadgeCount(state.wishSummary, state.profile) : 0;
+  for (const badge of document.querySelectorAll("[data-wish-badge]")) {
+    badge.textContent = count > 0 ? String(count) : "";
+    badge.hidden = count <= 0;
+  }
+}
 
 function settingsScreen(route) {
   return settings.settingsScreen(route);
@@ -592,9 +635,12 @@ async function enterProfile(user) {
   state.profile = user;
   markTabProfile(true);
   state.watchlistIds = new Set();
+  state.wishSummary = null;
+  wishes.reset();
   api.watchlist().then((response) => {
     if (state.profile?.id === user.id) state.watchlistIds = new Set(response?.mediaIds ?? []);
   }).catch(() => {});
+  void refreshWishSummary();
   startSync();
   renderRoute();
 }
@@ -655,6 +701,8 @@ async function switchProfile() {
   settings.closeEditors();
   stopSync();
   closePlayer();
+  state.wishSummary = null;
+  wishes.reset();
   await movieNight.leave();
   try {
     await api.endProfile();
@@ -671,6 +719,8 @@ async function sessionEnded() {
   settings.closeEditors();
   stopSync();
   closePlayer();
+  state.wishSummary = null;
+  wishes.reset();
   state.profile = null;
   try {
     await api.profiles();
@@ -785,12 +835,17 @@ function shell(content) {
   const labels = Object.fromEntries(logic.TOP_BAR_SECTIONS);
   const tabs = [["home", "Home", "/"], ...loadGeneral().sectionOrder.map((name) => [name, labels[name], `/${name}`])]
     .filter(([name]) => sidebarShows(name));
+  const hasWishes = supportsWishes(state.server);
+  if (hasWishes) tabs.push(["wishes", "Wishes", "/wishes"]);
+  const badgeCount = hasWishes ? wishBadgeCount(state.wishSummary, state.profile) : 0;
+  const wishBadge = () => h("span", { class: "nav-badge", "data-wish-badge": true, hidden: badgeCount <= 0 }, badgeCount > 0 ? String(badgeCount) : "");
   const current = state.route.name;
   const menu = h("div", { class: "profile-menu", hidden: true },
     h("div", { class: "menu-header" }, profilePicture(state.profile), h("span", {}, logic.shownName(state.profile))),
     h("a", { class: "menu-item", href: "/history", "data-route": true }, "Watch History"),
     h("a", { class: "menu-item", href: "/statistics", "data-route": true }, "Statistics"),
     h("a", { class: "menu-item", href: "/movie-night", "data-route": true }, "Movie Night"),
+    hasWishes ? h("a", { class: "menu-item", href: "/wishes", "data-route": true }, h("span", {}, "Wishes"), wishBadge()) : null,
     h("a", { class: "menu-item", href: "/settings", "data-route": true }, "Settings…"),
     h("button", { class: "menu-item", onclick: () => showShortcutsDialog() }, "Keyboard Shortcuts"),
     h("button", { class: "menu-item", onclick: () => switchProfile() }, "Switch Profile"),
@@ -806,7 +861,8 @@ function shell(content) {
   const header = h("header", { class: "top-bar" },
     h("a", { class: "brand", href: "/", "data-route": true, "aria-label": "Go to Home" }, h("img", { src: "/web/icon.svg", alt: "" }), h("span", {}, "Aurelia")),
     h("nav", { class: "tabs", "aria-label": "Library" }, tabs.map(([name, label, href]) =>
-      h("a", { class: `tab ${current === name ? "selected" : ""}`, href, "data-route": true, "aria-current": current === name ? "page" : null }, label))),
+      h("a", { class: `tab ${current === name ? "selected" : ""}`, href, "data-route": true, "aria-current": current === name ? "page" : null },
+        label, name === "wishes" ? wishBadge() : null))),
     h("div", { class: "top-actions" },
       h("a", { class: `icon-button ${current === "search" ? "selected" : ""}`, href: "/search", "data-route": true, "aria-label": "Search" }, icon("search")),
       h("div", { class: "menu-anchor" },
@@ -935,7 +991,7 @@ async function renderRoute({ quiet = false, restoreScroll = false, resetScroll =
   revealInstantly = false;
   isRenderingRoute = false;
   if (route.name === "home" && !quiet && logic.tourPending(safeStorage())) setTimeout(() => startTour(), 600);
-  const label = { home: "Home", library: "Library", watchlist: "Watchlist", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", history: "Watch History", statistics: "Statistics", settings: "Settings", "movie-night": "Movie Night" }[route.name];
+  const label = { home: "Home", library: "Library", watchlist: "Watchlist", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", history: "Watch History", statistics: "Statistics", settings: "Settings", "movie-night": "Movie Night", wishes: "Wishes" }[route.name];
   if (label) document.title = `${label} · Aurelia`;
 }
 
@@ -1063,6 +1119,8 @@ function screenFor(route, token) {
       return statisticsScreen();
     case "movie-night":
       return movieNight.screen();
+    case "wishes":
+      return supportsWishes(state.server) ? wishes.screen() : homeScreen();
     case "welcome":
       return settings.welcomeScreen();
     default:
@@ -2205,7 +2263,12 @@ function startSync() {
       try {
         const changes = await api.changes(after, generation, controller.signal);
         if (controller.signal.aborted) return;
-        if (!first && (changes.resetRequired || changes.changedAreas?.length)) refreshSoon({ forget: true });
+        if (!first && (changes.resetRequired || changes.changedAreas?.length)) {
+          refreshSoon({ forget: true });
+          if (changes.resetRequired || changes.changedAreas?.some((area) => String(area).toLowerCase() === "userstate" || String(area).toLowerCase() === "catalog")) {
+            void refreshWishSummary({ notify: true });
+          }
+        }
         after = changes.cursor;
         generation = changes.generation ?? generation;
         first = false;

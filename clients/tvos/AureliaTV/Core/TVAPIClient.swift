@@ -385,8 +385,49 @@ struct TVAPIClient: Sendable {
     return try Self.decode([TVLiveSubtitleTrack].self, data: data)
   }
   /// A player's sleep timer ended: a server in sleep mode may sleep if nothing else plays.
-  func sleepTimerEnded() async throws {
-    _ = try await send("/api/v1/playback/sleep-timer-ended", method: "POST")
+  @discardableResult
+  func sleepTimerEnded() async throws -> TVSleepTimerEndedResponse? {
+    let data = try await send("/api/v1/playback/sleep-timer-ended", method: "POST")
+    guard !data.isEmpty else { return nil }
+    return try? Self.decode(TVSleepTimerEndedResponse.self, data: data)
+  }
+
+  /// Family wishes visible to this profile.
+  func wishes(state: TVWishState? = nil, offset: Int = 0, limit: Int = TVWishPresentation.pageSize)
+    async throws -> TVWishListResponse
+  {
+    var query: [URLQueryItem] = [
+      URLQueryItem(name: "offset", value: String(max(0, offset))),
+      URLQueryItem(name: "limit", value: String(max(1, limit))),
+    ]
+    if let state {
+      query.append(URLQueryItem(name: "state", value: state.rawValue))
+    }
+    return try Self.decode(
+      TVWishListResponse.self, data: await send("/api/v1/wishes", query: query))
+  }
+
+  /// Server-proxied poster thumbnail for a wish.
+  func wishPosterData(path: String, width: Int = 342) async throws -> Data {
+    let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, trimmed.count <= 200 else {
+      throw TVCoreError.invalidResponse
+    }
+    var req = try request(
+      "/api/v1/wishes/poster",
+      query: [
+        URLQueryItem(name: "path", value: trimmed),
+        URLQueryItem(name: "width", value: String(width)),
+      ],
+      authentication: .profile)
+    req.setValue("image/*", forHTTPHeaderField: "Accept")
+    let response = try await execute(req)
+    guard response.body.count <= 8 * 1024 * 1024,
+      response.header("Content-Type")?.lowercased().hasPrefix("image/") == true
+    else {
+      throw TVCoreError.invalidResponse
+    }
+    return response.body
   }
 
   /// The watching profile's screen time now; nil when it has none.

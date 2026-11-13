@@ -771,6 +771,7 @@ export function parseRoute(pathname = "/", search = "") {
   if (parts.length === 1 && parts[0] === "history") return { name: "history" };
   if (parts.length === 1 && parts[0] === "statistics") return { name: "statistics" };
   if (parts.length === 1 && parts[0] === "movie-night") return { name: "movie-night" };
+  if (parts.length === 1 && parts[0] === "wishes") return { name: "wishes" };
   if (parts.length === 1 && parts[0] === "welcome") return { name: "welcome" };
   if (parts.length === 1 && parts[0] === "search") return { name: "search", query: query.get("q") ?? "" };
   if (parts[0] === "settings" && parts.length <= 2) {
@@ -805,6 +806,8 @@ export function routePath(route) {
       return "/watchlist";
     case "movie-night":
       return "/movie-night";
+    case "wishes":
+      return "/wishes";
     case "welcome":
       return "/welcome";
     case "person": {
@@ -1126,6 +1129,7 @@ export const PLAYBACK_DEFAULTS = Object.freeze({
   controlsAutoHideDelay: 2,
   seekInterval: 10,
   automaticallyPlayNextEpisode: true,
+  showGoodNightOnSleepTimer: false,
   keepScreenOn: true,
   nightMode: false,
   dialogueBoost: "off",
@@ -1155,6 +1159,7 @@ export function normalizePreferences(value) {
     controlsAutoHideDelay: number(merged.controlsAutoHideDelay, 1, 10, 2),
     seekInterval: Math.round(number(merged.seekInterval, 5, 60, 10)),
     automaticallyPlayNextEpisode: merged.automaticallyPlayNextEpisode !== false,
+    showGoodNightOnSleepTimer: merged.showGoodNightOnSleepTimer === true,
     keepScreenOn: merged.keepScreenOn !== false,
     nightMode: merged.nightMode === true,
     dialogueBoost: ["off", "standard", "strong"].includes(merged.dialogueBoost) ? merged.dialogueBoost : "off",

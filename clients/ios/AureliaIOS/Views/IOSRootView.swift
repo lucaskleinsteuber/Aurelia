@@ -76,9 +76,20 @@ struct IOSRootView: View {
           }.tag(IOSLibraryTab.search)
           NavigationStack { IOSConnectionMenu() }
             .tabItem { Label("Settings", systemImage: "gearshape") }
+            .badge(model.supportsWishes ? model.wishBadgeCount : 0)
             .tag(IOSLibraryTab.profile)
         }
         .tint(.white)
+        .sheet(isPresented: $model.wishesPresented) {
+          NavigationStack {
+            IOSWishesView()
+              .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                  Button("Done") { model.wishesPresented = false }
+                }
+              }
+          }
+        }
         .overlay {
           if guide.tourPending, !guide.isGuiding {
             IOSLibraryTour(tab: tabIndex) { guide.tourShown() }.transition(.opacity)
@@ -409,6 +420,15 @@ struct IOSConnectionMenu: View {
         }
       }
       Section {
+        if model.supportsWishes {
+          NavigationLink {
+            IOSWishesView()
+          } label: {
+            Label("Family Wishes", systemImage: "sparkles")
+          }
+          .badge(model.wishBadgeCount)
+          .accessibilityIdentifier("settings-wishes")
+        }
         NavigationLink {
           IOSDownloadsView(store: model.offline)
         } label: {
@@ -445,6 +465,22 @@ struct IOSConnectionMenu: View {
         } label: {
           Label("Profile PIN", systemImage: "lock")
         }.accessibilityIdentifier("settings-pin")
+      }
+      if model.supportsWishes {
+        Section {
+          Toggle(
+            "Family Wish Notifications",
+            isOn: Binding(
+              get: { model.wishNotificationsEnabled },
+              set: { enabled in Task { await model.setWishNotificationsEnabled(enabled) } }
+            )
+          )
+          .accessibilityIdentifier("settings-wish-notifications")
+        } header: {
+          Text("Notifications")
+        } footer: {
+          Text("Local alerts arrive while Aurelia is open or briefly in the background.")
+        }
       }
       Section {
         LabeledContent {

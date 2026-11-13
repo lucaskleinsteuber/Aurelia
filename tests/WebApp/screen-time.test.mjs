@@ -98,3 +98,22 @@ test("the last title of the day hides Up Next and says so once", async (t) => {
   assert.equal(player.upNext.hidden, true);
   assert.match(player.notice.textContent, /last episode before bedtime/);
 });
+
+test("goodNight formats sleep-timer server shutdown and sleep countdown hints", () => {
+  assert.deepEqual(goodNight({ reason: "sleepTimer", powerMode: "off", afterSleepTimer: false }, "Robin"), {
+    title: "Good night, Robin",
+    text: "Sleep well.",
+  });
+  assert.deepEqual(goodNight({ reason: "sleepTimer", powerMode: "sleep", afterSleepTimer: true, minutes: 5 }, "Robin"), {
+    title: "Good night, Robin",
+    text: "Sleep well. The server will go to sleep in 5 minutes.",
+  });
+  assert.deepEqual(goodNight({ reason: "sleepTimer", powerMode: "shutdown", afterSleepTimer: true, minutes: 1 }, ""), {
+    title: "Good night",
+    text: "Sleep well. The server will shut down in 1 minute.",
+  });
+  assert.deepEqual(goodNight({ reason: "sleepTimer", powerMode: "stop", afterSleepTimer: true, minutes: 3 }, ""), {
+    title: "Good night",
+    text: "Sleep well.",
+  });
+});

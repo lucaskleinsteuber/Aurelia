@@ -51,10 +51,10 @@ public sealed class SettingsView : UserControl
 {
     private static readonly Dictionary<SettingsCategory, string[]> Keywords = new()
     {
-        [SettingsCategory.General] = ["start", "screen", "poster", "size", "watched", "motion", "rest", "sleep", "server", "appearance"],
+        [SettingsCategory.General] = ["start", "screen", "poster", "size", "watched", "motion", "rest", "sleep", "server", "appearance", "wish", "wishes", "notification", "notifications"],
         [SettingsCategory.Sidebar] = ["sidebar", "order", "pages", "hide", "show", "reset"],
         [SettingsCategory.Activity] = ["history", "statistics", "watch time", "streak", "year"],
-        [SettingsCategory.Playback] = ["resume", "next", "episode", "up next", "sleep", "night", "rate", "speed", "volume", "seek", "audio", "subtitle", "language", "track", "controls"],
+        [SettingsCategory.Playback] = ["resume", "next", "episode", "up next", "sleep", "sleep timer", "good night", "night", "rate", "speed", "volume", "seek", "audio", "subtitle", "language", "track", "controls"],
         [SettingsCategory.Library] = ["storage", "location", "folder", "scan", "import", "health", "duplicate", "offline", "reset", "monitor"],
         [SettingsCategory.Metadata] = ["tmdb", "metadata", "artwork", "match", "review", "enrich", "token"],
         [SettingsCategory.ProfilesAndDevices] = ["profile", "pin", "lock", "switch", "device", "pair", "code", "apple tv", "browser", "revoke"],
@@ -357,6 +357,13 @@ public sealed class SettingsView : UserControl
                 "When nothing plays and nobody uses Aurelia, it lets go of a server on another computer so the server can save power.",
                 prefs.RestsWhenUnused, value => { prefs.RestsWhenUnused = value; minutes.IsEnabled = value; }),
             minutes));
+        if (shell?.Client?.SupportsWishes == true)
+        {
+            page.Children.Add(Section("Notifications",
+                Toggle("Family Wish Notifications",
+                    "Show desktop notifications when someone sends a wish or a wish is added to the library.",
+                    prefs.WishNotificationsEnabled, value => prefs.WishNotificationsEnabled = value)));
+        }
     }
 
     private void Sidebar(StackPanel page)
@@ -541,7 +548,9 @@ public sealed class SettingsView : UserControl
                 current.UpNextAtCredits, value => Save(PlaybackPreferences.Load(Prefs.Store) with { UpNextAtCredits = value })),
             Toggle("Play Suggestions Automatically", "When a movie or a series' last episode reaches its credits, your server suggests what to watch next, with Watch Now, Watch Credits and Done. Turned on, the suggestion starts by itself when the title ends; otherwise an end screen shows it with two more.",
                 current.PlaySuggestionsAutomatically, value => Save(PlaybackPreferences.Load(Prefs.Store) with { PlaySuggestionsAutomatically = value })),
-            Toggle("Prevent Sleep During Playback", "The screen stays on while a title plays.", current.PreventSleep, value => Save(PlaybackPreferences.Load(Prefs.Store) with { PreventSleep = value }))));
+            Toggle("Prevent Sleep During Playback", "The screen stays on while a title plays.", current.PreventSleep, value => Save(PlaybackPreferences.Load(Prefs.Store) with { PreventSleep = value })),
+            Toggle("Show Good Night When the Sleep Timer Ends", "Shows the Good Night screen for up to 5 minutes instead of closing the player right away.",
+                current.ShowGoodNightOnSleepTimer, value => Save(PlaybackPreferences.Load(Prefs.Store) with { ShowGoodNightOnSleepTimer = value }))));
         if (shell?.Client?.Supports(Aurelia.Contracts.ServerFeatures.CinemaTrailers) == true)
         {
             page.Children.Add(Section("Cinema Mode",

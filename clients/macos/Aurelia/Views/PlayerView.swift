@@ -975,7 +975,11 @@ struct PlayerView: View {
   /// opens again. Done closes the player; a whole-profile lock then returns to "Who's watching?".
   private var goodNightScreen: some View {
     let name = profile.user?.shownName ?? ""
-    let words = ScreenTimeText.goodNight(controller.screenTime, name: name)
+    let isSleepTimer = controller.showsSleepTimerGoodNight
+    let words =
+      isSleepTimer
+      ? ScreenTimeText.goodNight(sleepTimerStatus: controller.sleepTimerEndedStatus, name: name)
+      : ScreenTimeText.goodNight(controller.screenTime, name: name)
     return ZStack {
       RadialGradient(
         colors: [Color(red: 0.16, green: 0.2, blue: 0.38), Color(red: 0.02, green: 0.02, blue: 0.06)],
@@ -1001,12 +1005,27 @@ struct PlayerView: View {
       .multilineTextAlignment(.center)
       .padding(40)
     }
+    .contentShape(Rectangle())
+    .onTapGesture { if isSleepTimer { goodNightDone() } }
+    .focusable(isSleepTimer)
+    .onKeyPress(phases: .down) { press in
+      guard isSleepTimer,
+        press.modifiers.intersection([.command, .control, .option]).isEmpty
+      else { return .ignored }
+      goodNightDone()
+      return .handled
+    }
+    .onExitCommand { if isSleepTimer { goodNightDone() } }
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("player-good-night")
   }
 
   private func goodNightDone() {
-    let wholeProfile = controller.screenTime?.lockScope == .wholeProfile
+    let wholeProfile =
+      !controller.showsSleepTimerGoodNight && controller.screenTime?.lockScope == .wholeProfile
+    if controller.showsSleepTimerGoodNight {
+      controller.dismissSleepGoodNight()
+    }
     closePlayer()
     if wholeProfile { Task { await model.switchWatchingProfile() } }
   }
@@ -1255,6 +1274,16 @@ struct PlayerView: View {
     if model.isSettingsPresented {
       if event.keyCode == 53 {
         model.isSettingsPresented = false
+        return true
+      }
+      return false
+    }
+    if controller.showsGoodNight {
+      if controller.showsSleepTimerGoodNight,
+        !event.isARepeat,
+        event.modifierFlags.intersection([.command, .control, .option]).isEmpty
+      {
+        goodNightDone()
         return true
       }
       return false

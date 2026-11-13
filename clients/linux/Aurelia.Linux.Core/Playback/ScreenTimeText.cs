@@ -30,6 +30,23 @@ public static class ScreenTimeText
         return (who.Length == 0 ? "Good night" : $"Good night, {who}", opens.Length == 0 ? "Sleep well." : $"See you at {opens}.");
     }
 
+    /// <summary>The good-night screen's heading and server-power detail after a sleep timer ends.</summary>
+    public static (string Title, string Text) GoodNight(SleepTimerEndedResponse? sleepTimer, string? name)
+    {
+        var who = (name ?? "").Trim();
+        var title = who.Length == 0 ? "Good night" : $"Good night, {who}";
+        if (sleepTimer is not { AfterSleepTimer: true } status) return (title, "Sleep well.");
+        var minutes = Math.Max(1, status.Minutes);
+        var unit = minutes == 1 ? "minute" : "minutes";
+        var detail = status.PowerMode?.ToLowerInvariant() switch
+        {
+            "sleep" => $"The server goes to sleep in about {minutes} {unit} unless someone keeps watching.",
+            "shutdown" => $"The server turns off in about {minutes} {unit} unless someone keeps watching.",
+            _ => null,
+        };
+        return (title, detail is null ? "Sleep well." : $"Sleep well. {detail}");
+    }
+
     /// <summary>The quiet note while the last title of the day plays.</summary>
     public static string LastTitleNote(ScreenTimeStatus? status) =>
         status?.Reason == ScreenTimeReason.Limit ? "This is the last title for today." : "This is the last episode before bedtime.";

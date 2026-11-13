@@ -148,6 +148,29 @@ enum ScreenTimeText {
       opens.isEmpty ? "Sleep well." : "See you at \(opens).")
   }
 
+  /// Good-night heading and server-power detail when playback stops at a sleep timer.
+  static func goodNight(sleepTimerStatus: SleepTimerEndedResponse?, name: String)
+    -> (title: String, text: String)
+  {
+    let who = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    let title = who.isEmpty ? "Good night" : "Good night, \(who)"
+    guard let status = sleepTimerStatus, status.afterSleepTimer else {
+      return (title, "Sleep well.")
+    }
+    let minutes = max(1, status.minutes)
+    let unit = minutes == 1 ? "minute" : "minutes"
+    let detail: String? =
+      switch status.powerMode {
+      case "sleep":
+        "The server goes to sleep in about \(minutes) \(unit) unless someone keeps watching."
+      case "shutdown":
+        "The server turns off in about \(minutes) \(unit) unless someone keeps watching."
+      default:
+        nil
+      }
+    return (title, detail.map { "Sleep well. \($0)" } ?? "Sleep well.")
+  }
+
   /// The quiet note while the last title of the day plays.
   static func lastTitleNote(_ status: ScreenTimeStatus?) -> String {
     status?.reason == .limit

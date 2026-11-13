@@ -150,4 +150,5 @@ enum ServerFeatureNames {
   /// Subtitles from speech and Sync to Speech written by the server with whisper.cpp.
   static let serverSpeech = "server-speech-v1"
   static let suggestions = "suggestions-v1"
+  static let wishes = "wishes-v1"
 }

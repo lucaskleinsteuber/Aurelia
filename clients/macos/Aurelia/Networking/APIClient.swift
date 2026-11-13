@@ -1448,8 +1448,105 @@ struct APIClient: Sendable {
     return "\(encodedName)=\(encodedValue)"
   }
 
-  func sleepTimerEnded() async throws {
-    _ = try await perform(path: "/api/v1/playback/sleep-timer-ended", method: "POST")
+  @discardableResult
+  func sleepTimerEnded() async throws -> SleepTimerEndedResponse? {
+    let data = try await perform(path: "/api/v1/playback/sleep-timer-ended", method: "POST")
+    guard !data.isEmpty else { return nil }
+    return try? Self.decode(SleepTimerEndedResponse.self, from: data)
+  }
+
+  func wishes(state: WishState? = nil, offset: Int = 0, limit: Int = 30) async throws
+    -> WishListResponse
+  {
+    var params: [String] = []
+    if let state {
+      params.append(try Self.query(name: "state", value: state.rawValue))
+    }
+    if offset > 0 {
+      params.append("offset=\(offset)")
+    }
+    params.append("limit=\(max(1, min(limit, 100)))")
+    let suffix = params.isEmpty ? "" : "?\(params.joined(separator: "&"))"
+    return try await get("/api/v1/wishes\(suffix)")
+  }
+
+  func wishSummary() async throws -> WishSummaryResponse {
+    try await get("/api/v1/wishes/summary")
+  }
+
+  func wishSearch(query: String, kind: MediaKind? = nil) async throws -> WishSearchResponse {
+    var params = [try Self.query(name: "query", value: query)]
+    if let kind {
+      params.append(try Self.query(name: "kind", value: kind.rawValue))
+    }
+    return try await get("/api/v1/wishes/search?\(params.joined(separator: "&"))")
+  }
+
+  func createWish(_ payload: CreateWishRequest) async throws -> CreateWishOutcome {
+    let body = try JSONEncoder().encode(payload)
+    let (data, http, _) = try await Self.request(
+      baseURL: profile.baseURL,
+      path: "/api/v1/wishes",
+      method: "POST",
+      token: profile.token,
+      body: body,
+      trustMode: .pinned(profile.publicKeyFingerprint),
+      allowedStatuses: [409])
+    if http.statusCode == 409 {
+      if let conflict = try? Self.decode(WishAlreadyInLibraryProblem.self, from: data),
+        conflict.code == "already_in_library"
+      {
+        return .alreadyInLibrary(conflict)
+      }
+      throw Self.responseError(
+        status: http.statusCode,
+        retryAfter: http.value(forHTTPHeaderField: "Retry-After"),
+        data: data)
+    }
+    return .created(try Self.decode(CreateWishResponse.self, from: data))
+  }
+
+  func deleteWish(id: UUID) async throws {
+    _ = try await perform(path: "/api/v1/wishes/\(id.uuidString.lowercased())", method: "DELETE")
+  }
+
+  func setWishSupport(id: UUID, supported: Bool) async throws -> WishSummary {
+    let body = try JSONEncoder().encode(SetWishSupportRequest(supported: supported))
+    let data = try await perform(
+      path: "/api/v1/wishes/\(id.uuidString.lowercased())/support",
+      method: "PUT",
+      body: body)
+    return try Self.decode(WishSummary.self, from: data)
+  }
+
+  func updateWishState(
+    id: UUID, state: WishState, resolutionNote: String? = nil, fulfilledMediaItemId: UUID? = nil
+  ) async throws -> WishSummary {
+    let body = try JSONEncoder().encode(
+      UpdateWishStateRequest(
+        state: state, resolutionNote: resolutionNote, fulfilledMediaItemId: fulfilledMediaItemId))
+    let data = try await perform(
+      path: "/api/v1/wishes/\(id.uuidString.lowercased())/state",
+      method: "PUT",
+      body: body)
+    return try Self.decode(WishSummary.self, from: data)
+  }
+
+  func markWishesSeen() async throws -> WishSummaryResponse {
+    let data = try await perform(path: "/api/v1/wishes/seen", method: "POST")
+    return try Self.decode(WishSummaryResponse.self, from: data)
+  }
+
+  func wishPosterData(path: String, width: Int = 342) async throws -> Data {
+    let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, trimmed.hasPrefix("/"), !trimmed.contains("://") else {
+      throw APIClientError.invalidResponse
+    }
+    let query = [
+      try Self.query(name: "path", value: trimmed),
+      "width=\(max(92, min(width, 780)))",
+    ].joined(separator: "&")
+    return try await perform(path: "/api/v1/wishes/poster?\(query)", method: "GET")
   }
 
   func createPlayback(mediaId: UUID) async throws -> PlaybackSourceResponse {
@@ -2168,7 +2265,8 @@ struct APIClient: Sendable {
     body: Data?,
     trustMode: TLSTrustDelegate.Mode,
     additionalHeaders: [String: String] = [:],
-    timeout: TimeInterval = 15
+    timeout: TimeInterval = 15,
+    allowedStatuses: Set<Int> = []
   ) async throws -> (Data, HTTPURLResponse, TLSTrustDelegate) {
     guard let host = baseURL.host,
       let url = URL(string: path, relativeTo: baseURL)?.absoluteURL
@@ -2226,7 +2324,7 @@ struct APIClient: Sendable {
     guard let http = response as? HTTPURLResponse else {
       throw APIClientError.invalidResponse
     }
-    guard (200..<300).contains(http.statusCode) else {
+    guard (200..<300).contains(http.statusCode) || allowedStatuses.contains(http.statusCode) else {
       throw Self.responseError(
         status: http.statusCode, retryAfter: http.value(forHTTPHeaderField: "Retry-After"),
         data: data)

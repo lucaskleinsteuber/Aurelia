@@ -163,6 +163,17 @@ struct LibraryShellView: View {
       open(.person(person))
       model.requestedPersonDetail = nil
     }
+    .onChange(of: model.requestedDestination) { _, target in
+      guard let target else { return }
+      if target == .wishes, !model.supportsWishes {
+        model.requestedDestination = nil
+        return
+      }
+      selection = nil
+      findRequest = nil
+      destination = target
+      model.requestedDestination = nil
+    }
     .onChange(of: model.catalogVisibilityRevision) {
       if case .media(let id) = selection, !model.catalogItems.contains(where: { $0.id == id }) {
         selection = nil
@@ -189,6 +200,7 @@ struct LibraryShellView: View {
     return order.filter { item in
       guard SidebarPreferences.isVisible(item) else { return false }
       if item == .watchlist && !model.supportsWatchlist { return false }
+      if item == .wishes && !model.supportsWishes { return false }
       return true
     }
   }
@@ -210,7 +222,9 @@ struct LibraryShellView: View {
         defaults: LibraryBrowsePreferenceStore.applicationDefaults)
       let restored = store.load(
         serverId: profile.serverId, userId: profile.user?.id ?? profile.sessionId)
-      targetDestination = (restored == .watchlist && !model.supportsWatchlist) ? .home : restored
+      targetDestination =
+        ((restored == .watchlist && !model.supportsWatchlist)
+          || (restored == .wishes && !model.supportsWishes)) ? .home : restored
     }
 
     let visible = visibleSidebarItems
@@ -316,13 +330,25 @@ struct LibraryShellView: View {
       destination = item
       if item == .home { Task { await model.refreshHome() } }
     } label: {
-      Label {
-        Text(item.title).font(.body.weight(destination == item ? .semibold : .regular))
-      } icon: {
-        // Tinted symbols, as in the Apple TV app's sidebar; on the selection they turn white
-        // so they stay visible on the accent highlight.
-        Image(systemName: item.symbol)
-          .foregroundStyle(destination == item ? AnyShapeStyle(.primary) : AnyShapeStyle(.tint))
+      HStack(spacing: 8) {
+        Label {
+          Text(item.title).font(.body.weight(destination == item ? .semibold : .regular))
+        } icon: {
+          // Tinted symbols, as in the Apple TV app's sidebar; on the selection they turn white
+          // so they stay visible on the accent highlight.
+          Image(systemName: item.symbol)
+            .foregroundStyle(destination == item ? AnyShapeStyle(.primary) : AnyShapeStyle(.tint))
+        }
+        Spacer(minLength: 4)
+        if item == .wishes && model.wishBadgeCount > 0 {
+          Text("\(model.wishBadgeCount)")
+            .font(.caption2.weight(.semibold))
+            .monospacedDigit()
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Color.accentColor.opacity(destination == item ? 0.35 : 0.2)))
+            .accessibilityIdentifier("sidebar-wishes-badge")
+        }
       }
       .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
       .contentShape(Rectangle())
@@ -427,6 +453,8 @@ struct LibraryShellView: View {
         onSelectCollection: { open(.collection($0)) })
     case .watchlist:
       WatchlistPage(onSelect: { open(.media($0)) })
+    case .wishes:
+      WishesPage(onOpenMedia: { open(.media($0)) })
     case .recentlyAdded:
       LibraryPage(
         section: .recentlyAdded, findRequest: findRequest,

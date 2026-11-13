@@ -30,6 +30,10 @@ struct AureliaIOSApp: App {
         // The Apple TV screens rely on focus instead of a tint; text stays white here as well.
         .tint(.white)
         .task {
+          let appModel = model
+          IOSWishNotificationCenter.shared.installDelegateIfNeeded { [weak appModel] in
+            appModel?.openWishesFromNotification()
+          }
           await model.start()
           IOSVideoEngine.warmUp()
         }

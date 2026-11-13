@@ -54,6 +54,8 @@ struct AppSettingsView: View {
   @AppStorage(GeneralPreferenceKeys.showCollectionsInSidebar) private var showCollectionsInSidebar =
     true
   @AppStorage(GeneralPreferenceKeys.hideOfflineTitles) private var hideOfflineTitles = false
+  @AppStorage(GeneralPreferenceKeys.wishNotificationsEnabled) private var wishNotificationsEnabled =
+    true
 
   // Window & System
   @AppStorage(WindowClosePreference.quitsKey) private var quitsWhenWindowCloses = true
@@ -390,7 +392,7 @@ struct AppSettingsView: View {
 
       var foundAny = false
 
-      if queryMatches(query, "start screen poster rows hero motion interface display") {
+      if queryMatches(query, "start screen poster rows hero motion interface display wish wishes notifications") {
         interfaceDisplaySection
         let _ = { foundAny = true }()
       }
@@ -417,7 +419,7 @@ struct AppSettingsView: View {
         ServerManagementView(.power)
         let _ = { foundAny = true }()
       }
-      if queryMatches(query, "resume next countdown threshold auto night mode sleep skip intro credits") {
+      if queryMatches(query, "resume next countdown threshold auto night mode sleep good night timer skip intro credits") {
         playbackBehaviorSection
         let _ = { foundAny = true }()
       }
@@ -556,6 +558,19 @@ struct AppSettingsView: View {
           Text("Turns off sliding and zooming animations in Aurelia, as the system setting does.")
             .font(.caption)
             .foregroundStyle(.secondary)
+        }
+
+        if model.supportsWishes {
+          Divider()
+          VStack(alignment: .leading, spacing: 2) {
+            Toggle("Family Wish Notifications", isOn: $wishNotificationsEnabled)
+              .accessibilityIdentifier("interface-wish-notifications")
+            Text(
+              "Shows a macOS notification when someone adds a family wish or when your wish enters the library while Aurelia is open."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          }
         }
       }
       .toggleStyle(.switch)
@@ -811,6 +826,19 @@ struct AppSettingsView: View {
           isOn: $playbackPreferences.preferences.preventSleepDuringPlayback
         )
         .accessibilityIdentifier("playback-prevent-sleep")
+
+        VStack(alignment: .leading, spacing: 2) {
+          Toggle(
+            "Show Good Night When the Sleep Timer Ends",
+            isOn: $playbackPreferences.preferences.showGoodNightOnSleepTimer
+          )
+          .accessibilityIdentifier("playback-sleep-good-night")
+          Text(
+            "Shows a quiet Good-Night screen for 5 minutes when the sleep timer finishes instead of closing right away."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        }
 
         VStack(alignment: .leading, spacing: 2) {
           Toggle(

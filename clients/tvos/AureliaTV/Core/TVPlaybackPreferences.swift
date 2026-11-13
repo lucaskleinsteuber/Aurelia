@@ -83,6 +83,8 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
   var cinemaAds = true
   /// How many trailers of films nobody has watched yet, 0 to 3.
   var cinemaTrailers = 2
+  /// Shows the good-night screen when the sleep timer ends instead of leaving playback right away.
+  var showGoodNightOnSleepTimer = false
   /// Compatibility accessor for older code and the persisted Night Mode key.
   var nightMode: Bool {
     get { volumeLeveling != .off }
@@ -110,7 +112,7 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
     case automaticResume, automaticallyPlayNextEpisode, defaultPlaybackRate, controlsDelay
     case seekInterval, preferredAudioTrack, preferredSubtitleTrack, nightMode, dialogueBoost,
       volumeLeveling, streamingQuality, introSkipping, upNextAtCredits, cinemaMode, cinemaAds,
-      cinemaTrailers, playSuggestionsAutomatically
+      cinemaTrailers, playSuggestionsAutomatically, showGoodNightOnSleepTimer
   }
 
   init(from decoder: Decoder) throws {
@@ -140,6 +142,8 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
     cinemaTrailers = try values.decodeIfPresent(Int.self, forKey: .cinemaTrailers) ?? 2
     playSuggestionsAutomatically =
       try values.decodeIfPresent(Bool.self, forKey: .playSuggestionsAutomatically) ?? false
+    showGoodNightOnSleepTimer =
+      try values.decodeIfPresent(Bool.self, forKey: .showGoodNightOnSleepTimer) ?? false
   }
 
   func encode(to encoder: Encoder) throws {
@@ -161,6 +165,7 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
     try values.encode(cinemaAds, forKey: .cinemaAds)
     try values.encode(cinemaTrailers, forKey: .cinemaTrailers)
     try values.encode(playSuggestionsAutomatically, forKey: .playSuggestionsAutomatically)
+    try values.encode(showGoodNightOnSleepTimer, forKey: .showGoodNightOnSleepTimer)
   }
 
   /// These preferences with a series' own track choices, where it has them.

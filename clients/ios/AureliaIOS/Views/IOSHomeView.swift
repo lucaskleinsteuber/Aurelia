@@ -64,6 +64,49 @@ struct IOSHomeView: View {
     .accessibilityIdentifier("home-movie-night")
   }
 
+  private var familyWishesStrip: some View {
+    let badge = model.wishBadgeCount
+    return NavigationLink {
+      IOSWishesView()
+    } label: {
+      HStack(spacing: 14) {
+        ZStack {
+          RoundedRectangle(cornerRadius: 10, style: .continuous).fill(IOSDesign.raised)
+            .frame(width: 44, height: 40)
+          Image(systemName: "sparkles").font(.headline).foregroundStyle(.white)
+        }
+        .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Family Wishes").font(.body.weight(.semibold))
+          Text(
+            badge > 0
+              ? (model.isWishAdmin
+                ? "\(badge) open or awaiting review"
+                : "\(badge) new update\(badge == 1 ? "" : "s")")
+              : "Request a movie or TV show."
+          )
+          .font(.caption).foregroundStyle(.secondary)
+        }
+        Spacer()
+        if badge > 0 {
+          Text("\(badge)")
+            .font(.caption.weight(.bold))
+            .monospacedDigit()
+            .foregroundStyle(.black)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(.white, in: Capsule())
+        }
+        Image(systemName: "chevron.right").foregroundStyle(.secondary)
+      }
+      .padding(14)
+      .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+    .buttonStyle(.plain)
+    .padding(.horizontal, IOSDesign.margin)
+    .accessibilityIdentifier("home-wishes")
+  }
+
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 28) {
@@ -79,6 +122,7 @@ struct IOSHomeView: View {
             IOSMonthlyWrappedButton { monthlyWrapped = $0 }.padding(.horizontal, IOSDesign.margin)
           }
           if model.supportsMovieNight { movieNightStrip }
+          if model.supportsWishes { familyWishesStrip }
           // Same order as the Mac Home page.
           shelf("Continue Watching", items: home.continueWatching, section: .continueWatching)
           ForEach(home.becauseYouWatched ?? []) { rail in

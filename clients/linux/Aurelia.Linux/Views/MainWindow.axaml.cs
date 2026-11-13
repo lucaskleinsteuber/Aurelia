@@ -21,6 +21,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
 {
     private readonly AppServices services;
     private LibraryShell? shell;
+    private LibraryStore? observedLibrary;
     private readonly OfflineProfileStore offlineCards;
 
     public MainWindow() : this(AppServices.CreateDefault())
@@ -45,9 +46,12 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         Flow = new AppFlow(services.Settings);
         var discovery = new DiscoveryCache(services.CreateDiscovery());
         var api = new AureliaApi(services.Transport);
+        var wishPosters = new WishPosterCache(services.ArtworkDirectory is { } dir
+            ? Path.Combine(Path.GetDirectoryName(dir) ?? dir, "wish-posters")
+            : null);
         Session = new AppSession(Flow, api, services.Credentials,
             new ServerWakeUp(api, services.WakeOnLan, () => discovery.Latest, services.Time), services.DeviceName, services.Time,
-            new GeneralPreferences(services.Settings), new ArtworkCache(services.ArtworkDirectory));
+            new GeneralPreferences(services.Settings), new ArtworkCache(services.ArtworkDirectory), wishPosters);
         Flow.PropertyChanged += OnFlowChanged;
         Flow.Guide.PropertyChanged += OnGuideChanged;
         // Profile photos come from the connected server, with this computer's device credential,
@@ -58,7 +62,9 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
             : Task.FromException<byte[]>(new InvalidOperationException("No server is connected."));
         Session.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(AppSession.Library)) StartPlayOn();
+            if (e.PropertyName != nameof(AppSession.Library)) return;
+            AttachWishNotifications(Session.Library);
+            StartPlayOn();
         };
         // The offline mode remembers each profile that opens with the server (with only a PIN check
         // value), and forgets a server's profiles when this computer leaves it.
@@ -455,6 +461,11 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
 
     public void Dispose()
     {
+        if (observedLibrary is not null)
+        {
+            observedLibrary.WishNotificationRequested -= OnWishNotificationRequested;
+            observedLibrary = null;
+        }
         restCheck.Stop();
         services.Updater?.Dispose();
         playOn?.Cancel();
@@ -473,6 +484,18 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
     public RemotePlayback? Remote { get; private set; }
 
     /// <summary>Play On while a profile is open: announce this computer and follow commands from other devices.</summary>
+    private void AttachWishNotifications(LibraryStore? library)
+    {
+        if (observedLibrary is not null) observedLibrary.WishNotificationRequested -= OnWishNotificationRequested;
+        observedLibrary = library;
+        if (library is not null) library.WishNotificationRequested += OnWishNotificationRequested;
+    }
+
+    private void OnWishNotificationRequested(WishNotificationEvent notification)
+    {
+        if (services.Notifications is { } notifier) _ = notifier.NotifyAsync(notification);
+    }
+
     private void StartPlayOn()
     {
         playOn?.Cancel();

@@ -140,10 +140,16 @@ struct TVPlayerView: View {
       if shown, !controller.controlsVisible, controller.trackMenu == nil { focus = .skipIntro }
       else if !shown, focus == .skipIntro { focus = .surface }
     }
-    .onPlayPauseCommand { if preShow == nil { controller.togglePlayPause() } }
+    .onPlayPauseCommand {
+      if preShow == nil, !controller.showsGoodNight { controller.togglePlayPause() }
+    }
     .onExitCommand {
       preShow?.stop()
-      controller.back()
+      if controller.showsGoodNight {
+        goodNightDone()
+      } else {
+        controller.back()
+      }
     }
     .onChange(of: focus) { _, value in
       if let value, value.isTransport { lastTransport = value }
@@ -554,8 +560,13 @@ struct TVPlayerView: View {
   /// Screen time is over (docs/SCREEN_TIME.md): a calm moon, the profile's name and when Aurelia
   /// opens again. Done closes the player; a whole-profile lock then returns to "Who's watching?".
   private var goodNightScreen: some View {
-    let words = TVScreenTimeText.goodNight(
-      controller.screenTime, name: model.session?.user.shownName ?? "")
+    let words: (title: String, text: String) =
+      controller.showsSleepTimerGoodNight
+      ? TVScreenTimeText.goodNight(
+        sleepTimerStatus: controller.sleepTimerEndedStatus,
+        name: model.session?.user.shownName ?? "")
+      : TVScreenTimeText.goodNight(
+        controller.screenTime, name: model.session?.user.shownName ?? "")
     return ZStack {
       RadialGradient(
         colors: [Color(red: 0.16, green: 0.2, blue: 0.38), Color(red: 0.02, green: 0.02, blue: 0.06)],
@@ -569,7 +580,9 @@ struct TVPlayerView: View {
           .shadow(color: Color(red: 0.95, green: 0.89, blue: 0.66).opacity(0.45), radius: 20)
           .accessibilityHidden(true)
         Text(words.title).font(.largeTitle.weight(.bold)).foregroundStyle(.white)
-        Text(words.text).font(.title3).foregroundStyle(.white.opacity(0.75))
+        if !words.text.isEmpty {
+          Text(words.text).font(.title3).foregroundStyle(.white.opacity(0.75))
+        }
         Button("Done") { goodNightDone() }
           .buttonStyle(TVButtonStyle()).focusEffectDisabled().focused($focus, equals: .goodNightDone)
           .padding(.top, 8)
@@ -583,7 +596,9 @@ struct TVPlayerView: View {
   }
 
   private func goodNightDone() {
-    let wholeProfile = controller.screenTime?.closesWholeProfile == true
+    let wholeProfile = TVSleepTimerGoodNightPolicy.shouldCloseWholeProfile(
+      closesWholeProfile: controller.screenTime?.closesWholeProfile == true,
+      showsSleepTimerGoodNight: controller.showsSleepTimerGoodNight)
     controller.close()
     if wholeProfile { Task { await model.switchProfile() } }
   }

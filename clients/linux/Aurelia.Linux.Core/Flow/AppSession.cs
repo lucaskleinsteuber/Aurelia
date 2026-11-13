@@ -35,10 +35,11 @@ public sealed class AppSession : ObservableObject
     private string? message;
 
     public AppSession(AppFlow flow, AureliaApi api, ICredentialStore credentials, ServerWakeUp wakeUp, string deviceName, TimeProvider? time = null,
-        GeneralPreferences? preferences = null, ArtworkCache? artwork = null)
+        GeneralPreferences? preferences = null, ArtworkCache? artwork = null, WishPosterCache? wishPosters = null)
     {
         Preferences = preferences ?? new GeneralPreferences(new MemorySettingsStore());
         Artwork = artwork ?? new ArtworkCache(null);
+        WishPosters = wishPosters ?? new WishPosterCache(null);
         this.flow = flow;
         Api = api;
         this.credentials = credentials;
@@ -54,6 +55,8 @@ public sealed class AppSession : ObservableObject
     public GeneralPreferences Preferences { get; }
 
     public ArtworkCache Artwork { get; }
+
+    public WishPosterCache WishPosters { get; }
 
     /// <summary>Expected restart during a network trial: retain the settings editor until confirmation or rollback.</summary>
     public bool NetworkConfirmationPending { get; private set; }
@@ -283,7 +286,7 @@ public sealed class AppSession : ObservableObject
         Profile = session;
         if (Server is { } saved)
         {
-            var store = new LibraryStore(new LibraryClient(Api, saved, session, Capabilities), Artwork, Preferences, HandleSessionFailure);
+            var store = new LibraryStore(new LibraryClient(Api, saved, session, Capabilities), Artwork, Preferences, HandleSessionFailure, WishPosters);
             Library = store;
             syncing?.Cancel();
             var sync = new CancellationTokenSource();
