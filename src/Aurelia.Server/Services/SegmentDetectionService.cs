@@ -656,7 +656,8 @@ public sealed partial class SegmentDetectionService : BackgroundService
             while (!interrupt.IsCancellationRequested)
             {
                 await Task.Delay(TimeSpan.FromSeconds(2), interrupt.Token);
-                if (IsBusyWithPlayback())
+                // The pictures are read in a conversion slot of their own, which is not someone watching.
+                if (IsBusyWithPlayback(ownConversions: 1))
                 {
                     await interrupt.CancelAsync();
                     return;
@@ -776,7 +777,14 @@ public sealed partial class SegmentDetectionService : BackgroundService
         !rows.TryGetValue(id, out var row) || row.AnalysisVersion != version || row.AnalyzedFileSize != fileSize
         || row.AnalyzedFileModifiedAt?.ToUnixTimeMilliseconds() != fileModifiedAt?.ToUnixTimeMilliseconds();
 
-    private bool IsBusyWithPlayback() => streams.PlaybackCount > 0 || live.Running > 0;
+    private bool IsBusyWithPlayback(int ownConversions = 0) => IsBusy(streams.PlaybackCount, live.Running, ownConversions);
+
+    /// <summary>
+    /// Whether someone is watching or converting. <paramref name="ownConversions"/> are the slots
+    /// this work holds itself: counting them would stop a read because of itself, again and again.
+    /// </summary>
+    public static bool IsBusy(int playbackCount, int runningConversions, int ownConversions) =>
+        playbackCount > 0 || runningConversions > ownConversions;
 
     private async Task WaitWhilePlaybackBusyAsync(CancellationToken cancellationToken)
     {

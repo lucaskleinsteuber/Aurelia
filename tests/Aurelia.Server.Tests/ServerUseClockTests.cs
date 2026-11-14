@@ -28,6 +28,34 @@ public sealed class ServerUseClockTests
         Assert.Equal(expected, ServerUseClock.CountsAsUse(context));
     }
 
+    /// <summary>
+    /// An owner's open app asks for new devices in a request that waits on the server (since
+    /// 2.15.0). Counted as use, it kept a server with power saving awake for as long as the app
+    /// stayed open.
+    /// </summary>
+    [Theory]
+    [InlineData("GET", "/api/v1/server/security/alerts", "?version=0&waitSeconds=0", false)]
+    [InlineData("GET", "/api/v1/server/security/alerts", "?version=4&waitSeconds=25", false)]
+    [InlineData("GET", "/api/v1/server/security/alerts", "", false)]
+    [InlineData("GET", "/api/v1/some/later/watch", "?waitSeconds=25", false)]
+    [InlineData("GET", "/api/v1/some/later/watch", "?waitMs=10000", false)]
+    [InlineData("POST", "/api/v1/devices/players/synthetic/commands", "?waitMs=10000", true)]
+    [InlineData("GET", "/api/v1/server/security/devices", "", true)]
+    // Home on the Mac, iPhone and Apple TV asks every 15 seconds whether a night or a party is on.
+    [InlineData("GET", "/api/v1/movie-night", "", false)]
+    [InlineData("GET", "/api/v1/watch-together", "", false)]
+    [InlineData("GET", "/api/v1/watch-together", "?mediaId=00000000-0000-0000-0000-000000000001", false)]
+    [InlineData("POST", "/api/v1/movie-night", "", true)]
+    public void AnAppThatWaitsForNewsDoesNotCountAsUse(string method, string path, string query, bool expected)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Method = method;
+        context.Request.Path = path;
+        context.Request.QueryString = new QueryString(query);
+        context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "synthetic")], "Test"));
+        Assert.Equal(expected, ServerUseClock.CountsAsUse(context));
+    }
+
     [Fact]
     public void UseIsWrittenAtMostTwiceAMinute()
     {

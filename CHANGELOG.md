@@ -50,6 +50,8 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Fixed
 
+- Server: a server with power saving sleeps or turns off again when unused. Looking for credits in a title's pictures stopped itself after two seconds and began again without end on slower computers, which kept the computer busy and never finished; it now reads each stretch once.
+- Server: an app that is merely open no longer counts as someone using the server. Waiting for new devices (owners) and Home's look for a Movie Night or Watch Party kept it awake.
 - Browser: signing in with a device code works again; the browser refused the code because of the space it shows in it ("0000 0000").
 - iPhone & iPad: Wake-on-LAN also reaches a server found with Bonjour, whose name is now looked up to its IPv4 address.
 - Apple TV and iPhone & iPad: when the sleep timer's minutes run out, the player closes as on the other apps instead of only pausing. On Apple TV, the Menu button on the good-night screen now does the same as Done.

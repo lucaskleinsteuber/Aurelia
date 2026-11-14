@@ -353,6 +353,63 @@ public sealed class SegmentDetectionTests
         }
     }
 
+    /// <summary>
+    /// The pictures are read in a conversion slot of their own. Counted as someone converting, a
+    /// read longer than two seconds stopped itself and began again without end: a small server
+    /// never finished, stayed busy and so never went to sleep or turned off (found 14.11.2026).
+    /// </summary>
+    [Fact]
+    public async Task ASlowPictureReadFinishesInsteadOfStoppingItself()
+    {
+        if (OperatingSystem.IsWindows() || Installed() is not { } maker) return;
+        var real = Tools() ?? maker;
+        var parent = TestPaths.CreateDataDirectory();
+        var root = Path.Combine(parent, "Invented Movies");
+        var slow = Path.Combine(parent, "Slow Tools");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(slow);
+        try
+        {
+            // The real ffmpeg, three seconds late whenever it is asked for the grey pictures.
+            var wrapper = Path.Combine(slow, "ffmpeg");
+            await File.WriteAllTextAsync(wrapper, $"#!/bin/sh\ncase \"$*\" in *format=gray*) sleep 3 ;; esac\nexec '{real}' \"$@\"\n");
+            File.SetUnixFileMode(wrapper, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.CreateSymbolicLink(Path.Combine(slow, "ffprobe"), Path.Combine(Path.GetDirectoryName(real)!, "ffprobe"));
+
+            var path = Path.Combine(root, "Invented Movie (2026).mkv");
+            await EncodeFramesAsync(maker, path, seconds: 1_260, second => second < 1_100
+                ? SyntheticPictures.Scene(80_000 + second)
+                : second < 1_230 ? SyntheticPictures.Credits(81_000 + second / 4) : SyntheticPictures.Scene(82_000 + second));
+            using var factory = Factory(wrapper);
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var movie = await AddMovieAsync(factory, root, path);
+            var detection = factory.Services.GetRequiredService<SegmentDetectionService>();
+
+            Assert.Equal(1, await detection.QueuePendingSeasonsAsync(CancellationToken.None));
+            using var patience = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+            Assert.Equal(1, await detection.ProcessPendingAsync(patience.Token));
+
+            var times = await SegmentsAsync(client, owner.Token, movie);
+            Assert.True(times is { Analyzed: true, CreditsSource: MediaSegmentSource.Detected }, times.ToString());
+            Assert.Equal(0, factory.Services.GetRequiredService<LiveConversionService>().Running);
+        }
+        finally
+        {
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(0, 0, 0, false)]
+    [InlineData(1, 0, 0, true)]
+    [InlineData(0, 1, 0, true)]
+    [InlineData(0, 1, 1, false)]
+    [InlineData(0, 2, 1, true)]
+    [InlineData(1, 1, 1, true)]
+    public void BackgroundWorkDoesNotTakeItsOwnReadForSomeoneWatching(int playback, int conversions, int own, bool busy) =>
+        Assert.Equal(busy, SegmentDetectionService.IsBusy(playback, conversions, own));
+
     /// <summary>Invented pictures at two a second with noise as sound.</summary>
     private static async Task EncodeFramesAsync(string ffmpeg, string path, int seconds, Func<int, byte[]> picture)
     {
