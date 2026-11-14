@@ -10,7 +10,7 @@ public static class ServerFeatures
         "library-state-v1", "server-readiness-v1", "device-authorization-v1", "artwork-variants-v1",
         "catalog-pages-500-v1", PreviewStreams, WebApp, ProfilePersonalization, AgeLimits,
         WebPairingCode, CinemaTrailers, MovieNight, YearWrapped, MonthlyWrapped, MediaSegments, ServerSpeech, Suggestions,
-        ScreenTime, Wishes, Security, ServerPerformance,
+        ScreenTime, Wishes, Security, ServerPerformance, Automation,
     });
 
     /// <summary>
@@ -70,6 +70,9 @@ public static class ServerFeatures
 
     /// <summary>Response times and slow queries measured by the server ("server-performance-v1").</summary>
     public const string ServerPerformance = "server-performance-v1";
+
+    /// <summary>Smart Home: players report their state at once, webhooks, integration keys and turning off now.</summary>
+    public const string Automation = "automation-v1";
 
     /// <summary>Family wishlist ("wishes-v1", docs/WISHES.md).</summary>
     public const string Wishes = "wishes-v1";

@@ -24,6 +24,8 @@ import { serverSegmentsSection, SEGMENTS_FEATURE } from "./segments-view.js";
 import { serverSpeechSection } from "./speech-view.js";
 import { supportsSecurity } from "./security.js";
 import { remoteUnlockPanel, securitySection } from "./security-view.js";
+import { supportsAutomation } from "./automation.js";
+import { smartHomeSections } from "./automation-view.js";
 
 const CATEGORIES = [
   { id: "general", label: "General", symbol: "gear", adminOnly: false },
@@ -33,6 +35,7 @@ const CATEGORIES = [
   { id: "profiles", label: "Profiles and Devices", symbol: "lock", adminOnly: false },
   { id: "server", label: "Server", symbol: "tv", adminOnly: true },
   { id: "power", label: "Power", symbol: "power", adminOnly: true, ownerOnly: true, needsPower: true },
+  { id: "smarthome", label: "Smart Home", symbol: "tv", adminOnly: true, ownerOnly: true, needsAutomation: true },
   { id: "updates", label: "Updates", symbol: "arrow", adminOnly: false },
   { id: "advanced", label: "Advanced", symbol: "gear", adminOnly: true },
   { id: "about", label: "About", symbol: "star", adminOnly: false },
@@ -72,6 +75,7 @@ export function createSettings(app) {
       page = "general";
     }
     if (page === "power" && !owner) page = "server";
+    if (page === "smarthome" && (!owner || !supportsAutomation(state.server?.capabilities))) page = "general";
 
     let sections = null;
     const needsManagement = canManage() && (["library", "metadata", "server", "advanced", "updates", "profiles"].includes(page) || searchQuery !== "");
@@ -104,7 +108,7 @@ export function createSettings(app) {
     }
     if (page === "power" && !powerAvailable) page = "general";
     const availableCategories = CATEGORIES.filter((c) => (!c.adminOnly || canManage()) && (!c.ownerOnly || owner)
-      && (!c.needsPower || powerAvailable));
+      && (!c.needsPower || powerAvailable) && (!c.needsAutomation || supportsAutomation(state.server?.capabilities)));
 
     const refresh = () => app.navigate(state.route, { replace: true, quiet: true });
 
@@ -290,6 +294,7 @@ export function createSettings(app) {
       case "profiles": return profilesPage(sections, refresh);
       case "server": return serverPage(sections, refresh);
       case "power": return h("div", { class: "settings-stack" }, ...powerSections(sections, refresh));
+      case "smarthome": return h("div", { class: "settings-stack" }, ...smartHomeSections({ api, app, kit: { section, row, value }, refresh }));
       case "updates": return updatesPage(sections, refresh);
       case "advanced": return advancedPage(sections, refresh);
       case "about": return h("div", { class: "settings-stack" }, ...aboutSections());

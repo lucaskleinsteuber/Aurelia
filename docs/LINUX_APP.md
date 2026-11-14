@@ -220,6 +220,10 @@ and they fail.
   list and how long the log is kept, and a note at the top of the window when a new device signs
   in. When Face ID or Touch ID is required for administrators, unlocking shows Confirm on Another
   Device with a code.
+- Smart Home (owner, at the end of Settings › Server): webhooks for Home Assistant and other
+  receivers with Send Test, deliveries and new secrets, keys for Home Assistant and shortcuts, the
+  network card to wake the server, and Sleep, Turn Off or Stop Now. The player tells the server at
+  once when it plays, pauses, buffers or ends. See [AUTOMATION.md](AUTOMATION.md).
 - Server: summary with state, facts and Restart Server; health; Performance (response times per endpoint and slow database queries, measured by the server); for a Linux package server its
   updates; new devices and automatic backups with Back Up Now; scrub previews; and
   under Advanced Settings the details, network (a reversible trial for desktop-hosted servers;

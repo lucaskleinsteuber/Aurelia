@@ -11,7 +11,8 @@ public sealed partial class LibraryScanWorker(
     IMediaLibraryScanner scanner,
     ILogger<LibraryScanWorker> logger,
     ScrubPreviewService? scrubPreviews = null,
-    SegmentDetectionService? segmentDetection = null) : BackgroundService
+    SegmentDetectionService? segmentDetection = null,
+    Automation.NewTitleAnnouncer? newTitles = null) : BackgroundService
 {
     internal static readonly TimeSpan IdleFallback = TimeSpan.FromSeconds(30);
 
@@ -370,7 +371,7 @@ public sealed partial class LibraryScanWorker(
         scan.FailedFiles = discovery.Issues.Count(issue => issue.Code is "unreadable_directory" or "unreadable_entry" or "unreadable_file");
         await database.SaveChangesAsync(cancellationToken);
 
-        await ReconcileAsync(
+        var addedTitles = await ReconcileAsync(
             database,
             library,
             scan,
@@ -378,6 +379,8 @@ public sealed partial class LibraryScanWorker(
             scanRoot,
             effectiveTarget,
             cancellationToken);
+        // Smart Home: new movies and shows are announced once their information is found.
+        if (addedTitles.Count > 0) newTitles?.Added(addedTitles);
         await RebuildLocalCollectionsAsync(database, library, cancellationToken);
         await PruneOldScansAsync(database, library.Id, scan.Id, cancellationToken);
         scrubPreviews?.NotifyScanCompleted();
@@ -471,7 +474,8 @@ public sealed partial class LibraryScanWorker(
         return anchor;
     }
 
-    private static async Task ReconcileAsync(
+    /// <summary>Applies a scan; returns the movies and shows it added.</summary>
+    private static async Task<List<Guid>> ReconcileAsync(
         AureliaDbContext database,
         LibraryRoot library,
         LibraryScan scan,
@@ -515,6 +519,7 @@ public sealed partial class LibraryScanWorker(
             .Where(value => value.ParentIds.Count == 1 && seriesById.ContainsKey(value.ParentIds[0]))
             .ToDictionary(value => value.Path, value => seriesById[value.ParentIds[0]], StringComparer.Ordinal);
         var addedFiles = 0;
+        var addedTitles = new List<Guid>();
         var updatedFiles = 0;
 
         await ReconcileDiscoveriesAsync(
@@ -546,6 +551,7 @@ public sealed partial class LibraryScanWorker(
                 out var wasAdded,
                 out var wasUpdated);
             parentsByPath[MediaPath.Normalize(candidate.SourcePath)] = item;
+            if (wasAdded) addedTitles.Add(item.Id);
             if (candidate.IsFile && wasAdded)
             {
                 addedFiles += 1;
@@ -680,6 +686,7 @@ public sealed partial class LibraryScanWorker(
         }
 
         await transaction.CommitAsync(cancellationToken);
+        return addedTitles;
     }
 
     private static async Task ReconcileImportReviewsAsync(

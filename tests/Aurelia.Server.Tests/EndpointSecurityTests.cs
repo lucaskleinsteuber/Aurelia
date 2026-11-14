@@ -16,6 +16,9 @@ public sealed class EndpointSecurityTests
         "GET /api/v1/capabilities",
         "GET /api/v1/health",
         "GET /api/v1/health/ready",
+        // Home Assistant and shortcuts: each checks an integration key with its own scope.
+        "GET /api/v1/integration/players",
+        "GET /api/v1/integration/status",
         "GET /api/v1/server/info",
         "GET,HEAD /api/v1/health/live",
         "POST /api/v1/auth/device-pairings/",
@@ -24,6 +27,8 @@ public sealed class EndpointSecurityTests
         "POST /api/v1/auth/device-pairings/{id:guid}/status",
         "POST /api/v1/auth/login",
         "POST /api/v1/auth/pair",
+        "POST /api/v1/integration/players/{deviceId}/commands",
+        "POST /api/v1/integration/power",
         "POST /api/v1/local/owner-pin",
         "POST /api/v1/setup/owner",
         // The browser app: its files, and the sign-in steps before a device credential exists.

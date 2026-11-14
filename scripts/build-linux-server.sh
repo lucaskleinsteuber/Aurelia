@@ -40,7 +40,7 @@ for arch in x64 arm64; do
   for file in install.sh aurelia aurelia.service aurelia-autosleep aurelia-sleep-settings aurelia-autosleep.service \
     aurelia-autosleep.timer aurelia-wake-on-lan aurelia-wake-on-lan.service aurelia-start.socket \
     aurelia-start.service aurelia-update-request.path aurelia-update-request.service aurelia-update-check.timer \
-    aurelia-update-check.service; do
+    aurelia-update-check.service aurelia-power-request.path aurelia-power-request.service; do
     cp "$repository_root/packaging/linux/$file" "$stage/"
   done
   chmod 0755 "$stage/install.sh" "$stage/aurelia" "$stage/aurelia-autosleep" "$stage/aurelia-wake-on-lan" \

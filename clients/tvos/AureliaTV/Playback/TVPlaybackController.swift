@@ -111,6 +111,7 @@ final class TVPlaybackController: ObservableObject {
   /// Back over Skip Intro: the intro plays and the button stays away for this episode.
   private var introDeclined = false
   private var ticket: TVPlaybackTicket?
+  private var reportedAutomation: (ticket: UUID, state: String)?
   private var baselineRevision: Int64?
   private var openingTask: Task<Void, Never>?
   private var renewalTask: Task<Void, Never>?
@@ -222,7 +223,21 @@ final class TVPlaybackController: ObservableObject {
     if wantsPlayback { engine.play() } else { engine.pause() }
     userActionObserver?(wantsPlayback ? .play(position) : .pause(position))
     if !wantsPlayback { Task { await saveProgress(finished: false) } }
+    reportAutomationState()
     userInteracted()
+  }
+
+  /// Smart Home: tells the server at once that the title plays, pauses, buffers or ended, so a
+  /// light can dim when the picture appears. Fire and forget; equal states are sent once.
+  private func reportAutomationState(finished: Bool = false) {
+    guard let id = ticket?.id, !closed else { return }
+    let state = TVAutomationPlaybackState.state(
+      wantsPlayback: wantsPlayback, isPlaying: isPlaying, finished: finished)
+    let last = reportedAutomation?.ticket == id ? reportedAutomation?.state : nil
+    guard TVAutomationPlaybackState.shouldReport(last: last, next: state) else { return }
+    reportedAutomation = (id, state)
+    let seconds = Double(max(0, position)) / 1_000
+    Task { [api] in try? await api.reportPlaybackState(ticket: id, state: state, positionSeconds: seconds) }
   }
 
   /// `revealControls: false` skips while the controls stay hidden, like the
@@ -867,6 +882,7 @@ final class TVPlaybackController: ObservableObject {
     assignIfChanged(&audioSelectionPending, engine.audioSelectionPending)
     assignIfChanged(&subtitleSelectionPending, engine.subtitleSelectionPending)
     assignIfChanged(&playbackRate, engine.playbackRate)
+    reportAutomationState()
     runtime.setIdleTimerDisabled(isPlaying && !showsGoodNight && !closed)
     if showsGoodNight {
       controlsVisible = false
@@ -970,6 +986,7 @@ final class TVPlaybackController: ObservableObject {
         position: position, duration: duration,
         observedPlayback: engine.hasObservedPlayback, transportFailed: transportFailed)
     {
+      reportAutomationState(finished: true)
       finished = true
       upNext = nil
       showsSuggestion = false

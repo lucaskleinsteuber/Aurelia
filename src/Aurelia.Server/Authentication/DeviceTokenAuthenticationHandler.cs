@@ -31,7 +31,8 @@ public sealed class DeviceTokenAuthenticationHandler(
         var rawToken = header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
             ? header["Bearer ".Length..].Trim()
             : WebCookies.Credential(Request);
-        if (rawToken is null)
+        // Integration keys for Home Assistant are checked by their own endpoints.
+        if (rawToken is null || rawToken.StartsWith(Services.Automation.AutomationStore.TokenPrefix, StringComparison.Ordinal))
         {
             return AuthenticateResult.NoResult();
         }

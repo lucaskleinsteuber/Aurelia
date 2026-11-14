@@ -258,6 +258,9 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     updateWishState: (wishId, body, options = {}) => request(`/api/v1/wishes/${id(wishId)}/state`, { ...options, method: "PUT", body }),
     markWishesSeen: (options = {}) => request("/api/v1/wishes/seen", { ...options, method: "POST" }),
     revokePlayback: (playbackId) => request(`/api/v1/playback/${id(playbackId)}`, { method: "DELETE", keepalive: true }),
+    // Smart Home: the player says at once that it plays, pauses, buffers or finished (automation-v1).
+    playbackState: (playbackId, state, positionSeconds) => request(`/api/v1/playback/${id(playbackId)}/state`,
+      { method: "POST", body: { state, positionSeconds }, keepalive: true }),
     progress: (mediaId) => request(`/api/v1/media/${id(mediaId)}/progress`),
     saveProgress: (mediaId, body, { keepalive = false } = {}) =>
       request(`/api/v1/media/${id(mediaId)}/progress`, { method: "PUT", body, keepalive }),
@@ -278,6 +281,17 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     unblockDevice: (deviceId) => approved(`/api/v1/server/security/blocked/${id(deviceId)}`, { method: "DELETE" }),
     securitySettings: (options = {}) => request("/api/v1/server/security/settings", options),
     saveSecuritySettings: (body) => approved("/api/v1/server/security/settings", { method: "PUT", body }),
+    // Smart Home (owner): webhooks, integration keys and turning the server off now.
+    automationOverview: (options = {}) => request("/api/v1/server/automation", options),
+    createWebhook: (body) => approved("/api/v1/server/automation/webhooks", { body }),
+    saveWebhook: (webhookId, body) => approved(`/api/v1/server/automation/webhooks/${id(webhookId)}`, { method: "PUT", body }),
+    deleteWebhook: (webhookId) => request(`/api/v1/server/automation/webhooks/${id(webhookId)}`, { method: "DELETE" }),
+    testWebhook: (webhookId) => request(`/api/v1/server/automation/webhooks/${id(webhookId)}/test`, { method: "POST" }),
+    webhookDeliveries: (webhookId) => request(`/api/v1/server/automation/webhooks/${id(webhookId)}/deliveries?limit=50`),
+    rotateWebhookSecret: (webhookId) => approved(`/api/v1/server/automation/webhooks/${id(webhookId)}/secret`),
+    createIntegrationToken: (body) => approved("/api/v1/server/automation/tokens", { body }),
+    revokeIntegrationToken: (tokenId) => request(`/api/v1/server/automation/tokens/${id(tokenId)}`, { method: "DELETE" }),
+    powerNow: (action, force = false) => request("/api/v1/server/power/now", { method: "POST", body: { action, force } }),
     securityAlerts: (version, waitSeconds, options = {}) =>
       request(`/api/v1/server/security/alerts?version=${encodeURIComponent(version)}&waitSeconds=${encodeURIComponent(waitSeconds)}`, options),
     /** Asks an iPhone, iPad or Mac with Face ID or Touch ID to unlock server management here. */

@@ -98,3 +98,9 @@ again. Either build and install again every week, or let the Mac do it: run
 `zsh scripts/refresh-signing.sh --adopt-tv`. A small daily job then re-signs and reinstalls the
 same version before it expires, as long as the Mac and the Apple TV are on the same network.
 With a paid Apple Developer account the signature lasts a year.
+
+## Smart Home
+
+From 2.7.0 the Apple TV tells the server at once when a title plays, pauses, buffers or ends, so
+Home Assistant can dim the living room lights the moment the picture appears. Webhooks are set up
+by the owner on a Mac, iPhone, iPad, the Linux app or in a browser; see [AUTOMATION.md](AUTOMATION.md).

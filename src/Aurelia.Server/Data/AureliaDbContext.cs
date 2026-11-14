@@ -36,6 +36,9 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public DbSet<DeviceSession> DeviceSessions => Set<DeviceSession>();
     public DbSet<SecurityEvent> SecurityEvents => Set<SecurityEvent>();
     public DbSet<BlockedDevice> BlockedDevices => Set<BlockedDevice>();
+    public DbSet<AutomationWebhook> AutomationWebhooks => Set<AutomationWebhook>();
+    public DbSet<AutomationDelivery> AutomationDeliveries => Set<AutomationDelivery>();
+    public DbSet<IntegrationToken> IntegrationTokens => Set<IntegrationToken>();
     public DbSet<ManagementPasskey> ManagementPasskeys => Set<ManagementPasskey>();
 
     public DbSet<PairingCode> PairingCodes => Set<PairingCode>();
@@ -488,6 +491,43 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.Property(value => value.Detail).HasMaxLength(256);
             entity.HasIndex(value => value.At);
             entity.HasIndex(value => new { value.Outcome, value.At });
+        });
+        modelBuilder.Entity<AutomationWebhook>(entity =>
+        {
+            entity.HasKey(value => value.Id);
+            entity.Property(value => value.Name).HasMaxLength(64).IsRequired();
+            entity.Property(value => value.Url).HasMaxLength(2048).IsRequired();
+            entity.Property(value => value.Preset).HasMaxLength(32).IsRequired();
+            entity.Property(value => value.Events).HasMaxLength(512).IsRequired();
+            entity.Property(value => value.DeviceIds).HasMaxLength(2048).IsRequired();
+            entity.Property(value => value.ProfileIds).HasMaxLength(2048).IsRequired();
+            entity.Property(value => value.PausedReason).HasMaxLength(256);
+            entity.Property(value => value.ProtectedSecret).HasMaxLength(1024).IsRequired();
+            entity.Property(value => value.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(value => value.UpdatedAt).HasConversion(dateTimeOffsetConverter);
+        });
+        modelBuilder.Entity<AutomationDelivery>(entity =>
+        {
+            entity.HasKey(value => value.Id);
+            entity.Property(value => value.Event).HasMaxLength(48).IsRequired();
+            entity.Property(value => value.State).HasMaxLength(16).IsRequired();
+            entity.Property(value => value.Payload).HasMaxLength(16384);
+            entity.Property(value => value.Error).HasMaxLength(256);
+            entity.Property(value => value.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(value => value.NextAttemptAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(value => value.CompletedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.HasIndex(value => new { value.WebhookId, value.CreatedAt });
+            entity.HasIndex(value => new { value.State, value.NextAttemptAt });
+        });
+        modelBuilder.Entity<IntegrationToken>(entity =>
+        {
+            entity.HasKey(value => value.Id);
+            entity.Property(value => value.Name).HasMaxLength(64).IsRequired();
+            entity.Property(value => value.TokenHash).HasMaxLength(64).IsRequired();
+            entity.Property(value => value.Scopes).HasMaxLength(128).IsRequired();
+            entity.Property(value => value.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(value => value.LastUsedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.HasIndex(value => value.TokenHash).IsUnique();
         });
         modelBuilder.Entity<BlockedDevice>(entity =>
         {

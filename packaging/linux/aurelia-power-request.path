@@ -1,0 +1,10 @@
+[Unit]
+Description=Notice a request from an app to sleep, turn off or stop Aurelia now
+
+[Path]
+# Aurelia Server leaves this file in its data folder; aurelia-autosleep --now removes it.
+PathExists=/var/lib/aurelia/power-now
+Unit=aurelia-power-request.service
+
+[Install]
+WantedBy=paths.target

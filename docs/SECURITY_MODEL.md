@@ -151,6 +151,22 @@ of the same profile or the owner's shows the request and confirms it with Face I
 (signing `remote:<request id>`), and the asking device is then unlocked for ten minutes.
 Requests last two minutes and are used once.
 
+## Smart Home: webhooks and integration keys
+
+- Only the owner adds webhooks and keys; creating or changing them needs a one-time approval, and
+  every change, key and power request lands in the security log.
+- Webhooks go over HTTPS anywhere, or plain HTTP only to this computer and the home network.
+  Link-local and multicast addresses are refused and every connection is checked again, so a name
+  can't later point at a cloud metadata service. No redirects are followed. Bodies are signed with
+  a per-webhook secret (HMAC-SHA256), stored encrypted with the server's data-protection keys.
+- An integration key is 32 random bytes with the prefix `aur_it_`, shown once and stored only as
+  its SHA-256. It is no profile: the normal sign-in ignores it, and it reaches only
+  `/api/v1/integration/*` calls of the scopes it was given (status, power, playback). Removing it
+  stops it at once.
+- Turning the server off from Linux goes through a file the root `aurelia-autosleep --now` reads:
+  it accepts only `sleep`, `shutdown` or `stop`, refuses links, and waits for a running update.
+  See [AUTOMATION.md](AUTOMATION.md).
+
 ## Checking a change
 
 When adding an endpoint, decide which group above it belongs to and enforce it on the server,

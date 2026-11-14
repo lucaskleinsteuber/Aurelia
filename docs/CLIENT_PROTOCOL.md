@@ -628,6 +628,23 @@ New error codes: `403 device_blocked` (sign-in or pairing from a blocked device)
 Another Device), `403 passkey_invalid` (a signature or challenge that doesn't fit) and
 `409 passkey_needed_first`. See [SECURITY_MODEL.md](SECURITY_MODEL.md#face-id-and-touch-id-instead-of-the-server-password).
 
+## Smart Home
+
+`automation-v1` (server 2.16.0). Players send `POST /api/v1/playback/{ticketId}/state` with
+`{"state": "playing" | "paused" | "buffering" | "stopped" | "finished", "positionSeconds": n}` the
+moment the state changes; the server answers `204` at once (`404 playback_not_found` for an ended or
+foreign ticket). Clients send only changes, never block playback on the answer, and keep saving
+progress as before. "started" goes out on the first `playing`; a client that never reports gets it
+five seconds after the ticket was created.
+
+The owner manages webhooks and integration keys under `/api/v1/server/automation` (overview),
+`…/webhooks` (create, `PUT`/`DELETE …/{id}`, `POST …/{id}/test`, `GET …/{id}/deliveries`,
+`POST …/{id}/secret`) and `…/tokens` (create, `DELETE …/{id}`). Creating and changing them needs a
+one-time approval. `POST /api/v1/server/power/now` with `{"action": "sleep" | "shutdown" | "stop",
+"force": false}` turns the server off; `409 power_action_unavailable` or `409 playback_active`
+otherwise. Keys (`Authorization: Bearer aur_it_…`) reach only `/api/v1/integration/*`. Payloads,
+signatures and retries: [AUTOMATION.md](AUTOMATION.md).
+
 ## Family Wishes
 
 Servers with capability `wishes-v1` let household profiles request movies and TV series not yet in the library (`GET/POST /api/v1/wishes`, `GET /api/v1/wishes/summary`, `GET /api/v1/wishes/search`, `PUT /api/v1/wishes/{id}/support`, `PUT /api/v1/wishes/{id}/state`, `DELETE /api/v1/wishes/{id}`, `POST /api/v1/wishes/seen`, `GET /api/v1/wishes/poster`). See [Family Wishes](WISHES.md) for age-limit visibility, duplicate `"Me Too"` merging, `409 already_in_library` conflicts, and server-proxied TMDB poster caching.

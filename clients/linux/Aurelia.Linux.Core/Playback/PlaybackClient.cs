@@ -35,6 +35,11 @@ public sealed class PlaybackClient(AureliaApi api, LibraryClient library)
     public Task RevokeAsync(Guid ticketId, CancellationToken cancellation) =>
         Send<AureliaApi.NoContent>(HttpMethod.Delete, $"/api/v1/playback/{ticketId}", null, cancellation);
 
+    /// <summary>Smart Home (server 2.16.0): the player's state, the moment it changes.</summary>
+    public Task ReportStateAsync(Guid ticketId, string state, double positionSeconds, CancellationToken cancellation) =>
+        Send<AureliaApi.NoContent>(HttpMethod.Post, $"/api/v1/playback/{ticketId}/state",
+            new PlaybackStateRequest(state, positionSeconds), cancellation);
+
     public Task<PlaybackProgressResponse> ProgressAsync(Guid mediaId, CancellationToken cancellation) =>
         Send<PlaybackProgressResponse>(HttpMethod.Get, $"/api/v1/media/{mediaId}/progress", null, cancellation);
 

@@ -33,6 +33,11 @@ versioned commit, so their skipped numbers are preserved.
 - iPhone & iPad: Wake Server on the "server is off" screen sends Wake-on-LAN for two minutes and connects once the server answers; Settings › Server shows whether waking can work and sends a wake signal.
 - Server, Mac, browser, Linux and iPhone & iPad: Settings › Power has a Wake-on-LAN Check while the server sleeps or turns off. It shows whether the computer is connected by cable, whether its network card can wake it and is switched on, and whether it has real sleep. It explains the BIOS settings that waking from off needs and how to try it. `sudo aurelia sleep status` shows the same.
 
+- Server and all apps: Smart Home. The server tells Home Assistant and other automations the moment a title starts, pauses, continues, stops or ends, a new movie or show arrives, or the server starts or stops, so lights and scenes can follow. Each webhook is signed, tried again (playback events for seconds, others for an hour), can be limited to devices and profiles, can leave out titles and children's profiles, and keeps a delivery log. Settings › Smart Home on the Mac, iPhone and iPad and in the browser, and Settings › Server on Linux, add webhooks with a Home Assistant preset and a ready example automation.
+- Server and all apps: players report play, pause, buffering and the end at once, so events follow the picture instead of the 15-second progress saves. Apple TV reports too.
+- Server: keys for Home Assistant and shortcuts, each allowed only to read what plays, turn the server off or control the owner's players, shown once and stored as a fingerprint.
+- Server and all apps except Apple TV: Sleep, Turn Off or Stop Now. On a Linux package server it happens at once through a new path unit; a server in the Mac or Linux app stops. Home Assistant wakes the server with its Wake on LAN integration and the MAC address shown in Smart Home.
+
 ### Changed
 
 - iPhone & iPad: Settings is rebuilt. Every page says what it is for, every option explains itself, and actions show their progress, "Done" or the problem in their own row. For administrators the server pages come first; nothing appears twice any more (one devices page, backups only under Server, one Connection page). On iPad, pages opened inside a page (a storage location, a profile, Library Health) work again, and the sidebar marks the chosen page.
@@ -41,6 +46,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Fixed
 
+- Browser: signing in with a device code works again; the browser refused the code because of the space it shows in it ("0000 0000").
 - iPhone & iPad: Wake-on-LAN also reaches a server found with Bonjour, whose name is now looked up to its IPv4 address.
 - Apple TV and iPhone & iPad: when the sleep timer's minutes run out, the player closes as on the other apps instead of only pausing. On Apple TV, the Menu button on the good-night screen now does the same as Done.
 - Browser and Mac: "Franchises in Library" and Save as Collection work again, and the browser can create and rename collections.

@@ -42,7 +42,13 @@ or signing out removes them.
   without signing in. GitHub sees the request like any web visit. You can turn automatic checks
   off in Settings.
 
-None of these services receive your watch history, your profiles or your media files.
+- **Smart Home.** Only if the server's owner adds a webhook (Settings › Smart Home), the server
+  sends events such as "a movie started on the living room TV", with its title, the profile's name
+  and the device, to the address the owner entered, usually Home Assistant at home. Titles and
+  names can be left out, and children's profiles excluded. See [AUTOMATION.md](AUTOMATION.md).
+
+Apart from webhooks the owner adds, none of these services receive your watch history, your
+profiles or your media files.
 
 ## Children
 

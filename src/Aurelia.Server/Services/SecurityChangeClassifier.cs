@@ -47,6 +47,13 @@ public static partial class SecurityChangeClassifier
         ("PUT", Route("^/api/v1/metadata/provider$"), "metadata_changed", SecurityLog.Changed, SecurityTarget.None),
         ("DELETE", Route("^/api/v1/metadata/provider/token$"), "metadata_changed", SecurityLog.Changed, SecurityTarget.None),
         ("PUT", Route("^/api/v1/metadata/subtitles$"), "metadata_changed", SecurityLog.Changed, SecurityTarget.None),
+        ("POST", Route("^/api/v1/server/automation/webhooks$"), "webhook_added", SecurityLog.Changed, SecurityTarget.None),
+        ("PUT", Route($"^/api/v1/server/automation/webhooks/{Id}$"), "webhook_changed", SecurityLog.Changed, SecurityTarget.None),
+        ("DELETE", Route($"^/api/v1/server/automation/webhooks/{Id}$"), "webhook_removed", SecurityLog.Changed, SecurityTarget.None),
+        ("POST", Route($"^/api/v1/server/automation/webhooks/{Id}/secret$"), "webhook_secret_changed", SecurityLog.Changed, SecurityTarget.None),
+        ("POST", Route("^/api/v1/server/automation/tokens$"), "integration_key_created", SecurityLog.Changed, SecurityTarget.None),
+        ("DELETE", Route($"^/api/v1/server/automation/tokens/{Id}$"), "integration_key_removed", SecurityLog.Changed, SecurityTarget.None),
+        ("POST", Route("^/api/v1/server/power/now$"), "power_now", SecurityLog.Changed, SecurityTarget.None),
     ];
 
     private static Regex Route(string pattern) => new(pattern, RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);

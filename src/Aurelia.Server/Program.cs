@@ -121,6 +121,19 @@ builder.Services.AddSingleton<SecurityAlertSignal>();
 builder.Services.AddSingleton<PasskeyService>();
 builder.Services.AddSingleton<SecurityLog>();
 builder.Services.AddHostedService(services => services.GetRequiredService<SecurityLog>());
+// Smart Home: events to webhooks, players' state and keys for Home Assistant (docs/AUTOMATION.md).
+builder.Services.AddSingleton<Aurelia.Server.Services.Automation.AutomationEventBus>();
+builder.Services.AddSingleton<Aurelia.Server.Services.Automation.AutomationWebhookCache>();
+builder.Services.AddSingleton<Aurelia.Server.Services.Automation.AutomationOptions>();
+builder.Services.AddSingleton<Aurelia.Server.Services.Automation.PlaybackActivityTracker>();
+builder.Services.AddScoped<Aurelia.Server.Services.Automation.AutomationStore>();
+builder.Services.AddSingleton<Aurelia.Server.Services.Automation.PowerNowService>();
+builder.Services.AddSingleton<Aurelia.Server.Services.Automation.WebhookDispatcher>();
+builder.Services.AddHostedService(services => services.GetRequiredService<Aurelia.Server.Services.Automation.WebhookDispatcher>());
+builder.Services.AddSingleton<Aurelia.Server.Services.Automation.NewTitleAnnouncer>();
+builder.Services.AddHostedService(services => services.GetRequiredService<Aurelia.Server.Services.Automation.NewTitleAnnouncer>());
+if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService<Aurelia.Server.Services.Automation.ServerLifecycleEvents>();
+Aurelia.Server.Services.Automation.WebhookClientRegistration.AddWebhookClient(builder.Services);
 builder.Services.AddSingleton<ServerPerformanceStore>();
 builder.Services.AddHostedService(services => services.GetRequiredService<ServerPerformanceStore>());
 builder.Services.AddSingleton<SlowQueryInterceptor>();
@@ -509,6 +522,7 @@ app.MapWatchTogether();
 app.MapMovieNight();
 app.MapWishes();
 app.MapSecurityEndpoints();
+app.MapAutomationEndpoints();
 
 try
 {

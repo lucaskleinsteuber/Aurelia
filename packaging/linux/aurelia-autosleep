@@ -15,6 +15,9 @@
 # with `sudo aurelia sleep`. Run every five minutes by aurelia-autosleep.timer; it does nothing
 # while MODE is off. `sudo aurelia sleep status` shows the current decision.
 # With AURELIA_AUTOSLEEP_DRY_RUN=1 it only prints its decision.
+# With --now it carries out a request from an app, Home Assistant or Siri to sleep, turn off or
+# stop right away (Aurelia Server leaves power-now in its data folder; aurelia-power-request.path
+# starts this at once), whatever MODE says.
 set -euo pipefail
 data=${AURELIA_DATA_DIR:-/var/lib/aurelia}
 . "${AURELIA_SLEEP_SETTINGS_LIBRARY:-/opt/aurelia/aurelia-sleep-settings}"
@@ -41,7 +44,7 @@ if ! systemctl is-active --quiet aurelia && systemctl is-active --quiet aurelia-
 fi
 
 # While nothing is to be saved, no time counts as unused, so turning it on starts a fresh period.
-if [ "$MODE" = off ]; then
+if [ "$MODE" = off ] && [ "${1:-}" != --now ]; then
   echo "$now" > "$state/last-active"
   [ "$dry_run" = 1 ] || rm -f "$ready"
   say "running: power saving is off"
@@ -108,6 +111,26 @@ save_power() {
   date +%s > "$state/woke"
   exit 0
 }
+
+# Asked to save power now. Only the three words the server writes are accepted; the file is
+# checked not to be a link, read once and removed.
+if [ "${1:-}" = --now ]; then
+  request=$data/power-now
+  { [ -f "$request" ] && [ ! -L "$request" ]; } || exit 0
+  action=$(head -c 16 "$request" | tr -d '[:space:]')
+  [ "$dry_run" = 1 ] || rm -f "$request"
+  case "$action" in
+    sleep|shutdown|stop) MODE=$action ;;
+    *) logger -t aurelia-autosleep "Ignored an unknown request to save power."; exit 0 ;;
+  esac
+  # An update must finish first; the request is not kept.
+  if systemctl is-active --quiet aurelia-update-request.service aurelia-update-check.service; then
+    logger -t aurelia-autosleep "Asked to $action now, but an update is running; staying on."
+    exit 0
+  fi
+  save_power "Asked from an app"
+  exit 0
+fi
 
 # Someone signed in over SSH is working on the computer: never put it to sleep under them.
 if [ "$MODE" != stop ] && ss -Htn state established '( sport = :22 )' | grep -q .; then

@@ -19,7 +19,8 @@ public sealed class PlaybackService(
     PlaybackTicketPolicy? ticketPolicy = null,
     ProfileSessionStore? profiles = null,
     MediaSegmentService? segments = null,
-    ScreenTimeService? screenTime = null)
+    ScreenTimeService? screenTime = null,
+    Automation.PlaybackActivityTracker? activity = null)
 {
     private const int CleanupBatchSize = 100;
 
@@ -93,6 +94,12 @@ public sealed class PlaybackService(
         };
         database.PlaybackTickets.Add(ticket);
         await database.SaveChangesAsync(cancellationToken);
+        if (activity is not null)
+        {
+            var (device, profile, described) = await Automation.PlaybackActivityTracker.DescribeAsync(
+                database, session, activeUser, media, cancellationToken);
+            activity.Opened(ticket.Id, userId, userId, device, profile, described);
+        }
 
         return new PlaybackSourceResponse(
             ticket.Id,
@@ -124,6 +131,7 @@ public sealed class PlaybackService(
 
         ticket.RevokedAt ??= DateTimeOffset.UtcNow;
         await database.SaveChangesAsync(cancellationToken);
+        activity?.Closed(ticket.Id);
     }
 
     public async Task<PlaybackStreamSource?> OpenStreamAsync(

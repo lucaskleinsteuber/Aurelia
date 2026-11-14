@@ -49,6 +49,7 @@
                 "attribution": "This product uses the TMDB API but is not endorsed or certified by TMDB."]
       case ("GET", "/api/v1/metadata/jobs"): return [metadataJob]
       case ("GET", "/api/v1/metadata/reviews"): return []
+      case ("GET", "/api/v1/server/automation"): return automation
       case ("GET", "/api/v1/metadata/subtitles"):
         return ["enabled": true, "hasApiKey": true, "hasAccount": false, "languages": ["en", "de"],
                 "automatic": true, "provider": "OpenSubtitles", "attribution": "Subtitles from OpenSubtitles.com",
@@ -199,6 +200,30 @@
        device("00000000-0000-4000-8000-000000000301", "Living Room", "Alex", platform: "Apple TV", ip: "192.0.2.30"),
        device("00000000-0000-4000-8000-000000000302", "Kitchen Laptop", "Sam", platform: "Browser · Firefox on Linux",
               ip: "192.0.2.44", new: true)]
+    }
+
+    static var automation: [String: Any] {
+      ["webhooks": [[
+        "id": "00000000-0000-4000-8000-000000000501", "name": "Living Room Lights",
+        "url": "http://homeassistant.local:8123/api/webhook/aurelia_lights", "preset": "homeAssistant",
+        "events": ["playback.started", "playback.paused", "playback.resumed", "playback.stopped"],
+        "deviceIds": [], "profileIds": [], "includeTitles": true, "excludeChildren": false, "enabled": true,
+        "pausedReason": NSNull(), "consecutiveFailures": 0,
+        "lastDelivery": ["id": "00000000-0000-4000-8000-000000000502", "webhookId": "00000000-0000-4000-8000-000000000501",
+                         "event": "playback.started", "at": stamp, "attempt": 1, "state": "succeeded",
+                         "statusCode": 200, "durationMilliseconds": 14, "error": NSNull()],
+        "createdAt": earlier]],
+       "tokens": [["id": "00000000-0000-4000-8000-000000000503", "name": "Home Assistant", "scopes": ["status", "power"],
+                   "createdAt": earlier, "lastUsedAt": stamp]],
+       "events": [
+         ["kind": "playback.started", "title": "Playback Starts", "detail": "A movie or episode starts playing, after any buffering."],
+         ["kind": "playback.paused", "title": "Playback Pauses", "detail": "Someone pauses."],
+         ["kind": "playback.resumed", "title": "Playback Continues", "detail": "A paused title plays again."],
+         ["kind": "playback.stopped", "title": "Playback Stops", "detail": "The player closes before the end."],
+         ["kind": "library.title_added", "title": "New Title", "detail": "A new movie or show arrives in the library."]],
+       "devices": [["id": "00000000-0000-4000-8000-000000000301", "name": "Living Room", "detail": "Apple TV"]],
+       "profiles": [["id": IOSUITestFixtures.profileID.uuidString, "name": "Alex", "detail": NSNull()]],
+       "wakeOnLanAddresses": ["02:00:5E:10:00:01"], "powerActions": ["sleep", "shutdown", "stop"]]
     }
 
     static var metadataJob: [String: Any] {

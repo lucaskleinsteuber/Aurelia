@@ -256,7 +256,8 @@ async function showPairing(note) {
     class: "pairing-code pairing-input",
     type: "text",
     inputmode: "numeric",
-    pattern: "[0-9]*",
+    // The code is shown as "0000 0000"; the space must not fail the browser's own check.
+    pattern: "[0-9]{4} ?[0-9]{4}",
     maxlength: "9",
     autocomplete: "one-time-code",
     placeholder: "0000 0000",

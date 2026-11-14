@@ -195,7 +195,7 @@ final class IOSAppModel: ObservableObject {
           capabilities: [
             "device-authorization-v1", "library-state-v1", "watchlist-people-v1",
             "scrub-previews-v1",
-          ] + (scenario == .admin ? ["security-v1"] : []))
+          ] + (scenario == .admin ? ["security-v1", "automation-v1"] : []))
         if scenario == .profiles {
           phase = .profiles
           await refreshProfiles()

@@ -22,10 +22,12 @@ chmod +x "$work/bin/systemctl" "$work/bin/ss"
 printf 'MODE=sleep\nIDLE_MINUTES=15\n' > "$work/data/sleep-settings"
 
 decide() {
-  PATH="$work/bin:$PATH" ACTIVE="aurelia $1" AURELIA_DATA_DIR="$work/data" \
+  local active=$1
+  shift
+  PATH="$work/bin:$PATH" ACTIVE="aurelia $active" AURELIA_DATA_DIR="$work/data" \
     AURELIA_SLEEP_SETTINGS_LIBRARY="$repository/packaging/linux/aurelia-sleep-settings" \
     AURELIA_AUTOSLEEP_DRY_RUN=1 AURELIA_AUTOSLEEP_STATE="$work/state" \
-    bash "$repository/packaging/linux/aurelia-autosleep"
+    bash "$repository/packaging/linux/aurelia-autosleep" "$@"
 }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -79,4 +81,27 @@ spring=$(PATH="$work/dst:$PATH" TZ=Europe/Berlin LC_ALL=C decide "") \
   || fail "the night the clocks go forward must not end the check with an error"
 grep -F 'sleep until Sun 03:30 or a Wake-on-LAN call' <<<"$spring" >/dev/null \
   || fail "the night the clocks go forward must wake at 03:30, not: $spring"
+# Asked from an app to turn off now: done whatever MODE says, even with power saving off and
+# someone signed in over SSH; an unknown word or a link is ignored; an update finishes first.
+printf 'MODE=off\nIDLE_MINUTES=15\n' > "$work/data/sleep-settings"
+echo shutdown > "$work/data/power-now"
+decide "" --now | grep -F 'turn off until a Wake-on-LAN call: Asked from an app' >/dev/null \
+  || fail "a request to turn off now must turn the computer off"
+echo sleep > "$work/data/power-now"
+decide "" --now | grep -F 'sleep until a Wake-on-LAN call: Asked from an app' >/dev/null \
+  || fail "a request to sleep now must put the computer to sleep"
+echo stop > "$work/data/power-now"
+decide "" --now | grep -F 'stop Aurelia until a device connects: Asked from an app' >/dev/null \
+  || fail "a request to stop now must stop only Aurelia"
+echo reboot > "$work/data/power-now"
+[ -z "$(decide "" --now)" ] || fail "an unknown request must do nothing"
+echo shutdown > "$work/data/power-now"
+[ -z "$(decide aurelia-update-request.service --now)" ] || fail "a request must not interrupt an update"
+rm -f "$work/data/power-now"
+echo shutdown > "$work/elsewhere"
+ln -s "$work/elsewhere" "$work/data/power-now"
+[ -z "$(decide "" --now)" ] || fail "a linked request file must be ignored"
+rm -f "$work/data/power-now"
+[ -z "$(decide "" --now)" ] || fail "without a request --now must do nothing"
+
 echo "aurelia-autosleep decisions: all checks passed."

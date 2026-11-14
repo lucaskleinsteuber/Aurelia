@@ -83,7 +83,8 @@
       "screen-time-v1",
       "wishes-v1",
       "security-v1",
-      "server-performance-v1"
+      "server-performance-v1",
+      "automation-v1"
     ]
   },
   "problem": {

@@ -2198,3 +2198,19 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .security-log { max-height: 60vh; overflow-y: auto; margin: 12px 0; }
 .security-failed .settings-card-title { color: var(--warning); }
 .remote-unlock { display: grid; gap: 8px; }
+
+/* Settings › Smart Home */
+.automation-sheet { max-width: 640px; }
+.automation-sheet .field { display: grid; gap: 4px; margin: 10px 0; }
+.automation-filters { margin: 10px 0; }
+.automation-filters h4 { margin: 10px 0 4px; font-size: 13px; }
+.checkbox-list { display: grid; gap: 6px; margin: 6px 0; }
+.checkbox-row { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+.checkbox-row > span { display: grid; gap: 2px; }
+.code-block { display: block; white-space: pre-wrap; word-break: break-all; padding: 10px 12px; border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; user-select: all; }
+.tag.tag-ok { background: rgba(48, 209, 88, 0.22); color: #9ff0b5; }
+.tag.tag-warning { background: var(--warning); color: #1b1e21; }
+.tag.tag-off, .tag.tag-idle { background: rgba(255, 255, 255, 0.12); }
+.settings-card.automation-card { flex-direction: column; align-items: stretch; gap: 10px; }
+.automation-card .settings-card-actions { flex-wrap: wrap; justify-content: flex-start; }

@@ -6,7 +6,7 @@ enum IOSSettingsPage: String, Hashable, Identifiable, CaseIterable, Sendable {
   // You
   case nameAndPicture, playback, profilePIN, history, statistics, wishes, downloads
   // Server (owner and administrators)
-  case library, metadata, people, security, server, power, updates
+  case library, metadata, people, security, server, power, smartHome, updates
   // This device
   case device, about
   // Connection
@@ -30,7 +30,7 @@ enum IOSSettingsPage: String, Hashable, Identifiable, CaseIterable, Sendable {
   var group: Group {
     switch self {
     case .nameAndPicture, .playback, .profilePIN, .history, .statistics, .wishes, .downloads: .you
-    case .library, .metadata, .people, .security, .server, .power, .updates: .server
+    case .library, .metadata, .people, .security, .server, .power, .smartHome, .updates: .server
     case .device, .about: .device
     case .connection: .connection
     }
@@ -51,6 +51,7 @@ enum IOSSettingsPage: String, Hashable, Identifiable, CaseIterable, Sendable {
     case .security: "Security"
     case .server: "Server"
     case .power: "Power"
+    case .smartHome: "Smart Home"
     case .updates: "Server Updates"
     case .device: "Notifications and Storage"
     case .about: "About Aurelia"
@@ -73,6 +74,7 @@ enum IOSSettingsPage: String, Hashable, Identifiable, CaseIterable, Sendable {
     case .security: "lock.shield"
     case .server: "server.rack"
     case .power: "bolt"
+    case .smartHome: "house"
     case .updates: "arrow.down.circle.dotted"
     case .device: "bell.badge"
     case .about: "info.circle"
@@ -96,6 +98,7 @@ enum IOSSettingsPage: String, Hashable, Identifiable, CaseIterable, Sendable {
     case .security: "Sign-in log, Face ID and blocked devices"
     case .server: "Health, features, backups and network"
     case .power: "Sleep, shut down and Wake-on-LAN"
+    case .smartHome: "Home Assistant, webhooks and keys"
     case .updates: "Install a newer server version"
     case .device: "Alerts and stored artwork"
     case .about: "Version, licenses and privacy"
@@ -110,6 +113,7 @@ enum IOSSettingsPage: String, Hashable, Identifiable, CaseIterable, Sendable {
     var supportsWishes = false
     var supportsPersonalization = false
     var supportsSecurity = false
+    var supportsAutomation = false
 
     func shows(_ page: IOSSettingsPage) -> Bool {
       switch page {
@@ -118,6 +122,7 @@ enum IOSSettingsPage: String, Hashable, Identifiable, CaseIterable, Sendable {
       case .library: permissions.storage
       case .metadata, .people: permissions.administrator
       case .security: permissions.owner && supportsSecurity
+      case .smartHome: permissions.owner && supportsAutomation
       case .server, .power, .updates: permissions.owner
       default: true
       }

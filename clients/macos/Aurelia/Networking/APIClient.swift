@@ -1691,6 +1691,17 @@ struct APIClient: Sendable {
     return try Self.decode(DownloadedSubtitle.self, from: data)
   }
 
+  /// Smart Home (server 2.16.0): the player's state, the moment it changes.
+  func reportPlaybackState(ticket: UUID, state: String, positionSeconds: Double) async throws {
+    struct Body: Encodable {
+      let state: String
+      let positionSeconds: Double
+    }
+    _ = try await perform(
+      path: "/api/v1/playback/\(ticket.uuidString.lowercased())/state", method: "POST",
+      body: try JSONEncoder().encode(Body(state: state, positionSeconds: positionSeconds)), timeout: 5)
+  }
+
   func revokePlayback(id: UUID) async throws {
     _ = try await perform(
       path: "/api/v1/playback/\(id.uuidString.lowercased())",
@@ -1877,6 +1888,60 @@ struct APIClient: Sendable {
         trustMode: .pinned(profile.publicKeyFingerprint))
       return try Self.decode(Approval.self, from: data).token
     }
+  }
+
+  // MARK: Smart Home ("automation-v1")
+
+  func automationOverview() async throws -> AutomationOverview { try await get("/api/v1/server/automation") }
+  func createWebhook(_ request: AutomationWebhookRequest) async throws -> AutomationWebhookCreated {
+    try Self.decode(
+      AutomationWebhookCreated.self,
+      from: await perform(path: "/api/v1/server/automation/webhooks", method: "POST", body: JSONEncoder().encode(request)))
+  }
+  func saveWebhook(id: UUID, _ request: AutomationWebhookRequest) async throws {
+    _ = try await perform(
+      path: "/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())", method: "PUT",
+      body: JSONEncoder().encode(request))
+  }
+  func deleteWebhook(id: UUID) async throws {
+    _ = try await perform(path: "/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())", method: "DELETE")
+  }
+  func testWebhook(id: UUID) async throws -> AutomationDelivery {
+    try Self.decode(
+      AutomationDelivery.self,
+      from: await perform(path: "/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())/test", method: "POST", timeout: 20))
+  }
+  func webhookDeliveries(id: UUID) async throws -> [AutomationDelivery] {
+    try await get("/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())/deliveries?limit=50")
+  }
+  func rotateWebhookSecret(id: UUID) async throws -> AutomationSecret {
+    try Self.decode(
+      AutomationSecret.self,
+      from: await perform(path: "/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())/secret", method: "POST"))
+  }
+  func createIntegrationToken(name: String, scopes: [String]) async throws -> IntegrationTokenCreated {
+    struct Payload: Encodable {
+      let name: String
+      let scopes: [String]
+    }
+    return try Self.decode(
+      IntegrationTokenCreated.self,
+      from: await perform(
+        path: "/api/v1/server/automation/tokens", method: "POST",
+        body: JSONEncoder().encode(Payload(name: name, scopes: scopes))))
+  }
+  func revokeIntegrationToken(id: UUID) async throws {
+    _ = try await perform(path: "/api/v1/server/automation/tokens/\(id.uuidString.lowercased())", method: "DELETE")
+  }
+  func powerNow(action: String, force: Bool = false) async throws -> PowerNowResult {
+    struct Payload: Encodable {
+      let action: String
+      let force: Bool
+    }
+    return try Self.decode(
+      PowerNowResult.self,
+      from: await perform(
+        path: "/api/v1/server/power/now", method: "POST", body: JSONEncoder().encode(Payload(action: action, force: force))))
   }
 
   // MARK: Security ("security-v1")

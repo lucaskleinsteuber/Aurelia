@@ -34,13 +34,14 @@ if [ "${1:-}" = --uninstall ]; then
   remove_data=false
   [ "${2:-}" = --remove-data ] && remove_data=true
   systemctl disable --now aurelia aurelia-autosleep.timer aurelia-start.socket aurelia-update-request.path \
-    aurelia-update-check.timer 2>/dev/null || true
+    aurelia-update-check.timer aurelia-power-request.path 2>/dev/null || true
   systemctl disable aurelia-wake-on-lan.service 2>/dev/null || true
   rm -f "$unit" "$command_path" /etc/aurelia-autosleep.conf /etc/systemd/system/aurelia-autosleep.service \
     /etc/systemd/system/aurelia-autosleep.timer /etc/systemd/system/aurelia-wake-on-lan.service \
     /etc/systemd/system/aurelia-start.socket /etc/systemd/system/aurelia-start.service \
     /etc/systemd/system/aurelia-update-request.path /etc/systemd/system/aurelia-update-request.service \
     /etc/systemd/system/aurelia-update-check.timer /etc/systemd/system/aurelia-update-check.service \
+    /etc/systemd/system/aurelia-power-request.path /etc/systemd/system/aurelia-power-request.service \
     /etc/aurelia/github-token
   rmdir /etc/aurelia 2>/dev/null || true
   systemctl daemon-reload
@@ -164,7 +165,8 @@ install -m 0644 "$package_root/aurelia-sleep-settings" "$install_root/aurelia-sl
 install -m 0755 "$package_root/aurelia-wake-on-lan" "$install_root/aurelia-wake-on-lan"
 for sleep_unit in aurelia-autosleep.service aurelia-autosleep.timer aurelia-wake-on-lan.service \
   aurelia-start.socket aurelia-start.service aurelia-update-request.path aurelia-update-request.service \
-  aurelia-update-check.timer aurelia-update-check.service; do
+  aurelia-update-check.timer aurelia-update-check.service aurelia-power-request.path \
+  aurelia-power-request.service; do
   install -m 0644 "$package_root/$sleep_unit" "/etc/systemd/system/$sleep_unit"
 done
 chown -R root:root "$install_root/notices" "$install_root/VERSION" "$install_root/install.sh"
@@ -188,6 +190,8 @@ systemctl enable --now aurelia-wake-on-lan.service >/dev/null 2>&1 || true
 systemctl enable --now aurelia-autosleep.timer >/dev/null
 # Aurelia on a Mac can ask for an update check or an update; the server looks once a day by itself.
 systemctl enable --now aurelia-update-request.path aurelia-update-check.timer >/dev/null 2>&1
+# An app, Home Assistant or Siri can ask to sleep, turn off or stop now.
+systemctl enable --now aurelia-power-request.path >/dev/null 2>&1
 firewall
 
 echo "Aurelia Server $(cat "$install_root/VERSION") is installed and runs as a service."

@@ -247,6 +247,10 @@ draws a square JPEG that is uploaded on Save.
   before anything is imported),
   restart, a diagnostics report, Server Health with Performance (response times per endpoint and
   slow database queries) and server updates.
+- Smart Home for the owner (Settings › Smart Home): webhooks for Home Assistant and other
+  receivers with Send Test, the delivery log and new secrets, keys for Home Assistant and
+  shortcuts, the network card to wake the server, and Sleep, Turn Off or Stop Now. The player tells
+  the server at once when it plays, pauses, buffers or ends. See [AUTOMATION.md](AUTOMATION.md).
 - Security for the owner: the security log, signed-in devices with That Was Me and Block, the
   block list and how long the log is kept, and a note at the top of the page when a new device
   signs in. Face ID and Touch ID are set up in the iPhone, iPad and Mac apps; when they are

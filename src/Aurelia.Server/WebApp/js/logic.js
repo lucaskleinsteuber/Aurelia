@@ -773,7 +773,7 @@ export function scrubPreviewUsageText(settings) {
 }
 
 const BROWSE_SECTIONS = ["library", "recent", "movies", "shows"];
-export const SETTINGS_PAGES = ["general", "playback", "library", "metadata", "profiles", "server", "power", "updates", "advanced", "about", "account"];
+export const SETTINGS_PAGES = ["general", "playback", "library", "metadata", "profiles", "server", "power", "smarthome", "updates", "advanced", "about", "account"];
 
 /** Library filters from an address's query, without the defaults. */
 function parseFilters(query) {

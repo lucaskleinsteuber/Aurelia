@@ -101,7 +101,8 @@ struct IOSSettingsRoot: View {
     IOSSettingsPage.Visibility(
       permissions: admin.permissions, supportsWishes: model.supportsWishes,
       supportsPersonalization: model.supportsProfilePersonalization,
-      supportsSecurity: model.capabilities?.capabilities?.contains("security-v1") == true)
+      supportsSecurity: model.capabilities?.capabilities?.contains("security-v1") == true,
+      supportsAutomation: model.capabilities?.capabilities?.contains("automation-v1") == true)
   }
 
   var body: some View {
@@ -251,6 +252,7 @@ struct IOSSettingsDestination: View {
     case .security: IOSAdminSecurityView()
     case .server: IOSAdminServerView()
     case .power: IOSAdminPowerView()
+    case .smartHome: IOSAdminAutomationView()
     case .updates: IOSAdminUpdatesView()
     case .device: IOSDeviceSettingsView()
     case .about: IOSAboutView()

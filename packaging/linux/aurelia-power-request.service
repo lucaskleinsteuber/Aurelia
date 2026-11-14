@@ -1,0 +1,6 @@
+[Unit]
+Description=Sleep, turn off or stop Aurelia now, as asked in an app
+
+[Service]
+Type=oneshot
+ExecStart=/opt/aurelia/aurelia-autosleep --now

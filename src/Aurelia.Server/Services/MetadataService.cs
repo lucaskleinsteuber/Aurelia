@@ -14,7 +14,8 @@ public sealed class MetadataService(
     CatalogMutationGate mutations,
     MetadataJobStore jobs,
     CollectionArtworkService? collectionArtwork = null,
-    WishService? wishes = null)
+    WishService? wishes = null,
+    Automation.NewTitleAnnouncer? newTitles = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -257,6 +258,7 @@ public sealed class MetadataService(
         collectionArtwork?.DeleteFileNames(staleFiles);
         if (wishes is not null)
             await wishes.AutoFulfillForMediaAsync(item.Id, item.Kind, metadata.Provider, metadata.ProviderMediaId, cancellationToken);
+        newTitles?.Matched(item.Id);
         original.Metadata = metadata;
     }
 

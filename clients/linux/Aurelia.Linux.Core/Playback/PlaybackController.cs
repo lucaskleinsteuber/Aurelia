@@ -5,6 +5,22 @@ using Aurelia.Linux.Core.Settings;
 
 namespace Aurelia.Linux.Core.Playback;
 
+/// <summary>What the player reports for Smart Home; the same rules as the other apps.</summary>
+public static class AutomationPlaybackState
+{
+    public static string? For(PlayerState state) => state switch
+    {
+        PlayerState.Playing => PlaybackStates.Playing,
+        PlayerState.Paused => PlaybackStates.Paused,
+        PlayerState.Loading or PlayerState.Recovering => PlaybackStates.Buffering,
+        _ => null,
+    };
+
+    /// <summary>Equal states in a row are sent once; after the end only playing again counts.</summary>
+    public static bool ShouldReport(string? last, string next) =>
+        next != last && !(last == PlaybackStates.Finished && next != PlaybackStates.Playing);
+}
+
 public enum PlayerState
 {
     Loading,
@@ -174,6 +190,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         {
             if (!SetProperty(ref state, value)) return;
             Record(PlaybackDiagnosticKind.StateChanged);
+            ReportAutomationState(AutomationPlaybackState.For(value));
             system.KeepAwake(Preferences.PreventSleep && value is PlayerState.Playing or PlayerState.Loading or PlayerState.Recovering);
             system.Update(this);
         }
@@ -986,6 +1003,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     private async Task FinishTitleAsync()
     {
         Record(PlaybackDiagnosticKind.Ended);
+        ReportAutomationState(PlaybackStates.Finished);
         await SaveProgressAsync(finished: true);
         // Screen time may have ended while this title played: no next episode, no suggestion.
         if (ScreenTime is not null)
@@ -1024,6 +1042,27 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
             return;
         }
         await CloseAsync();
+    }
+
+    private (Guid Ticket, string State)? reportedAutomation;
+
+    /// <summary>
+    /// Smart Home: tells the server at once that the title plays, pauses, buffers or ended, so a
+    /// light can dim when the picture appears. Fire and forget; equal states are sent once.
+    /// </summary>
+    private void ReportAutomationState(string? next)
+    {
+        if (next is null || ticket is not { } current) return;
+        var last = reportedAutomation?.Ticket == current.Id ? reportedAutomation?.State : null;
+        if (!AutomationPlaybackState.ShouldReport(last, next)) return;
+        reportedAutomation = (current.Id, next);
+        var seconds = Math.Max(0, Position) / 1000.0;
+        _ = Task.Run(async () =>
+        {
+            using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try { await client.ReportStateAsync(current.Id, next, seconds, limit.Token); }
+            catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException or AureliaApiException) { }
+        });
     }
 
     private async Task SleepAsync()

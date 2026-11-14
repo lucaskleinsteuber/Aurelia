@@ -97,6 +97,9 @@ public sealed class ServerRequestGuard
         if (IsPasskeyChange(request.Method, path)) return true;
         if (HttpMethods.IsPut(request.Method) && path == "/api/v1/server/security/settings") return true;
         if (HttpMethods.IsDelete(request.Method) && path.StartsWith("/api/v1/server/security/blocked/", StringComparison.Ordinal)) return true;
+        // Where the server sends what is playing, and keys that let other programs act on it.
+        if (path.StartsWith("/api/v1/server/automation/", StringComparison.Ordinal) && !HttpMethods.IsDelete(request.Method)
+            && !path.EndsWith("/test", StringComparison.Ordinal)) return true;
 
         // 1. Critical: Library reset and permanent media removal from library database
         if (path == "/api/v1/libraries/reset") return true;

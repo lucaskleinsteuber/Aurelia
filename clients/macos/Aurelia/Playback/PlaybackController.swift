@@ -26,11 +26,14 @@ protocol PlaybackClientProtocol: AnyObject {
   func sleepTimerEndedStatus() async -> SleepTimerEndedResponse?
   /// The watching profile's screen time now; nil when it has none.
   func ownScreenTime() async throws -> ScreenTimeStatus?
+  /// Smart Home: tells the server at once that the title plays, pauses, buffers or ended.
+  func reportPlaybackState(ticket: UUID, state: String, positionSeconds: Double) async
 }
 
 extension PlaybackClientProtocol {
   func streamSubtitles(ticket: UUID) async throws -> [LiveSubtitleTrack] { [] }
   func ownScreenTime() async throws -> ScreenTimeStatus? { nil }
+  func reportPlaybackState(ticket: UUID, state: String, positionSeconds: Double) async {}
 }
 
 extension PlaybackClientProtocol {
@@ -66,6 +69,11 @@ final class APIPlaybackClient: PlaybackClientProtocol {
   func sleepTimerEnded() async {
     // Servers before 1.8.2 do not know the signal; playback is not affected either way.
     _ = try? await api.sleepTimerEnded()
+  }
+
+  func reportPlaybackState(ticket: UUID, state: String, positionSeconds: Double) async {
+    // Servers before 2.16.0 don't know it; playback never depends on the answer.
+    try? await api.reportPlaybackState(ticket: ticket, state: state, positionSeconds: positionSeconds)
   }
 
   func sleepTimerEndedStatus() async -> SleepTimerEndedResponse? {
@@ -230,6 +238,7 @@ final class PlaybackController: ObservableObject {
   private var previewRelayTask: Task<Void, Never>?
   private var activePlayback: PlaybackSourceResponse?
   private var playbackIDs: Set<UUID> = []
+  private var reportedAutomation: (ticket: UUID, state: String)?
   private var renewalTask: Task<Void, Never>?
   private let progressOutbox: PlaybackProgressOutbox
   private var progressObserver: UUID?
@@ -637,7 +646,22 @@ final class PlaybackController: ObservableObject {
     // A paused title must not keep the Mac awake, for example after a sleep timer.
     endPlaybackActivity()
     enqueueProgressSave(isFinished: naturalEndReached)
+    reportAutomationState()
     return true
+  }
+
+  /// Smart Home: tells the server at once that the title plays, pauses, buffers or ended, so a
+  /// light can dim when the picture appears. Fire and forget; equal states are sent once.
+  private func reportAutomationState(finished: Bool = false) {
+    guard let ticket = activePlayback?.id else { return }
+    let state = AutomationPlaybackState.state(
+      wantsPlayback: wantsPlayback, isPlaying: isPlaying, finished: finished)
+    let last = reportedAutomation?.ticket == ticket ? reportedAutomation?.state : nil
+    guard AutomationPlaybackState.shouldReport(last: last, next: state) else { return }
+    reportedAutomation = (ticket, state)
+    let position = Double(max(0, currentTimeMilliseconds)) / 1_000
+    let client = self.client
+    Task { await client.reportPlaybackState(ticket: ticket, state: state, positionSeconds: position) }
   }
 
   private func applyPausedIntentIfNeeded() {
@@ -1070,6 +1094,7 @@ final class PlaybackController: ObservableObject {
     updateUpNext()
     updateSuggestionCard()
     updateSkipIntro()
+    reportAutomationState()
 
     // Buffering or an external decoder pause breaks continuous stable playback,
     // even if the next position notification arrives within the normal tick gap.
@@ -1157,6 +1182,7 @@ final class PlaybackController: ObservableObject {
       recoverPlayback(cause: .prematureEnd)
       return
     }
+    reportAutomationState(finished: true)
     endHandled = true
     naturalEndReached = true
     loadID = UUID()
