@@ -1981,9 +1981,15 @@ final class AppModel: ObservableObject {
     }
   }
 
-  func startPlannedPlayback(mediaId: UUID, intent: PlaybackStartIntent? = nil) async throws {
+  /// Starts what the plan says. A page that already shows the title's plan passes it as
+  /// `known`, so the player opens at once instead of after another request to the server, as
+  /// on iPhone and Apple TV; the playback ticket still brings the current progress.
+  func startPlannedPlayback(
+    mediaId: UUID, intent: PlaybackStartIntent? = nil, known: PlaybackPlanResponse? = nil
+  ) async throws {
     let request = beginPlaybackIntent()
-    let plan = try await playbackPlan(mediaId: mediaId)
+    let plan: PlaybackPlanResponse
+    if let known, known.target != nil { plan = known } else { plan = try await playbackPlan(mediaId: mediaId) }
     let previous = await previousPlaybackItems(for: plan)
     guard !Task.isCancelled, playbackPlanningGeneration == request else {
       throw CancellationError()

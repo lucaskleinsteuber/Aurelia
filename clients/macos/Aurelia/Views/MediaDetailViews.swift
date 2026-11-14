@@ -282,7 +282,8 @@ struct MediaDetailView: View {
 
   private func playPrimary(_ detail: CatalogDetailPresentation) {
     if model.supportsLibraryState {
-      requestPlannedPlayback(mediaId: detail.item.id)
+      // The plan this page shows is the one Play promises: no second request before the player.
+      requestPlannedPlayback(mediaId: detail.item.id, known: detail.item.id == mediaId ? shownPlan : nil)
     } else if detail.item.kind == .movie {
       model.startPlayback(
         mediaId: detail.item.id, title: detail.item.title,
@@ -329,12 +330,14 @@ struct MediaDetailView: View {
     )
   }
 
-  private func requestPlannedPlayback(mediaId: UUID, intent: PlaybackStartIntent? = nil) {
+  private func requestPlannedPlayback(
+    mediaId: UUID, intent: PlaybackStartIntent? = nil, known: PlaybackPlanResponse? = nil
+  ) {
     guard !isStartingPlayback else { return }
     isStartingPlayback = true
     let profile = model.profile
     playbackTask = Task {
-      do { try await model.startPlannedPlayback(mediaId: mediaId, intent: intent) } catch {
+      do { try await model.startPlannedPlayback(mediaId: mediaId, intent: intent, known: known) } catch {
         if model.profile == profile, !Task.isCancelled, !(error is CancellationError) {
           errorMessage = error.localizedDescription
         }

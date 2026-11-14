@@ -528,7 +528,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         {
             try
             {
-                var plan = await client.Library.PlaybackPlanAsync(title.Id, CancellationToken.None);
+                var plan = client.Library.TakeShownPlan(title.Id) ?? await client.Library.PlaybackPlanAsync(title.Id, CancellationToken.None);
                 target = plan.Target ?? title;
                 seriesId = plan.SeriesId;
                 queue.AddRange(plan.Queue.Where(next => next.Id != target.Id));

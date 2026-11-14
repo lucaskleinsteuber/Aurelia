@@ -117,6 +117,19 @@ import Testing
     #expect(model.playback == nil)
   }
 
+  /// Play on a page that already shows the plan opens the player without another request, as
+  /// on iPhone and Apple TV. Asking again cost 0.1 to 1 second before anything appeared.
+  @Test func aPlanThePageShowsStartsWithoutAskingTheServerAgain() async throws {
+    let client = PendingLibraryStateClient()
+    let model = makeModel(client)
+    let shown = item()
+    let plan = PlaybackPlanResponse(
+      target: shown, seriesId: nil, queue: [], action: .play, continueWatchingEligible: false)
+    try await model.startPlannedPlayback(mediaId: shown.id, known: plan)
+    #expect(model.playback?.mediaId == shown.id)
+    #expect(!client.wasAsked)
+  }
+
   @Test(arguments: [false, true])
   func conflictNoticeSurvivesCatalogReloadAndDoesNotRetry(hidden: Bool) async throws {
     let client = PendingLibraryStateClient()
@@ -161,10 +174,12 @@ import Testing
 
 @MainActor private final class PendingLibraryStateClient: LibraryStateServing {
   private var pending: CheckedContinuation<PlaybackPlanResponse, Error>?
+  private(set) var wasAsked = false
   var rejectStateChanges = false
   private(set) var mutationRequests = 0
   func playbackPlan(mediaId: UUID) async throws -> PlaybackPlanResponse {
-    try await withCheckedThrowingContinuation { pending = $0 }
+    wasAsked = true
+    return try await withCheckedThrowingContinuation { pending = $0 }
   }
   func waitForRequest() async throws {
     for _ in 0..<1_000 {

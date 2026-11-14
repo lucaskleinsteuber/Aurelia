@@ -50,6 +50,8 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Fixed
 
+- Linux: 4K titles play at their full frame rate. Turning each picture into the screen's size took longer than a frame lasts, so only every second picture was shown (12.8 of 24 a second on a six-core laptop); pictures are now scaled the fast way (23.6).
+- Mac and Linux: Play on a title's page opens the player at once, as on iPhone and Apple TV. It asked the server again for the plan the page already showed and waited for the answer first.
 - Server: a server with power saving sleeps or turns off again when unused. Looking for credits in a title's pictures stopped itself after two seconds and began again without end on slower computers, which kept the computer busy and never finished; it now reads each stretch once.
 - Server: an app that is merely open no longer counts as someone using the server. Waiting for new devices (owners) and Home's look for a Movie Night or Watch Party kept it awake.
 - Browser: signing in with a device code works again; the browser refused the code because of the space it shows in it ("0000 0000").

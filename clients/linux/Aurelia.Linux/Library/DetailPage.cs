@@ -195,7 +195,10 @@ public sealed class DetailPage : LibraryPageBase
         AutomationProperties.SetName(play, label);
         play.Click += (_, _) =>
         {
-            if (target is not null) Context.Play(target, resume: plan?.Action == PlaybackPlanAction.Resume);
+            if (target is null) return;
+            // The player starts from the plan this page already shows instead of asking again.
+            Context.Store.Client.OfferShownPlan(plan);
+            Context.Play(target, resume: plan?.Action == PlaybackPlanAction.Resume);
         };
         actions.Children.Add(play);
         if (item.Kind is MediaKind.Movie or MediaKind.Series)

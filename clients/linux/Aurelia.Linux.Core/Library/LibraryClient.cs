@@ -153,6 +153,24 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
     public Task<PlaybackPlanResponse> PlaybackPlanAsync(Guid mediaId, CancellationToken cancellation) =>
         Get<PlaybackPlanResponse>($"/api/v1/media/{mediaId}/playback-plan", cancellation);
 
+    private (PlaybackPlanResponse Plan, long At)? shownPlan;
+
+    /// <summary>
+    /// The plan a page shows, handed over just before its Play starts the player, so the player
+    /// does not ask the server for the same plan again before anything appears (as on iPhone
+    /// and Apple TV). It is taken once, within a few seconds, and only for the plan's own target.
+    /// </summary>
+    public void OfferShownPlan(PlaybackPlanResponse? plan) =>
+        shownPlan = plan?.Target is null ? null : (plan, Environment.TickCount64);
+
+    /// <summary>The plan offered a moment ago if it plays <paramref name="targetId"/>; otherwise null.</summary>
+    public PlaybackPlanResponse? TakeShownPlan(Guid targetId)
+    {
+        var offered = shownPlan;
+        shownPlan = null;
+        return offered is { } known && known.Plan.Target?.Id == targetId && Environment.TickCount64 - known.At < 5_000 ? known.Plan : null;
+    }
+
     public Task<WatchStateResponse> WatchStateAsync(Guid mediaId, WatchStateScope scope, int? seasonNumber, CancellationToken cancellation) =>
         Get<WatchStateResponse>($"/api/v1/media/{mediaId}/watch-state?scope={ScopeName(scope)}"
             + (seasonNumber is { } season ? "&seasonNumber=" + season.ToString(CultureInfo.InvariantCulture) : ""), cancellation);

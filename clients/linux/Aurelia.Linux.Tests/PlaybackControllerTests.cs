@@ -72,6 +72,27 @@ public sealed class PlaybackControllerTests : IAsyncDisposable
         return player;
     }
 
+    /// <summary>
+    /// Play on a page that already shows the plan must not ask the server for it again before
+    /// the player loads; that request delayed every start (found 14.11.2026).
+    /// </summary>
+    [Fact]
+    public async Task APlanThePageShowsStartsWithoutAskingTheServerAgain()
+    {
+        var player = Controller();
+        var plan = await player.Client.Library.PlaybackPlanAsync(FakeLibrary.EpisodeOne, CancellationToken.None);
+        int Asked() => server.Requests.Count(request => request.Contains("/playback-plan", StringComparison.Ordinal));
+        var before = Asked();
+
+        player.Client.Library.OfferShownPlan(plan);
+        await player.StartAsync(plan.Target!, resume: false);
+
+        Assert.Equal(before, Asked());
+        Assert.Equal(plan.Target!.Id, player.Item?.Id);
+        // The offer is used once: a later start asks as before.
+        Assert.Null(player.Client.Library.TakeShownPlan(plan.Target.Id));
+    }
+
     [Fact]
     public async Task SkipIntroShowsWhileTheIntroPlaysAndJumpsToItsEnd()
     {

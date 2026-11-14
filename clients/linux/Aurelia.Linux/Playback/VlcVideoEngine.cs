@@ -13,7 +13,13 @@ namespace Aurelia.Linux.Playback;
 /// </summary>
 public sealed partial class VlcEngineFactory : IVideoEngineFactory, IScrubPreviewDecoderFactory
 {
-    private static readonly string[] BaseOptions = ["--no-video-title-show", "--network-caching=500", "--no-metadata-network-access", "--no-play-and-pause"];
+    /// <summary>
+    /// Fast scaling (<c>--swscale-mode=0</c>): VLC turns every picture into BGRA at the screen's
+    /// size on one thread. With its default, bicubic, a 4K HEVC picture decoded by the graphics
+    /// chip took longer than a frame lasts, so only every second one was shown (12.8 of 24 a
+    /// second on an i5-10500H, measured 14.11.2026; 23.6 with fast scaling).
+    /// </summary>
+    internal static readonly string[] BaseOptions = ["--no-video-title-show", "--network-caching=500", "--no-metadata-network-access", "--no-play-and-pause", "--swscale-mode=0"];
 
     private static readonly Lock Gate = new();
     private static bool initialized;
