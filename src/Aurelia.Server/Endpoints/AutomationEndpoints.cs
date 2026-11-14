@@ -88,6 +88,46 @@ public static class AutomationEndpoints
                 return Task.FromResult(Results.Ok(response));
             });
         });
+        // Siri and shortcuts find a title to play with a playback key: search, then the next
+        // episode to continue, or a given season and episode.
+        integration.MapGet("/search", async (HttpContext context, string? query, AutomationStore store, AureliaDbContext database,
+            PresentationService presentation, CancellationToken cancellationToken) =>
+        {
+            var token = await PlaybackKeyAsync(context, store, database, cancellationToken);
+            if (token is null) return Denied(context);
+            if (string.IsNullOrWhiteSpace(query) || query.Trim().Length > 200) return Problem("invalid_search", "Say or type what to look for.", 400);
+            var page = await presentation.SearchAsync(token.UserId, query.Trim(), 0, 30, cancellationToken);
+            return Results.Ok(page.Items.Where(item => item.Kind is MediaKind.Movie or MediaKind.Series).Take(10).ToList());
+        });
+        integration.MapGet("/titles/{id:guid}/next", async (HttpContext context, Guid id, AutomationStore store, AureliaDbContext database,
+            LibraryStateService states, PresentationService presentation, CancellationToken cancellationToken) =>
+        {
+            var token = await PlaybackKeyAsync(context, store, database, cancellationToken);
+            if (token is null) return Denied(context);
+            try
+            {
+                var plan = await states.SelectAsync(token.UserId, id, cancellationToken);
+                return plan.Target is null
+                    ? Problem("nothing_to_play", "There is nothing to play in this title.", 404)
+                    : Results.Ok(await presentation.SummaryAsync(token.UserId, plan.Target.Id, cancellationToken));
+            }
+            catch (Exception exception) when (exception is AccountException or MetadataException)
+            {
+                return Problem("media_not_found", "This title was not found.", 404);
+            }
+        });
+        integration.MapGet("/titles/{id:guid}/episode", async (HttpContext context, Guid id, int season, int episode, AutomationStore store,
+            AureliaDbContext database, PresentationService presentation, CancellationToken cancellationToken) =>
+        {
+            var token = await PlaybackKeyAsync(context, store, database, cancellationToken);
+            if (token is null) return Denied(context);
+            var match = await database.MediaItems.AsNoTracking()
+                .Where(item => item.ParentId == id && item.Kind == MediaKind.Episode && item.SeasonNumber == season && item.EpisodeNumber == episode)
+                .OrderBy(item => item.CreatedAt).Select(item => (Guid?)item.Id).FirstOrDefaultAsync(cancellationToken);
+            return match is { } found
+                ? Results.Ok(await presentation.SummaryAsync(token.UserId, found, cancellationToken))
+                : Problem("episode_not_found", $"Season {season}, episode {episode} isn’t in the library.", 404);
+        });
         integration.MapGet("/players", async (HttpContext context, AutomationStore store, RemotePlaybackService players,
             CancellationToken cancellationToken) =>
         {
@@ -102,6 +142,18 @@ public static class AutomationEndpoints
             try { return Results.Ok(players.SendCommand(token.UserId, deviceId, request)); }
             catch (AccountException exception) { return Problem(exception.Code, exception.Message, exception.StatusCode); }
         });
+    }
+
+    /// <summary>A playback key, with the library seen as its owner sees it.</summary>
+    private static async Task<IntegrationToken?> PlaybackKeyAsync(HttpContext context, AutomationStore store, AureliaDbContext database,
+        CancellationToken cancellationToken)
+    {
+        var token = await store.AuthorizeAsync(context.Request.Headers.Authorization, IntegrationScopes.Playback, cancellationToken);
+        if (token is null) return null;
+        database.AccessUserId = token.UserId;
+        database.AccessIsOwner = await database.Users.AnyAsync(user => user.Id == token.UserId && user.Role == UserRole.Owner, cancellationToken);
+        database.AccessMode = ProfileAccessMode.EntireLibrary;
+        return token;
     }
 
     private static IResult Denied(HttpContext context)

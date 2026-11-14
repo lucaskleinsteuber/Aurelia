@@ -59,8 +59,9 @@ endpoint and slow database queries, measured by the server) and the server's own
 
 *Settings › Smart Home* (owner) holds webhooks for Home Assistant and other receivers, keys for
 Home Assistant and shortcuts, the network card to wake the server, and Sleep, Turn Off or Stop
-Now; the player tells the server at once when it plays, pauses, buffers or ends. See
-[AUTOMATION.md](AUTOMATION.md).
+Now; the player tells the server at once when it plays, pauses, buffers or ends. From 2.17.0 *Set Up
+Siri* there lets Siri on the Mac turn the server on and off, play a title on the Apple TV and say
+what plays. See [AUTOMATION.md](AUTOMATION.md).
 
 *Settings › Profiles and Devices › Security* sets up Touch ID for server management (the key
 stays in the Mac's Secure Enclave) and shows the owner the security log, signed-in devices with

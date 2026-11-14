@@ -38,6 +38,14 @@ enum APIClientError: LocalizedError, Equatable {
     }
   }
 
+  /// The server's own sentence for a refusal, when it sent one.
+  var problemMessage: String? {
+    switch self {
+    case .serverRejected(_, let message), .httpFailure(_, _, _, let message?): message
+    default: nil
+    }
+  }
+
   var errorDescription: String? {
     switch self {
     case .invalidAddress:
@@ -2442,6 +2450,16 @@ struct APIClient: Sendable {
       return Data(response.utf8)
     }
   #endif
+
+  /// A request with a Siri integration key instead of a profile, pinned to the server's certificate.
+  static func integrationRequest(
+    profile: StoredServerProfile, key: String?, path: String, method: String, body: Data?
+  ) async throws -> Data {
+    let (data, _, _) = try await request(
+      baseURL: profile.baseURL, path: path, method: method, token: key, body: body,
+      trustMode: .pinned(profile.publicKeyFingerprint), timeout: 10)
+    return data
+  }
 
   private static func request(
     baseURL: URL,

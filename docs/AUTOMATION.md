@@ -143,6 +143,24 @@ Home Assistant's **Wake on LAN** integration starts the server with
 `wake_on_lan.send_magic_packet` and the MAC address shown under **Smart Home › Turning the Server On
 and Off**. Every Aurelia app wakes it the same way.
 
+## Siri and Shortcuts
+
+On iPhone, iPad (2.14.0) and Mac (2.17.0) the owner taps **Smart Home › Set Up Siri**. That
+creates a key for this device (status, power and playback), kept in its Keychain, so Siri works
+even when Aurelia is closed. Then, in English:
+
+| Say | What happens |
+|---|---|
+| “Hey Siri, turn on my Aurelia server” | Sends Wake-on-LAN for up to a minute and says when the server answers. Needs no key. |
+| “Hey Siri, turn off my Aurelia server” | Turns it off (or puts it to sleep, as the shortcut is set); asks first while someone watches. |
+| “Hey Siri, play in Aurelia” | Siri asks what to play: “Breaking Bad season 3 episode 4”, “… S3E4”, a movie, or just a show to continue it. It plays on the Apple TV, or on the device you name, that has Aurelia open with the owner's profile. |
+| “Hey Siri, what's playing in Aurelia” | Says what plays on which device. |
+
+The same actions are in the Shortcuts app for automations and the Home Screen. Limits: Siri needs
+the app's language phrases above (English until Aurelia is localized); the Apple TV receives the
+title only while Aurelia is open on it, because tvOS doesn't wake apps in the background; Siri on
+the Apple TV's remote doesn't offer these actions. Removing Siri on the device also removes its key.
+
 ## Turning the server off now
 
 `POST /api/v1/server/power/now` (owner) or `/api/v1/integration/power` (key) with `sleep`,

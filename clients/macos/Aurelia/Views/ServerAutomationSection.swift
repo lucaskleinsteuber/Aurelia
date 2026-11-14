@@ -1,3 +1,4 @@
+import AppIntents
 import AppKit
 import SwiftUI
 
@@ -14,6 +15,7 @@ struct ServerAutomationSection: View {
   @State private var shownSecret: ShownSecret?
   @State private var shownToken: String?
   @State private var confirmation: Confirmation?
+  @State private var siriReady = false
 
   struct WebhookEditorTarget: Identifiable {
     let id = UUID()
@@ -97,6 +99,7 @@ struct ServerAutomationSection: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
       }
+      siriSection
       AureliaSettingsSection(
         "Turning the Server On and Off", symbol: "power",
         description:
@@ -136,6 +139,7 @@ struct ServerAutomationSection: View {
       }
     }
     .disabled(working)
+    .onAppear { siriReady = model.profile.map { SiriKeyStore().load(server: $0.serverId) != nil } ?? false }
     .task(id: model.administrationGeneration) { await reload() }
     .sheet(item: $editing) { target in
       if let overview, let client {
@@ -173,6 +177,37 @@ struct ServerAutomationSection: View {
       Button("Cancel", role: .cancel) {}
     } message: { item in
       Text(item.message)
+    }
+  }
+
+  private var siriSection: some View {
+    AureliaSettingsSection(
+      "Siri on This Mac", symbol: "mic",
+      description:
+        "Siri can turn the server on and off, play a title on the Apple TV and say what plays, even when Aurelia is closed. It uses its own key, kept in this Mac's Keychain."
+    ) {
+      VStack(alignment: .leading, spacing: 8) {
+        if siriReady {
+          Label("Siri is set up on this Mac", systemImage: "checkmark.circle.fill")
+          ForEach(
+            ["Turn on my Aurelia server", "Play in Aurelia", "What's playing in Aurelia", "Turn off my Aurelia server"],
+            id: \.self
+          ) { phrase in
+            Text("“\(phrase)”").font(.callout)
+          }
+          Text("“Play in Aurelia” asks what to play: say a movie or a show, with a season and episode if you like. Siri understands these phrases in English.")
+            .font(.caption).foregroundStyle(.secondary)
+          HStack {
+            Button("Open Shortcuts") {
+              if let url = URL(string: "shortcuts://") { NSWorkspace.shared.open(url) }
+            }
+            Button("Remove Siri from This Mac", role: .destructive) { Task { await removeSiri() } }
+          }
+        } else {
+          Button("Set Up Siri") { Task { await setUpSiri() } }
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
 
@@ -217,6 +252,31 @@ struct ServerAutomationSection: View {
     }
     .padding(10)
     .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.05)))
+  }
+
+  private var siriKeyName: String { "Siri on \(Host.current().localizedName ?? "Mac")" }
+
+  private func setUpSiri() async {
+    guard let server = model.profile?.serverId else { return }
+    let name = siriKeyName
+    guard let created = await run({ try await $0.createIntegrationToken(name: name, scopes: ["status", "power", "playback"]) })
+    else { return }
+    do {
+      try SiriKeyStore().save(created.value, server: server)
+      siriReady = true
+      AureliaShortcuts.updateAppShortcutParameters()
+    } catch {
+      message = "This Mac couldn't keep the key. Try again."
+    }
+  }
+
+  private func removeSiri() async {
+    guard let server = model.profile?.serverId else { return }
+    SiriKeyStore().delete(server: server)
+    siriReady = false
+    if let token = overview?.tokens.first(where: { $0.name == siriKeyName }) {
+      await run { try await $0.revokeIntegrationToken(id: token.id) }
+    }
   }
 
   private func test(_ webhook: AutomationWebhook) async {

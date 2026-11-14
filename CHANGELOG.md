@@ -38,6 +38,10 @@ versioned commit, so their skipped numbers are preserved.
 - Server: keys for Home Assistant and shortcuts, each allowed only to read what plays, turn the server off or control the owner's players, shown once and stored as a fingerprint.
 - Server and all apps except Apple TV: Sleep, Turn Off or Stop Now. On a Linux package server it happens at once through a new path unit; a server in the Mac or Linux app stops. Home Assistant wakes the server with its Wake on LAN integration and the MAC address shown in Smart Home.
 
+- iPhone, iPad and Mac: Siri and Shortcuts. After Set Up Siri in Smart Home, “Hey Siri, turn on my Aurelia server”, “… turn off my Aurelia server”, “… play in Aurelia” (for example “Breaking Bad season 3 episode 4”, played on the Apple TV) and “… what's playing in Aurelia” work even when Aurelia is closed. Siri uses its own key in the device's Keychain; waking needs none.
+- Server: Siri can find a movie or show and a given or the next episode with a playback key.
+- Apple TV: follows pause, continue, seek and skip from another device or Siri, not only play and stop.
+
 ### Changed
 
 - iPhone & iPad: Settings is rebuilt. Every page says what it is for, every option explains itself, and actions show their progress, "Done" or the problem in their own row. For administrators the server pages come first; nothing appears twice any more (one devices page, backups only under Server, one Connection page). On iPad, pages opened inside a page (a storage location, a profile, Library Health) work again, and the sidebar marks the chosen page.

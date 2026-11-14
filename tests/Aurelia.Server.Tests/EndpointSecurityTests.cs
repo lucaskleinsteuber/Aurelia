@@ -18,7 +18,10 @@ public sealed class EndpointSecurityTests
         "GET /api/v1/health/ready",
         // Home Assistant and shortcuts: each checks an integration key with its own scope.
         "GET /api/v1/integration/players",
+        "GET /api/v1/integration/search",
         "GET /api/v1/integration/status",
+        "GET /api/v1/integration/titles/{id:guid}/episode",
+        "GET /api/v1/integration/titles/{id:guid}/next",
         "GET /api/v1/server/info",
         "GET,HEAD /api/v1/health/live",
         "POST /api/v1/auth/device-pairings/",

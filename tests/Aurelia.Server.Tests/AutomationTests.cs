@@ -294,6 +294,116 @@ public sealed class AutomationTests
     }
 
     [Fact]
+    public async Task SiriFindsASeriesAndItsEpisodeWithAPlaybackKey()
+    {
+        var root = Directory.CreateDirectory(Path.Combine(TestPaths.CreateDataDirectory(), "Automation")).FullName;
+        try
+        {
+            using var factory = Factory(new Receiver());
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var (series, episode) = await AddSeriesAsync(factory, root);
+            using var create = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/server/automation/tokens", owner.Token,
+                new CreateIntegrationTokenRequest("Siri on a Synthetic iPhone", [IntegrationScopes.Playback]));
+            using var createdResponse = await ApiTestClient.SendAsync(client, create);
+            var key = (await ApiTestClient.ReadAsync<IntegrationTokenCreated>(createdResponse)).Value;
+
+            using (var search = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/integration/search?query=Invented", key))
+            using (var found = await client.SendAsync(search))
+            {
+                found.EnsureSuccessStatusCode();
+                var titles = await ApiTestClient.ReadAsync<List<CatalogItemSummary>>(found);
+                Assert.Contains(titles, item => item.Id == series && item.Kind == MediaKind.Series);
+                Assert.DoesNotContain(titles, item => item.Kind == MediaKind.Episode);
+            }
+            using (var exact = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/integration/titles/{series}/episode?season=3&episode=4", key))
+            using (var exactResponse = await client.SendAsync(exact))
+                Assert.Equal(episode, (await ApiTestClient.ReadAsync<CatalogItemSummary>(exactResponse)).Id);
+            using (var missing = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/integration/titles/{series}/episode?season=9&episode=1", key))
+            using (var missingResponse = await client.SendAsync(missing))
+                Assert.Equal("episode_not_found", (await ApiTestClient.ReadAsync<ApiProblem>(missingResponse)).Code);
+            using (var next = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/integration/titles/{series}/next", key))
+            using (var nextResponse = await client.SendAsync(next))
+                Assert.Equal(MediaKind.Episode, (await ApiTestClient.ReadAsync<CatalogItemSummary>(nextResponse)).Kind);
+            // A status key may not look up titles.
+            using (var status = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/server/automation/tokens", owner.Token,
+                new CreateIntegrationTokenRequest("Status Only", [IntegrationScopes.Status])))
+            using (var statusResponse = await ApiTestClient.SendAsync(client, status))
+            {
+                var statusKey = (await ApiTestClient.ReadAsync<IntegrationTokenCreated>(statusResponse)).Value;
+                using var refused = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/integration/search?query=Invented", statusKey);
+                using var refusedResponse = await client.SendAsync(refused);
+                Assert.Equal(HttpStatusCode.Unauthorized, refusedResponse.StatusCode);
+            }
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    }
+
+    private static async Task<(Guid Series, Guid Episode)> AddSeriesAsync(AureliaServerFactory factory, string root)
+    {
+        using var scope = factory.Services.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var library = new LibraryRoot
+        {
+            Id = Guid.NewGuid(),
+            Name = "Synthetic Shows",
+            Path = root,
+            NormalizedPath = MediaPath.Normalize(root),
+            Kind = LibraryKind.TvShows,
+            Availability = LibraryAvailability.Available,
+            CreatedAt = now,
+        };
+        var folder = Path.Combine(root, "An Invented Show");
+        Directory.CreateDirectory(folder);
+        var series = new MediaItem
+        {
+            Id = Guid.NewGuid(),
+            LibraryRoot = library,
+            LibraryRootId = library.Id,
+            Kind = MediaKind.Series,
+            SourcePath = folder,
+            NormalizedSourcePath = MediaPath.Normalize(folder),
+            DetectedTitle = "An Invented Show",
+            Category = string.Empty,
+            Availability = MediaAvailability.Available,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        database.LibraryRoots.Add(library);
+        database.MediaItems.Add(series);
+        Guid wanted = Guid.Empty;
+        foreach (var (season, number) in new[] { (1, 1), (3, 3), (3, 4) })
+        {
+            var path = Path.Combine(folder, $"S{season:00}E{number:00}.mkv");
+            await File.WriteAllBytesAsync(path, new byte[1024]);
+            var episode = new MediaItem
+            {
+                Id = Guid.NewGuid(),
+                LibraryRoot = library,
+                LibraryRootId = library.Id,
+                ParentId = series.Id,
+                Kind = MediaKind.Episode,
+                SourcePath = path,
+                NormalizedSourcePath = MediaPath.Normalize(path),
+                DetectedTitle = $"Episode {number}",
+                Category = string.Empty,
+                Extension = ".mkv",
+                FileSize = 1024,
+                SeasonNumber = season,
+                EpisodeNumber = number,
+                Availability = MediaAvailability.Available,
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+            if (season == 3 && number == 4) wanted = episode.Id;
+            database.MediaItems.Add(episode);
+        }
+        await database.SaveChangesAsync();
+        return (series.Id, wanted);
+    }
+
+    [Fact]
     public async Task AServerThatCannotTurnOffSaysSo()
     {
         using var factory = Factory(new Receiver());

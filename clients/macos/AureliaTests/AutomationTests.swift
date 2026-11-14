@@ -49,3 +49,13 @@ final class AutomationTests: XCTestCase {
     XCTAssertEqual(overview.powerActions.map(AutomationText.powerTitle), ["Sleep Now", "Turn Off Now", "Stop Aurelia Now"])
   }
 }
+
+final class SiriSupportTests: XCTestCase {
+  func testASpokenRequestSplitsIntoTitleSeasonAndEpisode() {
+    XCTAssertEqual(SiriTitleRequest.parse("Breaking Bad season 3 episode 4"), .init(title: "Breaking Bad", season: 3, episode: 4))
+    XCTAssertEqual(SiriTitleRequest.parse("An Invented Show S1E2"), .init(title: "An Invented Show", season: 1, episode: 2))
+    XCTAssertEqual(SiriTitleRequest.parse("Arrival"), .init(title: "Arrival"))
+    XCTAssertTrue(SiriKeyStore.isKey("aur_it_" + String(repeating: "A", count: 43)))
+    XCTAssertFalse(SiriKeyStore.isKey("whsec_abc"))
+  }
+}

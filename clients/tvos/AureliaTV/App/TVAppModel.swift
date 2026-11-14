@@ -882,17 +882,28 @@ final class TVAppModel: ObservableObject {
           let commands = try await api.pollPlayerCommands(deviceId: deviceId, waitMs: 10000)
           guard !Task.isCancelled, self.session?.sessionId == sessionID else { return }
           for cmd in commands {
-            if cmd.action.lowercased() == "play", let mediaId = cmd.mediaId {
+            let effect = TVRemoteCommandEffect.of(
+              action: cmd.action, mediaId: cmd.mediaId, positionSeconds: cmd.positionSeconds,
+              skipSeconds: cmd.skipSeconds, position: self.openPlayer?.position,
+              isPlaying: self.openPlayer?.isPlaying)
+            switch effect {
+            case .play(let mediaId):
               if let item = try? await api.summary(id: mediaId) {
                 await MainActor.run { [weak self] in
                   self?.remotePlaybackItem = item
                 }
               }
-            } else if cmd.action.lowercased() == "stop" {
+            case .stop:
               await MainActor.run { [weak self] in
                 self?.remotePlaybackItem = nil
                 self?.stopPlayer()
               }
+            case .togglePlayPause:
+              self.openPlayer?.togglePlayPause()
+            case .seek(let offset):
+              self.openPlayer?.seek(by: offset, revealControls: true)
+            case .nothing:
+              break
             }
           }
         } catch {

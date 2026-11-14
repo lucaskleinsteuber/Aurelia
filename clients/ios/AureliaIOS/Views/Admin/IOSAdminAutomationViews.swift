@@ -1,3 +1,4 @@
+import AppIntents
 import SwiftUI
 import UIKit
 
@@ -15,6 +16,8 @@ struct IOSAdminAutomationView: View {
 
 private struct IOSAdminAutomationForm: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
+  @EnvironmentObject private var model: IOSAppModel
+  @State private var siriReady = false
   let overview: IOSAutomationOverview
   let reload: () async -> Void
   @State private var editing: EditorTarget?
@@ -115,6 +118,30 @@ private struct IOSAdminAutomationForm: View {
         Text("For the other direction: Home Assistant reads what plays, or turns the server off, with a key you create here. Swipe a key to remove it.")
       }
       Section {
+        if siriReady {
+          Label("Siri is set up on this \(IOSDesign.deviceName)", systemImage: "checkmark.circle.fill")
+          ForEach(Self.phrases, id: \.self) { phrase in
+            Text("“\(phrase)”").font(.callout)
+          }
+          ShortcutsLink()
+          Button("Remove Siri from This \(IOSDesign.deviceName)", role: .destructive) { Task { await removeSiri() } }
+        } else {
+          Button {
+            Task { await setUpSiri() }
+          } label: {
+            IOSAdminToggleLabel(
+              "Set Up Siri", "Creates a key for this \(IOSDesign.deviceName), so Siri can play, turn the server off and say what plays, even when Aurelia is closed.")
+          }
+          .accessibilityIdentifier("automation-set-up-siri")
+        }
+      } header: {
+        Text("Siri on This \(IOSDesign.deviceName)")
+      } footer: {
+        Text(
+          "Siri understands these phrases in English. “Play in Aurelia” asks what to play: say a movie or a show, with a season and episode if you like. Titles play on an Apple TV or another device that has Aurelia open. Turning the server on works without a key."
+        )
+      }
+      Section {
         LabeledContent("Network Card") {
           Text(overview.wakeOnLanAddresses.isEmpty ? "Not reported" : overview.wakeOnLanAddresses.joined(separator: ", "))
             .textSelection(.enabled)
@@ -147,6 +174,7 @@ private struct IOSAdminAutomationForm: View {
     .background(IOSDesign.canvas.ignoresSafeArea())
     .refreshable { await reload() }
     .adminConfirmation($confirmation)
+    .onAppear { siriReady = model.connection.map { IOSSiriKeyStore().load(server: $0.serverID) != nil } ?? false }
     .sheet(item: $editing) { target in
       NavigationStack {
         IOSWebhookEditor(overview: overview, webhook: target.webhook) { created in
@@ -174,6 +202,40 @@ private struct IOSAdminAutomationForm: View {
       }
     }
     .sheet(item: $shown) { value in NavigationStack { IOSShownValueView(value: value) } }
+  }
+
+  static let phrases = [
+    "Hey Siri, turn on my Aurelia server", "Hey Siri, play in Aurelia", "Hey Siri, what's playing in Aurelia",
+    "Hey Siri, turn off my Aurelia server",
+  ]
+
+  private var siriKeyName: String { "Siri on \(model.deviceName)" }
+
+  private func setUpSiri() async {
+    guard let server = model.connection?.serverID else { return }
+    let name = siriKeyName
+    guard
+      let created = await admin.value("Setting up Siri…", {
+        try await $0.createIntegrationToken(name: name, scopes: ["status", "power", "playback"])
+      })
+    else { return }
+    do {
+      try IOSSiriKeyStore().save(created.value, server: server)
+      siriReady = true
+      AureliaShortcuts.updateAppShortcutParameters()
+    } catch {
+      admin.alert = "This \(IOSDesign.deviceName) couldn't keep the key. Try again."
+    }
+  }
+
+  private func removeSiri() async {
+    guard let server = model.connection?.serverID else { return }
+    IOSSiriKeyStore().delete(server: server)
+    siriReady = false
+    if let token = overview.tokens.first(where: { $0.name == siriKeyName }) {
+      let id = token.id
+      await admin.perform("Removing Siri's key…") { try await $0.revokeIntegrationToken(id: id) }
+    }
   }
 
   private func webhookRow(_ webhook: IOSAutomationWebhook) -> some View {
