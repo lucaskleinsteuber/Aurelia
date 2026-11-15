@@ -163,6 +163,9 @@ struct RootView: View {
     .sheet(isPresented: $model.isKeyboardShortcutsPresented) {
       KeyboardShortcutsSheet()
     }
+    .sheet(item: $model.downloadChoice) { choice in
+      DownloadQualitySheet(choice: choice).environmentObject(model)
+    }
     .onReceive(NotificationCenter.default.publisher(for: .aureliaShowIntroduction)) { _ in
       model.isSettingsPresented = false
       introductionReplay = UUID()

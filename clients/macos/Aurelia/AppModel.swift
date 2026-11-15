@@ -2840,9 +2840,38 @@ final class AppModel: ObservableObject {
 
   // MARK: Offline downloads
 
-  /// Downloads a movie or episode to this Mac to watch without the server.
+  /// A download whose quality the person chooses now (Settings › Playback › Download Quality).
+  @Published var downloadChoice: PendingDownloadChoice?
+
+  /// Downloads a movie or episode to this Mac to watch without the server: the original, or a
+  /// smaller copy the server converts when it offers one and the setting asks for it.
   func download(_ item: CatalogItemSummary) {
     guard let profile, item.kind == .movie || item.kind == .episode, item.isPlayable else { return }
+    let preference =
+      UserDefaults.standard.string(forKey: DownloadQualityPreference.key) ?? DownloadQualityPreference.ask
+    guard libraryCapabilities.contains(ServerFeatureNames.convertedDownloads),
+      preference != DownloadQualityPreference.original
+    else {
+      startDownload(item)
+      return
+    }
+    Task {
+      let options = try? await APIClient(profile: profile).downloadOptions(mediaId: item.id)
+      guard self.profile?.serverId == profile.serverId else { return }
+      switch DownloadQualityPreference.resolve(preference, options: options) {
+      case .original: startDownload(item)
+      case .ask: if let options { downloadChoice = PendingDownloadChoice(item: item, options: options) }
+      case .converted(let quality):
+        startDownload(
+          item, quality: quality, audio: options?.audioTrack,
+          expectedBytes: options?.qualities.first { $0.id == quality }?.estimatedBytes)
+      }
+    }
+  }
+
+  /// Starts a download in the chosen quality; nil keeps the original file.
+  func startDownload(_ item: CatalogItemSummary, quality: String? = nil, audio: Int? = nil, expectedBytes: Int64? = nil) {
+    guard let profile else { return }
     let subtitle =
       item.kind == .episode
       ? [
@@ -2850,7 +2879,9 @@ final class AppModel: ObservableObject {
         item.seasonNumber.map { season in "S\(season) E\(item.episodeNumber ?? 0)" },
       ].compactMap { $0 }.joined(separator: " · ") : item.year.map(String.init)
     let series = item.parentId.flatMap { parent in catalogItems.first { $0.id == parent } }
-    OfflineDownloads.shared.download(item, subtitle: subtitle, profile: profile, series: series)
+    OfflineDownloads.shared.download(
+      item, subtitle: subtitle, profile: profile, series: series, quality: quality, audio: audio,
+      expectedBytes: expectedBytes)
   }
 
   /// Plays a download from this Mac; it works while the server is asleep or out of reach.

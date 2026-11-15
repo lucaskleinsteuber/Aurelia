@@ -65,6 +65,7 @@ struct AppSettingsView: View {
   @AppStorage(AureliaRest.minutesKey) private var restMinutes = AureliaRest.defaultMinutes
   @AppStorage(AppUpdatePreferences.automaticChecksKey) private var automaticUpdateChecks = true
   @AppStorage(AppUpdatePreferences.betaUpdatesKey) private var betaUpdates = false
+  @AppStorage(DownloadQualityPreference.key) private var downloadQuality = DownloadQualityPreference.ask
 
   // Navigation & Search State
   @State private var selectedCategory: SettingsCategory
@@ -740,6 +741,23 @@ struct AppSettingsView: View {
             }
             Text(
               "Original plays the file itself. The other choices let the server convert the title while it plays, in the quality your connection carries, which helps away from home."
+            )
+            .font(.caption).foregroundStyle(.secondary)
+          }
+        }
+
+        if model.libraryCapabilities.contains(ServerFeatureNames.convertedDownloads) {
+          VStack(alignment: .leading, spacing: 2) {
+            LabeledContent("Download Quality") {
+              Picker("Download Quality", selection: $downloadQuality) {
+                ForEach(DownloadQualityPreference.choices, id: \.id) { choice in Text(choice.title).tag(choice.id) }
+              }
+              .labelsHidden()
+              .frame(width: 180)
+              .accessibilityIdentifier("playback-download-quality")
+            }
+            Text(
+              "Original keeps the file itself. A smaller quality has the server convert a copy while it downloads, which saves space on this Mac; a title that is already small keeps its original."
             )
             .font(.caption).foregroundStyle(.secondary)
           }

@@ -292,9 +292,10 @@ enum OfflineTitlePresentation {
     return min(1, Double(title.positionMilliseconds) / Double(title.durationMilliseconds))
   }
 
-  /// "2.1 GB · Watched", "1.4 GB · 35 % watched", plus a note while progress waits for the server.
+  /// "720p · 2.1 GB · Watched", "1.4 GB · 35 % watched", plus a note while progress waits for the server.
   static func details(_ title: OfflineTitle) -> String {
     var parts = [ByteCountFormatter.string(fromByteCount: title.bytes, countStyle: .file)]
+    if let quality = title.quality { parts.insert(quality, at: 0) }
     if title.isCompleted {
       parts.append("Watched")
     } else if let progress = progress(title) {

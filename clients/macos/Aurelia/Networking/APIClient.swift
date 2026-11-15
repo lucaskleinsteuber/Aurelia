@@ -1203,6 +1203,31 @@ struct APIClient: Sendable {
       method: "DELETE")
   }
 
+  // MARK: Smaller downloads ("converted-downloads-v1")
+
+  func downloadOptions(mediaId: UUID) async throws -> DownloadOptionsResponse {
+    try await get("/api/v1/media/\(mediaId.uuidString.lowercased())/download-options")
+  }
+
+  /// One piece of a converted download: a quality's playlist, init or media segment, read over
+  /// the pinned connection. A segment may take a while: the server converts it first.
+  func downloadPiece(streamPath: String, quality: String, piece: String, audio: Int?) async throws
+    -> Data
+  {
+    _ = try streamURL(path: streamPath)
+    let (data, _, _) = try await Self.request(
+      baseURL: profile.baseURL,
+      path: ConvertedDownloadPlan.piecePath(
+        streamPath: streamPath, quality: quality, piece: piece, audio: audio),
+      method: "GET",
+      token: profile.token,
+      body: nil,
+      trustMode: .pinned(profile.publicKeyFingerprint),
+      additionalHeaders: ["Accept": "*/*"],
+      timeout: 90)
+    return data
+  }
+
   // MARK: The file watch ("file-checks-v1")
 
   func serverFileChecks() async throws -> FileCheckSettings {
@@ -1600,9 +1625,12 @@ struct APIClient: Sendable {
     return try await perform(path: "/api/v1/wishes/poster?\(query)", method: "GET")
   }
 
-  func createPlayback(mediaId: UUID) async throws -> PlaybackSourceResponse {
+  /// A playback ticket. `forDownload` tells the server nobody watches yet: Smart Home hears
+  /// nothing and no scrub previews are made (servers before 2.20.0 ignore it).
+  func createPlayback(mediaId: UUID, forDownload: Bool = false) async throws -> PlaybackSourceResponse {
     let data = try await perform(
-      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/playback",
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/playback"
+        + (forDownload ? "?purpose=download" : ""),
       method: "POST")
     let source = try Self.decode(PlaybackSourceResponse.self, from: data)
     guard source.mediaId == mediaId, source.progress.mediaId == mediaId else {

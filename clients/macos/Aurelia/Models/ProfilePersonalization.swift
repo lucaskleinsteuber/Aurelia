@@ -151,6 +151,8 @@ enum ServerFeatureNames {
   static let serverSpeech = "server-speech-v1"
   /// The server reads every file in the background and reports damaged files and drives.
   static let fileChecks = "file-checks-v1"
+  /// Smaller downloads the server converts live; only this Mac keeps them.
+  static let convertedDownloads = "converted-downloads-v1"
   static let suggestions = "suggestions-v1"
   static let wishes = "wishes-v1"
 }

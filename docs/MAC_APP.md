@@ -105,6 +105,11 @@ On a movie or episode, choose **Download** to keep a copy on this Mac. It is the
 streamed through the usual secure connection and kept in the app's own data folder; its size is
 shown and **Remove Download** deletes it. Downloads belong to the profile that made them.
 
+With Aurelia Server 2.20 or newer a download can be a smaller copy instead (1080p, 720p or 480p,
+with its size and how long the server needs): **Settings › Playback › Download Quality** asks
+every time or always uses one. The server converts the copy while it downloads and stores
+nothing; its conversion waits while someone watches.
+
 When the server is out of reach, for example on a train, Aurelia offers **Watch Downloads Offline**.
 It shows your downloads with Continue Watching, movies and series. Your profile opens with its PIN,
 and the progress you make is sent to the server the next time it answers.

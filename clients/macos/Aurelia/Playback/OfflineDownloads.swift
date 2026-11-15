@@ -37,6 +37,8 @@ struct OfflineTitle: Codable, Identifiable, Equatable, Sendable {
   var backdropFile: String? = nil
   /// An episode's series poster, so the offline library shows the series like the library does.
   var seriesPosterFile: String? = nil
+  /// The quality of a smaller copy the server converted ("720p"); nil for the original file.
+  var quality: String? = nil
 
   var isEpisode: Bool { kind == "episode" }
   var hasArtwork: Bool { posterFile != nil || backdropFile != nil }
@@ -129,9 +131,12 @@ final class OfflineDownloads: ObservableObject {
   func isDownloaded(_ id: UUID) -> Bool { title(id) != nil }
 
   /// Downloads a movie or episode for the signed-in profile.
+  /// With a `quality` the server converts a smaller copy ("converted-downloads-v1"); only this
+  /// Mac keeps it (owner's decision, 15.11.2026).
   func download(
     _ item: CatalogItemSummary, subtitle: String?, profile: StoredServerProfile,
-    series: CatalogItemSummary? = nil
+    series: CatalogItemSummary? = nil, quality: String? = nil, audio: Int? = nil,
+    expectedBytes: Int64? = nil
   ) {
     guard let userId = profile.user?.id, tasks[item.id] == nil else { return }
     if let existing = title(item.id) {
@@ -151,7 +156,7 @@ final class OfflineDownloads: ObservableObject {
       do {
         let downloaded = try await self.fetch(
           item, subtitle: subtitle, profile: profile, userId: userId, series: series,
-          attempt: attempt)
+          attempt: attempt, quality: quality, audio: audio, expectedBytes: expectedBytes)
         if self.attempts[item.id] == attempt {
           self.titles.append(downloaded)
           self.save()
@@ -300,7 +305,8 @@ final class OfflineDownloads: ObservableObject {
 
   private func fetch(
     _ item: CatalogItemSummary, subtitle: String?, profile: StoredServerProfile, userId: UUID,
-    series: CatalogItemSummary?, attempt: UUID
+    series: CatalogItemSummary?, attempt: UUID, quality: String? = nil, audio: Int? = nil,
+    expectedBytes: Int64? = nil
   ) async throws -> OfflineTitle {
     // Checked before every write into the title's folder: after a cancel it may already belong
     // to a new download of the same title.
@@ -309,13 +315,19 @@ final class OfflineDownloads: ObservableObject {
     }
     func ensureCurrent() throws { if !isCurrent() { throw CancellationError() } }
     let api = APIClient(profile: profile)
-    let ticket = try await api.createPlayback(mediaId: item.id)
-    defer { Task { try? await api.revokePlayback(id: ticket.id) } }
+    let ticket = try await api.createPlayback(mediaId: item.id, forDownload: true)
+    // A long conversion may need a new ticket; the last one is closed at the end too.
+    let tickets = DownloadTickets(ticket)
+    defer {
+      let used = tickets.all
+      Task { for id in used { try? await api.revokePlayback(id: id) } }
+    }
     let available =
       (try? root.deletingLastPathComponent().resourceValues(forKeys: [
         .volumeAvailableCapacityForImportantUsageKey
       ]).volumeAvailableCapacityForImportantUsage) ?? Int64.max
-    guard ticket.contentLength <= 0 || ticket.contentLength + 1_000_000_000 < available else {
+    let needed = quality == nil ? ticket.contentLength : (expectedBytes ?? 0)
+    guard needed <= 0 || needed + 1_000_000_000 < available else {
       throw OfflineDownloadError.notEnoughSpace
     }
     // The relay checks the server's pinned certificate and adds the sign-in; this Mac then
@@ -328,13 +340,22 @@ final class OfflineDownloads: ObservableObject {
     let folder = folder(for: item.id)
     try ensureCurrent()
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-    let extensionName = Self.fileExtension(ticket.contentType)
-    let fileName = "title.\(extensionName)"
+    // A converted copy is one fragmented MP4, whatever the original was.
+    let contentType = quality == nil ? ticket.contentType : "video/mp4"
+    let fileName = "title.\(Self.fileExtension(contentType))"
     let destination = folder.appendingPathComponent(fileName)
     do {
       let id = item.id
-      let temporary = try await OfflineFileDownload.run(from: local, into: folder) { [weak self] share in
+      let report: @Sendable (Double) -> Void = { [weak self] share in
         Task { @MainActor in if self?.active[id] != nil { self?.active[id] = share } }
+      }
+      let temporary: URL
+      if let quality {
+        temporary = folder.appendingPathComponent("title.mp4.part")
+        _ = try await ConvertedFileDownload(api: api, mediaId: item.id, quality: quality, audio: audio)
+          .run(ticket: ticket, into: temporary, progress: report) { tickets.add($0) }
+      } else {
+        temporary = try await OfflineFileDownload.run(from: local, into: folder, progress: report)
       }
       do { try ensureCurrent() } catch {
         try? FileManager.default.removeItem(at: temporary)
@@ -367,12 +388,13 @@ final class OfflineDownloads: ObservableObject {
       var downloaded = OfflineTitle(
         id: item.id, serverId: profile.serverId, userId: userId, title: item.title,
         subtitle: subtitle, kind: item.kind.rawValue, fileName: fileName,
-        contentType: ticket.contentType, bytes: size, downloadedAt: Date(),
+        contentType: contentType, bytes: size, downloadedAt: Date(),
         positionMilliseconds: item.progress?.positionMilliseconds ?? 0,
         durationMilliseconds: item.progress?.durationMilliseconds ?? 0,
         isCompleted: item.progress?.isCompleted ?? false, progressSavedAt: nil,
         progressDirty: false, subtitles: subtitles, serverRevision: item.progress?.revision)
       details.apply(to: &downloaded)
+      downloaded.quality = quality
       return downloaded
     } catch {
       // A cancel already removed the folder; it may now hold a new download of this title.
@@ -487,6 +509,13 @@ final class OfflineDownloads: ObservableObject {
       try? data.write(to: indexURL, options: .atomic)
     }
   }
+}
+
+/// The tickets one download used, so every one is closed at its end.
+@MainActor final class DownloadTickets {
+  private(set) var all: [UUID]
+  init(_ first: PlaybackSourceResponse) { all = [first.id] }
+  func add(_ ticket: PlaybackSourceResponse) { all.append(ticket.id) }
 }
 
 enum OfflineDownloadError: LocalizedError {
