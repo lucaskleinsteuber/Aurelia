@@ -81,9 +81,16 @@ public sealed class HomePage(LibraryContext context) : LibraryPageBase(context)
         if (Context.Store.Home is null && e.PropertyName is nameof(LibraryStore.IsLoading) or nameof(LibraryStore.Error)) Rebuild();
     }
 
+    /// <summary>Whether the page was built while the first load was still running (it shows the spinner).</summary>
+    private bool builtWhileLoading;
+
+    // A first load that failed while Home was not shown changes no revision, only IsLoading.
+    protected override bool IsStale => base.IsStale || (Context.Store.Home is null && builtWhileLoading != Context.Store.IsLoading);
+
     protected override Control Build()
     {
         var store = Context.Store;
+        builtWhileLoading = store.IsLoading;
         if (store.Home is not { } home)
         {
             if (store.IsLoading) return new Aurelia.Linux.Controls.Spinner { Margin = Inset(160), HorizontalAlignment = HorizontalAlignment.Center };

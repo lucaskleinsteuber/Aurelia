@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Cmd-F focuses the library search; coming from Home or a detail page starts a new search.
-private struct FindRequest: Equatable {
+private struct FindRequest: Hashable {
   let id = UUID()
   let startsNewSearch: Bool
 }
@@ -10,6 +10,28 @@ private enum MediaSelection: Hashable {
   case media(UUID)
   case collection(UUID)
   case person(PersonSelection)
+}
+
+private struct BrowsePageKey: Equatable, Sendable {
+  let destination: LibraryDestination
+  let findRequest: FindRequest?
+}
+
+private struct DetailPageKey: Equatable, Sendable {
+  let page: MediaSelection
+  let collection: CollectionSummary?
+}
+
+/// A page of the window that is worked out again only when what it is built from changed, not
+/// whenever the window itself changes. Pages hidden beneath a detail page were otherwise worked out
+/// again whenever a title opened or closed. The page still follows the library and its settings itself.
+private struct StablePage<Key: Equatable & Sendable, Content: View>: View, Equatable {
+  let key: Key
+  @ViewBuilder let content: () -> Content
+
+  nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.key == rhs.key }
+
+  var body: some View { content() }
 }
 
 struct LibraryShellView: View {
@@ -362,8 +384,11 @@ struct LibraryShellView: View {
   /// position and artwork exactly where they were.
   private var content: some View {
     ZStack {
-      // Switching pages in the sidebar cross-fades briefly instead of cutting.
-      browsePage
+      // Switching pages in the sidebar cross-fades briefly instead of cutting. The page stays as it
+      // is while only the shell changes (a title opens above it, the sidebar is dragged); it still
+      // follows the library and its settings itself.
+      StablePage(key: BrowsePageKey(destination: destination, findRequest: findRequest)) { browsePage }
+        .equatable()
         .id(destination)
         .transition(.opacity)
         .opacity(selection == nil ? 1 : 0)
@@ -377,7 +402,8 @@ struct LibraryShellView: View {
       let pages = selection.map { backStack + [$0] } ?? []
       ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
         let isTop = index == pages.count - 1
-        selectedPage(page)
+        StablePage(key: pageKey(page)) { selectedPage(page) }
+          .equatable()
           .id(page)
           .opacity(isTop ? 1 : 0)
           .allowsHitTesting(isTop)
@@ -394,6 +420,12 @@ struct LibraryShellView: View {
       // Typing must never reach a search field hidden underneath the detail page.
       if value != nil { NSApp.keyWindow?.makeFirstResponder(nil) }
     }
+  }
+
+  /// What a detail page is built from: a collection page also from the collection as it is now.
+  private func pageKey(_ page: MediaSelection) -> DetailPageKey {
+    guard case .collection(let id) = page else { return DetailPageKey(page: page, collection: nil) }
+    return DetailPageKey(page: page, collection: model.collections.first(where: { $0.id == id }))
   }
 
   /// Opens a detail page; one opened from another detail page remembers it for Back.

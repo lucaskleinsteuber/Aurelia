@@ -49,10 +49,30 @@ public sealed class DetailPage : LibraryPageBase
     public DetailPage(LibraryContext context, CatalogItemSummary item) : base(context)
     {
         initial = item;
+        // A title prepared while its card was hovered (at most 30 seconds ago, and dropped when the
+        // library changed) opens complete. It is not asked for again and built a second time: that
+        // doubled the work of opening a title (measured 15.11.2026). Returning to the page reloads it.
+        var showsPrepared = false;
         if (context.Store.PreparedDetail(item.Id) is { } prepared)
+        {
             (detail, plan) = prepared;
-        AttachedToVisualTree += async (_, _) => await LoadAsync();
+            ChooseSeason();
+            showsPrepared = true;
+        }
+        AttachedToVisualTree += async (_, _) =>
+        {
+            if (showsPrepared)
+            {
+                showsPrepared = false;
+                return;
+            }
+            await LoadAsync();
+        };
     }
+
+    /// <summary>The season of the episode Play starts, else the first one; a season chosen on the page stays.</summary>
+    private void ChooseSeason() =>
+        season ??= plan?.Target is { Kind: MediaKind.Episode, SeasonNumber: { } target } ? target : (detail?.Seasons.Count > 0 ? detail.Seasons[0].Number : null);
 
     public CatalogDetailPresentation? Detail => detail;
 
@@ -72,7 +92,7 @@ public sealed class DetailPage : LibraryPageBase
             await Task.WhenAll(detailTask, planTask);
             detail = detailTask.Result;
             plan = planTask.Result;
-            season ??= plan?.Target is { Kind: MediaKind.Episode, SeasonNumber: { } target } ? target : (detail.Seasons.Count > 0 ? detail.Seasons[0].Number : null);
+            ChooseSeason();
             error = null;
         }
         catch (AureliaApiException failure)

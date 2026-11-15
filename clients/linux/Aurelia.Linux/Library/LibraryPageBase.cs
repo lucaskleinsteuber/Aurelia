@@ -22,13 +22,26 @@ public abstract class LibraryPageBase : UserControl
         VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
     };
 
+    /// <summary>The library's revision this page was last built from.</summary>
+    private long builtRevision = -1;
+
     protected LibraryPageBase(LibraryContext context)
     {
         Context = context;
         Content = scroller;
-        AttachedToVisualTree += (_, _) => context.Store.Changed += OnStoreChanged;
+        AttachedToVisualTree += (_, _) =>
+        {
+            context.Store.Changed += OnStoreChanged;
+            // A page hears about changes only while it is shown. One built before its data arrived
+            // (Home right after the PIN, while the window still showed the profiles) or left while
+            // the library changed would otherwise keep showing a spinner or old rows.
+            if (IsStale) Rebuild();
+        };
         DetachedFromVisualTree += (_, _) => context.Store.Changed -= OnStoreChanged;
     }
+
+    /// <summary>Whether the library changed since this page was built.</summary>
+    protected virtual bool IsStale => builtRevision != -1 && builtRevision != Context.Store.Revision;
 
     public LibraryContext Context { get; }
 
@@ -54,6 +67,7 @@ public abstract class LibraryPageBase : UserControl
     public void Rebuild()
     {
         var offset = scroller.Offset;
+        builtRevision = Context.Store.Revision;
         scroller.Content = Build();
         scroller.Offset = offset;
     }

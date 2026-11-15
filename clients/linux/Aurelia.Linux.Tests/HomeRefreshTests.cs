@@ -102,6 +102,34 @@ public sealed class HomeRefreshTests
         Assert.False(store.IsLoading);
     }
 
+    // Measured 15.11.2026 on the laptop: after the PIN, Home stayed a spinner until another page
+    // was opened. It was built while the library loaded and heard nothing until it was shown.
+    [AvaloniaFact]
+    public void AHomeBuiltWhileItsDataLoadedOffScreenShowsTheDataWhenItAppears()
+    {
+        var navigator = FakeLibrary.ShowLibrary(FakeLibrary.Create(pictures: false));
+        var server = FakeLibrary.Create(watchlist: false, pictures: false);
+        var transport = new HeldHomeTransport(server) { HoldNextHome = true };
+        using var api = new AureliaApi(transport);
+        var store = Store(api);
+        var loading = store.RefreshAsync();
+        FakeLibrary.Pump(() => transport.Entered.Task.IsCompleted);
+        var home = new Aurelia.Linux.Library.HomePage(new Aurelia.Linux.Library.LibraryContext(store, navigator.Shell!));
+        home.Rebuild();
+        transport.Release.TrySetResult();
+        FakeLibrary.Pump(() => loading.IsCompleted);
+        Assert.NotNull(store.Home);
+
+        var window = new Avalonia.Controls.Window { Content = home, Width = 1200, Height = 800 };
+        window.Show();
+        FakeLibrary.Pump(() => false, rounds: 5);
+        Assert.Empty(Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(home).OfType<Aurelia.Linux.Controls.Spinner>());
+        Assert.Contains(Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(home).OfType<Avalonia.Controls.TextBlock>(),
+            text => text.Text == "Quiet Orbit");
+        window.Close();
+        navigator.Close();
+    }
+
     [AvaloniaFact]
     public void RecommendationsRefreshAtTheirDeadlineWithoutASyncChangeAndStopAtRest()
     {

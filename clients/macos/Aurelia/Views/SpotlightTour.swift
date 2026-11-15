@@ -44,10 +44,15 @@ struct TourAnchorKey: PreferenceKey {
 }
 
 extension View {
-  /// Marks this view as a place the library tour can light up.
+  /// Marks this view as a place the library tour can light up. Views that are not the place (every
+  /// poster but the first) report nothing at all: an empty report from each poster still had the
+  /// window combine them on every update (measured 15.11.2026: about a ninth of opening a title).
+  @ViewBuilder
   func aureliaTourTarget(_ target: TourTarget, isEnabled: Bool = true) -> some View {
-    anchorPreference(key: TourAnchorKey.self, value: .bounds) {
-      isEnabled ? [target: $0] : [:]
+    if isEnabled {
+      anchorPreference(key: TourAnchorKey.self, value: .bounds) { [target: $0] }
+    } else {
+      self
     }
   }
 }

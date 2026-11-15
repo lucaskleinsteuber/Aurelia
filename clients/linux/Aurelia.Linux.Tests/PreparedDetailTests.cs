@@ -34,6 +34,35 @@ public sealed class PreparedDetailTests
     }
 
     [AvaloniaFact]
+    public void APreparedTitleOpensCompleteWithoutAskingTheServerAgain()
+    {
+        var server = FakeLibrary.Create(pictures: false);
+        var main = FakeLibrary.ShowLibrary(server);
+        var store = main.Session.Library!;
+        var item = store.Catalog.Single(i => i.Id == FakeLibrary.SeriesId);
+        var preparing = store.PrepareDetailAsync(item, CancellationToken.None);
+        FakeLibrary.Pump(() => preparing.IsCompleted);
+        var detailRequest = $"GET /api/v1/catalog/items/{item.Id}";
+        var asked = server.Requests.Count(request => request == detailRequest);
+
+        main.Shell!.OpenDetail(item);
+        FakeLibrary.Pump(() => false, rounds: 20);
+        var page = Assert.IsType<DetailPage>(main.Shell.CurrentPage);
+        Assert.NotNull(page.Detail);
+        Assert.Empty(Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(page).OfType<Aurelia.Linux.Controls.Spinner>());
+        Assert.Equal(asked, server.Requests.Count(request => request == detailRequest));
+
+        // A page someone comes back to loads again: it may have been played meanwhile.
+        main.Shell.OpenDetail(store.Catalog.Single(i => i.Id == FakeLibrary.MovieA));
+        FakeLibrary.Pump(() => false, rounds: 10);
+        main.Shell.Back();
+        FakeLibrary.Pump(() => server.Requests.Count(request => request == detailRequest) > asked);
+        Assert.Equal(asked + 1, server.Requests.Count(request => request == detailRequest));
+        main.Session.Rest();
+        main.Close();
+    }
+
+    [AvaloniaFact]
     public void LeavingATitleBeforeTheDelayCancelsPreparation()
     {
         var server = FakeLibrary.Create(pictures: false);
