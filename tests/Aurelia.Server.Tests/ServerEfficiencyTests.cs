@@ -89,15 +89,17 @@ public sealed class ServerEfficiencyTests
         Assert.True(guard.Admit(System.Net.IPAddress.Parse("192.168.1.21")));
     }
 
-    // A device in the home network can use thousands of IPv6 addresses and fill the table of
-    // addresses. The server computer itself, where the owner repairs things, still gets in.
+    // A device in the home network can use thousands of IPv6 addresses; within its /64 network
+    // they count as one device, which meets the limit like any other. The server computer itself,
+    // where the owner repairs things, still gets in.
     [Fact]
-    public void AFullAddressTableStillAdmitsTheServerComputer()
+    public void ADeviceWithManyAddressesCountsOnceAndTheServerComputerStillGetsIn()
     {
         var guard = new Aurelia.Server.Services.ServerRequestGuard();
-        for (var host = 0; host < 4_096; host++)
+        for (var host = 0; host < Aurelia.Server.Services.ServerRequestGuard.RequestsPerMinute; host++)
             Assert.True(guard.Admit(System.Net.IPAddress.Parse($"fd00::{host + 1:x}")));
         Assert.False(guard.Admit(System.Net.IPAddress.Parse("fd00::ffff")));
+        Assert.True(guard.Admit(System.Net.IPAddress.Parse("fd00:0:0:1::1")));
         Assert.True(guard.Admit(System.Net.IPAddress.Loopback));
         Assert.True(guard.Admit(System.Net.IPAddress.IPv6Loopback));
         Assert.True(guard.Admit(System.Net.IPAddress.Loopback.MapToIPv6()));

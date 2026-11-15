@@ -96,6 +96,35 @@ public sealed class LanConnectivityTests
         }
     }
 
+    // Audit S-X12: a server running past its certificate's years renews it with the same key while
+    // it runs, so apps keep trusting it and browsers see a valid certificate.
+    [Fact]
+    public void TheCertificateIsRenewedWhileTheServerRuns()
+    {
+        var dataDirectory = TestPaths.CreateDataDirectory();
+        Directory.CreateDirectory(dataDirectory);
+        var runtime = ServerRuntimeOptions.Resolve(new ConfigurationBuilder().Build(), ["run", "--lan", "--data-dir", dataDirectory]);
+        try
+        {
+            using var identity = ServerTlsIdentity.LoadOrCreate(runtime);
+            var before = identity.Certificate!;
+            Assert.False(identity.RenewIfDue(DateTime.UtcNow));
+            Assert.Same(before, identity.Certificate);
+            Assert.True(identity.RenewIfDue(before.NotAfter.ToUniversalTime().AddDays(-1)));
+            var renewed = identity.Certificate!;
+            Assert.NotSame(before, renewed);
+            Assert.True(renewed.HasPrivateKey);
+            using var oldKey = before.GetECDsaPublicKey();
+            using var newKey = renewed.GetECDsaPublicKey();
+            Assert.Equal(oldKey!.ExportSubjectPublicKeyInfo(), newKey!.ExportSubjectPublicKeyInfo());
+            before.Dispose();
+        }
+        finally
+        {
+            if (Directory.Exists(dataDirectory)) Directory.Delete(dataDirectory, recursive: true);
+        }
+    }
+
     [Fact]
     public void IncompleteTlsIdentityIsRejected()
     {

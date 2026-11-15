@@ -746,7 +746,8 @@ public sealed class SegmentDetectionTests
         return relative.StartsWith("Backups" + Path.DirectorySeparatorChar, StringComparison.Ordinal)
             || relative.StartsWith("DataProtectionKeys" + Path.DirectorySeparatorChar, StringComparison.Ordinal)
             || relative.StartsWith("aurelia.db", StringComparison.Ordinal)
-            || relative is "server-events.json" or "server.lock" or SegmentDetectionService.SettingsFileName;
+            || relative is "server-events.json" or "server.lock" or SegmentDetectionService.SettingsFileName
+                or ServerWorkSignal.FileName;
     }
 
     private static HashSet<string> TemporaryVideoFiles() =>

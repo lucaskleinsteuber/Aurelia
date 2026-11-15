@@ -66,6 +66,12 @@ public sealed partial class MaintenanceService(
                 .ExecuteDeleteAsync(cancellationToken);
         }, cancellationToken);
 
+        await phases.RunAsync("certificate renewal", () =>
+        {
+            scope.ServiceProvider.GetRequiredService<ServerTlsIdentity>().RenewIfDue(now.UtcDateTime);
+            return Task.CompletedTask;
+        }, cancellationToken);
+
         await phases.RunAsync("artwork cleanup", async () => await scope.ServiceProvider.GetRequiredService<ArtworkStore>()
             .PruneOrphansAsync(database, cancellationToken), cancellationToken);
         await phases.RunAsync("change history cleanup", () => scope.ServiceProvider.GetRequiredService<SyncChangeService>()

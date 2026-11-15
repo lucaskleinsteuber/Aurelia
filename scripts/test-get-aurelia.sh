@@ -79,9 +79,18 @@ for signer in none other; do
   grep -F 'not signed by the owner' "$work/unsigned-$signer/output" >/dev/null || fail "the refusal does not say why"
 done
 
-# Releases from before the first signed build stay installable.
-first=$(sed -n 's/^first_signed_build=//p' "$repository/packaging/linux/get-aurelia.sh")
-release earlier "" none $((first - 1))
-install_from earlier || { cat "$work/earlier/output" >&2; fail "an older release without a signature was not installed"; }
-[ -e "$work/earlier/installed" ] || fail "the older release's installer did not run"
+# An old build without a signature is refused too: there is no unsigned way in (audit S-M2).
+release earlier "" none 152
+if install_from earlier; then fail "an old release without a signature was installed"; fi
+[ ! -e "$work/earlier/installed" ] || fail "the old unsigned release's installer ran"
+grep -F 'not signed by the owner' "$work/earlier/output" >/dev/null || fail "the refusal does not say why"
+
+# A signed release older than the installed server is not installed over it.
+release downgrade "" key 500
+printf '10.0.0 (600)\n' > "$work/downgrade/VERSION"
+if AURELIA_INSTALLED_VERSION_FILE="$work/downgrade/VERSION" install_from downgrade; then fail "an older release replaced a newer server"; fi
+[ ! -e "$work/downgrade/installed" ] || fail "the older release's installer ran over a newer server"
+grep -F 'is newer than the release found' "$work/downgrade/output" >/dev/null || fail "the refusal does not say why"
+printf '9.9.8 (400)\n' > "$work/downgrade/VERSION"
+AURELIA_INSTALLED_VERSION_FILE="$work/downgrade/VERSION" install_from downgrade || { cat "$work/downgrade/output" >&2; fail "a newer signed release was not installed"; }
 echo "get-aurelia.sh: all checks passed."

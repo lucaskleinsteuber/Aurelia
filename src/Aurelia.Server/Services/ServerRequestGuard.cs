@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using Aurelia.Contracts;
 using Aurelia.Server.Authentication;
 using Aurelia.Server.Data;
@@ -49,14 +50,30 @@ public sealed class ServerRequestGuard
             || (IPAddress.TryParse(host.Trim('[', ']'), out var address) && IPAddress.IsLoopback(address));
     }
 
+    public const int TrackedAddresses = 4_096;
+
+    /// <summary>
+    /// One device counts once: an IPv6 address counts by its /64 network, since a device makes up
+    /// new addresses within it all the time (privacy addresses).
+    /// </summary>
+    internal static string AddressKey(IPAddress? address)
+    {
+        if (address is null) return "local";
+        var ip = address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
+        if (ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6 || IPAddress.IsLoopback(ip)) return ip.ToString();
+        var bytes = ip.GetAddressBytes();
+        Array.Clear(bytes, 8, 8);
+        return new IPAddress(bytes).ToString() + "/64";
+    }
+
     public bool Admit(IPAddress? address, bool preview = false)
     {
-        var key = (preview ? "preview:" : "") + (address?.ToString() ?? "local");
+        var key = (preview ? "preview:" : "") + AddressKey(address);
         var limit = preview ? PreviewRequestsPerMinute : RequestsPerMinute;
         var now = DateTimeOffset.UtcNow;
         lock (gate)
         {
-            if (addresses.Count >= 4_096)
+            if (addresses.Count >= TrackedAddresses)
                 foreach (var stale in addresses.Where(pair => now - pair.Value.Window >= TimeSpan.FromMinutes(1)).Select(pair => pair.Key).ToArray())
                     addresses.Remove(stale);
             if (addresses.TryGetValue(key, out var entry) && now - entry.Window < TimeSpan.FromMinutes(1))
@@ -66,10 +83,10 @@ public sealed class ServerRequestGuard
             }
             else
             {
-                // A full table refuses new addresses, but never the server computer itself: a device
-                // with thousands of addresses must not lock the owner out there too.
-                if (addresses.Count >= 4_096 && address is not null
-                    && !IPAddress.IsLoopback(address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address)) return false;
+                // A full table makes room by forgetting the address seen longest ago, instead of
+                // refusing every new address (audit S-L5).
+                if (addresses.Count >= TrackedAddresses)
+                    addresses.Remove(addresses.MinBy(pair => pair.Value.Window).Key);
                 addresses[key] = (1, now);
             }
             return true;
@@ -171,6 +188,70 @@ public sealed class ServerRequestGuard
             throw new AccountException("full_library_access_required", "Storage management and file browsing require full library access, not individual title grants.", 403);
     }
 
+    /// <summary>
+    /// The other ways to change who manages the server (docs/SECURITY_MODEL.md): a new owner or
+    /// administrator, a changed role, or an owner or administrator switched off, cut off from the
+    /// libraries or given a new PIN by someone else. These need the Server Password like
+    /// <c>PUT /users/{id}/role</c>; a stolen owner PIN alone must not make a new owner (audit S-M1).
+    /// </summary>
+    internal static async Task<bool> ChangesWhoManagesAsync(HttpContext context, AureliaDbContext database)
+    {
+        var request = context.Request;
+        if (context.User.Identity?.IsAuthenticated != true || !MayChangeWhoManages(request.Method, request.Path.Value)) return false;
+        var segments = (request.Path.Value ?? string.Empty).TrimEnd('/').ToLowerInvariant().Split('/');
+        var creating = segments.Length == 4;
+        var action = creating ? null : segments[5];
+
+        using var body = await ReadJsonAsync(request, context.RequestAborted);
+        if (body is null) return false;
+        static UserRole? Role(JsonElement root) =>
+            root.TryGetProperty("role", out var value) && value.ValueKind == JsonValueKind.String
+                && Enum.TryParse<UserRole>(value.GetString(), ignoreCase: true, out var role) ? role : null;
+        static bool Elevated(UserRole? role) => role is UserRole.Owner or UserRole.Admin;
+        var root = body.RootElement;
+        if (creating) return Elevated(Role(root));
+
+        var targetId = Guid.Parse(segments[4]);
+        var target = await database.Users.AsNoTracking().Where(user => user.Id == targetId)
+            .Select(user => new { user.Role }).SingleOrDefaultAsync(context.RequestAborted);
+        if (target is null) return false;
+        var self = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value is { } actor
+            && Guid.TryParse(actor, out var actorId) && actorId == targetId;
+        bool SwitchedOff() => root.TryGetProperty("isEnabled", out var enabled) && enabled.ValueKind == JsonValueKind.False;
+        bool NewPin() => root.TryGetProperty("pin", out var pin) && pin.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(pin.GetString());
+        return action switch
+        {
+            "profile" => (Role(root) is { } role && role != target.Role)
+                || (Elevated(target.Role) && (SwitchedOff() || (NewPin() && !self))),
+            "enabled" or "access" => Elevated(target.Role) && SwitchedOff(),
+            "pin" => Elevated(target.Role) && !self,
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Requests that may change who manages the server, by address alone: creating a profile, and its
+    /// profile, enabled, access and PIN changes. Their content decides (<see cref="ChangesWhoManagesAsync"/>).
+    /// </summary>
+    public static bool MayChangeWhoManages(string method, string? path)
+    {
+        var segments = (path ?? string.Empty).TrimEnd('/').ToLowerInvariant().Split('/');
+        // "", "api", "v1", "users"[, id, action]
+        if (segments.Length < 4 || segments[1] != "api" || segments[2] != "v1" || segments[3] != "users") return false;
+        if (segments.Length == 4) return HttpMethods.IsPost(method);
+        return segments.Length == 6 && HttpMethods.IsPut(method) && Guid.TryParse(segments[4], out _)
+            && segments[5] is "profile" or "enabled" or "access" or "pin";
+    }
+
+    /// <summary>The request's JSON body, read once and left in place for the endpoint.</summary>
+    private static async Task<JsonDocument?> ReadJsonAsync(HttpRequest request, CancellationToken cancellation)
+    {
+        request.EnableBuffering(bufferThreshold: 65_536, bufferLimit: MaximumJsonBytes + 1);
+        try { return await JsonDocument.ParseAsync(request.Body, cancellationToken: cancellation); }
+        catch (JsonException) { return null; }
+        finally { request.Body.Position = 0; }
+    }
+
     public static async Task RequireApprovalAsync(HttpContext context, AdministrationApprovalStore approvals)
     {
         var database = context.RequestServices.GetRequiredService<AureliaDbContext>();
@@ -181,6 +262,7 @@ public sealed class ServerRequestGuard
         {
             required = await database.Users.AsNoTracking().AnyAsync(u => u.Id == targetUserId && (u.Role == UserRole.Owner || u.Role == UserRole.Admin), context.RequestAborted);
         }
+        if (!required) required = await ChangesWhoManagesAsync(context, database);
         if (!required) return;
         var reset = context.Request.Path.Equals(new PathString("/api/v1/libraries/reset"));
         var removal = HttpMethods.IsDelete(context.Request.Method) && context.Request.Path.StartsWithSegments("/api/v1/media") && (context.Request.Path.Value ?? "").Split('/').Length == 5;

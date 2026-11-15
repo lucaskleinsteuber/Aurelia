@@ -21,6 +21,20 @@ namespace Aurelia.Server.Tests;
 [Collection(LiveConversionRuns.Name)]
 public sealed class ServerSpeechTests
 {
+    // Audit S-M3: whisper.cpp reads the model as native code, so only the exact published file is kept.
+    [Fact]
+    public void OnlyThePublishedSpeechModelIsKept()
+    {
+        var choice = Aurelia.Server.Services.Speech.SpeechModelStore.Choices.Single(candidate => candidate.Name == "base");
+        var published = Convert.FromHexString(Aurelia.Server.Services.Speech.SpeechModelStore.PublishedSha256["base"]);
+        Assert.True(Aurelia.Server.Services.Speech.SpeechModelStore.IsPublished(choice, choice.Bytes, published));
+        Assert.False(Aurelia.Server.Services.Speech.SpeechModelStore.IsPublished(choice, choice.Bytes - 1, published));
+        Assert.False(Aurelia.Server.Services.Speech.SpeechModelStore.IsPublished(choice, choice.Bytes,
+            System.Security.Cryptography.SHA256.HashData("a swapped model"u8)));
+        Assert.All(Aurelia.Server.Services.Speech.SpeechModelStore.Choices,
+            each => Assert.Equal(64, Aurelia.Server.Services.Speech.SpeechModelStore.PublishedSha256[each.Name].Length));
+    }
+
     [Fact]
     public void WordsBecomeSubtitlesWithTheMacsRules()
     {

@@ -88,7 +88,8 @@ if (tlsIdentity.Certificate is not null)
 {
     builder.WebHost.ConfigureKestrel(options =>
         options.ConfigureHttpsDefaults(https =>
-            https.ServerCertificate = tlsIdentity.Certificate));
+            // Asked for each connection, so a certificate renewed while running is shown at once.
+            https.ServerCertificateSelector = (_, _) => tlsIdentity.Certificate));
 }
 // Every request would otherwise leave lines in the journal, all night while an app waits for changes.
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
@@ -184,6 +185,8 @@ builder.Services.AddSingleton<SegmentDetectionService>();
 if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<SegmentDetectionService>());
 builder.Services.AddSingleton<ServerSleepSignal>();
 builder.Services.AddSingleton<ServerUseClock>();
+builder.Services.AddSingleton<ServerWorkSignal>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<ServerWorkSignal>());
 builder.Services.AddSingleton(services => new ServerPowerSettingsStore(services.GetRequiredService<ServerRuntimeOptions>()));
 builder.Services.AddSingleton(services => new ServerUpdateStore(services.GetRequiredService<ServerRuntimeOptions>(), services.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton<LinuxServiceRestart>();

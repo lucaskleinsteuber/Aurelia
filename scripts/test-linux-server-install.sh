@@ -226,6 +226,9 @@ offer "$archive"
 python3 -I -m http.server 43180 --bind 127.0.0.1 --directory "$release" >/dev/null 2>&1 &
 release_server=$!
 for _ in $(seq 1 20); do curl -fs http://127.0.0.1:43180/files/ >/dev/null && break; sleep 0.5; done
+# The root command honours the stand-in only where root allows it with this file.
+install -d -m 0755 /etc/aurelia
+touch /etc/aurelia/test-update-source
 update() {
   AURELIA_UPDATE_API=http://127.0.0.1:43180 AURELIA_UPDATE_REPOSITORY=test/aurelia AURELIA_UPDATE_SIGNING_KEY="$signing_key" \
     aurelia update "$@"
@@ -291,6 +294,7 @@ offer "Aurelia-Server-1.0.0-$installed_build-linux-$arch.tar.gz"
 update --yes | has 'not downgraded' || fail "an older release was not refused"
 [ "$(cat /opt/aurelia/VERSION)" = "9.9.9 ($next_build)" ] || fail "an older release replaced the newer one"
 systemctl start aurelia-update-request.path
+rm -f /etc/aurelia/test-update-source
 
 step "Uninstall"
 printf 'y\n' | aurelia uninstall --remove-data | has 'deleted' || fail "uninstall did not remove the test data"

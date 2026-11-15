@@ -63,6 +63,18 @@ public sealed class AutomationTests
     public void WebhooksGoOverHttpsOrStayAtHome(string url, bool allowed) =>
         Assert.Equal(allowed, WebhookTargetPolicy.Problem(url) is null);
 
+    // Audit S-L3: a home name may bring its own certificate, so it may only lead to a home address,
+    // whatever a name lookup says. Real names with https may go anywhere public.
+    [Theory]
+    [InlineData("192.168.1.20", true, true, true)]
+    [InlineData("203.0.113.5", true, true, false)]
+    [InlineData("203.0.113.5", true, false, true)]
+    [InlineData("203.0.113.5", false, false, false)]
+    [InlineData("10.0.0.20", false, true, true)]
+    [InlineData("169.254.169.254", true, false, false)]
+    public void AHomeNameOnlyEverReachesAHomeAddress(string address, bool https, bool localName, bool reachable) =>
+        Assert.Equal(reachable, WebhookTargetPolicy.Reachable(System.Net.IPAddress.Parse(address), https, localName));
+
     // MARK: End to end
 
     [Fact]
@@ -176,6 +188,29 @@ public sealed class AutomationTests
         finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
     }
 
+    // Audit S-L4: a receiver asking for a pause of a hundred days gets an hour at most.
+    [Fact]
+    public async Task AReceiverCannotParkDeliveriesForever()
+    {
+        var root = Directory.CreateDirectory(Path.Combine(TestPaths.CreateDataDirectory(), "Automation")).FullName;
+        var receiver = new Receiver(HttpStatusCode.ServiceUnavailable) { RetryAfter = TimeSpan.FromDays(100) };
+        try
+        {
+            using var factory = Factory(receiver);
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            // A new title is kept and tried again later; playback events are not.
+            await CreateWebhookAsync(client, owner.Token, [AutomationEvents.TitleAdded]);
+            factory.Services.GetRequiredService<AutomationEventBus>()
+                .Publish(new AutomationEvent(AutomationEvents.TitleAdded, Guid.NewGuid(), DateTimeOffset.UtcNow, Count: 1));
+            await receiver.WaitAsync(1);
+            await WaitForAsync(async () => (await DeliveriesAsync(factory)).Any(value => value.State == AutomationDeliveryStates.Pending));
+            var pending = (await DeliveriesAsync(factory)).Single(value => value.State == AutomationDeliveryStates.Pending);
+            Assert.True(pending.NextAttemptAt - pending.CreatedAt <= WebhookDispatcher.MaximumRetryAfter + TimeSpan.FromSeconds(1));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    }
+
     [Fact]
     public async Task FiltersLeaveOutOtherDevicesChildrenAndTitles()
     {
@@ -285,6 +320,25 @@ public sealed class AutomationTests
             Assert.NotEqual(created.Value, stored.TokenHash);
             Assert.NotNull(stored.LastUsedAt);
         }
+
+        // Audit S-L2: the key acts for its owner; an owner who is switched off takes it along.
+        async Task<HttpStatusCode> StatusWithKey()
+        {
+            using var request = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/integration/status", created.Value);
+            using var response = await client.SendAsync(request);
+            return response.StatusCode;
+        }
+        async Task SetOwnerEnabled(bool enabled)
+        {
+            using var scope = factory.Services.CreateScope();
+            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            (await database.Users.SingleAsync(user => user.Id == owner.User.Id)).IsEnabled = enabled;
+            await database.SaveChangesAsync();
+        }
+        await SetOwnerEnabled(false);
+        Assert.Equal(HttpStatusCode.Unauthorized, await StatusWithKey());
+        await SetOwnerEnabled(true);
+        Assert.Equal(HttpStatusCode.OK, await StatusWithKey());
 
         using (var revoke = ApiTestClient.Authorized(HttpMethod.Delete, $"/api/v1/server/automation/tokens/{created.Token.Id}", owner.Token))
         using (var revoked = await ApiTestClient.SendAsync(client, revoke)) revoked.EnsureSuccessStatusCode();
@@ -555,6 +609,7 @@ public sealed class AutomationTests
         private readonly SemaphoreSlim arrived = new(0);
         public ConcurrentQueue<Delivered> Received { get; } = new();
         public bool FailAlways { get; set; }
+        public TimeSpan? RetryAfter { get; set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -563,7 +618,9 @@ public sealed class AutomationTests
             Received.Enqueue(new Delivered(headers["X-Aurelia-Event"], body, headers));
             arrived.Release();
             var status = FailAlways ? HttpStatusCode.BadGateway : answers.TryDequeue(out var next) ? next : HttpStatusCode.OK;
-            return new HttpResponseMessage(status);
+            var response = new HttpResponseMessage(status);
+            if (RetryAfter is { } after && status != HttpStatusCode.OK) response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(after);
+            return response;
         }
 
         public async Task<IReadOnlyList<Delivered>> WaitAsync(int count, TimeSpan? timeout = null)

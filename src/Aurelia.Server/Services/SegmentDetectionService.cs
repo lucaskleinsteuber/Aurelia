@@ -509,7 +509,7 @@ public sealed partial class SegmentDetectionService : BackgroundService
                 try
                 {
                     if (Interlocked.Exchange(ref rescanRequested, 0) == 1) await QueuePendingSeasonsAsync(stoppingToken);
-                    await ProcessPendingAsync(stoppingToken);
+                    using (ServerWorkSignal.Begin(scopes, keepAwake: false)) await ProcessPendingAsync(stoppingToken);
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {

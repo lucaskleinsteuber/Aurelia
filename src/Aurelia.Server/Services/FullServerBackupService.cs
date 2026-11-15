@@ -199,15 +199,19 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
             await ApplyPreparedAsync(runtime, id, token);
             outcome = "completed";
         }
+        // Keys, settings and XML files of a damaged backup fail too, without stopping the server's start (audit S-X11).
         catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException
-            or JsonException or Microsoft.Data.Sqlite.SqliteException)
+            or JsonException or Microsoft.Data.Sqlite.SqliteException or System.Security.Cryptography.CryptographicException
+            or System.Xml.XmlException or FormatException or EndOfStreamException)
         {
             outcome = "failed";
         }
         var journal = Path.Combine(runtime.DataDirectory, NativeHostOperations.JournalFileName);
         if (File.Exists(journal) && new FileInfo(journal).LinkTarget is null)
         {
-            var current = JsonSerializer.Deserialize<HostOperationJournal>(await File.ReadAllTextAsync(journal, token), Json);
+            HostOperationJournal? current;
+            try { current = JsonSerializer.Deserialize<HostOperationJournal>(await File.ReadAllTextAsync(journal, token), Json); }
+            catch (JsonException) { current = null; }
             if (current?.Id == id)
             {
                 var temporary = journal + "." + Guid.NewGuid().ToString("N");

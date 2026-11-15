@@ -231,15 +231,26 @@ public sealed class ProfileAndSceneNoteTests
         Assert.Throws<AccountException>(() => attempts.Check(device, user));
         clock.Advance(TimeSpan.FromSeconds(1));
         attempts.Check(device, user);
-        // Another paired device does not get fresh guesses, and every lock lasts longer.
+        // Another device guessing wrong locks only itself (audit S-L1): the owner's device goes on.
         var otherDevice = Guid.NewGuid();
         for (var index = 0; index < 5; index++) { attempts.Check(otherDevice, user); attempts.Record(otherDevice, user, false); }
-        var locked = Assert.Throws<AccountException>(() => attempts.Check(device, user));
-        Assert.Equal("profile_pin_locked", locked.Code);
+        Assert.Equal("profile_pin_locked", Assert.Throws<AccountException>(() => attempts.Check(otherDevice, user)).Code);
+        attempts.Check(device, user);
+        // Each further lock of a device lasts longer.
+        for (var index = 0; index < 5; index++) { attempts.Check(device, user); attempts.Record(device, user, false); }
         clock.Advance(TimeSpan.FromMinutes(5) - TimeSpan.FromSeconds(1));
-        Assert.Throws<AccountException>(() => attempts.Check(otherDevice, user));
+        Assert.Throws<AccountException>(() => attempts.Check(device, user));
         clock.Advance(TimeSpan.FromSeconds(1));
-        attempts.Check(otherDevice, user);
+        attempts.Check(device, user);
+        // Many devices together still meet a limit: twenty failures lock the profile everywhere.
+        var thirdDevice = Guid.NewGuid();
+        for (var index = 0; index < 5; index++) { attempts.Check(thirdDevice, user); attempts.Record(thirdDevice, user, false); }
+        Assert.Throws<AccountException>(() => attempts.Check(device, user));
+        Assert.Throws<AccountException>(() => attempts.Check(Guid.NewGuid(), user));
+        // A new PIN ends every lock: the guesses were for the old one.
+        attempts.Reset(user);
+        attempts.Check(thirdDevice, user);
+        attempts.Check(device, user);
         Assert.Equal(TimeSpan.FromMinutes(30), ProfilePinAttemptGuard.LockDuration(15));
         Assert.Equal(TimeSpan.FromHours(2), ProfilePinAttemptGuard.LockDuration(40));
         // A correct PIN starts over; another profile is never affected.

@@ -2,9 +2,9 @@
 # Downloads a stable Aurelia Server release for this image, checks it against the release's
 # SHA256SUMS and its minisign signature and unpacks it into /opt/aurelia.
 set -euo pipefail
-# The owner's minisign key and the first signed build, as in `aurelia update`.
+# The owner's minisign key, as in `aurelia update`. Every release must be signed with it, old
+# builds included: there is no unsigned way in.
 signing_public_key=RWT0nYptHNjXQSXnVurY9XXdPF2Ssq5sUlSP+WoBwjA5GPXWnugBc7lE
-first_signed_build=153
 
 # Succeeds when $2 is a minisign signature of $1 made with signing_public_key, checked with
 # openssl so that no further program is needed. Only the prehashed form that minisign writes is
@@ -48,16 +48,23 @@ IFS=$'\t' read -r build version name url sums_url signature_url <<<"$newest"
 echo "Aurelia Server $version ($build) for $arch"
 curl -fsSL --retry 3 "$url" -o "$work/$name"
 curl -fsSL --retry 3 "$sums_url" -o "$work/SHA256SUMS"
-if [ "$build" -ge "$first_signed_build" ]; then
-  [ -n "$signature_url" ] && curl -fsSL --retry 3 "$signature_url" -o "$work/SHA256SUMS.minisig" \
-    && mkdir "$work/signature" && signature_valid "$work/SHA256SUMS" "$work/SHA256SUMS.minisig" "$work/signature" \
-    || { echo "The release is not signed by the owner of Aurelia." >&2; exit 1; }
-fi
+[ -n "$signature_url" ] && curl -fsSL --retry 3 "$signature_url" -o "$work/SHA256SUMS.minisig" \
+  && mkdir "$work/signature" && signature_valid "$work/SHA256SUMS" "$work/SHA256SUMS.minisig" "$work/signature" \
+  || { echo "The release is not signed by the owner of Aurelia." >&2; exit 1; }
 expected=$(awk -v file="$name" '{ sub(/^\*/, "", $2); sub(/^\.\//, "", $2) } $2 == file { print $1 }' "$work/SHA256SUMS")
 [ "${#expected}" -eq 64 ] && [ "$(sha256sum "$work/$name" | cut -d ' ' -f1)" = "$expected" ] \
   || { echo "The download does not match its published checksum." >&2; exit 1; }
-tar -xzf "$work/$name" -C "$work"
-package=$(find "$work" -mindepth 2 -maxdepth 2 -name install.sh -printf '%h\n' | head -n 1)
+# Like `aurelia update`: only the package's own folder is unpacked, owned by root, and it must be
+# the version and architecture that was chosen.
+folder="Aurelia-Server-$version-linux-$arch"
+tar -tzf "$work/$name" > "$work/contents"
+awk -v folder="$folder" 'index($0, folder "/") != 1 || /(^|\/)\.\.(\/|$)/ { bad = 1 } END { exit bad }' "$work/contents" \
+  || { echo "The download is not an Aurelia Server package." >&2; exit 1; }
+mkdir "$work/package"
+tar -xzf "$work/$name" --no-same-owner -C "$work/package"
+package="$work/package/$folder"
+[ "$(cat "$package/VERSION" 2>/dev/null)" = "$version ($build)" ] && [ "$(cat "$package/ARCHITECTURE" 2>/dev/null)" = "$arch" ] \
+  || { echo "The download is not Aurelia Server $version ($build) for $arch." >&2; exit 1; }
 install -d /opt/aurelia
 cp -R "$package/server" "$package/notices" /opt/aurelia/
 install -m 0644 "$package/VERSION" /opt/aurelia/VERSION

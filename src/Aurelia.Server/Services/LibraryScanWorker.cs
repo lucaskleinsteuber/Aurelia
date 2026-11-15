@@ -48,7 +48,7 @@ public sealed partial class LibraryScanWorker(
             var scanToken = queue.Register(request.ScanId, stoppingToken);
             try
             {
-                await ProcessAsync(request, scanToken);
+                using (ServerWorkSignal.Begin(scopeFactory, keepAwake: true)) await ProcessAsync(request, scanToken);
             }
             catch (OperationCanceledException)
             {

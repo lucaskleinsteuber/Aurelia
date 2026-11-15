@@ -197,6 +197,32 @@ public sealed partial class LiveConversionTests
         Assert.Equal(LiveVideoEncoder.Libx264, session.Encoder);
     }
 
+    // Audit S-L7: one profile cannot take every conversion; another profile still gets one.
+    [Fact]
+    public async Task OneProfileLeavesConversionsForTheOthers()
+    {
+        using var factory = Factory("off");
+        await using var manager = Manager(factory, new InventedConverter(), new SteppingClock());
+        var files = new List<IAsyncDisposable>();
+        try
+        {
+            for (var index = 0; index < HlsSessionManager.MaximumSessionsPerUser; index++)
+            {
+                files.Add(Session(manager, "360p", out var mine, profileSession: Guid.NewGuid()));
+                await manager.AddAsync(mine);
+            }
+            files.Add(Session(manager, "360p", out var oneMore, profileSession: Guid.NewGuid()));
+            await Assert.ThrowsAsync<HlsBusyException>(() => manager.AddAsync(oneMore));
+            files.Add(Session(manager, "360p", out var someoneElse));
+            await manager.AddAsync(someoneElse);
+            Assert.Equal(HlsSessionManager.MaximumSessionsPerUser + 1, manager.Count);
+        }
+        finally
+        {
+            foreach (var file in files) await file.DisposeAsync();
+        }
+    }
+
     [Fact]
     public async Task SixSessionsAtMostAndAConversionThatNeverWorksGivesUp()
     {

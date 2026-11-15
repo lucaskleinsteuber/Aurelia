@@ -41,10 +41,17 @@ public sealed class NativeHostOperations(ServerRuntimeOptions runtime, ServerCon
         { throw new AccountException("host_unavailable", "The native host did not respond.", 503); }
     }
     public void Dispose() => gate.Dispose();
-    public async Task<HostOperationStatus?> StatusAsync(CancellationToken token)
+
+    /// <summary>The journal, or null when there is none or it is damaged: a broken file is no operation (audit S-X10).</summary>
+    private async Task<HostOperationJournal?> ReadJournalAsync(CancellationToken token)
     {
         if (!File.Exists(JournalPath)) return null;
-        var value = JsonSerializer.Deserialize<HostOperationJournal>(await File.ReadAllTextAsync(JournalPath, token), Json);
+        try { return JsonSerializer.Deserialize<HostOperationJournal>(await File.ReadAllTextAsync(JournalPath, token), Json); }
+        catch (JsonException) { return null; }
+    }
+    public async Task<HostOperationStatus?> StatusAsync(CancellationToken token)
+    {
+        var value = await ReadJournalAsync(token);
         return value is null ? null : new(value.Id, value.Kind, value.State, value.ConfirmBefore, configuration.Current.LanHttpsPort);
     }
     public async Task<HostOperationStatus> RestartAsync(Guid sessionId, CancellationToken token)
@@ -111,7 +118,7 @@ public sealed class NativeHostOperations(ServerRuntimeOptions runtime, ServerCon
         await gate.WaitAsync(token);
         try
         {
-            var journal = JsonSerializer.Deserialize<HostOperationJournal>(await File.ReadAllTextAsync(JournalPath, token), Json);
+            var journal = await ReadJournalAsync(token);
             if (journal is null || journal.Id != id || journal.SessionId != sessionId || journal.State != "awaitingConfirmation" || journal.ConfirmBefore <= DateTimeOffset.UtcNow)
                 throw new AccountException("network_confirmation_expired", "The network change has expired or belongs to another device.", 409);
             await SendAsync("network-confirm", new { id }, token);

@@ -242,6 +242,8 @@ public sealed class ServerFoundationTests
         Assert.NotEqual(pairing.Code, codeHash);
         Assert.Matches("^[0-9A-F]{64}$", tokenHash);
         Assert.Matches("^[0-9A-F]{64}$", codeHash);
+        // Audit S-X6: the code is not kept as a plain hash that a database copy could reverse.
+        Assert.NotEqual(new Aurelia.Server.Services.TokenService().Hash(pairing.Code), codeHash);
     }
 
     [Fact]

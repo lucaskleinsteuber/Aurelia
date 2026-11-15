@@ -6,16 +6,24 @@
 # It finds the newest stable server release for this computer on GitHub, checks the download
 # against the release's SHA256SUMS and its minisign signature, runs the package's installer and,
 # on a new installation, starts the setup questions. Nothing else on the computer is changed.
+#
+# Everything runs inside main, called on the last line: a download that breaks off midway does not
+# parse, so no half of the script runs as root.
+main() {
 set -euo pipefail
 
 repository=${AURELIA_REPOSITORY:-lucaskleinsteuber/Aurelia}
 # Tests point this at a local stand-in for GitHub's release list.
 releases=${AURELIA_RELEASES_URL:-https://api.github.com/repos/$repository/releases?per_page=30}
-# The owner's minisign key and the first signed build, as in `aurelia update`; tests with a
-# stand-in for GitHub sign with their own key.
+# The owner's minisign key, as in `aurelia update`. Every release must be signed with it: there is
+# no way around the signature, not even for old builds. Tests with a stand-in for GitHub sign with
+# their own key and name their own installed version.
 signing_public_key=RWT0nYptHNjXQSXnVurY9XXdPF2Ssq5sUlSP+WoBwjA5GPXWnugBc7lE
-first_signed_build=153
-[ -n "${AURELIA_RELEASES_URL:-}" ] && signing_public_key=${AURELIA_SIGNING_PUBLIC_KEY:-$signing_public_key}
+installed_version_file=/opt/aurelia/VERSION
+if [ -n "${AURELIA_RELEASES_URL:-}" ]; then
+  signing_public_key=${AURELIA_SIGNING_PUBLIC_KEY:-$signing_public_key}
+  installed_version_file=${AURELIA_INSTALLED_VERSION_FILE:-$installed_version_file}
+fi
 
 fail() { echo "$*" >&2; exit 1; }
 
@@ -77,17 +85,20 @@ newest=$(jq -r --arg arch "$arch" '
   | max_by(.[0]) // empty | .[0] |= tostring | join("\t")' "$work/releases.json")
 [ -n "$newest" ] || fail "No Aurelia Server release for $arch was found on GitHub."
 IFS=$'\t' read -r build version name url sums_url signature_url <<<"$newest"
+# Never back to an older server than the one installed, even if only an older release is offered.
+installed_build=$(sed -n 's/^.*(\([0-9][0-9]*\))$/\1/p' "$installed_version_file" 2>/dev/null || true)
+if [ -n "$installed_build" ] && [ "$build" -lt "$installed_build" ]; then
+  fail "The installed Aurelia Server (build $installed_build) is newer than the release found (build $build), so nothing was changed."
+fi
 
 echo "Downloading Aurelia Server $version ($build)..."
 curl -fsSL --retry 3 "$url" -o "$work/$name" || fail "The download failed. Try again."
 curl -fsSL --retry 3 "$sums_url" -o "$work/SHA256SUMS" || fail "The checksum list could not be downloaded."
-if [ "$build" -ge "$first_signed_build" ]; then
-  unsigned="The release is not signed by the owner of Aurelia, so it was not installed."
-  [ -n "$signature_url" ] || fail "$unsigned"
-  curl -fsSL --retry 3 "$signature_url" -o "$work/SHA256SUMS.minisig" || fail "The signature could not be downloaded."
-  mkdir "$work/signature"
-  signature_valid "$work/SHA256SUMS" "$work/SHA256SUMS.minisig" "$work/signature" || fail "$unsigned"
-fi
+unsigned="The release is not signed by the owner of Aurelia, so it was not installed."
+[ -n "$signature_url" ] || fail "$unsigned"
+curl -fsSL --retry 3 "$signature_url" -o "$work/SHA256SUMS.minisig" || fail "The signature could not be downloaded."
+mkdir "$work/signature"
+signature_valid "$work/SHA256SUMS" "$work/SHA256SUMS.minisig" "$work/signature" || fail "$unsigned"
 expected=$(awk -v file="$name" '{ sub(/^\*/, "", $2); sub(/^\.\//, "", $2) } $2 == file { print $1 }' "$work/SHA256SUMS")
 [ "${#expected}" -eq 64 ] || fail "The release lists no checksum for $name."
 [ "$(sha256sum "$work/$name" | cut -d ' ' -f1)" = "$expected" ] \
@@ -117,3 +128,6 @@ if [ -r /dev/tty ] && [ -w /dev/tty ] && (exec </dev/tty) 2>/dev/null; then
   echo "Now a few questions to set up Aurelia."
   aurelia setup </dev/tty
 fi
+}
+
+main "$@"

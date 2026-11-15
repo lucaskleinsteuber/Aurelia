@@ -93,7 +93,13 @@ public static partial class HlsEndpoints
                     var unsupported = LiveHdr.Unsupported();
                     return Problem(unsupported.Code, unsupported.Message, unsupported.StatusCode);
                 }
-                LiveConversionService.EnsureInputMatchesHandle(opened.Source.Stream.SafeFileHandle, opened.Source.SourcePath);
+                try { LiveConversionService.EnsureInputMatchesHandle(opened.Source.Stream.SafeFileHandle, opened.Source.SourcePath); }
+                catch
+                {
+                    // The file is closed at once, not later by the finalizer (audit S-X8).
+                    await opened.Source.Stream.DisposeAsync();
+                    throw;
+                }
                 session = await sessions.AddAsync(sessions.Create(key, opened.Source.Stream, opened.Source.Stream, opened.Source.SourcePath,
                     Path.GetFileName(opened.Source.SourcePath), opened.Duration, quality, opened.Video, opened.Audio, toneMapping, opened.Tools));
             }

@@ -33,6 +33,9 @@ if [ ! -f "$state/last-active" ]; then
   # A computer that turns off starts with an empty /run: this start is its wake.
   [ "$MODE" = shutdown ] && echo "$now" > "$state/woke"
 fi
+# An empty or damaged last-active (a full disk, a cut write) would stop every later calculation
+# under set -e, and the computer would never sleep again until a restart (audit S-X21).
+[[ "$(head -c 20 "$state/last-active" 2>/dev/null || true)" =~ ^[0-9]+$ ]] || echo "$now" > "$state/last-active"
 
 say() { if [ "$dry_run" = 1 ]; then echo "$1"; fi; }
 
@@ -116,7 +119,14 @@ save_power() {
 # checked not to be a link, read once and removed.
 if [ "${1:-}" = --now ]; then
   request=$data/power-now
-  { [ -f "$request" ] && [ ! -L "$request" ]; } || exit 0
+  # Anything else at that name (a folder, a link) is removed unread: left there, it would start this
+  # again and again until systemd stopped answering power requests (audit S-X1).
+  if [ -L "$request" ] || { [ -e "$request" ] && [ ! -f "$request" ]; }; then
+    [ "$dry_run" = 1 ] || rm -rf -- "$request"
+    logger -t aurelia-autosleep "Removed a power request that was not a plain file."
+    exit 0
+  fi
+  [ -f "$request" ] || exit 0
   action=$(head -c 16 "$request" | tr -d '[:space:]')
   [ "$dry_run" = 1 ] || rm -f "$request"
   case "$action" in
@@ -167,7 +177,16 @@ if [[ "$used" =~ ^[0-9]+$ ]]; then
 elif ss -Htn state established '( sport = :43111 )' | grep -q .; then
   busy=true
 fi
-if awk '{ exit !($1 > 0.5) }' /proc/loadavg; then busy=true; fi
+# The server says what it works on (Aurelia Server 2.18 and newer): a scan or metadata job keeps the
+# computer on; intro, credits, speech and preview analysis does not, since it continues after the
+# next wake where it left off and can run for hours (audit B-4). Without a fresh note the processor
+# load decides, as before: someone's own programs or an older server.
+work=""
+if [ -f "$data/work" ] && [ ! -L "$data/work" ] && (( now - $(stat -c %Y "$data/work") < 120 )); then
+  work=$(head -c 16 "$data/work" | tr -d '[:space:]')
+fi
+[ "$work" = keepawake ] && busy=true
+if [ "$work" != analysis ] && awk '{ exit !($1 > 0.5) }' /proc/loadavg; then busy=true; fi
 if systemctl is-active --quiet aurelia-update-request.service aurelia-update-check.service; then busy=true; fi
 if $busy; then
   echo "$now" > "$state/last-active"

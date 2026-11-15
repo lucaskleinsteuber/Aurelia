@@ -133,7 +133,7 @@ public sealed partial class SpeechJobService : BackgroundService
                 while (queue.TryDequeue(out var mediaId))
                 {
                     if (!jobs.TryGetValue(mediaId, out var job) || job.Finished) continue;
-                    await RunAsync(job, stoppingToken);
+                    using (ServerWorkSignal.Begin(scopes, keepAwake: false)) await RunAsync(job, stoppingToken);
                 }
             }
         }

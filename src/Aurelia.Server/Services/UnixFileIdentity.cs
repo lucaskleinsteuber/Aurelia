@@ -29,6 +29,13 @@ internal static partial class UnixFileIdentity
             && handleStatus.Dev == pathStatus.Dev
             && handleStatus.Ino == pathStatus.Ino;
     }
+    /// <summary>The directory entry type of a path without following a final link: 4 directory, 8 file, otherwise 0.</summary>
+    public static byte EntryType(string path)
+    {
+        if (OperatingSystem.IsWindows() || LStat(path, out var status) != 0) return 0;
+        return (status.Mode & 0xF000) switch { 0x4000 => 4, 0x8000 => 8, _ => 0 };
+    }
+
     public static void RequireOwned(string path)
     {
         if (OperatingSystem.IsWindows()) return;

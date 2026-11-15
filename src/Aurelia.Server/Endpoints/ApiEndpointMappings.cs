@@ -175,8 +175,18 @@ public static class ApiEndpointMappings
         var playback = api.MapGroup("/playback").RequireAuthorization();
         playback.MapDelete("/{playbackId:guid}", RevokePlaybackAsync);
         // A player's sleep timer ended; a server with sleep mode may sleep if nothing else plays.
-        playback.MapPost("/sleep-timer-ended", (ServerSleepSignal sleep, ServerPowerSettingsStore power) =>
+        playback.MapPost("/sleep-timer-ended", async (ServerSleepSignal sleep, ServerPowerSettingsStore power, AureliaDbContext database,
+            TimeProvider clock, HttpContext context) =>
         {
+            // Only a profile that was just watching ends its sleep timer: its ticket still runs or
+            // ended moments ago. Any other profile cannot start the countdown (audit S-L9).
+            var userId = context.User.RequireUserId();
+            var now = clock.GetUtcNow();
+            var recentStart = now - TimeSpan.FromHours(24);
+            var recentStop = now - TimeSpan.FromMinutes(15);
+            if (!await database.PlaybackTickets.AnyAsync(ticket => ticket.UserId == userId && ticket.CreatedAt > recentStart
+                    && (ticket.RevokedAt == null || ticket.RevokedAt > recentStop), context.RequestAborted))
+                return Results.Conflict(new ApiProblem("no_recent_playback", "Nothing was playing in this profile."));
             sleep.SleepTimerEnded();
             var settings = power.Read();
             var powerMode = settings.Available ? settings.Mode : "off";

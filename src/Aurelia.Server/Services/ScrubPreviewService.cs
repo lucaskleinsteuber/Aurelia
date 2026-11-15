@@ -587,7 +587,7 @@ public sealed class ScrubPreviewService : BackgroundService
                 await workSignal.WaitAsync(stoppingToken);
                 if (Volatile.Read(ref modeCode) == 2 && priorityQueue.IsEmpty && importQueue.IsEmpty)
                     await QueueUncachedLibraryTitlesAsync(stoppingToken);
-                await ProcessPendingQueueAsync(TimeSpan.FromMilliseconds(25), stoppingToken);
+                using (ServerWorkSignal.Begin(scopes, keepAwake: false)) await ProcessPendingQueueAsync(TimeSpan.FromMilliseconds(25), stoppingToken);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }

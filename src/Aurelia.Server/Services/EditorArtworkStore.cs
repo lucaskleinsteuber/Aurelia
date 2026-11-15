@@ -182,7 +182,7 @@ public sealed class EditorArtworkStore(ServerRuntimeOptions runtime) : IDisposab
     /// <param name="minimumWidth">When set, a JPEG is decoded at the smallest DCT scale
     /// (1/2, 1/4 or 1/8) whose displayed width still covers it; other formats and
     /// smaller sources decode at full size.</param>
-    internal static DecodedImage Decode(byte[] bytes, bool allowProviderWebP = false, int? minimumWidth = null)
+    internal static DecodedImage Decode(byte[] bytes, bool allowProviderWebP = false, int? minimumWidth = null, long? maximumFullPixels = null)
     {
         using var stream = new SKMemoryStream(bytes);
         using var codec = SKCodec.Create(stream);
@@ -192,6 +192,9 @@ public sealed class EditorArtworkStore(ServerRuntimeOptions runtime) : IDisposab
             || codec.FrameCount > 1)
             throw new AccountException("invalid_image", "Use a valid, non-animated JPEG or PNG image of at most 24 megapixels.", 400);
         var isJpeg = codec.EncodedFormat == SKEncodedImageFormat.Jpeg;
+        // PNG and WebP decode at full size; a caller that only needs a small picture may limit them.
+        if (!isJpeg && maximumFullPixels is { } limit && (long)codec.Info.Width * codec.Info.Height > limit)
+            throw new AccountException("invalid_image", $"Use a JPEG, or a PNG or WebP image of at most {limit / 1_000_000} megapixels.", 400);
         var size = new SKSizeI(codec.Info.Width, codec.Info.Height);
         if (isJpeg && minimumWidth is > 0)
         {

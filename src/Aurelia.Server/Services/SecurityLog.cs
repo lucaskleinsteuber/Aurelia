@@ -23,6 +23,14 @@ public sealed class SecurityLog(
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
     private readonly Channel<SecurityEvent> pending = Channel.CreateBounded<SecurityEvent>(new BoundedChannelOptions(2048)
     { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
+    /// <summary>
+    /// Failed attempts wait apart: a flood of wrong codes drops only older failures, never a sign-in
+    /// or a change waiting to be written (audit S-X3).
+    /// </summary>
+    private readonly Channel<SecurityEvent> failures = Channel.CreateBounded<SecurityEvent>(new BoundedChannelOptions(1024)
+    { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
+    /// <summary>The log keeps at most this many entries, whatever its days allow.</summary>
+    public const int MaximumEntries = 100_000;
     private readonly SemaphoreSlim flushGate = new(1, 1);
     private DateTimeOffset nextPrune = DateTimeOffset.MinValue;
 
@@ -31,7 +39,7 @@ public sealed class SecurityLog(
     {
         if (kind.Length is < 1 or > 48 || kind.Any(character => !char.IsAsciiLetterLower(character) && character != '_'))
             throw new ArgumentException("Use a fixed security event code.", nameof(kind));
-        pending.Writer.TryWrite(new SecurityEvent
+        (outcome == Failed ? failures : pending).Writer.TryWrite(new SecurityEvent
         {
             Id = Guid.NewGuid(),
             At = clock.GetUtcNow(),
@@ -70,8 +78,12 @@ public sealed class SecurityLog(
             {
                 using var idle = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 idle.CancelAfter(TimeSpan.FromHours(1));
-                try { await pending.Reader.WaitToReadAsync(idle.Token); }
+                try
+                {
+                    await Task.WhenAny(pending.Reader.WaitToReadAsync(idle.Token).AsTask(), failures.Reader.WaitToReadAsync(idle.Token).AsTask());
+                }
                 catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested) { }
+                finally { await idle.CancelAsync(); }
                 await FlushAsync(stoppingToken);
             }
         }
@@ -87,6 +99,7 @@ public sealed class SecurityLog(
         {
             var batch = new List<SecurityEvent>();
             while (batch.Count < 1000 && pending.Reader.TryRead(out var entry)) batch.Add(entry);
+            while (batch.Count < 1000 && failures.Reader.TryRead(out var failure)) batch.Add(failure);
             var now = clock.GetUtcNow();
             if (batch.Count == 0 && now < nextPrune) return;
             using var scope = scopes.CreateScope();
@@ -116,7 +129,14 @@ public sealed class SecurityLog(
             {
                 nextPrune = now.AddHours(6);
                 var oldest = now.AddDays(-settings.Current.SecurityLogDays);
-                try { await database.SecurityEvents.Where(entry => entry.At < oldest).ExecuteDeleteAsync(token); }
+                try
+                {
+                    await database.SecurityEvents.Where(entry => entry.At < oldest).ExecuteDeleteAsync(token);
+                    // A flood of failed attempts cannot grow the log without end within its days (audit S-X3).
+                    var cutoff = await database.SecurityEvents.OrderByDescending(entry => entry.At).Skip(MaximumEntries)
+                        .Select(entry => (DateTimeOffset?)entry.At).FirstOrDefaultAsync(token);
+                    if (cutoff is { } last) await database.SecurityEvents.Where(entry => entry.At <= last).ExecuteDeleteAsync(token);
+                }
                 catch (Exception error) when (StorageRecovery.IsRecoverableDatabase(error)) { }
             }
         }

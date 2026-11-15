@@ -212,6 +212,10 @@ public sealed class AutomationStore(
         var hash = tokens.Hash(raw);
         var token = await database.IntegrationTokens.SingleOrDefaultAsync(value => value.TokenHash == hash, cancellationToken);
         if (token is null || !Split(token.Scopes).Contains(scope)) return null;
+        // A key acts for the owner who made it: once that profile is no owner or is switched off,
+        // its keys stop working (audit S-L2).
+        if (!await database.Users.AnyAsync(user => user.Id == token.UserId && user.IsEnabled && user.Role == UserRole.Owner, cancellationToken))
+            return null;
         var now = clock.GetUtcNow();
         if (token.LastUsedAt is not { } used || now - used > TimeSpan.FromMinutes(1))
         {

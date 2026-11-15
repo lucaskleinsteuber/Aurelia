@@ -8,21 +8,49 @@ namespace Aurelia.Server.Services;
 
 public sealed class ServerTlsIdentity : IDisposable
 {
+    private readonly ServerRuntimeOptions? runtime;
+    private readonly object renewal = new();
+    private X509Certificate2? certificate;
+
     private ServerTlsIdentity(
         bool isEnabled,
         X509Certificate2? certificate,
         string? publicKeyFingerprint,
-        string? displayFingerprint)
+        string? displayFingerprint,
+        ServerRuntimeOptions? runtime = null)
     {
         IsEnabled = isEnabled;
-        Certificate = certificate;
+        this.certificate = certificate;
         PublicKeyFingerprint = publicKeyFingerprint;
         DisplayFingerprint = displayFingerprint;
+        this.runtime = runtime;
     }
 
     public bool IsEnabled { get; }
 
-    public X509Certificate2? Certificate { get; }
+    /// <summary>The certificate HTTPS shows now; it changes when <see cref="RenewIfDue"/> renews it.</summary>
+    public X509Certificate2? Certificate => Volatile.Read(ref certificate);
+
+    /// <summary>
+    /// Renews the certificate with the same key while the server runs, once fewer than 30 days are
+    /// left: a server running past its ten years no longer shows an expired certificate to browsers
+    /// until its next start (audit S-X12). Apps pin the key, which stays the same.
+    /// </summary>
+    public bool RenewIfDue(DateTime utcNow)
+    {
+        if (runtime is null) return false;
+        lock (renewal)
+        {
+            var current = Certificate;
+            if (current is null || current.NotAfter.ToUniversalTime() >= utcNow.AddDays(30)) return false;
+            using (var key = current.GetECDsaPrivateKey() ?? throw new InvalidOperationException("The TLS private key is unavailable."))
+                CreateCertificate(runtime, key);
+            // UsableForTls keeps or replaces the loaded certificate itself. The previous one stays
+            // undisposed: a handshake may still be using it.
+            Volatile.Write(ref certificate, UsableForTls(X509Certificate2.CreateFromPemFile(runtime.CertificatePath, runtime.PrivateKeyPath)));
+            return true;
+        }
+    }
 
     public string? PublicKeyFingerprint { get; }
 
@@ -72,7 +100,8 @@ public sealed class ServerTlsIdentity : IDisposable
             true,
             UsableForTls(certificate),
             fingerprint,
-            FormatDisplayFingerprint(fingerprint));
+            FormatDisplayFingerprint(fingerprint),
+            runtime);
     }
 
     /// <summary>

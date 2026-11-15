@@ -298,7 +298,7 @@ public sealed class ScrubPreviewTests
         return relative.StartsWith("Backups" + Path.DirectorySeparatorChar, StringComparison.Ordinal)
             || relative.StartsWith("DataProtectionKeys" + Path.DirectorySeparatorChar, StringComparison.Ordinal)
             || relative.StartsWith("aurelia.db", StringComparison.Ordinal)
-            || relative is "server-events.json" or "server.lock";
+            || relative is "server-events.json" or "server.lock" or ServerWorkSignal.FileName;
     }
 
     private static HashSet<string> TemporaryVideoFiles() =>

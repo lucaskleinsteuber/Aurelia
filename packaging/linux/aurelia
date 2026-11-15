@@ -35,6 +35,11 @@ ensure_running() {
 token_file=/etc/aurelia/github-token
 # "beta" here also offers GitHub pre-releases (test versions); set with: sudo aurelia update --beta on
 channel_file=/etc/aurelia/update-channel
+# Stand-ins for GitHub are honoured only where root asked for them with this file (the package
+# tests): with `sudo -E`, a user's own variables must not choose what root installs (audit S-X18).
+if [ ! -f /etc/aurelia/test-update-source ] || [ -L /etc/aurelia/test-update-source ]; then
+  unset AURELIA_UPDATE_API AURELIA_UPDATE_REPOSITORY AURELIA_UPDATE_SIGNING_KEY
+fi
 update_api=${AURELIA_UPDATE_API:-https://api.github.com}
 update_repository=${AURELIA_UPDATE_REPOSITORY:-$(cat "$install_root/REPOSITORY" 2>/dev/null || true)}
 update_token=""

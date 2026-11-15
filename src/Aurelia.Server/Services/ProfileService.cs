@@ -114,6 +114,7 @@ public sealed class ProfileService(AureliaDbContext database, IPasswordHasher<Se
         user.PinProtectionEnabled = request.PinProtectionEnabled;
         user.PinHash = request.PinProtectionEnabled ? await HashPinAsync(user, request.Pin!, token) : null;
         await database.SaveChangesAsync(token);
+        pins.Reset(userId);
         sessions.RevokeUser(userId);
         streams.RevokeUser(userId);
     }
@@ -128,6 +129,7 @@ public sealed class ProfileService(AureliaDbContext database, IPasswordHasher<Se
         user.PinHash = await HashPinAsync(user, pin, token);
         user.PinProtectionEnabled = true;
         await database.SaveChangesAsync(token);
+        pins.Reset(userId);
         sessions.RevokeUser(userId);
     }
 
@@ -267,6 +269,7 @@ public sealed class ProfileService(AureliaDbContext database, IPasswordHasher<Se
         database.SyncChanges.Add(new SyncChange { UserId = userId, Area = SyncChangeArea.Catalog, CreatedAt = DateTimeOffset.UtcNow });
         await database.SaveChangesAsync(token);
         await transaction.CommitAsync(token);
+        if (request.Pin is not null) pins.Reset(userId);
         if (oldRole != user.Role || oldEnabled != user.IsEnabled || protectionChanged) sessions.RevokeUser(userId);
         if (oldRole != user.Role || oldEnabled != user.IsEnabled || protectionChanged || changeAccess) streams.RevokeUser(userId);
         return new(ToSummary(user), user.IsEnabled, await AccessAsync(userId, token), user.ProfileRevision);
@@ -385,7 +388,7 @@ public sealed class ProfileService(AureliaDbContext database, IPasswordHasher<Se
                 throw new AccountException("profile_photo_too_large", "Choose a photo no larger than 8 MB.", 413);
             bytes.Write(buffer, 0, read);
         }
-        var jpeg = ProfilePhotoEncoder.Encode(bytes.ToArray());
+        var jpeg = await ProfilePhotoEncoder.EncodeAsync(bytes.ToArray(), token);
         using var lease = await mutations.EnterAsync(token);
         if (actorId != userId) await RequireOwnerAsync(actorId, token);
         var user = await database.Users.SingleOrDefaultAsync(user => user.Id == userId, token)

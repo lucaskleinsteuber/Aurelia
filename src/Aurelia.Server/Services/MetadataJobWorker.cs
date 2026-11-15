@@ -37,7 +37,7 @@ public sealed partial class MetadataJobWorker(
             var heartbeatTask = HeartbeatAsync(jobId.Value, heartbeat.Token);
             try
             {
-                await ProcessAsync(jobId.Value, jobToken);
+                using (ServerWorkSignal.Begin(scopeFactory, keepAwake: true)) await ProcessAsync(jobId.Value, jobToken);
             }
             catch (OperationCanceledException) when (jobToken.IsCancellationRequested)
             {

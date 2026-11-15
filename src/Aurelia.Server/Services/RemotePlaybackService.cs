@@ -18,6 +18,8 @@ public sealed class RemotePlaybackService
     private static readonly TimeSpan RegistrationLifetime = TimeSpan.FromMinutes(10);
     private const int MaxPendingCommands = 50;
     private const int MaxRegistrations = 256;
+    /// <summary>One profile cannot fill the list of players for everyone (audit S-L7).</summary>
+    internal const int MaxRegistrationsPerUser = 32;
     private const int MaxDeviceIdLength = 128;
     private const int MaxNameLength = 100;
     private const int MaxClientTypeLength = 32;
@@ -47,7 +49,8 @@ public sealed class RemotePlaybackService
             if (existing is null || existing.DeviceSessionId != deviceSessionId)
             {
                 PruneStaleRegistrations(now);
-                if (existing is null && _devices.Count >= MaxRegistrations)
+                if (existing is null && (_devices.Count >= MaxRegistrations
+                        || _devices.Values.Count(player => player.UserId == userId) >= MaxRegistrationsPerUser))
                     throw new AccountException("too_many_players", "Too many players are registered. Try again shortly.", 429);
                 existing = new RegisteredPlayer(deviceId, deviceSessionId, userId);
                 _devices[deviceId] = existing;

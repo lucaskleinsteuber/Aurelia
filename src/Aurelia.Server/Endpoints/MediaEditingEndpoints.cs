@@ -78,8 +78,15 @@ public static class MediaEditingEndpoints
 
     internal static IResult Image(HttpContext context, string path, string type = "image/png")
     {
+        // A picture that is gone (a draft discarded or expired) is not found, not a storage failure (audit S-X9).
+        FileStream file;
+        try { file = File.OpenRead(path); }
+        catch (Exception missing) when (missing is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return Results.Json(new ApiProblem("image_not_found", "This picture is no longer available."), statusCode: StatusCodes.Status404NotFound);
+        }
         context.Response.Headers.CacheControl = "private, no-store";
         context.Response.Headers.XContentTypeOptions = "nosniff";
-        return Results.File(File.OpenRead(path), type);
+        return Results.File(file, type);
     }
 }

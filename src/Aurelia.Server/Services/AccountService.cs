@@ -191,7 +191,7 @@ public sealed class AccountService(
             Id = Guid.NewGuid(),
             User = user,
             UserId = user.Id,
-            CodeHash = tokenService.Hash(rawCode),
+            CodeHash = tokenService.HashCode(rawCode),
             CreatedAt = now,
             ExpiresAt = expiresAt,
         });
@@ -212,11 +212,15 @@ public sealed class AccountService(
             throw InvalidPairingCode();
         }
 
+        var address = http.HttpContext?.Connection.RemoteIpAddress;
+        // An address that guessed wrong too often waits for the next code; the code stays valid for others.
+        if (pairingAttempts.IsRefused(address)) throw InvalidPairingCode();
+
         await using var transaction = await database.Database.BeginTransactionAsync(
             IsolationLevel.Serializable,
             cancellationToken);
         var now = DateTimeOffset.UtcNow;
-        var codeHash = tokenService.Hash(normalizedCode);
+        var codeHash = tokenService.HashCode(normalizedCode);
         var code = await database.PairingCodes
             .Include(candidate => candidate.User)
             .SingleOrDefaultAsync(candidate => candidate.CodeHash == codeHash, cancellationToken);
@@ -224,7 +228,7 @@ public sealed class AccountService(
         if (code is null || code.ConsumedAt is not null || code.ExpiresAt <= now || !code.User.IsEnabled || code.User.Role != UserRole.Owner)
         {
             // Too many wrong guesses, from however many addresses, end every waiting code.
-            if (pairingAttempts.RecordFailure())
+            if (pairingAttempts.RecordFailure(address))
             {
                 var waiting = await database.PairingCodes.Where(candidate => candidate.ConsumedAt == null).ToListAsync(cancellationToken);
                 foreach (var candidate in waiting) candidate.ConsumedAt = now;

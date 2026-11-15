@@ -430,6 +430,27 @@ public sealed class WishTests
             using var client = factory.CreateClient();
             var owner = await ApiTestClient.SetupOwnerAsync(client);
 
+            // Audit S-L9: a profile that was not watching cannot start the countdown.
+            using (var idle = await SendAsync(client, owner.Token, HttpMethod.Post, "/api/v1/playback/sleep-timer-ended"))
+                Assert.Equal(System.Net.HttpStatusCode.Conflict, idle.StatusCode);
+            await using (var scope = factory.Services.CreateAsyncScope())
+            {
+                var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+                var root = $"/synthetic/sleep-{Guid.NewGuid():N}";
+                var library = new LibraryRoot { Id = Guid.NewGuid(), Name = "Synthetic", Path = root, NormalizedPath = root, Kind = LibraryKind.Movies, MonitoringEnabled = false };
+                var movie = new MediaItem { Id = Guid.NewGuid(), LibraryRoot = library, Kind = MediaKind.Movie, SourcePath = root + "/title.mkv", NormalizedSourcePath = root + "/title.mkv", DetectedTitle = "Synthetic" };
+                database.PlaybackTickets.Add(new PlaybackTicket
+                {
+                    Id = Guid.NewGuid(),
+                    MediaItem = movie,
+                    User = await database.Users.SingleAsync(user => user.Id == owner.User.Id),
+                    DeviceSession = await database.DeviceSessions.SingleAsync(session => session.Id == owner.SessionId),
+                    TokenHash = "synthetic-ticket-" + Guid.NewGuid().ToString("N"),
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+                });
+                await database.SaveChangesAsync();
+            }
             using var response = await SendAsync(client, owner.Token, HttpMethod.Post, "/api/v1/playback/sleep-timer-ended");
             var body = await ReadAsync<SleepTimerEndedResponse>(response);
             Assert.Equal(mode, body.PowerMode);

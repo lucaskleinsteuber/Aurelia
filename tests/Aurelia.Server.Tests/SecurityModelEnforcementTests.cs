@@ -219,4 +219,79 @@ public sealed class SecurityModelEnforcementTests
         using var delResponse = await client.SendAsync(delWatchlist);
         delResponse.EnsureSuccessStatusCode();
     }
+
+    // Audit S-M1: with only an owner's PIN, no other way may make a new owner or administrator, change
+    // a role or switch an owner off. Each needs the Server Password like PUT /users/{id}/role.
+    [Fact]
+    public async Task EveryWayToChangeWhoManagesNeedsTheServerPassword()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+        static async Task<HttpResponseMessage> Send(HttpClient http, HttpRequestMessage request)
+        {
+            using (request) return await http.SendAsync(request);
+        }
+        static async Task<string?> Refusal(HttpResponseMessage response) =>
+            response.StatusCode == HttpStatusCode.Forbidden ? (await ApiTestClient.ReadAsync<ApiProblem>(response)).Code : null;
+
+        using (var elevated = await Send(client, ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token,
+                   new CreateUserRequest("Synthetic Admin", null, UserRole.Admin, ApiTestClient.TestPin))))
+            Assert.Equal("approval_required", await Refusal(elevated));
+        using var created = await Send(client, ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token,
+            new CreateUserRequest("Synthetic Viewer", null, UserRole.User, ApiTestClient.TestPin)));
+        created.EnsureSuccessStatusCode();
+        var viewer = await ApiTestClient.ReadAsync<UserSummary>(created);
+
+        using var editorResponse = await Send(client, ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/users/{viewer.Id}/profile", owner.Token));
+        var editor = await ApiTestClient.ReadAsync<ProfileEditorResponse>(editorResponse);
+        using (var promote = await Send(client, ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{viewer.Id}/profile", owner.Token,
+                   new UpdateProfileRequest(editor.Revision, UserRole.Owner, true, true))))
+            Assert.Equal("approval_required", await Refusal(promote));
+        using (var unchanged = await Send(client, ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{viewer.Id}/profile", owner.Token,
+                   new UpdateProfileRequest(editor.Revision, UserRole.User, true, true, "5678"))))
+            unchanged.EnsureSuccessStatusCode();
+
+        using (var switchOff = await Send(client, ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{owner.User.Id}/enabled", owner.Token,
+                   new SetProfileEnabledRequest(false))))
+            Assert.Equal("approval_required", await Refusal(switchOff));
+        using (var viewerOff = await Send(client, ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{viewer.Id}/enabled", owner.Token,
+                   new SetProfileEnabledRequest(false))))
+            Assert.NotEqual("approval_required", await Refusal(viewerOff));
+
+        // The real clients ask for the approval when refused; with it the same change goes through.
+        using var approved = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token,
+            new CreateUserRequest("Approved Admin", null, UserRole.Admin, ApiTestClient.TestPin));
+        using var approvedResponse = await ApiTestClient.SendAsync(client, approved);
+        approvedResponse.EnsureSuccessStatusCode();
+    }
+
+    [Theory]
+    [InlineData("POST", "/api/v1/users", true)]
+    [InlineData("PUT", "/api/v1/users/6f0c1c6e-8a3d-4d0c-9b55-111111111111/profile", true)]
+    [InlineData("PUT", "/api/v1/users/6f0c1c6e-8a3d-4d0c-9b55-111111111111/enabled", true)]
+    [InlineData("PUT", "/api/v1/users/6f0c1c6e-8a3d-4d0c-9b55-111111111111/access", true)]
+    [InlineData("PUT", "/api/v1/users/6f0c1c6e-8a3d-4d0c-9b55-111111111111/pin", true)]
+    [InlineData("PUT", "/api/v1/users/6f0c1c6e-8a3d-4d0c-9b55-111111111111/name", false)]
+    [InlineData("PUT", "/api/v1/users/6f0c1c6e-8a3d-4d0c-9b55-111111111111/screen-time", false)]
+    [InlineData("GET", "/api/v1/users", false)]
+    public void OnlyProfileChangesThatCanChangeWhoManagesAreLookedAt(string method, string path, bool looked)
+        => Assert.Equal(looked, ServerRequestGuard.MayChangeWhoManages(method, path));
+
+    // Audit S-L5: one device with many IPv6 addresses counts once, and a full table never refuses
+    // a new address: it forgets the one seen longest ago.
+    [Fact]
+    public void TheFloodGuardCountsADeviceOnceAndAlwaysAdmitsNewAddresses()
+    {
+        Assert.Equal(ServerRequestGuard.AddressKey(System.Net.IPAddress.Parse("2001:db8:1:2::aaaa")),
+            ServerRequestGuard.AddressKey(System.Net.IPAddress.Parse("2001:db8:1:2:1234:5678:9abc:def0")));
+        Assert.NotEqual(ServerRequestGuard.AddressKey(System.Net.IPAddress.Parse("2001:db8:1:2::1")),
+            ServerRequestGuard.AddressKey(System.Net.IPAddress.Parse("2001:db8:1:3::1")));
+        Assert.Equal("192.168.1.20", ServerRequestGuard.AddressKey(System.Net.IPAddress.Parse("::ffff:192.168.1.20")));
+
+        var guard = new ServerRequestGuard();
+        for (var index = 0; index < ServerRequestGuard.TrackedAddresses; index++)
+            Assert.True(guard.Admit(new System.Net.IPAddress([10, 1, (byte)(index / 256), (byte)(index % 256)])));
+        Assert.True(guard.Admit(System.Net.IPAddress.Parse("192.168.178.50")));
+    }
 }

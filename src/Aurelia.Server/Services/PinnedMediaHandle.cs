@@ -33,7 +33,11 @@ internal static partial class PinnedMediaHandle
                 var mac = OperatingSystem.IsMacOS();
                 var type = Marshal.ReadByte(entry, mac ? 20 : 18);
                 var name = Marshal.PtrToStringUTF8(entry + (mac ? 21 : 19));
-                if (name is null or "." or ".." || name.Contains('/') || type is not 4 and not 8) continue;
+                if (name is null or "." or ".." || name.Contains('/')) continue;
+                // FUSE, NFS and XFS without ftype report no type (DT_UNKNOWN): look at the entry itself,
+                // through the open directory and without following a link.
+                if (type == 0 && !mac) type = UnixFileIdentity.EntryType($"/proc/self/fd/{descriptor}/{name}");
+                if (type is not 4 and not 8) continue;
                 if (results.Count >= 10_000) throw new AccountException("directory_too_large", "This directory contains too many entries. Select a smaller folder.", 413);
                 results.Add((name, type == 4));
             }
@@ -56,10 +60,7 @@ internal static partial class PinnedMediaHandle
         var components = root.Split('/', StringSplitOptions.RemoveEmptyEntries)
             .Concat(Path.GetRelativePath(libraryPath, sourcePath).Split('/', StringSplitOptions.RemoveEmptyEntries).Where(value => value != ".")).ToArray();
         if (components.Length == 0 || components.Any(value => value is "." or ".." || value.Contains('\0'))) throw new IOException("Invalid media path.");
-        var noFollow = OperatingSystem.IsMacOS() ? 0x100 : 0x20000;
-        var directory = OperatingSystem.IsMacOS() ? 0x100000 : 0x10000;
-        var closeOnExec = OperatingSystem.IsMacOS() ? 0x1000000 : 0x80000;
-        var nonBlocking = OperatingSystem.IsMacOS() ? 0x4 : 0x800;
+        var (noFollow, directory, closeOnExec, nonBlocking) = OpenFlags(OperatingSystem.IsMacOS(), RuntimeInformation.ProcessArchitecture);
         using var first = Owned(OpenNative("/", directory | closeOnExec));
         SafeFileHandle current = first;
         try
@@ -78,6 +79,18 @@ internal static partial class PinnedMediaHandle
         }
         finally { if (!ReferenceEquals(current, first)) current.Dispose(); }
     }
+    /// <summary>
+    /// open(2) flags. Linux numbers them per processor: arm and arm64 have their own O_DIRECTORY and
+    /// O_NOFOLLOW, where the x86 numbers mean O_DIRECT and O_LARGEFILE (Raspberry Pi servers).
+    /// </summary>
+    internal static (int NoFollow, int Directory, int CloseOnExec, int NonBlocking) OpenFlags(bool macOS, Architecture architecture)
+    {
+        if (macOS) return (0x100, 0x100000, 0x1000000, 0x4);
+        return architecture is Architecture.Arm64 or Architecture.Arm
+            ? (0x8000, 0x4000, 0x80000, 0x800)
+            : (0x20000, 0x10000, 0x80000, 0x800);
+    }
+
     private static SafeFileHandle Owned(int descriptor)
     {
         if (descriptor < 0)

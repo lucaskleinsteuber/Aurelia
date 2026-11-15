@@ -74,7 +74,8 @@ public sealed class ServerConfigurationStore
         if (info.LinkTarget is not null || info.Length > ServerRequestGuard.MaximumJsonBytes)
             throw new InvalidDataException("Invalid host operation journal.");
         using var file = File.OpenRead(path);
-        return JsonSerializer.Deserialize<HostOperationJournal>(file, Json)?.State is "awaitingConfirmation" or "restarting";
+        try { return JsonSerializer.Deserialize<HostOperationJournal>(file, Json)?.State is "awaitingConfirmation" or "restarting"; }
+        catch (JsonException) { return false; }
     }
     internal static void Validate(ServerHostSettings value)
     {

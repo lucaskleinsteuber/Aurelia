@@ -47,7 +47,7 @@ public sealed class DeviceAuthorizationService(
         do
         {
             code = tokens.CreatePairingCode();
-            codeHash = tokens.Hash(code);
+            codeHash = tokens.HashCode(code);
         } while (await database.DeviceAuthorizationRequests.AnyAsync(request => request.CodeHash == codeHash, token));
         var secret = tokens.CreateDeviceToken();
         var request = new DeviceAuthorizationRequest
@@ -73,7 +73,7 @@ public sealed class DeviceAuthorizationService(
         await RequireOwnerAsync(ownerId, deviceId, profileId, token);
         var normalized = code?.Trim() ?? string.Empty;
         if (normalized.Length != 8 || normalized.Any(character => !char.IsAsciiDigit(character))) throw InvalidCode();
-        var hash = tokens.Hash(normalized);
+        var hash = tokens.HashCode(normalized);
         var request = await database.DeviceAuthorizationRequests.Include(value => value.DeviceSession).ThenInclude(session => session!.User)
             .SingleOrDefaultAsync(value => value.CodeHash == hash, token) ?? throw InvalidCode();
         await ExpireAsync(request, token);
@@ -93,6 +93,7 @@ public sealed class DeviceAuthorizationService(
             .SingleOrDefaultAsync(value => value.Id == id, token) ?? throw Missing();
         await ExpireAsync(request, token);
         var desired = approve ? DeviceAuthorizationState.Approved : DeviceAuthorizationState.Denied;
+        DeviceSession? created = null;
         if (request.State != DeviceAuthorizationState.Pending && request.State != desired)
             throw new AccountException("device_pairing_not_pending", "This device pairing is no longer awaiting approval.", 409);
         if (request.State == DeviceAuthorizationState.Pending)
@@ -113,9 +114,7 @@ public sealed class DeviceAuthorizationService(
                     ExpiresAt = now.AddDays(configuration.Current.DeviceSessionDays),
                 };
                 database.DeviceSessions.Add(session);
-                securityLog.Record("signed_in", SecurityLog.Succeeded, owner.Id, session.Id, "Code shown on the device",
-                    deviceName: request.DeviceName);
-                securityAlerts.Bump();
+                created = session;
                 request.DeviceSession = session;
                 request.DeviceSessionId = session.Id;
                 request.ProtectedAuthentication = Protector(id).Protect(JsonSerializer.Serialize(
@@ -128,6 +127,13 @@ public sealed class DeviceAuthorizationService(
             await database.SaveChangesAsync(token);
         }
         await transaction.CommitAsync(token);
+        // Only an approval that was saved is a sign-in (audit S-X5).
+        if (created is not null)
+        {
+            securityLog.Record("signed_in", SecurityLog.Succeeded, owner.Id, created.Id, "Code shown on the device",
+                deviceName: request.DeviceName);
+            securityAlerts.Bump();
+        }
         return await PreviewAsync(request, token);
     }
 

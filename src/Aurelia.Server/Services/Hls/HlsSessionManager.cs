@@ -13,6 +13,8 @@ public sealed partial class HlsSessionManager(
     IHlsConverter? converter = null) : IAsyncDisposable
 {
     public const int MaximumSessions = 6;
+    /// <summary>One profile never takes every conversion: the others keep two (audit S-L7).</summary>
+    public const int MaximumSessionsPerUser = 4;
     public static readonly TimeSpan IdleTimeout = TimeSpan.FromSeconds(60);
 
     private readonly TimeProvider clock = clock ?? TimeProvider.System;
@@ -46,7 +48,8 @@ public sealed partial class HlsSessionManager(
         lock (gate)
         {
             if (sessions.TryGetValue(session.Key, out var existing)) winner = existing.Session;
-            else if (sessions.Count < MaximumSessions)
+            else if (sessions.Count < MaximumSessions
+                && sessions.Keys.Count(key => key.UserId == session.Key.UserId) < MaximumSessionsPerUser)
             {
                 var key = session.Key;
                 var watch = streams.Watch(key.UserId, key.ProfileSessionId, key.MediaId, () => _ = EndAsync(key));

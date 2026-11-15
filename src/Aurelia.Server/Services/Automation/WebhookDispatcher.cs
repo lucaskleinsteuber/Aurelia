@@ -97,6 +97,10 @@ public sealed partial class WebhookDispatcher(
         using var scope = scopes.CreateScope();
         targets = await scope.ServiceProvider.GetRequiredService<AutomationStore>().TargetsAsync(cancellationToken);
         loadedVersion = version;
+        // A removed or paused webhook's queue ends now, not at the next restart (audit S-X13).
+        var current = targets.Select(target => target.Id).ToHashSet();
+        foreach (var stale in queues.Keys.Where(id => !current.Contains(id)).ToArray())
+            if (queues.TryRemove(stale, out var channel)) channel.Writer.TryComplete();
         return targets;
     }
 
@@ -295,6 +299,8 @@ public sealed partial class WebhookDispatcher(
             await database.AutomationDeliveries.Where(value => batch.Contains(value.Id)).ExecuteDeleteAsync(cancellationToken);
     }
 
+    internal static readonly TimeSpan MaximumRetryAfter = TimeSpan.FromHours(1);
+
     private sealed record Outcome(bool Succeeded, bool Retry, int? Status, int? Milliseconds, string? Error, TimeSpan? RetryAfter);
 
     private async Task<Outcome> SendAsync(WebhookTarget target, string kind, Guid eventId, string body, CancellationToken cancellationToken)
@@ -317,7 +323,9 @@ public sealed partial class WebhookDispatcher(
             using var response = await clients.CreateClient(ClientName)
                 .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
             var status = (int)response.StatusCode;
-            var retryAfter = response.Headers.RetryAfter?.Delta;
+            // A receiver may ask for a pause, but at most an hour: a huge Retry-After parked deliveries
+            // for good, never failing and never pausing the webhook (audit S-L4).
+            var retryAfter = response.Headers.RetryAfter?.Delta is { } asked ? TimeSpan.FromTicks(Math.Clamp(asked.Ticks, 0, MaximumRetryAfter.Ticks)) : (TimeSpan?)null;
             if (response.IsSuccessStatusCode) return new Outcome(true, false, status, Elapsed(), null, null);
             var retry = status is 408 or 429 or >= 500;
             return new Outcome(false, retry, status, Elapsed(), $"The receiver answered {status} {response.ReasonPhrase}".Trim(), retryAfter);

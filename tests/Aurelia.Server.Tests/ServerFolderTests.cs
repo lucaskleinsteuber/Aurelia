@@ -6,6 +6,22 @@ namespace Aurelia.Server.Tests;
 
 public sealed class ServerFolderTests
 {
+    // Audit S-H1: Linux numbers O_DIRECTORY and O_NOFOLLOW differently on arm and arm64. With the x86
+    // numbers a Raspberry Pi server asked for O_DIRECT on folders and lost its symlink protection.
+    [Theory]
+    [InlineData(false, System.Runtime.InteropServices.Architecture.X64, 0x20000, 0x10000)]
+    [InlineData(false, System.Runtime.InteropServices.Architecture.Arm64, 0x8000, 0x4000)]
+    [InlineData(false, System.Runtime.InteropServices.Architecture.Arm, 0x8000, 0x4000)]
+    [InlineData(true, System.Runtime.InteropServices.Architecture.Arm64, 0x100, 0x100000)]
+    [InlineData(true, System.Runtime.InteropServices.Architecture.X64, 0x100, 0x100000)]
+    public void MediaIsOpenedWithTheFlagsOfThisSystemAndProcessor(bool macOS, System.Runtime.InteropServices.Architecture architecture, int noFollow, int directory)
+    {
+        var flags = Aurelia.Server.Services.PinnedMediaHandle.OpenFlags(macOS, architecture);
+        Assert.Equal(noFollow, flags.NoFollow);
+        Assert.Equal(directory, flags.Directory);
+        Assert.Equal(0x800, macOS ? 0x800 : flags.NonBlocking);
+    }
+
     // The list under / leaves Linux's system folders out; typing their path must not open them
     // either. Removable drives under /run/media stay reachable.
     [Theory]

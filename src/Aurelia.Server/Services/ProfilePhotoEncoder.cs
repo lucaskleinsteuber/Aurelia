@@ -11,12 +11,20 @@ public static class ProfilePhotoEncoder
 {
     private static readonly SemaphoreSlim Gate = new(2, 2);
 
-    public static byte[] Encode(byte[] upload)
+    /// <summary>
+    /// PNG and WebP decode at full size; 12 megapixels (48 MB decoded) are plenty for a small square.
+    /// JPEGs decode scaled down and may be larger (audit S-L8).
+    /// </summary>
+    public const long MaximumFullPixels = 12_000_000;
+
+    public static async Task<byte[]> EncodeAsync(byte[] upload, CancellationToken token)
     {
-        Gate.Wait();
+        // Waiting for a free slot no longer holds a request thread (audit S-L8).
+        await Gate.WaitAsync(token);
         try
         {
-            using var decoded = EditorArtworkStore.Decode(upload, allowProviderWebP: true, minimumWidth: ProfilePictures.PhotoSize);
+            using var decoded = EditorArtworkStore.Decode(upload, allowProviderWebP: true, minimumWidth: ProfilePictures.PhotoSize,
+                maximumFullPixels: MaximumFullPixels);
             using var upright = EditorArtworkStore.Orient(decoded.Image, decoded.Origin);
             var side = Math.Min(upright.Width, upright.Height);
             var source = new SKRect((upright.Width - side) / 2f, (upright.Height - side) / 2f,

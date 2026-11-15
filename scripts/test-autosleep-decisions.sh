@@ -104,4 +104,26 @@ ln -s "$work/elsewhere" "$work/data/power-now"
 rm -f "$work/data/power-now"
 [ -z "$(decide "" --now)" ] || fail "without a request --now must do nothing"
 
+mkdir "$work/data/power-now"
+[ -z "$(decide "" --now)" ] || fail "a folder at the request's name must do nothing but be removed"
+rmdir "$work/data/power-now"
+
+# An empty last-active (a cut write) must not end every later check with an error (audit S-X21).
+rm -f "$work/data/sleep-ready" "$work/state/woke"
+printf 'MODE=sleep\nIDLE_MINUTES=15\n' > "$work/data/sleep-settings"
+: > "$work/state/last-active"
+decide "" >/dev/null || fail "an empty last-active must not stop the check"
+
+# A scan or metadata job the server reports keeps the computer on; its analysis note alone does not
+# (audit B-4). The load of this computer is real, so only the scan case can be checked exactly.
+echo $(( $(date +%s) - 3600 )) > "$work/state/last-active"
+echo keepawake > "$work/data/work"
+decide "" | grep -Fx 'awake: in use' >/dev/null || fail "a scan the server reports must keep the computer on"
+echo $(( $(date +%s) - 3600 )) > "$work/state/last-active"
+echo analysis > "$work/data/work"
+touch -d '10 minutes ago' "$work/data/work"
+decide "" | grep -F 'Unused for 15 minutes' >/dev/null || [ "$(awk '{ print ($1 > 0.5) }' /proc/loadavg)" = 1 ] \
+  || fail "an old work note must not count"
+rm -f "$work/data/work"
+
 echo "aurelia-autosleep decisions: all checks passed."

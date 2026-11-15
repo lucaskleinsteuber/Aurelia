@@ -41,7 +41,7 @@ A Linux server without an owner can be set up entirely in a browser:
    TMDB token for posters and details, and power saving; then the first scan.
 
 The code exists only while the server has no owner. It lives in the server's private data folder
-(`/var/lib/aurelia/browser-setup-code`, readable by root and the server) and in its log, lasts a
+(`/var/lib/aurelia/browser-setup-code`, readable by root and the server), never in its log, lasts a
 day, and ten wrong tries replace it, so someone else at home cannot claim the server first. Until
 the owner exists the network reaches only the browser app and the setup step.
 

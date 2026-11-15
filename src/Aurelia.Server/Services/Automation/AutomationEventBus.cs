@@ -85,6 +85,15 @@ public static class WebhookTargetPolicy
     public static bool Forbidden(IPAddress address)
     {
         if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        // NAT64 (64:ff9b::/96) and IPv4-compatible forms reach the IPv4 address in their last four
+        // bytes, cloud metadata at 169.254.169.254 included (audit S-X14).
+        if (address.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            var v6 = address.GetAddressBytes();
+            var nat64 = v6[0] == 0x00 && v6[1] == 0x64 && v6[2] == 0xff && v6[3] == 0x9b && v6.AsSpan(4, 8).IndexOfAnyExcept((byte)0) < 0;
+            var compatible = v6.AsSpan(0, 12).IndexOfAnyExcept((byte)0) < 0 && !IPAddress.IPv6Loopback.Equals(address) && !IPAddress.IPv6Any.Equals(address);
+            if (nat64 || compatible) return Forbidden(new IPAddress(v6.AsSpan(12, 4)));
+        }
         if (address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any) || address.Equals(IPAddress.Broadcast)) return true;
         if (address.AddressFamily == AddressFamily.InterNetwork)
         {
@@ -108,12 +117,22 @@ public static class WebhookTargetPolicy
     }
 
     /// <summary>Checked for every connection the webhook client opens.</summary>
+    /// <summary>
+    /// Whether a webhook may connect to this address. Plain http goes only to the home network. A
+    /// home name (homeassistant.local, fritz.box) goes only to a home address too, also with https:
+    /// its own certificate is accepted for such names, so with a poisoned name lookup the event would
+    /// otherwise reach a stranger's computer unchecked (audit S-L3).
+    /// </summary>
+    internal static bool Reachable(IPAddress address, bool https, bool localName) =>
+        !Forbidden(address) && ((https && !localName) || IsPrivate(address));
+
     public static async ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
     {
         var addresses = IPAddress.TryParse(context.DnsEndPoint.Host.Trim('[', ']'), out var literal)
             ? [literal] : await Dns.GetHostAddressesAsync(context.DnsEndPoint.Host, cancellationToken);
         var https = context.InitialRequestMessage.RequestUri?.Scheme == "https";
-        var allowed = addresses.Where(address => !Forbidden(address) && (https || IsPrivate(address))).ToArray();
+        var localName = literal is null && IsLocalName(context.DnsEndPoint.Host);
+        var allowed = addresses.Where(address => Reachable(address, https, localName)).ToArray();
         if (allowed.Length == 0) throw new HttpRequestException("This address can't receive events.");
         var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
         try

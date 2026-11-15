@@ -106,7 +106,8 @@ internal static class ApiTestClient
         var policyRequest = new DefaultHttpContext().Request;
         policyRequest.Method = request.Method.Method;
         policyRequest.Path = request.RequestUri?.OriginalString.Split('?')[0];
-        if (request.Headers.Authorization is { } authorization && ServerRequestGuard.RequiresApproval(policyRequest))
+        if (request.Headers.Authorization is { } authorization
+            && (ServerRequestGuard.RequiresApproval(policyRequest) || ServerRequestGuard.MayChangeWhoManages(policyRequest.Method, policyRequest.Path)))
         {
             var payload = request.Content is null ? [] : await request.Content.ReadAsByteArrayAsync(cancellationToken);
             using var approvalRequest = Authorized(HttpMethod.Post, "/api/v1/server/approval", authorization.Parameter!,

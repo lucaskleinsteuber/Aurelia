@@ -89,14 +89,16 @@ public sealed partial class BrowserSetup(ServerRuntimeOptions runtime, TimeProvi
         {
             LogUnwritable(logger, exception);
         }
-        LogCode(logger, runtime.LanHttpsPort, Display(code));
+        LogCode(logger, runtime.LanHttpsPort);
     }
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "The browser setup code could not be written to the data folder.")]
     private static partial void LogUnwritable(ILogger logger, Exception exception);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "This server has no owner yet. Open its address (https://<this computer>:{Port}) in a browser and enter the setup code {Code}.")]
-    private static partial void LogCode(ILogger logger, int port, string code);
+    // The code itself stays out of the log: members of adm or systemd-journal can read the journal,
+    // and whoever types the code first becomes the owner (audit S-X4).
+    [LoggerMessage(Level = LogLevel.Warning, Message = "This server has no owner yet. Open its address (https://<this computer>:{Port}) in a browser; the setup code is shown by `sudo aurelia setup-code` (Docker: `docker compose exec aurelia aurelia setup-code`).")]
+    private static partial void LogCode(ILogger logger, int port);
 
     private void TryDelete()
     {

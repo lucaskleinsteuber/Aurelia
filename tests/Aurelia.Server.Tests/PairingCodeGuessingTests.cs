@@ -37,6 +37,26 @@ public sealed class PairingCodeGuessingTests
         Assert.Equal(owner.User.Id, paired.User.Id);
     }
 
+    // Audit S-L6: one device guessing wrong is refused itself; the waiting code stays valid for the
+    // device that is really being paired. Many networks together still end it.
+    [Fact]
+    public void ADeviceGuessingWrongIsRefusedWhileTheCodeStaysValidForOthers()
+    {
+        var guard = new PairingCodeAttemptGuard();
+        var guesser = System.Net.IPAddress.Parse("2001:db8:5:5::1");
+        for (var guess = 0; guess < PairingCodeAttemptGuard.FailuresPerAddress; guess++)
+            Assert.False(guard.RecordFailure(System.Net.IPAddress.Parse($"2001:db8:5:5::{guess + 1:x}")));
+        Assert.True(guard.IsRefused(guesser));
+        Assert.False(guard.IsRefused(System.Net.IPAddress.Parse("192.168.1.30")));
+
+        var ended = false;
+        for (var network = 1; network < PairingCodeAttemptGuard.MaximumFailures / PairingCodeAttemptGuard.FailuresPerAddress; network++)
+            for (var guess = 0; guess < PairingCodeAttemptGuard.FailuresPerAddress; guess++)
+                ended = guard.RecordFailure(new System.Net.IPAddress([10, 0, (byte)network, 1]));
+        Assert.True(ended);
+        Assert.False(guard.IsRefused(guesser));
+    }
+
     private static async Task<string> CreateCodeAsync(AureliaServerFactory factory, Guid ownerId)
     {
         await using var scope = factory.Services.CreateAsyncScope();

@@ -19,7 +19,24 @@ public sealed partial class SpeechModelStore
         new("medium", "Medium", 1_533_763_059, "The most accurate here, slow on a small server. About 1.5 GB."),
     ];
 
-    private static readonly Uri Source = new("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/");
+    /// <summary>
+    /// A fixed revision of whisper.cpp's model repository, not "main", and each model's SHA-256 as
+    /// published there: whisper.cpp reads the file as native code, so a model that was swapped on the
+    /// way or at the source is never kept (audit S-M3). A new model or revision changes both here.
+    /// </summary>
+    private static readonly Uri Source = new("https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/");
+
+    internal static readonly IReadOnlyDictionary<string, string> PublishedSha256 = new Dictionary<string, string>
+    {
+        ["base"] = "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+        ["small"] = "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+        ["medium"] = "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+    };
+
+    /// <summary>Whether a download is exactly the published model: its size and its SHA-256.</summary>
+    internal static bool IsPublished(SpeechModelChoice choice, long bytes, ReadOnlySpan<byte> sha256) =>
+        bytes == choice.Bytes && PublishedSha256.TryGetValue(choice.Name, out var expected)
+        && Convert.ToHexStringLower(sha256) == expected;
     private readonly string folder;
     private readonly HttpClient http;
     private readonly ILogger<SpeechModelStore> logger;
@@ -94,6 +111,8 @@ public sealed partial class SpeechModelStore
             response.EnsureSuccessStatusCode();
             var total = response.Content.Headers.ContentLength ?? choice.Bytes;
             if (total > choice.Bytes * 2) throw new InvalidDataException("The model is larger than expected.");
+            using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+            long written = 0;
             await using (var input = await response.Content.ReadAsStreamAsync(cancellation.Token))
             await using (var output = File.Create(partial))
             {
@@ -103,12 +122,15 @@ public sealed partial class SpeechModelStore
                 while ((read = await input.ReadAsync(buffer, cancellation.Token)) > 0)
                 {
                     await output.WriteAsync(buffer.AsMemory(0, read), cancellation.Token);
+                    hash.AppendData(buffer, 0, read);
                     received += read;
+                    written = received;
                     if (received > choice.Bytes * 2) throw new InvalidDataException("The model is larger than expected.");
                     lock (gate) if (downloading == cancellation) Download = new SpeechModelDownload(choice.Name, received, total);
                 }
             }
-            if (!IsModel(partial)) throw new InvalidDataException("The download is not a whisper.cpp model.");
+            if (!IsPublished(choice, written, hash.GetHashAndReset()) || !IsModel(partial))
+                throw new InvalidDataException("The download is not the published whisper.cpp model.");
             lock (gate)
             {
                 if (downloading != cancellation) return;
