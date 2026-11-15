@@ -245,6 +245,24 @@ public sealed partial class ManagementClient
 
     public Task RemoveEntryAsync(Guid mediaId) => SendAsync<JsonNode>(HttpMethod.Delete, $"/api/v1/library/health/entries/{mediaId}", null);
 
+    // The file watch ("file-checks-v1").
+    public Task<FileCheckSettingsResponse> FileChecksAsync() => GetAsync<FileCheckSettingsResponse>("/api/v1/server/file-checks");
+
+    public Task<FileCheckSettingsResponse> SaveFileChecksAsync(UpdateFileCheckSettingsRequest request) =>
+        SendAsync<FileCheckSettingsResponse>(HttpMethod.Put, "/api/v1/server/file-checks", request);
+
+    public Task<IReadOnlyList<FileProblemSummary>> FileProblemsAsync(bool ignored) =>
+        GetAsync<IReadOnlyList<FileProblemSummary>>($"/api/v1/library/health/files?ignored={(ignored ? "true" : "false")}&limit=100");
+
+    public Task RecheckFileAsync(Guid mediaId) => SendAsync<JsonNode>(HttpMethod.Post, $"/api/v1/library/health/files/{mediaId}/recheck", null);
+
+    public Task SetFileProblemIgnoredAsync(Guid mediaId, bool ignored) =>
+        SendAsync<JsonNode>(ignored ? HttpMethod.Post : HttpMethod.Delete, $"/api/v1/library/health/files/{mediaId}/ignore", null);
+
+    public Task<DriveHealthResponse> DrivesAsync(bool refresh) => refresh
+        ? SendAsync<DriveHealthResponse>(HttpMethod.Post, "/api/v1/library/health/drives/refresh", null)
+        : GetAsync<DriveHealthResponse>("/api/v1/library/health/drives");
+
     // Reset (needs the Server Password).
     public Task<ResetLibraryPreview> PreviewResetAsync(IReadOnlyList<Guid> libraryIds) =>
         SendAsync<ResetLibraryPreview>(HttpMethod.Post, "/api/v1/libraries/reset/preview", libraryIds);

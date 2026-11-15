@@ -105,6 +105,7 @@ public sealed class ServerPage : StackPanel
         Children.Add(await ScrubPreviewsAsync());
         if (scope.IsOwner && Client.Library.Supports(ServerFeatures.MediaSegments)) Children.Add(await ServerSegmentsSection.BuildAsync(scope));
         if (scope.IsOwner && Client.Library.Supports(ServerFeatures.ServerSpeech)) Children.Add(await ServerSpeechSection.BuildAsync(scope));
+        if (scope.IsOwner && Client.Library.Supports(ServerFeatures.FileChecks)) Children.Add(await ServerFileWatchSection.BuildAsync(scope));
         if (await VideoConversionAsync() is { } conversion) Children.Add(conversion);
         if (scope.IsOwner && Client.Library.Supports(ServerFeatures.Automation)) Children.Add(new AutomationSection(scope));
         if (scope.IsOwner) Children.Add(new ServerMoveSection(scope, status?.NetworkAddresses));

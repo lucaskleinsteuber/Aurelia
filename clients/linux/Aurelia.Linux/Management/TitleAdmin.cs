@@ -927,6 +927,7 @@ public sealed class LibraryHealthSheet : UserControl
     private readonly StackPanel content = new() { Spacing = 10 };
     private readonly TextBlock problem = Message();
     private int offlineDays = 30;
+    private bool problemsSetAside;
     private Guid? excludedLibrary;
 
     public LibraryHealthSheet(AdminScope scope, IReadOnlyList<LibrarySummary> libraries, Action refreshLibrary)
@@ -938,8 +939,13 @@ public sealed class LibraryHealthSheet : UserControl
         Width = 760;
         Height = 600;
         var tabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        string[] names = ["Duplicates", "Offline Titles", "Unmatched Metadata", "Excluded Items"];
-        Func<Task>[] pages = [DuplicatesAsync, OfflineAsync, UnmatchedAsync, ExcludedAsync];
+        var fileChecks = scope.Client.Library.Supports(ServerFeatures.FileChecks);
+        string[] names = fileChecks
+            ? ["Duplicates", "Offline Titles", "Unmatched Metadata", "Excluded Items", "File Problems", "Drives"]
+            : ["Duplicates", "Offline Titles", "Unmatched Metadata", "Excluded Items"];
+        Func<Task>[] pages = fileChecks
+            ? [DuplicatesAsync, OfflineAsync, UnmatchedAsync, ExcludedAsync, FileProblemsAsync, () => DrivesAsync(false)]
+            : [DuplicatesAsync, OfflineAsync, UnmatchedAsync, ExcludedAsync];
         for (var index = 0; index < names.Length; index++)
         {
             var page = pages[index];
@@ -1041,6 +1047,43 @@ public sealed class LibraryHealthSheet : UserControl
             }
             content.Children.Add(new Border { Classes = { "card" }, Padding = new Thickness(12), Child = card });
         }
+    }
+
+    private async Task FileProblemsAsync()
+    {
+        Start("File Problems",
+            "Files the file watch found a problem in. Play a title to check it, and replace a damaged file from a backup or a new copy; then choose Examine Again. Aurelia never changes files.",
+            "Loading file problems…");
+        content.Children.Insert(2, FileWatchHealth.ShowChoice(problemsSetAside, async aside =>
+        {
+            problemsSetAside = aside;
+            await FileProblemsAsync();
+        }));
+        IReadOnlyList<FileProblemSummary> problems = [];
+        if (!await scope.RunAsync(async () => problems = await scope.Client.FileProblemsAsync(problemsSetAside), problem)) return;
+        if (problems.Count == 0)
+        {
+            Empty(problemsSetAside ? "Nothing Set Aside" : "No File Problems",
+                problemsSetAside ? "No problem is set aside." : "No examined file has a problem. Turn on the file watch in the server settings to examine your files.");
+            return;
+        }
+        content.Children.RemoveAt(content.Children.Count - 1);
+        foreach (var entry in problems) content.Children.Add(FileWatchHealth.ProblemRow(scope, entry, problemsSetAside, problem, FileProblemsAsync));
+    }
+
+    private async Task DrivesAsync(bool refresh)
+    {
+        Start("Drives", "How the drives with your storage locations are doing, as they report it themselves (SMART). Many USB cases and network shares don't report it.", "Asking the drives…");
+        DriveHealthResponse? answer = null;
+        if (!await scope.RunAsync(async () => answer = await scope.Client.DrivesAsync(refresh), problem) || answer is null) return;
+        if (answer.Drives.Count == 0)
+        {
+            Empty("No Storage Locations", "Add a storage location to see its drive here.");
+            return;
+        }
+        content.Children.RemoveAt(content.Children.Count - 1);
+        foreach (var drive in answer.Drives) content.Children.Add(FileWatchHealth.DriveRow(drive));
+        content.Children.Add(Buttons(Button("Ask Again", () => DrivesAsync(true))));
     }
 
     private async Task OfflineAsync()
