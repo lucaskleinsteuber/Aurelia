@@ -2,7 +2,7 @@
 // download once or remove (kept in the server's data folder with its size), and running jobs.
 
 import { h, clear } from "./dom.js";
-import { speechJobText } from "./logic.js";
+import { keepsPolling, speechJobText } from "./logic.js";
 
 function bytes(value) {
   if (!(value > 0)) return "0 MB";
@@ -55,11 +55,17 @@ export function serverSpeechSection({ api, section }) {
     return settings;
   }
   let last = null;
+  const startedAt = Date.now();
+  let everConnected = false;
+  const polling = () => {
+    everConnected ||= element.isConnected;
+    return keepsPolling({ connected: element.isConnected, everConnected, startedAt, now: Date.now() });
+  };
   const tick = async () => {
-    if (!element.isConnected && last) return;
+    if (!polling()) return;
     try { last = render(await api.serverSpeech()); } catch (error) { message.textContent = error.message; }
     const busy = last?.downloading || (last?.jobs ?? []).some((job) => ["waiting", "listening", "saving"].includes(job.state));
-    if (element.isConnected || !last) setTimeout(tick, busy ? 2000 : 10000);
+    if (polling()) setTimeout(tick, busy ? 2000 : 10000);
   };
   tick();
   return element;

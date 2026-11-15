@@ -28,6 +28,8 @@ import { codecSupport, liveProblem, mimeType, selectSubtitle, startTrack, subtit
 const SAVE_INTERVAL = 10_000;
 const RENEW_BEFORE = 5 * 60_000;
 const RENEW_RETRY_MS = 20_000;
+/** The longest delay a browser timer keeps; a longer one would fire at once (audit C-X4). */
+const LONGEST_TIMER_MS = 2_147_483_647;
 export const SLEEP_GOOD_NIGHT_CLOSE_MS = 5 * 60_000;
 const PREFERENCES_KEY = "aurelia.playback";
 
@@ -513,9 +515,13 @@ export class Player {
         this.airplayButton.hidden = (event.availability !== "available");
       });
     } else if (video.remote && typeof video.remote.watchAvailability === "function") {
+      // Ended when the player closes, so a closed player is not kept by the browser (audit C-X3).
       video.remote.watchAvailability((available) => {
         this.airplayButton.hidden = !available;
-      }).catch(() => {});
+      }).then((id) => {
+        if (this.closed) video.remote.cancelWatchAvailability?.(id).catch?.(() => {});
+        else this.listeners.push(() => video.remote.cancelWatchAvailability?.(id).catch?.(() => {}));
+      }, () => {});
     }
     on(video, "ended", () => {
       this.reportState("ended");
@@ -817,12 +823,21 @@ export class Player {
 
   /** Keeps the screen on while a title plays, like "Prevent Sleep During Playback" on the Mac. */
   async keepAwake(playing) {
-    if (playing && this.preferences.keepScreenOn && !this.wakeLock && navigator.wakeLock && document.visibilityState === "visible") {
+    if (playing && this.preferences.keepScreenOn && !this.wakeLock && !this.wakeLockPending && navigator.wakeLock && document.visibilityState === "visible") {
+      this.wakeLockPending = true;
       try {
-        this.wakeLock = await navigator.wakeLock.request("screen");
-        this.wakeLock.addEventListener("release", () => (this.wakeLock = null), { once: true });
+        const lock = await navigator.wakeLock.request("screen");
+        // The player may have closed or paused while the browser answered (audit C-X2).
+        if (this.closed || this.video.paused || this.video.ended || this.goodNightActive) {
+          lock.release().catch(() => {});
+          return;
+        }
+        this.wakeLock = lock;
+        lock.addEventListener("release", () => { if (this.wakeLock === lock) this.wakeLock = null; }, { once: true });
       } catch {
         // Not allowed here (for example on plain HTTP); the screen follows its own settings.
+      } finally {
+        this.wakeLockPending = false;
       }
     } else if (!playing && this.wakeLock) {
       this.wakeLock.release().catch(() => {});
@@ -1229,7 +1244,9 @@ export class Player {
     const hasNext = Boolean(this.upNextItem) || (this.next && this.upNextItem === undefined);
     if (this.suggestionList === undefined && wantsSuggestions({ position: video.currentTime, duration, hasNext })) {
       this.suggestionList = null;
-      this.suggestionList = (await this.suggestions().catch(() => null))?.filter((entry) => entry.item?.id !== this.item.id) ?? [];
+      // A suggestion without a title (a faulty answer) is left out instead of failing on every
+      // time update (audit C-X5).
+      this.suggestionList = (await this.suggestions().catch(() => null))?.filter((entry) => entry?.item?.id && entry.item.id !== this.item.id) ?? [];
     }
     const first = this.suggestionList?.[0];
     const visible = this.endScreen.hidden && showsSuggestion({
@@ -1626,6 +1643,10 @@ export class Player {
     const expires = new Date(this.source.expiresAt).getTime();
     const due = retryIn ?? expires - Date.now() - RENEW_BEFORE;
     if (!Number.isFinite(due)) return;
+    if (due > LONGEST_TIMER_MS) {
+      this.after(() => this.scheduleRenewal(retryIn), LONGEST_TIMER_MS);
+      return;
+    }
     this.after(async () => {
       if (this.closed) return;
       try {
@@ -1646,8 +1667,12 @@ export class Player {
         }
         const position = this.video.currentTime;
         const paused = this.video.paused;
+        // A new address resets the speed to 1×; whoever watches at 1.5× keeps it (audit C-L4).
+        const rate = this.video.playbackRate;
         this.video.src = renewed.streamPath;
         this.video.currentTime = position;
+        this.video.playbackRate = rate;
+        this.video.addEventListener("loadedmetadata", () => { if (!this.closed) this.video.playbackRate = rate; }, { once: true });
         if (!paused) this.video.play().catch(() => {});
         this.api.revokePlayback(old.id).catch(() => {});
         this.scheduleRenewal();

@@ -230,6 +230,27 @@ export function remembersWakeOnAccess(storage = globalThis.localStorage) {
   try { return storage?.getItem(WAKE_ON_ACCESS_KEY) === "1"; } catch { return false; }
 }
 
+/**
+ * A signal that aborts after `milliseconds`. `AbortSignal.timeout` is missing in Safari before 16
+ * and Chrome before 103; there a timer aborts instead, so the asleep page still reconnects by
+ * itself (audit C-X1).
+ */
+export function timeoutSignal(milliseconds, scope = globalThis) {
+  if (typeof scope.AbortSignal?.timeout === "function") return scope.AbortSignal.timeout(milliseconds);
+  const controller = new scope.AbortController();
+  scope.setTimeout(() => controller.abort(), milliseconds);
+  return controller.signal;
+}
+
+/**
+ * Whether a settings section keeps asking the server for its state. It asks while it is in the
+ * page; before it was ever shown it asks only briefly, so a section that is built but never shown,
+ * or a page left before the first answer, leaves no endless asking behind (audit C-L3).
+ */
+export function keepsPolling({ connected, everConnected, startedAt, now }) {
+  return connected || (!everConnected && now - startedAt < 15_000);
+}
+
 /** How long the asleep page waits before knocking again: often for two minutes, then calmly. */
 export function wakeRetryDelay(offSince, now) {
   return now - offSince < 120_000 ? 3_000 : 20_000;

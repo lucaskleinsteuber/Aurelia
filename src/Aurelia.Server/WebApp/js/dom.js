@@ -119,5 +119,10 @@ export function saveBlob(blob, name) {
   document.body.append(link);
   link.click();
   link.remove();
-  setTimeout(() => URL.revokeObjectURL(address), 60_000);
+  // Kept for ten minutes, so a large backup still saves when its save dialog stays open a while
+  // (audit C-X20); leaving the page frees it at once.
+  const revoke = () => URL.revokeObjectURL(address);
+  // Under Node (the logic tests) the pending timer must not keep the process running.
+  setTimeout(revoke, 600_000)?.unref?.();
+  addEventListener("pagehide", revoke, { once: true });
 }

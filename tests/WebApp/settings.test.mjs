@@ -5,7 +5,7 @@ import {
   managementPermissions, metadataPayload, cropFrame, normalizeGeneralPreferences, normalizePreferences,
   profilePayload, scrubPreviewBucketSeconds, scrubPreviewFrameUrl, scrubPreviewUsageText, transcodingSummary, waitForLibraryOperation,
   POWER_MODES, powerPayload, wakeOnAccessOffered, rememberWakeOnAccess, remembersWakeOnAccess, wakeRetryDelay,
-  powerModesFor, appHostName, rememberHosting, rememberedHosting, wakeCheck
+  powerModesFor, appHostName, rememberHosting, rememberedHosting, wakeCheck, timeoutSignal, keepsPolling
 } from "../../src/Aurelia.Server/WebApp/js/logic.js";
 
 test("management permissions keep owner settings and selected-title storage restrictions", () => {
@@ -388,6 +388,28 @@ test("Settings › Power sends what the server can act on and only asks a card t
   assert.equal(wakeOnAccessOffered(card, "shutdown"), true);
   assert.equal(wakeOnAccessOffered(card, "stop"), false, "a stopped Aurelia already starts on any connection");
   assert.equal(wakeOnAccessOffered({ wakeSupport: "g" }, "sleep"), false);
+});
+
+test("a timeout signal works in browsers without AbortSignal.timeout", () => {
+  const timers = [];
+  const old = {
+    AbortSignal: { },
+    AbortController,
+    setTimeout: (work, delay) => timers.push({ work, delay }),
+  };
+  const signal = timeoutSignal(8_000, old);
+  assert.equal(signal.aborted, false);
+  assert.equal(timers[0].delay, 8_000);
+  timers[0].work();
+  assert.equal(signal.aborted, true);
+  assert.equal(typeof timeoutSignal(8_000).aborted, "boolean");
+});
+
+test("a settings section asks the server while shown and only briefly before it was ever shown", () => {
+  assert.equal(keepsPolling({ connected: true, everConnected: true, startedAt: 0, now: 999_999 }), true);
+  assert.equal(keepsPolling({ connected: false, everConnected: true, startedAt: 0, now: 1_000 }), false);
+  assert.equal(keepsPolling({ connected: false, everConnected: false, startedAt: 0, now: 1_000 }), true);
+  assert.equal(keepsPolling({ connected: false, everConnected: false, startedAt: 0, now: 16_000 }), false);
 });
 
 test("the asleep page knocks often for two minutes, then calmly, and knows whether knocking wakes the server", () => {

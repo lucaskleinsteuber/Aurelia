@@ -52,6 +52,7 @@ const state = {
   player: null,
   pendingRefresh: false,
   retryTimer: null,
+  knockChain: 0,
   offSince: null,
   watchlistIds: new Set(),
   wishSummary: null,
@@ -81,6 +82,7 @@ window.addEventListener("scroll", () => {
 
 async function start() {
   clearTimeout(state.retryTimer);
+  state.knockChain++;
   showConnecting();
   try {
     state.server = await api.serverInfo();
@@ -122,6 +124,7 @@ function showServerOff() {
   catalog.close();
   settings.closeEditors();
   stopSync();
+  closeMiniRemote();
   const name = state.server?.name ? `“${state.server.name}”` : "The server";
   // A server inside Aurelia on a desktop or laptop is started there, not woken over the network.
   const computer = logic.appHostName(logic.rememberedHosting());
@@ -136,17 +139,22 @@ function showServerOff() {
       : `${name} isn’t answering. The computer may be asleep or turned off. You can wake it with Aurelia on your Mac if Wake-on-LAN is set up, or check that the computer is turned on.`),
     computer ? null : h("p", { class: "muted" }, "This page connects by itself as soon as the server is on."),
     h("div", { class: "button-row" }, h("button", { class: "primary-button", onclick: () => start() }, "Try Again")))));
-  // Several requests can fail at once; only one retry may be waiting. Each quiet knock is a direct
-  // packet to the server, which wakes it when its power settings allow; the page doesn't flicker.
+  // Several requests can fail at once; only one chain of knocks may run. A knock still waiting for
+  // its answer belongs to an older chain once this page shows again, and then stops (audit C-L1).
+  // Each quiet knock is a direct packet to the server, which wakes it when its power settings
+  // allow; the page doesn't flicker.
   clearTimeout(state.retryTimer);
+  const chain = ++state.knockChain;
   state.offSince ??= Date.now();
   const knock = async () => {
     try {
-      await api.serverInfo({ signal: AbortSignal.timeout(8_000) });
+      await api.serverInfo({ signal: logic.timeoutSignal(8_000) });
     } catch {
+      if (chain !== state.knockChain) return;
       state.retryTimer = setTimeout(knock, logic.wakeRetryDelay(state.offSince, Date.now()));
       return;
     }
+    if (chain !== state.knockChain) return;
     state.offSince = null;
     start();
   };
@@ -690,6 +698,7 @@ async function signOut() {
   scrollMemory.clear();
   settings.closeEditors();
   stopSync();
+  closeMiniRemote();
   closePlayer();
   await movieNight.leave();
   try {
@@ -705,6 +714,7 @@ async function switchProfile() {
   scrollMemory.clear();
   settings.closeEditors();
   stopSync();
+  closeMiniRemote();
   closePlayer();
   state.wishSummary = null;
   wishes.reset();
@@ -723,6 +733,7 @@ async function sessionEnded() {
   catalog.close();
   settings.closeEditors();
   stopSync();
+  closeMiniRemote();
   closePlayer();
   state.wishSummary = null;
   wishes.reset();
@@ -1880,6 +1891,11 @@ function aboutSection(detail) {
 
 let activeMiniRemote = null;
 
+/** The mini remote ends with the session it belongs to: sign-out, another profile, a refused session or a sleeping server (audit C-L2). */
+function closeMiniRemote() {
+  activeMiniRemote?.close(false);
+}
+
 async function startRemotePlayback(device, target, plan) {
   try {
     const position = plan?.action === "resume" ? (target?.progress?.positionMilliseconds ?? 0) / 1000 : 0;
@@ -1996,6 +2012,9 @@ function showMiniRemote(device, target) {
         close(false);
       } else if (error?.status === 409 || error?.code === "target_profile_mismatch") {
         toast(`Profile changed on ${device.deviceName}.`);
+        close(false);
+      } else if (error?.status === 401 || error?.status === 403) {
+        // A refused session never answers again; asking every few seconds only adds load.
         close(false);
       }
     }

@@ -5,7 +5,7 @@
 import { h, clear } from "./dom.js";
 import {
   segmentOrigin, segmentRequest, segmentTimeText, segmentTrimClamp, segmentTrimInitial, segmentTrimLabel,
-  segmentTrimSpan, segmentProgress, segmentRemaining, segmentMovieSummary, scrubPreviewFrameUrl,
+  segmentTrimSpan, segmentProgress, segmentRemaining, segmentMovieSummary, scrubPreviewFrameUrl, keepsPolling,
 } from "./logic.js";
 import { triesDirectPlay } from "./live-logic.js";
 
@@ -361,10 +361,16 @@ export function serverSegmentsSection({ api, section, row, toggle }) {
     } catch (error) { message.textContent = error.message; }
   }
   details.addEventListener("toggle", refreshSeries);
+  const startedAt = Date.now();
+  let everConnected = false;
+  const polling = () => {
+    everConnected ||= element.isConnected;
+    return keepsPolling({ connected: element.isConnected, everConnected, startedAt, now: Date.now() });
+  };
   const tick = async () => {
-    if (!element.isConnected && settings) return;
+    if (!polling()) return;
     try { render(await api.serverMediaSegments()); } catch (error) { message.textContent = error.message; }
-    if (element.isConnected || !settings) setTimeout(tick, 5000);
+    if (polling()) setTimeout(tick, 5000);
   };
   tick();
   return element;
