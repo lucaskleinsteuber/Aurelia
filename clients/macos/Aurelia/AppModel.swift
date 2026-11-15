@@ -1086,6 +1086,16 @@ final class AppModel: ObservableObject {
     }
   }
 
+  /// Taking over another server while this Mac's own server waits for setup. Like the owner
+  /// setup, it talks to 127.0.0.1 only while this app's host reports its server waiting there.
+  func localSetupMoveClient() async throws -> LocalSetupMoveClient {
+    guard let token = hostSnapshot.bootstrapToken else {
+      throw NativeServerHostError.localServerNotReady
+    }
+    try await requireOwnLocalServer(accepting: [.setupRequired])
+    return LocalSetupMoveClient(bootstrapToken: token)
+  }
+
   /// The password travels over plain HTTP on 127.0.0.1, so it is sent only while this app's own
   /// server host reports its server in the expected state: then that server holds the port, not
   /// another program that took it while the server was stopped or restarting.

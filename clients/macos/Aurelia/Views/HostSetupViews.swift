@@ -115,6 +115,7 @@ struct NativeHostSetupView: View {
   @State private var showsPassword = false
   @State private var showsAdvancedSetup = false
   @State private var lanPort = 43_111
+  @State private var showsMove = false
 
   var body: some View {
     VStack(spacing: 24) {
@@ -170,12 +171,16 @@ struct NativeHostSetupView: View {
     .frame(maxWidth: .infinity)
     .padding(36)
     .background(AureliaBackdrop())
+    .sheet(isPresented: $showsMove) { HostSetupMoveView() }
   }
 
   private var ownerSetup: some View {
     VStack(spacing: 18) {
       VStack(spacing: 6) {
         Text("Set Up This Mac").font(.title.bold())
+        Button("Moving from another Aurelia server? Take it over…") { showsMove = true }
+          .buttonStyle(.link)
+          .accessibilityIdentifier("host-setup-move")
         Text("Choose a Server Password. Aurelia takes care of the server details.")
           .foregroundStyle(.secondary)
           .multilineTextAlignment(.center)

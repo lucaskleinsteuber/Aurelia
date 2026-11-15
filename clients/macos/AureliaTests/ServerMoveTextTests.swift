@@ -43,3 +43,45 @@ struct ServerMoveTextTests {
     #expect(waiting.isWaiting)
   }
 }
+
+/// What Set Up This Mac sends when it takes over another server.
+@MainActor
+struct SetupMovePlanTests {
+  private func location(_ suggestions: [(String, Int)]) -> SetupMoveStatus.Location {
+    SetupMoveStatus.Location(
+      id: UUID(), name: "Movies", oldPath: "/media/usb/Movies", sampled: 200,
+      suggestions: suggestions.map { StorageRelocationSuggestion(path: $0.0, matched: $0.1) })
+  }
+
+  @Test func theBestMatchingFolderIsPreselectedAndUnmatchedOnesWaitForLater() {
+    let found = location([("/srv/other", 3), ("/mnt/ssd/Movies", 198)])
+    let missing = location([("/home/someone", 0)])
+    let choices = SetupMovePlan.initialChoices(for: [found, missing])
+    #expect(choices[found.id] == "/mnt/ssd/Movies")
+    #expect(choices[missing.id] == nil)
+    let mappings = SetupMovePlan.mappings(
+      for: [found, missing], choices: choices.merging([missing.id: "  "]) { $1 })
+    #expect(mappings == [
+      SetupMoveMapping(id: found.id, path: "/mnt/ssd/Movies"),
+      SetupMoveMapping(id: missing.id, path: nil),
+    ])
+  }
+
+  @Test func typedAddressesGetHTTPSAndTheServerPort() {
+    #expect(SetupMovePlan.normalizedAddress("minipc.local") == "https://minipc.local:43111")
+    #expect(SetupMovePlan.normalizedAddress(" 192.168.1.20 ") == "https://192.168.1.20:43111")
+    #expect(SetupMovePlan.normalizedAddress("https://minipc.local:8443") == "https://minipc.local:8443")
+  }
+
+  @Test func statusDecodesWithoutLocationsAndFailuresReadPlainly() throws {
+    let idle = try JSONDecoder().decode(SetupMoveStatus.self, from: Data(#"{"state":"idle"}"#.utf8))
+    #expect(idle.locations == nil)
+    #expect(!idle.isWorking)
+    #expect(
+      SetupMovePlan.failureText("move_file_invalid", message: nil)
+        == "This is a backup, not a moving file. Make a moving file on the old server.")
+    #expect(SetupMovePlan.failureText("other", message: "Server text") == "Server text")
+    let progress = SetupMoveStatus.Progress(received: 50, expected: 200)
+    #expect(progress.fraction == 0.25)
+  }
+}
