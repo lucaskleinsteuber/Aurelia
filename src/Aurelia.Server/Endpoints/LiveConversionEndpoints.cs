@@ -20,6 +20,7 @@ public static partial class LiveConversionEndpoints
     public static void MapLiveConversion(this WebApplication app)
     {
         app.MapPost("/api/v1/media/{mediaId:guid}/conversion", PlanAsync).RequireAuthorization();
+        app.MapGet("/api/v1/media/{mediaId:guid}/download-options", DownloadOptionsAsync).RequireAuthorization();
         app.MapGet("/api/v1/streams/{ticket}/live", StreamAsync)
             .RequireAuthorization()
             .WithDisplayName("Stream converted media");
@@ -56,6 +57,39 @@ public static partial class LiveConversionEndpoints
             return LiveConversionPlanner.Plan(probe, request, live.ChooseEncoder(tools) is not null, () => tools.ToneMapping, sidecars) is { } plan
                 ? Results.Ok(plan)
                 : NotPossible();
+        }
+        catch (PlaybackException exception)
+        {
+            return Problem(exception.Code, exception.Message, exception.StatusCode);
+        }
+    }
+
+    /// <summary>The original's size and the smaller qualities a download can be converted to.</summary>
+    private static async Task<IResult> DownloadOptionsAsync(
+        Guid mediaId,
+        AureliaDbContext database,
+        LiveConversionService live,
+        CancellationToken cancellationToken)
+    {
+        // The catalog's access rules filter this lookup, as for a playback ticket.
+        var media = await database.MediaItems
+            .AsNoTracking()
+            .Include(candidate => candidate.LibraryRoot)
+            .SingleOrDefaultAsync(candidate => candidate.Id == mediaId, cancellationToken);
+        if (media is null) return Problem("media_not_found", "The media item was not found.", StatusCodes.Status404NotFound);
+        if (media.Kind == MediaKind.Series)
+            return Problem("media_not_playable", "This media item is a container and cannot be played directly.", StatusCodes.Status409Conflict);
+        try
+        {
+            var file = MediaFileAccess.OpenRead(media);
+            await using var stream = file.Stream;
+            if (await live.ToolsAsync() is not { } tools)
+                return Results.Ok(new DownloadOptionsResponse(file.Length, null, false, [], [], null));
+            var probe = await live.ProbeAsync(tools, file, Path.GetFullPath(media.SourcePath), media.Id, cancellationToken);
+            var encoder = live.ChooseEncoder(tools);
+            var canConvert = encoder is not null && (probe.Video is not { IsHdr: true } || tools.ToneMapping != HdrToneMapping.Unavailable);
+            return Results.Ok(DownloadOptions.For(probe, file.Length, canConvert,
+                step => encoder is { } chosen ? live.Pace.Last(chosen.Kind, step.Id)?.Speed : null));
         }
         catch (PlaybackException exception)
         {

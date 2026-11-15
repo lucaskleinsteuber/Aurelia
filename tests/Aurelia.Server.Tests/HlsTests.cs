@@ -414,11 +414,12 @@ public sealed partial class LiveConversionTests
             NullLogger<HlsSessionManager>.Instance, clock, converter);
 
     /// <summary>A session over an invented 200-second title in a file of its own; the returned owner deletes the file.</summary>
-    private static InventedFile Session(HlsSessionManager manager, string step, out HlsSession session, Guid? profileSession = null, FfmpegTools? tools = null)
+    private static InventedFile Session(HlsSessionManager manager, string step, out HlsSession session, Guid? profileSession = null, FfmpegTools? tools = null,
+        bool download = false)
     {
         var file = new InventedFile();
         var quality = StreamingLadder.Find(SmallPicture with { Width = 1920, Height = 1080 }, null, step)!;
-        var key = new HlsSessionKey(Guid.NewGuid(), profileSession ?? Guid.NewGuid(), Guid.Empty, step, 1);
+        var key = new HlsSessionKey(Guid.NewGuid(), profileSession ?? Guid.NewGuid(), Guid.Empty, step, 1, download);
         if (profileSession is not null) key = key with { UserId = Guid.Empty };
         session = manager.Create(key, file.Stream, file.Stream, file.Path, "Invented", 200, quality, SmallPicture,
             new ProbedAudio(1, "aac", null, 2, null, null, true), HdrToneMapping.Unavailable,

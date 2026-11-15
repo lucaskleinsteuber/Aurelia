@@ -130,6 +130,10 @@ public sealed partial class LiveConversionService : IDisposable
         ? slots.Value.Result.VideoLimit - slots.Value.Result.Video.CurrentCount
         : 0;
 
+    /// <summary>Whether every place to encode pictures is taken now.</summary>
+    public bool VideoPlacesTaken => slots.IsValueCreated && slots.Value.IsCompletedSuccessfully
+        && slots.Value.Result.Video.CurrentCount == 0;
+
     public async Task<bool> IsAvailableAsync() => await tools is not null;
 
     /// <summary>Whether pictures can be encoded, which adaptive streaming needs.</summary>

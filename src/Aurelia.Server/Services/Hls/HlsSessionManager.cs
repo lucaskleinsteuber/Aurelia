@@ -69,10 +69,49 @@ public sealed partial class HlsSessionManager(
         {
             others = sessions.Values.Select(entry => entry.Session)
                 .Where(other => other != session && other.Key.ProfileSessionId == session.Key.ProfileSessionId
-                    && other.Key.MediaId == session.Key.MediaId)
+                    && other.Key.MediaId == session.Key.MediaId && other.Key.Download == session.Key.Download)
                 .ToList();
         }
         foreach (var other in others) await other.StopProducerAsync();
+    }
+
+    private int playbackWaiting;
+
+    /// <summary>Whether someone who watches is waiting for a place to encode; downloads hold back meanwhile.</summary>
+    internal bool PlaybackWaiting => Volatile.Read(ref playbackWaiting) > 0;
+
+    /// <summary>Counts a session that watches while it waits for a place to encode.</summary>
+    internal IDisposable WaitForPlace()
+    {
+        Interlocked.Increment(ref playbackWaiting);
+        return new Waiting(this);
+    }
+
+    private sealed class Waiting(HlsSessionManager owner) : IDisposable
+    {
+        private int done;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref done, 1) == 0) Interlocked.Decrement(ref owner.playbackWaiting);
+        }
+    }
+
+    /// <summary>
+    /// Ends one running download conversion so someone can watch. The download's session stays;
+    /// its next segment starts converting again once a place is free.
+    /// </summary>
+    internal async Task<bool> PauseDownloadAsync(HlsSession forSession)
+    {
+        HlsSession? download;
+        lock (gate)
+        {
+            download = sessions.Values.Select(entry => entry.Session)
+                .FirstOrDefault(other => other != forSession && other.Key.Download && other.IsProducing);
+        }
+        if (download is null) return false;
+        LogDownloadPaused(logger);
+        await download.StopProducerAsync();
+        return true;
     }
 
     /// <summary>Ends sessions without a request for a minute.</summary>
@@ -113,6 +152,9 @@ public sealed partial class HlsSessionManager(
         lock (gate) keys = [.. sessions.Keys];
         foreach (var key in keys) await EndAsync(key);
     }
+
+    [LoggerMessage(LogLevel.Information, "A download's conversion paused so someone can watch")]
+    private static partial void LogDownloadPaused(ILogger logger);
 
     [LoggerMessage(LogLevel.Warning, "An HLS session did not end cleanly: {Message}")]
     private static partial void LogEndFailed(ILogger logger, string message);

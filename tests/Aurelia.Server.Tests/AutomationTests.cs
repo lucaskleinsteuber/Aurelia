@@ -147,6 +147,32 @@ public sealed class AutomationTests
     }
 
     [Fact]
+    public async Task ADownloadIsNoPlaybackForSmartHome()
+    {
+        var root = Directory.CreateDirectory(Path.Combine(TestPaths.CreateDataDirectory(), "Automation")).FullName;
+        var receiver = new Receiver();
+        try
+        {
+            using var factory = Factory(receiver);
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var media = await AddMovieAsync(factory, root);
+            await CreateWebhookAsync(client, owner.Token, [AutomationEvents.PlaybackStarted, AutomationEvents.PlaybackStopped]);
+            using (var odd = ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/media/{media}/playback?purpose=keep", owner.Token))
+            using (var refused = await client.SendAsync(odd))
+                Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            using var request = ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/media/{media}/playback?purpose=download", owner.Token);
+            using var response = await client.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            var ticket = (await ApiTestClient.ReadAsync<PlaybackSourceResponse>(response)).Id;
+            Assert.Null(factory.Services.GetRequiredService<PlaybackActivityTracker>().Find(ticket));
+            await Task.Delay(PlaybackActivityTracker.SilentStart + TimeSpan.FromSeconds(2));
+            Assert.Empty(receiver.Received);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task AFailingReceiverIsTriedAgainThenTheWebhookPauses()
     {
         var root = Directory.CreateDirectory(Path.Combine(TestPaths.CreateDataDirectory(), "Automation")).FullName;

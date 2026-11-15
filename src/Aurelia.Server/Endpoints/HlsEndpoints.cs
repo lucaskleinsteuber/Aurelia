@@ -50,27 +50,32 @@ public static partial class HlsEndpoints
         }
     }
 
-    private static Task<IResult> InitAsync(HttpContext context, string ticket, string step, int? audio, PlaybackService playback,
+    private static Task<IResult> InitAsync(HttpContext context, string ticket, string step, int? audio, string? purpose, PlaybackService playback,
         LiveConversionService live, CatalogMutationGate mutations, HlsSessionManager sessions, CancellationToken cancellationToken) =>
-        ServeAsync(context, ticket, step, audio, playback, live, mutations, sessions,
+        ServeAsync(context, ticket, step, audio, purpose, playback, live, mutations, sessions,
             (session, token) => session.InitAsync(token), cancellationToken);
 
-    private static Task<IResult> SegmentAsync(HttpContext context, string ticket, string step, int segment, int? audio, PlaybackService playback,
-        LiveConversionService live, CatalogMutationGate mutations, HlsSessionManager sessions, CancellationToken cancellationToken) =>
-        ServeAsync(context, ticket, step, audio, playback, live, mutations, sessions,
+    private static Task<IResult> SegmentAsync(HttpContext context, string ticket, string step, int segment, int? audio, string? purpose,
+        PlaybackService playback, LiveConversionService live, CatalogMutationGate mutations, HlsSessionManager sessions,
+        CancellationToken cancellationToken) =>
+        ServeAsync(context, ticket, step, audio, purpose, playback, live, mutations, sessions,
             (session, token) => segment >= 0 && segment < session.SegmentCount ? session.SegmentAsync(segment, token) : Task.FromResult<byte[]?>(null),
             cancellationToken, segment);
 
-    private static async Task<IResult> ServeAsync(HttpContext context, string ticket, string step, int? audio, PlaybackService playback,
-        LiveConversionService live, CatalogMutationGate mutations, HlsSessionManager sessions,
+    private static async Task<IResult> ServeAsync(HttpContext context, string ticket, string step, int? audio, string? purpose,
+        PlaybackService playback, LiveConversionService live, CatalogMutationGate mutations, HlsSessionManager sessions,
         Func<HlsSession, CancellationToken, Task<byte[]?>> read, CancellationToken cancellationToken, int? segment = null)
     {
         if (!StepName().IsMatch(step)) return QualityNotFound();
+        // "download": an app keeps this copy ("converted-downloads-v1"); it yields to anyone who watches.
+        if (purpose is not (null or "" or "playback" or "download"))
+            return Problem("invalid_purpose", "The purpose must be playback or download.", StatusCodes.Status400BadRequest);
         var (opened, problem) = await OpenAsync(context, ticket, audio, playback, live, mutations, cancellationToken);
         if (opened is null) return problem!;
         var lease = context.Items["Aurelia.StreamLease"] as ActiveStreamRegistry.Lease;
         lease?.BindMedia(opened.Source.MediaId);
-        var key = new HlsSessionKey(context.User.RequireUserId(), context.User.RequireProfileSessionId(), opened.Source.MediaId, step, opened.Audio?.Index);
+        var key = new HlsSessionKey(context.User.RequireUserId(), context.User.RequireProfileSessionId(), opened.Source.MediaId, step, opened.Audio?.Index,
+            Download: purpose == "download");
         HlsSession session;
         try
         {

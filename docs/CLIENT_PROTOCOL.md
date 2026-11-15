@@ -507,6 +507,33 @@ normal player without the server; progress watched offline is saved on the compu
 with the expected revision once the server answers and the profile is open, unless the server
 already has a newer position.
 
+Download tickets are created with `POST /api/v1/media/{id}/playback?purpose=download` (server
+2.20.0; older servers ignore it): nobody watches yet, so Smart Home hears no `playback.*` event
+and no scrub previews are made for the title.
+
+### Smaller downloads
+
+`converted-downloads-v1` (server 2.20.0, reported with `adaptive-streaming-v1`). By the owner's
+decision of 15.11.2026 a download may be a smaller copy the server converts live; only the app
+keeps it, in the same data folder as an original download.
+
+- `GET /api/v1/media/{id}/download-options` returns `originalBytes`, `durationSeconds`,
+  `canConvert`, `qualities` (best first, each `{ id, width, height, estimatedBytes,
+  estimatedSeconds }`, only those clearly smaller than the original; `estimatedSeconds` once the
+  server measured its speed), `audioTracks` (as in the conversion plan) and `audioTrack`.
+- The app fetches `{streamPath}/hls/{quality}/index.m3u8`, `…/init.mp4` and every
+  `…/{n}.m4s` in order, each with `?audio={index}&purpose=download`, and writes init and
+  segments one after another into one fragmented MP4. Segments carry title time, so a download
+  that stopped continues with segment n in a new session and its pieces still make one file;
+  an init that changed (another encoder) means starting over.
+- A download session is its own session. When every place to encode pictures is taken and
+  someone starts watching, the download's conversion stops and its next segment answers
+  `429 conversion_busy` with `Retry-After` until a place is free; the app waits and asks again.
+  Downloads never make a playing session yield. `purpose` other than `playback` or `download`
+  is `400 invalid_purpose`.
+- A ticket that ended (`401`/`404`) is replaced by a new download ticket; the HLS session does
+  not depend on the ticket.
+
 ## Collections and smart lists
 
 The server reports capability `collections-v3` (extending `collections-v2`).

@@ -29,7 +29,8 @@ public sealed class PlaybackService(
         Guid deviceSessionId,
         Guid mediaId,
         CancellationToken cancellationToken,
-        Guid? profileSessionId = null)
+        Guid? profileSessionId = null,
+        bool download = false)
     {
         var now = DateTimeOffset.UtcNow;
         await PruneExpiredAsync(now, cancellationToken);
@@ -94,7 +95,7 @@ public sealed class PlaybackService(
         };
         database.PlaybackTickets.Add(ticket);
         await database.SaveChangesAsync(cancellationToken);
-        if (activity is not null)
+        if (activity is not null && !download)
         {
             var (device, profile, described) = await Automation.PlaybackActivityTracker.DescribeAsync(
                 database, session, activeUser, media, cancellationToken);

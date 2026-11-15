@@ -3,8 +3,12 @@ using System.Diagnostics;
 namespace Aurelia.Server.Services.Hls;
 
 /// <summary>Which HLS session a request belongs to: the profile session's title in one quality and sound track.</summary>
-/// <remarks>It holds no playback ticket, so a renewed ticket keeps using the same session.</remarks>
-public sealed record HlsSessionKey(Guid UserId, Guid ProfileSessionId, Guid MediaId, string Step, int? Audio);
+/// <remarks>
+/// It holds no playback ticket, so a renewed ticket keeps using the same session. A download
+/// (<paramref name="Download"/>) is a session of its own: it gives its conversion place to anyone
+/// who starts watching and never makes a playing session yield.
+/// </remarks>
+public sealed record HlsSessionKey(Guid UserId, Guid ProfileSessionId, Guid MediaId, string Step, int? Audio, bool Download = false);
 
 /// <summary>One running ffmpeg for a session: its fragmented MP4 output and how to end it.</summary>
 public interface IHlsRun : IDisposable
@@ -230,8 +234,7 @@ public sealed partial class HlsSession : IAsyncDisposable
             await StopProducerAsync();
             // Only one conversion per title and profile session: an earlier quality yields its place.
             await manager.YieldOthersAsync(this);
-            var slot = await live.EnterAsync(encodesVideo: true, cancellationToken)
-                ?? throw new HlsBusyException();
+            var slot = await EnterAsync(cancellationToken) ?? throw new HlsBusyException();
             encoder ??= live.ChooseEncoder(tools) ?? throw new InvalidOperationException("The server cannot encode pictures.");
             var stop = CancellationTokenSource.CreateLinkedTokenSource(ending.Token);
             var options = new LiveStreamOptions(index * HlsPlaylists.SegmentSeconds, Video, encoder.Value.Kind, Audio, CopyAudio: false,
@@ -244,6 +247,24 @@ public sealed partial class HlsSession : IAsyncDisposable
             }
         }
         finally { control.Release(); }
+    }
+
+    /// <summary>
+    /// A place to encode pictures. Someone watching takes the place of a download when every place
+    /// is taken; a download waits while anyone who watches is waiting for one.
+    /// </summary>
+    private async Task<IDisposable?> EnterAsync(CancellationToken cancellationToken)
+    {
+        if (Key.Download)
+        {
+            if (manager.PlaybackWaiting) return null;
+            return await live.EnterAsync(encodesVideo: true, cancellationToken);
+        }
+        using (manager.WaitForPlace())
+        {
+            if (live.VideoPlacesTaken) await manager.PauseDownloadAsync(this);
+            return await live.EnterAsync(encodesVideo: true, cancellationToken);
+        }
     }
 
     /// <summary>Ends the running ffmpeg, if any, and waits until it is gone.</summary>

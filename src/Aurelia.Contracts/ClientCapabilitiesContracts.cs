@@ -143,13 +143,20 @@ public static class ServerFeatures
     /// </summary>
     public const string AdaptiveStreaming = "adaptive-streaming-v1";
 
+    /// <summary>
+    /// Smaller downloads: the app chooses a quality and the server converts the copy live from the
+    /// adaptive-streaming qualities ("converted-downloads-v1", since server 2.20.0). Only the app
+    /// keeps it; the server stores nothing.
+    /// </summary>
+    public const string ConvertedDownloads = "converted-downloads-v1";
+
     /// <summary>The features this server reports: <see cref="All"/> and those its host provides.</summary>
     public static IReadOnlyList<string> Reported(bool liveConversion, bool speechAudio = false, bool adaptiveStreaming = false)
     {
         if (!liveConversion) return Array.AsReadOnly([.. All, WatchlistAndPeople, CollectionsV2, CollectionsV3, RemotePlayback]);
         List<string> features = [.. All, WatchlistAndPeople, CollectionsV2, CollectionsV3, RemotePlayback, LiveConversion, ScrubPreviews];
         if (speechAudio) features.AddRange([SpeechSubtitles, SubtitleSync]);
-        if (adaptiveStreaming) features.Add(AdaptiveStreaming);
+        if (adaptiveStreaming) features.AddRange([AdaptiveStreaming, ConvertedDownloads]);
         return features.AsReadOnly();
     }
 }

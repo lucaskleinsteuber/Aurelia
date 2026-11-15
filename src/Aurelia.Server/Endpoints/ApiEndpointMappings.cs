@@ -1127,18 +1127,25 @@ public static class ApiEndpointMappings
     private static Task<IResult> CreatePlaybackAsync(
         HttpContext context,
         Guid mediaId,
+        string? purpose,
         PlaybackService playback,
         ServerSleepSignal sleep,
         ScrubPreviewService scrubPreviews,
         CancellationToken cancellationToken)
     {
+        // "download": an app copies the title to keep it; nobody watches yet, so Smart Home hears
+        // nothing and no scrub previews are made for it (since server 2.20.0).
+        if (purpose is not (null or "" or "playback" or "download"))
+            return Task.FromResult(Results.Json(new ApiProblem("invalid_purpose", "The purpose must be playback or download."),
+                statusCode: StatusCodes.Status400BadRequest));
+        var download = purpose == "download";
         sleep.PlaybackStarted();
-        scrubPreviews.NotifyTitleOpened(mediaId);
+        if (!download) scrubPreviews.NotifyTitleOpened(mediaId);
         return ExecuteAsync(() => playback.CreateAsync(
             context.User.RequireUserId(),
             context.User.RequireSessionId(),
             mediaId,
-            cancellationToken, context.User.RequireProfileSessionId()));
+            cancellationToken, context.User.RequireProfileSessionId(), download));
     }
 
     private static Task<IResult> RevokePlaybackAsync(

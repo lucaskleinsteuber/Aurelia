@@ -30,7 +30,12 @@ These rules apply to every task in this repository.
   downloads a title to their own device to watch without the server. It is the
   original file streamed through the normal playback ticket, kept in that app's
   own data folder with a visible size, removable at any time, and never written
-  next to the media or on the server.
+  next to the media or on the server. Since the owner's decision of 15.11.2026 it
+  may instead be a smaller converted copy ("converted-downloads-v1"): the server
+  converts it live from its HLS qualities (`?purpose=download`, nothing stored on
+  the server, the conversion yields to anyone who watches) and only the app keeps
+  it, under the same rules as the original download. This is the one exception to
+  "converted video is never stored", and it applies to the app's own data folder only.
 - Converting video live is allowed: decoding, remuxing or transcoding while a
   title plays (for example for a browser or a device that cannot play the
   original), and scrub previews decoded ahead in the background. Converted

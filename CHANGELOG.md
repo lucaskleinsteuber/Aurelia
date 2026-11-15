@@ -15,6 +15,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
+- Server, Mac, Linux and iPhone & iPad: smaller downloads. With Download Quality in Settings › Playback (Ask Every Time, Original, 1080p, 720p, 480p) a download can be a copy the server converts while it downloads, shown with its expected size and how long the server needs; a title that is already small keeps its original. Only the device keeps the copy, the server stores nothing, and its conversion steps aside whenever someone starts watching. On iPhone and iPad it continues in the background with the system's progress and Try Again goes on where it stopped.
 - Server, Mac, browser, Linux and iPhone & iPad: a file watch. Settings › Server › File Watch (off until turned on) has the server read every file in the background while nobody watches, keep its checksum and, by choice, let ffmpeg read every packet or decode everything. Library Health › File Problems lists files the drive can't read, files that are cut off or damaged (with about where) and files that changed by themselves although their size and date stayed the same (bit rot), with Examine Again and Set Aside.
 - Server, Mac, browser, Linux and iPhone & iPad: Library Health › Drives shows how the drives with storage locations are doing, as they report it themselves (SMART): state, temperature, running hours and bad sectors, from UDisks on Linux and diskutil on a Mac, without waking a sleeping drive.
 - Server: Smart Home webhooks can receive "Damaged File" (`library.file_damaged`) and "Drive Warning" (`server.drive_failing`).
@@ -61,6 +62,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Fixed
 
+- Server, Mac, Linux and iPhone & iPad: a download no longer counts as playback for Smart Home, which sent "Playback Starts" five seconds after a download began, and no longer prepares scrub previews for the title.
 - Mac: saving one server settings box no longer throws away unsaved changes in the others, and a profile whose photo failed to upload is no longer created twice on the next Save. Pages that failed to load (Watchlist, collections, history, year in review, Smart Home, subtitles, previews, conversion, speech) say so with Try Again instead of looking empty or "all good". Play on a series starts with season 1, not the Specials; the remote player's slider seeks once when released; unmatched trailers can be assigned again; storage locations on another computer's server can be scanned and removed.
 - Mac: resetting the library no longer hangs when the server still cleans up artwork, and Find Intros and Credits no longer locks its section for hours. A title's page that can't load offers Back and Try Again, a deleted collection shows a page with Back, the hero's Continue plays a started movie or episode, and More Actions marks the chosen season.
 - Mac: TMDB and OpenSubtitles keys stay in their field until the server accepted them, Create Key and Save as Collection can't run twice, the intro editor stops playing once closed, Enrich Library can't start a second job, and adding to or removing from a collection says when it failed.

@@ -22,7 +22,8 @@ server can see and delete this data; ask them if you want your profile removed.
 ## What stays on your device
 
 Each app remembers the servers it connects to, its settings, a cache of pictures and, if you
-download titles to watch offline, those downloads and the information shown about them. Sign-in
+download titles to watch offline, those downloads (the original file or a smaller copy the server
+converted for you) and the information shown about them. Sign-in
 keys are kept in the system's protected storage (the Keychain on Apple devices). Deleting the app
 or signing out removes them.
 

@@ -82,3 +82,26 @@ public sealed record TranscodingStatusResponse(
 
 /// <param name="Speed">ffmpeg's speed against real time, such as 3.5; null before it reported one.</param>
 public sealed record TranscodingSessionStatus(string Title, string Quality, string? Encoder, double? Speed, bool Converting);
+
+/// <summary>
+/// What a title can be downloaded as ("converted-downloads-v1", server 2.20.0): the original file,
+/// or a smaller copy the server converts live from the adaptive-streaming qualities. The app
+/// fetches the converted copy's init and media segments with <c>?purpose=download</c> and keeps
+/// them as one fragmented MP4 in its own data folder; the server stores nothing.
+/// </summary>
+/// <param name="OriginalBytes">The original file's size.</param>
+/// <param name="CanConvert">Whether this server can convert the title now.</param>
+/// <param name="Qualities">Smaller qualities, best first; empty when none would be smaller.</param>
+/// <param name="AudioTrack">The track a download uses unless the app chooses another.</param>
+public sealed record DownloadOptionsResponse(
+    long OriginalBytes,
+    double? DurationSeconds,
+    bool CanConvert,
+    IReadOnlyList<DownloadQuality> Qualities,
+    IReadOnlyList<LiveAudioTrack> AudioTracks,
+    int? AudioTrack);
+
+/// <param name="Id">The quality's name in HLS addresses, such as "720p".</param>
+/// <param name="EstimatedBytes">About how large the download will be.</param>
+/// <param name="EstimatedSeconds">About how long the server needs to convert it, once it measured its speed.</param>
+public sealed record DownloadQuality(string Id, int Width, int Height, long EstimatedBytes, int? EstimatedSeconds);
