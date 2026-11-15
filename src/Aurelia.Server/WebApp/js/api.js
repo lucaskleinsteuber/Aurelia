@@ -21,10 +21,23 @@ export class ApiError extends Error {
  * @param {(path: string, method: string) => void} [hooks.onChange]  called before each request that
  *   may change something on the server (everything but GET and HEAD), so remembered pages can be dropped
  */
-export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { onChange } = {}) {
-  async function request(path, { method = "GET", body, as = "profile", signal, keepalive = false, approval } = {}) {
+export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { onChange, onMoved } = {}) {
+  /** A problem answer as an ApiError; a server that moved away also tells the app (docs/SERVER_MOVE.md). */
+  function problem(status, value) {
+    const error = new ApiError(status, value?.code ?? `http_${status}`, value?.message ?? defaultMessage(status));
+    if (value && typeof value === "object") {
+      if (value.mediaId != null) error.mediaId = value.mediaId;
+      if (value.title != null) error.mediaTitle = value.title;
+      if (value.kind != null) error.mediaKind = value.kind;
+      if (value.movedTo && typeof value.movedTo === "object") error.movedTo = value.movedTo;
+    }
+    if (status === 409 && error.code === "server_moved") onMoved?.(error);
+    return error;
+  }
+
+  async function request(path, { method = "GET", body, as = "profile", signal, keepalive = false, approval, headers: extra } = {}) {
     if (method !== "GET" && method !== "HEAD") onChange?.(path, method);
-    const headers = { Accept: "application/json", "X-Aurelia-Web": as };
+    const headers = { Accept: "application/json", "X-Aurelia-Web": as, ...(extra ?? {}) };
     if (body !== undefined) headers["Content-Type"] = "application/json";
     if (approval) headers["X-Aurelia-Approval"] = approval;
     let response;
@@ -51,26 +64,18 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     } catch {
       if (response.ok) throw new ApiError(response.status, "invalid_response", "The server returned an unreadable answer. Try again.");
     }
-    if (!response.ok) {
-      const error = new ApiError(response.status, value?.code ?? `http_${response.status}`, value?.message ?? defaultMessage(response.status));
-      if (value && typeof value === "object") {
-        if (value.mediaId != null) error.mediaId = value.mediaId;
-        if (value.title != null) error.mediaTitle = value.title;
-        if (value.kind != null) error.mediaKind = value.kind;
-      }
-      throw error;
-    }
+    if (!response.ok) throw problem(response.status, value);
     return value;
   }
 
   const id = (value) => encodeURIComponent(value);
 
   /** Sends a file as it is (a picture or an encrypted backup); the answer is JSON or nothing. */
-  async function send(path, blob, { method = "POST", contentType = blob?.type || "application/octet-stream", signal } = {}) {
+  async function send(path, blob, { method = "POST", contentType = blob?.type || "application/octet-stream", signal, as = "profile", headers: extra } = {}) {
     onChange?.(path, method);
     let response;
     try {
-      response = await fetchImpl(path, { method, body: blob, headers: { Accept: "application/json", "Content-Type": contentType, "X-Aurelia-Web": "profile" },
+      response = await fetchImpl(path, { method, body: blob, headers: { Accept: "application/json", "Content-Type": contentType, "X-Aurelia-Web": as, ...(extra ?? {}) },
         credentials: "same-origin", cache: "no-store", signal });
     } catch (error) {
       if (error?.name === "AbortError") throw error;
@@ -79,7 +84,7 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     const text = response.status === 204 ? "" : await response.text();
     let value = null;
     try { value = text ? JSON.parse(text) : null; } catch { /* A plain answer has no details. */ }
-    if (!response.ok) throw new ApiError(response.status, value?.code ?? `http_${response.status}`, value?.message ?? defaultMessage(response.status));
+    if (!response.ok) throw problem(response.status, value);
     return value;
   }
 
@@ -95,7 +100,7 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     if (!response.ok) {
       let value = null;
       try { value = JSON.parse(await response.text()); } catch { /* No details. */ }
-      throw new ApiError(response.status, value?.code ?? `http_${response.status}`, value?.message ?? defaultMessage(response.status));
+      throw problem(response.status, value);
     }
     return response.blob();
   }
@@ -111,6 +116,19 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     const grant = await request("/api/v1/management/approval", { method: "POST", body: { action: `${method} ${path}`, payloadHash }, signal });
     if (!grant?.token) throw new ApiError(200, "invalid_response", "The server did not authorize this change. Try again.");
     return request(path, { method, body: body === undefined ? undefined : text, approval: grant.token, signal });
+  }
+
+  /**
+   * Sends a change as it is and asks for an approval only when the server wants one: a server that
+   * moved away answers nothing but its move, so its Undo Move cannot depend on an approval.
+   */
+  async function approvedIfAsked(path, { method = "POST", body, signal } = {}) {
+    try {
+      return await request(path, { method, body, signal });
+    } catch (error) {
+      if (error?.status === 403 && error.code === "approval_required") return approved(path, { method, body, signal });
+      throw error;
+    }
   }
 
   return {
@@ -420,6 +438,28 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     uploadBackup: (uploadId, file, options = {}) => send(`/api/v1/server/backups/uploads/${id(uploadId)}`, file, { ...options, method: "PUT", contentType: "application/octet-stream" }),
     prepareRestore: (body) => approved("/api/v1/server/backups/restore/prepare", { body }),
     applyRestore: (restoreId) => approved(`/api/v1/server/backups/restore/${id(restoreId)}/apply`),
+    // Moving to a new server (docs/SERVER_MOVE.md). On the old server, as its owner:
+    serverMove: (options = {}) => request("/api/v1/server/move", options),
+    startServerMove: (body) => approved("/api/v1/server/move", { body }),
+    markServerMoved: () => approved("/api/v1/server/move/mark-moved"),
+    /** Cancels a waiting move, or undoes one that finished. */
+    endServerMove: () => approvedIfAsked("/api/v1/server/move", { method: "DELETE" }),
+    // On the new server before it has an owner, with the one-time setup code.
+    setupMove: (setupCode, options = {}) => request("/api/v1/setup/move", { ...options, as: "device", headers: { "X-Aurelia-Setup-Code": setupCode } }),
+    startNetworkMove: (setupCode, address, code) =>
+      request("/api/v1/setup/move/network", { method: "POST", body: { address, code }, as: "device", headers: { "X-Aurelia-Setup-Code": setupCode } }),
+    uploadMovingFile: (setupCode, file, options = {}) =>
+      send("/api/v1/setup/move/file", file, { ...options, method: "PUT", contentType: "application/octet-stream", as: "device", headers: { "X-Aurelia-Setup-Code": setupCode } }),
+    openMovingFile: (setupCode, uploadId, passphrase) =>
+      request(`/api/v1/setup/move/file/${id(uploadId)}/open`, { method: "POST", body: { passphrase }, as: "device", headers: { "X-Aurelia-Setup-Code": setupCode } }),
+    previewMoveLocation: (setupCode, locationId, path, options = {}) =>
+      request("/api/v1/setup/move/locations/preview", { ...options, method: "POST", body: { id: locationId, path }, as: "device", headers: { "X-Aurelia-Setup-Code": setupCode } }),
+    finishMove: (setupCode, body) => request("/api/v1/setup/move/finish", { method: "POST", body, as: "device", headers: { "X-Aurelia-Setup-Code": setupCode } }),
+    discardMove: (setupCode) => request("/api/v1/setup/move", { method: "DELETE", as: "device", headers: { "X-Aurelia-Setup-Code": setupCode } }),
+    // Storage Location Moved (owner, any time).
+    relocateSuggestions: (libraryId, options = {}) => request(`/api/v1/libraries/${id(libraryId)}/relocate/suggestions`, options),
+    previewRelocation: (libraryId, path, options = {}) => request(`/api/v1/libraries/${id(libraryId)}/relocate/preview`, { ...options, method: "POST", body: { path } }),
+    relocateLibrary: (libraryId, path, force = false) => approved(`/api/v1/libraries/${id(libraryId)}/relocate`, { body: force ? { path, force: true } : { path } }),
     cinemaTrailers: (mediaId, count, options = {}) => request(`/api/v1/media/${id(mediaId)}/cinema-trailers?${new URLSearchParams({ count })}`, options),
     changes: (after, generation, signal) =>
       request(`/api/v1/sync/changes?${new URLSearchParams(generation ? { after, waitSeconds: 25, generation } : { after, waitSeconds: 25 })}`, { signal }),

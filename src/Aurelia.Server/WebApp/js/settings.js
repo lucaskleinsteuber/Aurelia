@@ -18,6 +18,7 @@ import { applyAppearance, loadGeneral, saveGeneral } from "./preferences.js";
 import { createManagementEditors } from "./settings-editors.js";
 import { createServerUpdates } from "./server-updates.js";
 import { createAdminTools } from "./settings-admin.js";
+import { createMoveTools } from "./server-move-view.js";
 import { createImportPreview } from "./import-preview.js";
 import { cropPhoto } from "./photo-crop.js";
 import { serverSegmentsSection, SEGMENTS_FEATURE } from "./segments-view.js";
@@ -53,6 +54,7 @@ export function createSettings(app) {
     reviewImport: (library) => importPreview.open(library, { onDone: () => app.navigate(state.route, { replace: true, quiet: true }) }) });
   const admin = createAdminTools({ api, app, editors });
   const importPreview = createImportPreview({ api, app, kit: editors.kit });
+  const move = createMoveTools({ api, app, kit: editors.kit, chooseServerFolder: (onPick, start) => admin.chooseServerFolder(onPick, start) });
   let updatesView;
   let serverRead = new AbortController();
   let searchQuery = "";
@@ -556,6 +558,7 @@ export function createSettings(app) {
               ? openButton("Review Import…", () => importPreview.open(library, { onDone: refresh }), "primary-button")
               : button("Scan Now", () => api.scanLibrary(library.id), `Scanning ${library.name}…`, "secondary-button", refresh),
             openButton("Left Out…", () => admin.exclusions(library, refresh)),
+            permissions.owner && typeof api.relocateSuggestions === "function" ? openButton("Storage Location Moved…", () => move.relocate(library, refresh)) : null,
             permissions.owner ? openButton("Remove…", () => editors.removeStorage(library), "secondary-button danger") : null)))
           : h("p", { class: "muted" }, "No storage locations configured."),
         h("div", { class: "button-row" },
@@ -750,6 +753,9 @@ export function createSettings(app) {
           ? h("p", { class: "muted small" }, "Restoring swaps the server’s data, which a server hosted by Aurelia for Mac or installed from the Linux package can do. Encrypted backups from here can be restored there.") : null) : null,
 
       permissions.owner && sections?.policy?.stored ? serverPolicySection(sections.policy.stored, refresh) : null,
+
+      permissions.owner && typeof api.serverMove === "function" ? section("Move to a New Server", "arrow", "Takes this server to another computer, as on the Mac. Asks for the Server Password.",
+        move.moveSection(refresh)) : null,
 
       permissions.owner ? section("Maintenance", "gear", "Restart the server or save a report of recent events for troubleshooting. The report holds no passwords, tokens or media paths.",
         h("div", { class: "button-row" },

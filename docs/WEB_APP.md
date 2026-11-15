@@ -45,6 +45,28 @@ The code exists only while the server has no owner. It lives in the server's pri
 day, and ten wrong tries replace it, so someone else at home cannot claim the server first. Until
 the owner exists the network reaches only the browser app and the setup step.
 
+### Moving from another Aurelia server
+
+The setup's first step asks **Set Up a New Server** or **Move from Another Aurelia Server**
+([SERVER_MOVE.md](SERVER_MOVE.md)). Moving asks for the same setup code, then either the old
+server's address and its move code (a browser cannot search the network, so the address is typed
+as the old server's Move window shows it) or the moving file and its passphrase. The page follows
+`GET /api/v1/setup/move`, then lists each old storage location with its best folder on this
+computer ("412 of 415 sample files found"), the other suggestions, a typed folder with **Preview**,
+and **Later**. **Finish Move** restarts the server with the old one's identity; the page waits for
+it and asks to sign in with a code, because a browser's sign-in belongs to the address. Every setup
+call sends the code in `X-Aurelia-Setup-Code`; it stays in the page's memory only.
+
+On the old server, **Settings › Server › Move to a New Server** (owner) shows the move code with its
+countdown, or saves the moving file through the backup transfer download, and offers Cancel, Mark
+as Moved and Undo Move (only after confirming that the new server is off). **Storage Location
+Moved…** on each storage location points it at a new folder after a preview; a folder without any
+matching sample file needs a second confirmation. When any call answers `409 server_moved`, or the
+public server info reports `moved`, the page shows where the server went with links to its
+addresses; the owner's open profile can still undo the move there, unlocking Server Management
+with the Server Password when it asks. The rules live in
+`js/server-move.js` and are tested in `tests/WebApp/server-move.test.mjs`.
+
 ## Signing in
 
 1. On the main device, the owner creates an 8-digit code: *Settings › Profiles and Devices ›

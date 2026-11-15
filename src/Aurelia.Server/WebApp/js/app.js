@@ -18,6 +18,8 @@ import { clockTime, closedLabel } from "./screen-time.js";
 import { LIVE_FEATURE } from "./live-logic.js";
 import { ADAPTIVE_FEATURE } from "./hls-logic.js";
 import { createSettings } from "./settings.js";
+import { createSetupMove, movedNotice } from "./server-move-view.js";
+import { movedDestination } from "./server-move.js";
 import { adScene, cinemaActs, cinemaWanted, comingUp, curtain, nextAd, AD_SECONDS, CURTAIN_EARLIEST, CURTAIN_LONGEST_WAIT, CURTAIN_OPENING, LAST_AD_KEY, TRAILER_LONGEST_SECONDS, TRAILER_START_SECONDS } from "./cinema.js";
 import { loadPreferences } from "./player.js";
 import { applyAppearance, loadGeneral, sidebarShows, startPath, visibleTitles } from "./preferences.js";
@@ -32,7 +34,7 @@ const api = createApi(undefined, { onChange: (path) => {
   if (path.endsWith("/player/heartbeat")) return;
   reads.clear();
   prefetches.forget();
-} });
+}, onMoved: (error) => showServerMoved(movedDestination(error)) });
 const remembered = (name, key, load) => reads.read(`${name}:${key}`, load, () => refreshSoon());
 const cached = {
   home: () => remembered("home", "", () => api.home()),
@@ -56,6 +58,7 @@ const state = {
   offSince: null,
   watchlistIds: new Set(),
   wishSummary: null,
+  movedToken: null,
 };
 
 // Settings › General: open on the chosen page when the app starts at Home.
@@ -92,6 +95,8 @@ async function start() {
   } catch (error) {
     return showServerOff(error);
   }
+  // A server that moved to another computer still answers its public info, and says where it went.
+  if (state.server?.moved) return showServerMoved(movedDestination(state.server));
   // A page reload keeps the open profile. A new tab, or the browser opened again, asks for the
   // profile (and its PIN) again, unless Settings › General keeps it open.
   try {
@@ -255,7 +260,7 @@ async function showPairing(note) {
   const token = ++state.renderToken;
   // A server nobody owns yet is set up here instead, with the code from the server computer.
   try {
-    if ((await api.webSetupStatus())?.open) return token === state.renderToken ? showServerSetup() : undefined;
+    if ((await api.webSetupStatus())?.open) return token === state.renderToken ? setupMove.choose() : undefined;
   } catch { /* Older servers have no browser setup; pairing works as before. */ }
   if (token !== state.renderToken) return;
   let busy = false;
@@ -375,10 +380,47 @@ function showServerSetup() {
     field("Owner Name", owner, "The owner manages the server. You choose a viewing PIN next."),
     field("Server Password", password, "At least 12 characters. It protects server changes like removing titles or restoring backups."),
     field("Repeat Server Password", repeat),
-    message, h("div", { class: "button-row" }, submit));
+    message, h("div", { class: "button-row" }, h("button", { type: "button", class: "secondary-button", onclick: () => setupMove.choose() }, "Back"), submit));
   clear(root);
   root.append(screenFrame(form));
   code.focus();
+}
+
+// Moving from another Aurelia server, as the other way to set up a server nobody owns yet.
+const setupMove = createSetupMove({
+  api,
+  show: (element) => {
+    catalog.close();
+    const token = ++state.renderToken;
+    clear(root);
+    root.append(screenFrame(element));
+    return token;
+  },
+  current: (token) => token === state.renderToken,
+  showPairing: (note) => showPairing(note),
+  showServerOff: () => showServerOff(),
+  newServerSetup: () => showServerSetup(),
+  serverName: () => state.server?.name ?? "Aurelia",
+});
+
+/** Every page gives way to the notice of a server that moved (409 server_moved or its info). */
+function showServerMoved(destination) {
+  if (!destination || (state.movedToken && state.movedToken === state.renderToken)) return;
+  catalog.close();
+  settings.closeEditors();
+  stopSync();
+  closeMiniRemote();
+  closePlayer();
+  state.profile = null;
+  document.title = "Aurelia";
+  const token = ++state.renderToken;
+  state.movedToken = token;
+  clear(root);
+  root.append(screenFrame(movedNotice({ api, destination, onUndone: () => {
+    state.movedToken = null;
+    toast("The move is undone. This server is back.");
+    start();
+  } })));
 }
 
 // MARK: Profiles
