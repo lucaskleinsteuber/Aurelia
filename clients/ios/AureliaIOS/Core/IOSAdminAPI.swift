@@ -455,6 +455,33 @@ extension IOSAPIClient {
   func removeHealthEntry(mediaId: UUID) async throws {
     try await adminSend("/api/v1/library/health/entries/\(Self.id(mediaId))", method: "DELETE")
   }
+
+  // MARK: The file watch ("file-checks-v1")
+
+  func serverFileChecks() async throws -> IOSFileCheckSettings {
+    try await admin("/api/v1/server/file-checks")
+  }
+  func saveServerFileChecks(_ request: IOSUpdateFileCheckSettings) async throws -> IOSFileCheckSettings {
+    try await admin("/api/v1/server/file-checks", method: "PUT", json: request)
+  }
+  func fileProblems(ignored: Bool = false) async throws -> [IOSFileProblem] {
+    try await admin(
+      "/api/v1/library/health/files",
+      query: [URLQueryItem(name: "ignored", value: ignored ? "true" : "false")] + Self.page(0, 100))
+  }
+  /// Has the server read the file again from the start and keep it as the new reference.
+  func recheckFile(mediaId: UUID) async throws {
+    try await adminSend("/api/v1/library/health/files/\(Self.id(mediaId))/recheck", method: "POST")
+  }
+  func setFileProblemIgnored(mediaId: UUID, ignored: Bool) async throws {
+    try await adminSend(
+      "/api/v1/library/health/files/\(Self.id(mediaId))/ignore", method: ignored ? "POST" : "DELETE")
+  }
+  func drives(refresh: Bool = false) async throws -> IOSDriveHealthResponse {
+    refresh
+      ? try await admin("/api/v1/library/health/drives/refresh", method: "POST")
+      : try await admin("/api/v1/library/health/drives")
+  }
   func previewReset(libraries: [UUID]) async throws -> IOSResetLibraryPreview {
     try await admin("/api/v1/libraries/reset/preview", method: "POST", json: libraries)
   }

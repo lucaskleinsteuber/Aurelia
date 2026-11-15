@@ -29,6 +29,7 @@ struct IOSAdminServerView: View {
 
 private struct IOSAdminServerContent: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
+  @EnvironmentObject private var model: IOSAppModel
   let overview: IOSAdminServerView.Overview
   let reload: () async -> Void
   @State private var confirmation: IOSAdminConfirmation?
@@ -111,6 +112,11 @@ private struct IOSAdminServerContent: View {
         }
         NavigationLink { IOSAdminSpeechView() } label: {
           IOSAdminToggleLabel("Speech Recognition", "Writes and syncs subtitles from speech.")
+        }
+        if model.supportsFileChecks {
+          NavigationLink { IOSAdminFileWatchView() } label: {
+            IOSAdminToggleLabel("File Watch", "Reads every file and finds damaged ones.")
+          }
         }
         NavigationLink { IOSAdminTranscodingView() } label: {
           IOSAdminToggleLabel("Video Conversion", "Converts video live for devices that can’t play the original.")
@@ -1061,5 +1067,83 @@ private struct IOSAdminPerformanceView: View {
     .navigationTitle("Performance")
     .navigationBarTitleDisplayMode(.inline)
     .adminConfirmation($confirmation)
+  }
+}
+
+/// The file watch: the server reads every file in the background and finds damaged ones.
+struct IOSAdminFileWatchView: View {
+  var body: some View {
+    IOSAdminLoader { try await $0.serverFileChecks() } content: { settings, reload in
+      IOSAdminFileWatchForm(settings: settings, reload: reload)
+    }
+    .navigationTitle("File Watch")
+    .navigationBarTitleDisplayMode(.inline)
+  }
+}
+
+private struct IOSAdminFileWatchForm: View {
+  @EnvironmentObject private var admin: IOSAdministrationModel
+  let settings: IOSFileCheckSettings
+  let reload: () async -> Void
+
+  var body: some View {
+    Form {
+      Section {
+        Toggle(
+          "Watch Files",
+          isOn: Binding(get: { settings.enabled }, set: { enabled in save(.init(enabled: enabled)) }))
+      } footer: {
+        Text(
+          "The server reads every file in the background, only while nobody watches, and tells you in Library Health when one is damaged, can’t be read or changed by itself. Files are only read, never changed. The first round reads the whole library once."
+        )
+      }
+      Section {
+        Picker(
+          "How Thoroughly",
+          selection: Binding(
+            get: { IOSFileCheckDepth(rawValue: settings.depth) ?? .container },
+            set: { depth in save(.init(enabled: settings.enabled, depth: depth.rawValue)) })
+        ) {
+          ForEach(IOSFileCheckDepth.allCases.filter { settings.canInspect || $0 == .read }) { depth in
+            Text(depth.title).tag(depth)
+          }
+        }
+        Picker(
+          "Read Again",
+          selection: Binding(
+            get: { settings.recheckDays },
+            set: { days in save(.init(enabled: settings.enabled, recheckDays: days)) })
+        ) {
+          ForEach(IOSFileWatchText.recheckChoices, id: \.days) { choice in Text(choice.title).tag(choice.days) }
+        }
+      } footer: {
+        Text(
+          (IOSFileCheckDepth(rawValue: settings.depth)?.detail ?? "")
+            + (settings.canInspect ? "" : " This server has no FFmpeg, so it can only read every byte.")
+            + " Read Again compares every file with the first time, to find bit rot.")
+      }
+      Section("Progress") {
+        if settings.enabled && settings.totalCount > 0 { ProgressView(value: settings.progress) }
+        Text(IOSFileWatchText.status(settings)).foregroundStyle(.secondary)
+        if let current = IOSFileWatchText.current(settings) {
+          Text(current).font(.caption).foregroundStyle(.secondary)
+        }
+      }
+    }
+    .scrollContentBackground(.hidden)
+    .background(IOSDesign.canvas.ignoresSafeArea())
+    .refreshable { await reload() }
+    .task(id: settings) {
+      // Follows the progress while files are still waiting; ends when the page closes.
+      guard settings.enabled, settings.pendingCount > 0 || settings.running else { return }
+      try? await Task.sleep(for: .seconds(5))
+      if !Task.isCancelled { await reload() }
+    }
+  }
+
+  private func save(_ request: IOSUpdateFileCheckSettings) {
+    Task {
+      if await admin.perform(nil, { _ = try await $0.saveServerFileChecks(request) }) { await reload() }
+    }
   }
 }

@@ -222,6 +222,8 @@ struct IOSCapabilities: Codable, Equatable, Sendable {
   var supportsScrubPreviews: Bool { capabilities?.contains("scrub-previews-v1") == true }
   /// Movie Night: the household swipes one deck until everyone likes a title.
   var supportsMovieNight: Bool { capabilities?.contains("movie-night-v1") == true }
+  /// The server reads every file in the background and reports damaged files and drives.
+  var supportsFileChecks: Bool { capabilities?.contains("file-checks-v1") == true }
   /// What to watch next after a movie or a series' last episode, and Home's "Because You Watched".
   var supportsSuggestions: Bool { capabilities?.contains("suggestions-v1") == true }
   /// Cinema mode's trailers before a film.

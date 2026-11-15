@@ -1125,6 +1125,9 @@ private struct IOSImportAssignmentEditor: View {
 /// information to match. Each part loads on its own, so one problem doesn't hide the others.
 private struct IOSAdminLibraryHealthView: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
+  @EnvironmentObject private var model: IOSAppModel
+  @State private var problems: Result<[IOSFileProblem], Error>?
+  @State private var drives: Result<IOSDriveHealthResponse, Error>?
   @State private var duplicates: Result<[IOSDuplicateGroup], Error>?
   @State private var offline: Result<[IOSHealthOfflineTitle], Error>?
   @State private var unmatched: Result<[IOSUnmatchedTitle], Error>?
@@ -1140,6 +1143,10 @@ private struct IOSAdminLibraryHealthView: View {
       duplicatesSection
       offlineSection
       unmatchedSection
+      if model.supportsFileChecks {
+        fileProblemsSection
+        drivesSection
+      }
     }
     .scrollContentBackground(.hidden)
     .background(IOSDesign.canvas.ignoresSafeArea())
@@ -1288,7 +1295,87 @@ private struct IOSAdminLibraryHealthView: View {
     async let first: Void = loadDuplicates()
     async let second: Void = loadOffline()
     async let third: Void = loadUnmatched()
-    _ = await (first, second, third)
+    async let fourth: Void = loadFileWatch()
+    _ = await (first, second, third, fourth)
+  }
+
+  private func loadFileWatch(refreshDrives: Bool = false) async {
+    guard model.supportsFileChecks else { return }
+    problems = await load { try await $0.fileProblems() }
+    drives = await load { try await $0.drives(refresh: refreshDrives) }
+  }
+
+  private var fileProblemsSection: some View {
+    Section {
+      switch problems {
+      case nil: ProgressView()
+      case .failure(let error):
+        IOSAdminSectionProblem(message: IOSAdministrationModel.message(error)) { await loadFileWatch() }
+      case .success(let list):
+        if list.isEmpty { Label("No file has a problem", systemImage: "checkmark.shield").foregroundStyle(.secondary) }
+        ForEach(list) { problem in fileProblemRow(problem) }
+      }
+    } header: {
+      Text("File Problems")
+    } footer: {
+      Text(
+        "Files the file watch found a problem in. Play a title to check it, replace a damaged file from a backup, then choose Examine Again. Turn the watch on in Settings › Server › File Watch."
+      )
+    }
+  }
+
+  private func fileProblemRow(_ problem: IOSFileProblem) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Label("\(problem.title) · \(IOSFileWatchText.problemTitle(problem.state))", systemImage: IOSFileWatchText.problemSymbol(problem.state))
+        .font(.headline)
+      Text(problem.fileName).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+      if let detail = problem.detail { Text(detail).font(.caption) }
+      let facts = IOSFileWatchText.facts(problem)
+      if !facts.isEmpty { Text(facts).font(.caption2).foregroundStyle(.secondary) }
+      HStack {
+        Button("Examine Again") {
+          let id = problem.mediaId
+          Task { if await admin.perform(nil, { try await $0.recheckFile(mediaId: id) }) { await loadFileWatch() } }
+        }
+        Spacer()
+        Button("Set Aside") {
+          let id = problem.mediaId
+          Task {
+            if await admin.perform(nil, { try await $0.setFileProblemIgnored(mediaId: id, ignored: true) }) { await loadFileWatch() }
+          }
+        }
+      }
+      .buttonStyle(.borderless)
+      .font(.callout)
+    }
+  }
+
+  private var drivesSection: some View {
+    Section {
+      switch drives {
+      case nil: ProgressView()
+      case .failure(let error):
+        IOSAdminSectionProblem(message: IOSAdministrationModel.message(error)) { await loadFileWatch() }
+      case .success(let answer):
+        ForEach(answer.drives) { drive in
+          VStack(alignment: .leading, spacing: 2) {
+            Label(
+              "\(drive.name) · \(IOSFileWatchText.driveTitle(drive.state))",
+              systemImage: drive.state == "failing" || drive.state == "warning" ? "externaldrive.badge.exclamationmark" : "externaldrive")
+              .foregroundStyle(drive.state == "failing" ? Color.red : drive.state == "warning" ? Color.orange : Color.primary)
+            Text(drive.libraries.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+            if let detail = drive.detail { Text(detail).font(.caption) }
+            let facts = IOSFileWatchText.driveFacts(drive)
+            if !facts.isEmpty { Text(facts).font(.caption2).foregroundStyle(.secondary) }
+          }
+        }
+        Button("Ask the Drives Again") { Task { await loadFileWatch(refreshDrives: true) } }
+      }
+    } header: {
+      Text("Drives")
+    } footer: {
+      Text("How the drives with your storage locations are doing, as they report it themselves. Many USB cases and network shares don’t report it.")
+    }
   }
 
   private func loadDuplicates() async {

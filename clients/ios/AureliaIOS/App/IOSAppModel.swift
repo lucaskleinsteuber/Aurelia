@@ -39,6 +39,7 @@ final class IOSAppModel: ObservableObject {
   var supportsCollectionsV3: Bool { capabilities?.supportsCollectionsV3 ?? false }
   var supportsScrubPreviews: Bool { capabilities?.supportsScrubPreviews ?? false }
   var supportsMovieNight: Bool { capabilities?.supportsMovieNight ?? false }
+  var supportsFileChecks: Bool { capabilities?.supportsFileChecks ?? false }
   var supportsSuggestions: Bool { capabilities?.supportsSuggestions ?? false }
   var supportsWrapped: Bool { capabilities?.supportsWrapped ?? false }
   var supportsMonthlyWrapped: Bool { capabilities?.supportsMonthlyWrapped ?? false }
