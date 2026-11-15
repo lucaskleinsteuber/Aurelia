@@ -1307,12 +1307,9 @@ struct AppSettingsView: View {
 
         if updater.state == .downloading || updater.state == .installing {
           AppUpdateProgressBar(updater: updater)
-          HStack {
-            Button("Show Progress Window") { updater.showProgress() }
-            if updater.state == .downloading {
-              Button("Cancel Download") { updater.cancelInstall() }
-                .accessibilityIdentifier("updates-cancel")
-            }
+          if updater.state == .downloading {
+            Button("Cancel Download") { updater.cancelInstall() }
+              .accessibilityIdentifier("updates-cancel")
           }
         } else if case .available(let release) = updater.state {
           Button("Install \(release.version) and Restart") { updater.startInstall(release) }

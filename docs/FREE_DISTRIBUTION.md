@@ -124,13 +124,14 @@ app's Info.plist; builds made in Xcode have none and cannot update). The reposit
 so updates check and download anonymously; the app has no GitHub token setting. The app
 also looks at launch when at least 24 hours have passed since its last successful check.
 *Settings › Updates › Check for updates automatically* is on by default; turning it off stops
-background checks. *Check for Updates…* continues to work manually.
+background checks. *Check for Updates…* in the Aurelia menu opens *Settings › Updates* and
+checks there; its answer shows on that page instead of in dialogs.
 
-Once an update is chosen (*Install and Restart* in the offer, or *Install … and Restart* in
-*Settings › Updates*), a small *Updating Aurelia* window shows the download with its size and
-percentage and a Cancel button, then that Aurelia closes and reopens by itself. Closing the
-window only hides it; *Check for Updates…* and Settings bring it back, and Settings shows the
-same bar.
+Once an update is chosen (*Install and Restart* in the offer of a background check, or
+*Install … and Restart* in *Settings › Updates*), *Settings › Updates* shows the download with
+its size, percentage and Cancel, and the Dock icon carries a small progress bar; there is no
+extra window. Then Aurelia closes and reopens by itself. In offline mode, where Settings can't
+open, the check answers in dialogs as before.
 
 To protect GitHub's anonymous rate limit (60 requests per hour per IP), checks send the HTTP
 `If-None-Match` header with the cached release `ETag`. When no newer release is published,

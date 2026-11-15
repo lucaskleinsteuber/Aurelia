@@ -59,10 +59,10 @@ final class AppUpdater: ObservableObject {
 
   var isBusy: Bool { state == .checking || state == .downloading || state == .installing }
 
-  /// Starts downloading and installing `release` and shows its progress window.
+  /// Starts downloading and installing `release`; Settings › Updates shows how far it is.
   func startInstall(_ release: AppRelease) {
     guard !isBusy else {
-      showProgress()
+      showUpdatesPage()
       return
     }
     installTask = Task { await install(release) }
@@ -74,10 +74,16 @@ final class AppUpdater: ObservableObject {
     installTask?.cancel()
   }
 
-  /// Brings the "Updating Aurelia" window back while an update downloads or installs.
-  func showProgress() {
-    guard state == .downloading || state == .installing else { return }
-    AppUpdateProgressWindow.shared.show(updater: self)
+  /// Opens Settings › Updates in the main window, where the check, the offer and the download
+  /// show. Returns false where Settings can't open (offline mode or no window yet), so the caller
+  /// falls back to a dialog.
+  @discardableResult
+  func showUpdatesPage() -> Bool {
+    guard let model = AppModel.active, model.offlineMode == nil else { return false }
+    NSApp.activate()
+    NSApp.windows.first { $0.canBecomeMain && $0.isVisible }?.makeKeyAndOrderFront(nil)
+    model.openSettings(.updates)
+    return true
   }
 
   /// At launch, at most once a day; it speaks up only when there is news.
@@ -89,12 +95,13 @@ final class AppUpdater: ObservableObject {
 
   /// Looks for a newer release; a check the user asked for always answers.
   func check(userInitiated: Bool) async {
-    // Asking again while an update downloads shows how far it is instead of doing nothing.
-    if userInitiated { showProgress() }
+    // Asked for by a person, the answer shows in Settings › Updates instead of in dialogs; asking
+    // again while an update downloads shows how far it is.
+    let onPage = userInitiated && showUpdatesPage()
     guard !isBusy else { return }
     guard userInitiated || AppUpdatePreferences.checksAutomatically(in: defaults) else { return }
     guard let repository else {
-      if userInitiated {
+      if userInitiated, !onPage {
         alert(
           "Updates Need a Release Build",
           "This copy of Aurelia was not built for publishing, so it can't look for updates on GitHub."
@@ -116,14 +123,16 @@ final class AppUpdater: ObservableObject {
       if AppUpdateLogic.isNewer(release, version: currentVersion, build: currentBuild) {
         state = .available(release)
         // Re-read choices after the request: Settings may have changed while it was in flight.
-        if AppUpdatePreferences.shouldOffer(
-          version: release.version, userInitiated: userInitiated, defaults: defaults)
+        // The page already shows Install; only a background check asks in a dialog.
+        if !onPage,
+          AppUpdatePreferences.shouldOffer(
+            version: release.version, userInitiated: userInitiated, defaults: defaults)
         {
           offer(release)
         }
       } else {
         state = .upToDate
-        if userInitiated {
+        if userInitiated, !onPage {
           alert(
             "Aurelia Is Up to Date",
             "You have the newest version, \(currentVersion) (\(currentBuild)).")
@@ -135,7 +144,7 @@ final class AppUpdater: ObservableObject {
         ?? "GitHub couldn't be reached. Check the internet connection, then try again."
       state = .failed(message)
       Self.logger.error("Update check failed: \(message, privacy: .public)")
-      if userInitiated { alert("Couldn't Check for Updates", message) }
+      if userInitiated, !onPage { alert("Couldn't Check for Updates", message) }
     }
   }
 
@@ -153,6 +162,7 @@ final class AppUpdater: ObservableObject {
     switch alert.runModal() {
     case .alertFirstButtonReturn:
       startInstall(release)
+      showUpdatesPage()
     case .alertThirdButtonReturn:
       AppUpdatePreferences.skip(version: release.version, in: defaults)
     default:
@@ -167,7 +177,7 @@ final class AppUpdater: ObservableObject {
     installingRelease = release
     progress = AppUpdateProgress(received: 0, expected: release.downloadBytes)
     state = .downloading
-    AppUpdateProgressWindow.shared.show(updater: self)
+    AppUpdateDockProgress.show(nil)
     var downloadedImage: URL?
     var pendingRequest: MacUpdateInstallRequest?
     do {
@@ -184,6 +194,7 @@ final class AppUpdater: ObservableObject {
       try Task.checkCancellation()
 
       state = .installing
+      AppUpdateDockProgress.show(nil)
       let helper = Bundle.main.bundleURL
         .appendingPathComponent("Contents/Helpers/Aurelia Server Host.app")
       let configuration = NSWorkspace.OpenConfiguration()
@@ -213,7 +224,7 @@ final class AppUpdater: ObservableObject {
       if let downloadedImage {
         try? FileManager.default.removeItem(at: downloadedImage.deletingLastPathComponent())
       }
-      AppUpdateProgressWindow.shared.close()
+      AppUpdateDockProgress.clear()
       progress = nil
       installingRelease = nil
       // Cancel was pressed: the download is gone and the update is still on offer.
@@ -225,7 +236,7 @@ final class AppUpdater: ObservableObject {
         (error as? AppUpdateError)?.message
         ?? "The update installer did not acknowledge the request. Aurelia has stayed open; try again."
       state = .failed(message)
-      alert("Couldn't Install the Update", message)
+      if !showUpdatesPage() { alert("Couldn't Install the Update", message) }
     }
   }
 
@@ -233,6 +244,7 @@ final class AppUpdater: ObservableObject {
   private func reportDownload(received: Int64, expected: Int64?) {
     guard state == .downloading, received >= progress?.received ?? 0 else { return }
     progress = AppUpdateProgress(received: received, expected: expected)
+    AppUpdateDockProgress.show(progress?.fraction)
   }
 
   /// A folder the helper can read too: the App Group shared with it.
