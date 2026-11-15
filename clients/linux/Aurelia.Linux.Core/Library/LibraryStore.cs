@@ -449,6 +449,8 @@ public sealed partial class LibraryStore(LibraryClient client, ArtworkCache artw
             return;
         }
         Error = failure.Message;
+        // A server that moved to another computer: the app follows it there (docs/SERVER_MOVE.md).
+        if (failure.IsServerMoved) onSessionFailure(failure);
     }
 
     public void ClearError() => Error = null;

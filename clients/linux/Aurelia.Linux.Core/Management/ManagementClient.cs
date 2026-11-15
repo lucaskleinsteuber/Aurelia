@@ -66,6 +66,16 @@ public sealed partial class ManagementClient(AureliaApi api, LibraryClient libra
         return await response.Content.ReadAsByteArrayAsync(cancellation);
     }
 
+    /// <summary>A large file the server sends (a moving file), streamed into <paramref name="destination"/>.</summary>
+    public async Task DownloadToAsync(string path, Stream destination, CancellationToken cancellation = default)
+    {
+        using var request = Request(HttpMethod.Get, path, null, null, null);
+        request.Headers.Accept.Clear();
+        using var response = await Pinned.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation);
+        if (!response.IsSuccessStatusCode) throw await AureliaApi.ProblemAsync(response, cancellation);
+        await response.Content.CopyToAsync(destination, cancellation);
+    }
+
     /// <summary>POST /api/v1/management/unlock with the Server Password; it lasts ten minutes.</summary>
     public async Task UnlockAsync(string reason, CancellationToken cancellation = default)
     {

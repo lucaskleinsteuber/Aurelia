@@ -5,6 +5,9 @@ namespace Aurelia.Linux.Core.Connection;
 /// <summary>A server found on the local network. Its name and id are hints until its key is checked.</summary>
 public sealed record DiscoveredServer(Guid? ServerId, string Name, Uri Address);
 
+/// <summary>A saved server's public info, and where it went when it moved to another computer.</summary>
+public sealed record ServerProbe(ServerInfoResponse Info, Aurelia.Linux.Core.Moving.MovedServer? Moved);
+
 /// <summary>A server read for the first time: its details and the key it presented.</summary>
 public sealed record InspectedServer(Uri Address, ServerInfoResponse Info, string Fingerprint);
 

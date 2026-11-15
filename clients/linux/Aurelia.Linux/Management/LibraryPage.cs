@@ -109,6 +109,10 @@ public sealed class LibraryPage : StackPanel
             AutomationProperties.SetName(preview, "Import Preview " + library.Name);
             var remove = Button("Remove", () => RemoveAsync(library), "destructive");
             AutomationProperties.SetName(remove, "Remove " + library.Name);
+            // Storage Location Moved… (owner): the files are now in another folder, on a new disk or computer.
+            var moved = Button("Location Moved…", () => RelocateAsync(library));
+            AutomationProperties.SetName(moved, "Storage Location Moved " + library.Name);
+            moved.IsVisible = scope.IsOwner;
             var monitoring = new CheckBox { Content = "Automatically detect changes in this storage location", IsChecked = library.MonitoringEnabled, FontSize = 12 };
             monitoring.IsCheckedChanged += async (_, _) =>
             {
@@ -124,7 +128,7 @@ public sealed class LibraryPage : StackPanel
                     {
                         Children =
                         {
-                            Buttons(preview, scan, remove).Also(b => { DockPanel.SetDock(b, Dock.Right); b.VerticalAlignment = VerticalAlignment.Center; }),
+                            Buttons(preview, scan, moved, remove).Also(b => { DockPanel.SetDock(b, Dock.Right); b.VerticalAlignment = VerticalAlignment.Center; }),
                             new StackPanel
                             {
                                 Spacing = 2,
@@ -230,6 +234,13 @@ public sealed class LibraryPage : StackPanel
         {
             refreshLibrary();
         }
+        await ReloadAsync();
+    }
+
+    private async Task RelocateAsync(LibrarySummary library)
+    {
+        if (!await scope.Sheets.ShowAsync(new StorageLocationMovedSheet(scope, library))) return;
+        refreshLibrary();
         await ReloadAsync();
     }
 

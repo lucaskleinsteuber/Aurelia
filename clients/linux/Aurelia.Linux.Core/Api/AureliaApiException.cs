@@ -16,6 +16,12 @@ public sealed class AureliaApiException(int status, string? code, string message
 
     public bool IsUnreachable => Code == "unreachable";
 
+    /// <summary>The server moved to another computer (409 server_moved); where it went, when it said so.</summary>
+    public bool IsServerMoved => Status == 409 && Code == "server_moved";
+
+    /// <summary>Where a server that moved went, from its 409 server_moved answer (docs/SERVER_MOVE.md).</summary>
+    public Moving.MovedServer? MovedTo { get; init; }
+
     public static AureliaApiException IdentityMismatch() =>
         new(0, "identity_mismatch", "This server's identity does not match the one you trusted. Check the server, then connect again.");
 

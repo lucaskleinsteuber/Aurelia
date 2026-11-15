@@ -377,6 +377,7 @@ public sealed class HostingScreenTests
         public int Resets { get; private set; }
         public string? NewPin { get; private set; }
         public (string ServerName, string OwnerName, string Password, int Port)? Setup { get; private set; }
+        public ISetupMoveChannel? SetupMove { get; init; }
 
         public Task StartAsync()
         {

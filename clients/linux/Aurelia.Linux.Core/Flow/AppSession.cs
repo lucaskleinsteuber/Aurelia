@@ -29,6 +29,8 @@ public sealed class AppSession : ObservableObject
     private LibraryStore? library;
     private IReadOnlyList<string> capabilities = [];
     private bool isResting;
+    private bool following;
+    private Moving.MovedServer? movedAway;
     private StoredServer? server;
     private ProfileSession? profile;
     private ConnectionStatus status;
@@ -142,6 +144,13 @@ public sealed class AppSession : ObservableObject
     /// <summary>True when the saved server runs on another computer, the only case in which Aurelia rests.</summary>
     public bool ConnectedElsewhere => Server is { } saved && !saved.LocallyManaged && !ServerAddress.IsLoopback(saved.Address);
 
+    /// <summary>Where the saved server moved when Aurelia could not follow it there; null otherwise.</summary>
+    public Moving.MovedServer? MovedAway
+    {
+        get => movedAway;
+        private set => SetProperty(ref movedAway, value);
+    }
+
     /// <summary>A problem to show on the current screen, or null.</summary>
     public string? Message
     {
@@ -209,6 +218,7 @@ public sealed class AppSession : ObservableObject
         try
         {
             var reached = await wakeUp.ReachAsync(saved, value => Status = value, attempt.Token);
+            MovedAway = null;
             if (reached is null)
             {
                 ShowUnreachable();
@@ -225,6 +235,7 @@ public sealed class AppSession : ObservableObject
         }
         catch (AureliaApiException error)
         {
+            MovedAway = error.MovedTo;
             Message = error.Message;
             ShowUnreachable();
         }
@@ -358,6 +369,11 @@ public sealed class AppSession : ObservableObject
     public void HandleSessionFailure(AureliaApiException error)
     {
         if (NetworkConfirmationPending) return;
+        if (error.IsServerMoved)
+        {
+            FollowMovedServer();
+            return;
+        }
         if (error.Code is "device_session_revoked" || (error.IsAuthenticationFailure && Profile is null))
         {
             CloseLibrary();
@@ -377,6 +393,35 @@ public sealed class AppSession : ObservableObject
             CloseLibrary();
             Profile = null;
             flow.Show(AppScreen.ProfilePicker);
+        }
+    }
+
+    /// <summary>
+    /// The server answered that it moved to another computer (409 server_moved). Aurelia looks for it
+    /// there: the saved connection switches only to an address of the same server with the same
+    /// pinned key, keeping this computer's sign-in, and the profile is opened again. This computer's
+    /// own server stays as it is; its owner chooses what happens next.
+    /// </summary>
+    public void FollowMovedServer()
+    {
+        if (following || Server is not { LocallyManaged: false }) return;
+        following = true;
+        CloseLibrary();
+        profileTimer?.Cancel();
+        profileTimer = null;
+        Profile = null;
+        _ = FollowAsync();
+
+        async Task FollowAsync()
+        {
+            try
+            {
+                await ReachServerAsync();
+            }
+            finally
+            {
+                following = false;
+            }
         }
     }
 
@@ -429,7 +474,18 @@ public sealed class AppSession : ObservableObject
         if (!IsResting || Server is not { } saved) return;
         IsResting = false;
         Status = ConnectionStatus.Connecting;
-        var reached = await wakeUp.ReachAsync(saved, value => Status = value, CancellationToken.None);
+        ReachedServer? reached;
+        try
+        {
+            reached = await wakeUp.ReachAsync(saved, value => Status = value, CancellationToken.None);
+        }
+        catch (AureliaApiException error)
+        {
+            // A server that moved where it can't be followed, or presents another key.
+            MovedAway = error.MovedTo;
+            Message = error.Message;
+            reached = null;
+        }
         Status = ConnectionStatus.Idle;
         if (reached is null)
         {
@@ -437,6 +493,8 @@ public sealed class AppSession : ObservableObject
             ShowUnreachable();
             return;
         }
+        // A server found at another address (on the network, or where it moved) keeps the sign-in there.
+        if (reached.Server.Address != saved.Address) await SaveAsync(reached.Server);
         if (Profile is { } open && open.ExpiresAt > time.GetUtcNow()) OpenProfile(open);
         else await SwitchProfileAsync();
     }

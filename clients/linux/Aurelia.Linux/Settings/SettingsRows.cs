@@ -58,7 +58,7 @@ internal static class SettingsRows
         "Languages" or "Subtitle Downloads" => "IconSubtitles",
         "Motion and Appearance" => "IconSparkle",
         "Library" or "Storage Locations" or "Library Maintenance" or "Library Health & Maintenance" or "Catalog Visibility" => "IconLibrary",
-        "Server" or "Server Details" or "Server Connection" or "Hosting" or "When the Server Runs" => "IconServer",
+        "Server" or "Server Details" or "Server Connection" or "Hosting" or "When the Server Runs" or "Move to a New Server" => "IconServer",
         "Server Updates" or "Beta" => "IconDownload",
         "Network" or "Sign-In & Streaming Limits" => "IconNetwork",
         "Power Saving" => "IconSleep",

@@ -70,6 +70,8 @@ public sealed class AdminScope
                 message.Text = Describe(failure);
                 message.IsVisible = true;
             }
+            // The server moved to another computer: the app follows it (docs/SERVER_MOVE.md).
+            if (failure is AureliaApiException { IsServerMoved: true } moved) session.HandleSessionFailure(moved);
             return false;
         }
     }

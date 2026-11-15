@@ -82,6 +82,9 @@ public interface ILocalServerHost : IAsyncDisposable
     Task<AuthenticationResponse> SetUpOwnerAsync(string serverName, string ownerName, string password, int httpsPort, string deviceName, CancellationToken cancellation);
     Task<AuthenticationResponse> SignInAsync(string ownerName, string password, string deviceName, CancellationToken cancellation);
     Task ResetOwnerPinAsync(string password, string pin, CancellationToken cancellation);
+
+    /// <summary>"Move from another Aurelia server" while this server has no owner; null where the host can't offer it.</summary>
+    ISetupMoveChannel? SetupMove => null;
 }
 
 /// <summary>
@@ -117,6 +120,7 @@ public sealed class LocalServerHost : ILocalServerHost
     private bool stopping;
     private Task? watchdog;
     private volatile bool trialPending;
+    private LocalSetupMoveChannel? setupMove;
 
     public LocalServerHost(LocalServerOptions options, TimeProvider? time = null)
     {
@@ -136,6 +140,18 @@ public sealed class LocalServerHost : ILocalServerHost
     public ServerInfoResponse? Info { get; private set; }
     public LocalServerSettings Settings => ReadSettings();
     public Uri SecureAddress => new($"https://127.0.0.1:{Settings.LanHttpsPort}");
+
+    /// <summary>The setup move, authorized like the owner's creation: with the bootstrap token, only while this app's server waits for setup.</summary>
+    public ISetupMoveChannel SetupMove => setupMove ??= new LocalSetupMoveChannel(local.BaseAddress!, SetupToken);
+
+    /// <summary>The one-time bootstrap token while the server this app started waits for its owner; null otherwise.</summary>
+    private string? SetupToken()
+    {
+        lock (gate)
+        {
+            return State == LocalServerState.SetupRequired && bootstrapToken is not null && OwnsPort() ? bootstrapToken : null;
+        }
+    }
     /// <summary>The hosting choices the server reports to owners on other devices.</summary>
     public Func<HostingPreferences>? Hosting { get; set; }
     internal string ControlSecret => secret;
@@ -325,6 +341,7 @@ public sealed class LocalServerHost : ILocalServerHost
         }
         control?.Dispose();
         log?.Dispose();
+        setupMove?.Dispose();
         local.Dispose();
         lifecycle.Dispose();
         disposal.Dispose();

@@ -96,6 +96,7 @@ public sealed class ProfilePickerModel : ObservableObject
                 return;
             }
             Error = failure.Status == 404 ? "This server is too old for this app. Update Aurelia on the server." : failure.Message;
+            if (failure.IsServerMoved) session.HandleSessionFailure(failure);
         }
         finally
         {
@@ -198,6 +199,7 @@ public sealed class ProfilePickerModel : ObservableObject
             else
             {
                 Error = failure.Message;
+                if (failure.IsServerMoved) session.HandleSessionFailure(failure);
             }
         }
         finally

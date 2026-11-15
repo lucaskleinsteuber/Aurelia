@@ -6,7 +6,10 @@ using Avalonia.Layout;
 
 namespace Aurelia.Linux.Views;
 
-/// <summary>The saved server did not answer: try again (which wakes it), or forget it and connect to another one.</summary>
+/// <summary>
+/// The saved server did not answer: try again (which wakes it), or forget it and connect to another
+/// one. A server that moved where Aurelia could not follow it says where it went and why.
+/// </summary>
 public sealed class ServerUnreachableView : UserControl
 {
     public ServerUnreachableView(AppSession session, IReadOnlyList<OfflineTitle>? downloads = null, Action<OfflineTitle>? play = null, Action? offline = null)
@@ -23,7 +26,7 @@ public sealed class ServerUnreachableView : UserControl
         };
         confirm.Click += async (_, _) => await session.DisconnectAsync();
         var wakeable = session.Server?.WakeOnLanAddresses is { Count: > 0 };
-        var appHost = session.Server is { HostedByApp: true } server ? (server.Hosting == "linuxApp" ? "Linux PC" : "Mac") : null;
+        var appHost = session.Server is { HostedByApp: true } server && session.MovedAway is null ? (server.Hosting == "linuxApp" ? "Linux PC" : "Mac") : null;
         // As on the Mac: the downloads on this computer, without the server.
         var watchOffline = new Button { Content = "Watch Downloads Offline", Classes = { "chip" }, HorizontalAlignment = HorizontalAlignment.Center, IsVisible = offline is not null };
         watchOffline.Click += (_, _) => offline?.Invoke();
@@ -35,7 +38,7 @@ public sealed class ServerUnreachableView : UserControl
             Children =
             {
                 ScreenParts.Symbol(appHost is null ? "IconServer" : "IconComputer", 46),
-                ScreenParts.Title(appHost is null ? "Server Not Answering" : $"Start Aurelia on Your {appHost}"),
+                ScreenParts.Title(session.MovedAway is not null ? "Server Moved" : appHost is null ? "Server Not Answering" : $"Start Aurelia on Your {appHost}"),
                 ScreenParts.Detail(appHost is not null
                     ? $"{name} runs inside the Aurelia app on a {appHost}. Open Aurelia there, or wake the {appHost}, then choose Try Again."
                     : session.Message ?? (wakeable

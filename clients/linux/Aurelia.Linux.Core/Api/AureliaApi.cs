@@ -47,15 +47,33 @@ public sealed partial class AureliaApi : IDisposable
     }
 
     /// <summary>GET /api/v1/server/info over the pinned connection; the server's id and key must still match.</summary>
-    public async Task<ServerInfoResponse> ServerInfoAsync(StoredServer server, CancellationToken cancellation, TimeSpan? timeout = null)
+    public async Task<ServerInfoResponse> ServerInfoAsync(StoredServer server, CancellationToken cancellation, TimeSpan? timeout = null) =>
+        (await ProbeAsync(server, cancellation, timeout)).Info;
+
+    /// <summary>
+    /// GET /api/v1/server/info over the pinned connection, with where the server went when it moved to
+    /// another computer (its "moved" field, docs/SERVER_MOVE.md). The server's id and key must still match.
+    /// </summary>
+    public async Task<ServerProbe> ProbeAsync(StoredServer server, CancellationToken cancellation, TimeSpan? timeout = null)
     {
         var client = timeout is { } limit ? transport.CreateClient(server.Address, server.Fingerprint, null, limit) : Pinned(server.Address, server.Fingerprint);
         try
         {
-            var info = await SendAsync<ServerInfoResponse>(client, HttpMethod.Get, "/api/v1/server/info", null, null, inspecting: false, cancellation);
+            var raw = await SendAsync<byte[]>(client, HttpMethod.Get, "/api/v1/server/info", null, null, inspecting: false, cancellation);
+            ServerInfoResponse info;
+            Moving.MovedInfo? moved;
+            try
+            {
+                info = JsonSerializer.Deserialize<ServerInfoResponse>(raw, AureliaJson.Options) ?? throw AureliaApiException.InvalidResponse();
+                moved = JsonSerializer.Deserialize<Moving.MovedInfo>(raw, AureliaJson.Options);
+            }
+            catch (JsonException)
+            {
+                throw AureliaApiException.InvalidResponse();
+            }
             if (info.ServerId != server.ServerId || !ReportsIdentity(info, server.Fingerprint, server.Address))
                 throw AureliaApiException.IdentityMismatch();
-            return info;
+            return new ServerProbe(info, moved?.Moved);
         }
         finally
         {
@@ -240,12 +258,12 @@ public sealed partial class AureliaApi : IDisposable
 
     internal static async Task<AureliaApiException> ProblemAsync(HttpResponseMessage response, CancellationToken cancellation)
     {
-        ApiProblem? problem = null;
+        Moving.MovedProblem? problem = null;
         if (response.Content.Headers.ContentLength is null or <= 16_384)
         {
             try
             {
-                problem = await response.Content.ReadFromJsonAsync<ApiProblem>(AureliaJson.Options, cancellation);
+                problem = await response.Content.ReadFromJsonAsync<Moving.MovedProblem>(AureliaJson.Options, cancellation);
             }
             catch (Exception exception) when (exception is JsonException or NotSupportedException)
             {
@@ -264,7 +282,10 @@ public sealed partial class AureliaApi : IDisposable
             429 => "The server is busy. Try again shortly.",
             _ => "The server could not complete the request.",
         };
-        return new AureliaApiException(status, problem?.Code, message, retryAfter);
+        return new AureliaApiException(status, problem?.Code, message, retryAfter)
+        {
+            MovedTo = status == 409 && problem?.Code == "server_moved" ? problem.MovedTo : null,
+        };
     }
 
     /// <summary>

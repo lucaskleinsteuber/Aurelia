@@ -116,7 +116,17 @@ the saved pairing from the desktop keyring (`Platform/SecretServiceCredentialSto
 freedesktop Secret Service of GNOME Keyring and KDE Wallet; there is no plain-file fallback) and
 reaches the server (`Connection/ServerWakeUp.cs`): a quick check, then Wake-on-LAN every 10 seconds
 for up to two minutes when the server reported its hardware addresses, otherwise up to 20 seconds.
-A server announced nearby with the same id and key at another address is accepted and remembered.
+A server announced nearby with the same id and key at another address is accepted and remembered;
+one with the same id but another key is skipped.
+
+A server that moved to another computer ([SERVER_MOVE.md](SERVER_MOVE.md)) still answers its
+public info with `moved` at the old address, and every other call with `409 server_moved` and
+`movedTo`. Reaching the server then tries the addresses it names (HTTPS only, the same `serverId`),
+next to those announced nearby, and switches the saved connection only to one that presents the
+pinned key: the device credential stays, the profile is opened again. A new computer that presents
+another key is never used; the start screen says so ("Server Moved") and asks to connect again. A
+silent new computer is waited for like a sleeping server. This PC's own hosted server is not
+followed when it moves away; its owner can still undo the move in Settings › Server.
 
 The connection screen lists servers announced on the network (`_aurelia._tcp` and the older
 `_aurelia-home._tcp`, TLS only) or takes a typed address (HTTPS, port 43111 by default). Starting
@@ -234,11 +244,19 @@ and they fail.
   enabled, PIN, entire library or selected titles), deleting a profile (never the last owner),
   approving an Apple TV or browser code, the browser address, a pairing code for another computer
   with its countdown, and signing out devices.
+- Move to a New Server (owner, Settings › Server, `Management/ServerMoveViews.cs`): over the
+  network this server shows a one-use move code with its countdown and follows the new server
+  receiving and arriving; with a moving file it asks for a passphrase twice and saves the encrypted
+  file through the backup transfer download. A waiting move can be cancelled, a moving file marked
+  as moved, and a finished move undone after confirming that the new server is off.
 - Library: storage locations chosen from the server's folders, each added waiting for an import
   preview; the preview lists every file with filters and search, assignments (movie, series, episode,
   extra, trailer, ignore) and confirmation. Rescan, monitoring, removing a location (files stay),
   scan activity, trailer reviews, Library Health (duplicates, offline titles, unmatched metadata,
-  excluded items with reimport), Hide Offline Titles and Reset Library.
+  excluded items with reimport), Hide Offline Titles and Reset Library. Location Moved… (owner)
+  points a location at the folder that holds its files now: the server's suggestions with their
+  match counts, or a folder chosen on the server and previewed; a folder without any matching
+  sample file needs a checkbox and a second question before it is sent with `force`.
 - Metadata: the owner's TMDB token, Enrich Library, the review queue, unused artwork and the
   running job. On every title, administrators find Edit Metadata (all fields, cast and crew,
   poster and backdrop with upload and crop, the source file) and Remove from Library, and on the
@@ -276,6 +294,21 @@ a sleep inhibitor while the server runs. Flatpak uses the desktop portals for ba
 and inhibition. Native packages use the desktop's autostart location and login-session inhibitor.
 These settings do not bypass sleep or shutdown, and they show a firewall hint for the selected port
 without changing firewall rules.
+
+### Moving another server to this PC
+
+“Set Up This PC” also offers “Move from Another Aurelia Server…” ([SERVER_MOVE.md](SERVER_MOVE.md),
+`Hosting/HostSetupModel.cs`, `Hosting/SetupMoveChannel.cs`). Over the network, the old server is
+picked from the servers announced nearby or typed, with the move code it shows; otherwise the
+moving file is chosen and opened with its passphrase. The app sends the setup-time move calls to
+its own server on 127.0.0.1 with the bootstrap token it already uses to create the owner
+(`X-Aurelia-Bootstrap-Token`), only while that server waits for setup. It follows the progress,
+then shows each storage location with its best folder on this PC ("412 of 415 sample files
+found"), the other suggestions, another folder chosen with the folder picker and previewed, or
+Later (the location stays offline until Location Moved…). Finish Move applies the data; the
+server hands the host its prepared restore on the control channel, the host restores and starts
+it with the moved identity, and “Welcome Back” signs in with the moved server's owner name and
+Server Password.
 
 ### Network changes with automatic rollback
 

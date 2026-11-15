@@ -44,7 +44,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         Controls.Motion.ReduceMotion = () => Session?.Preferences.ReduceMotion == true;
         AppWindowBehavior.Attach(this);
         Flow = new AppFlow(services.Settings);
-        var discovery = new DiscoveryCache(services.CreateDiscovery());
+        discovery = new DiscoveryCache(services.CreateDiscovery());
         var api = new AureliaApi(services.Transport);
         var wishPosters = new WishPosterCache(services.ArtworkDirectory is { } dir
             ? Path.Combine(Path.GetDirectoryName(dir) ?? dir, "wish-posters")
@@ -228,6 +228,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
 
     private HostSetupModel? hosting;
     private HostingTray? tray;
+    private readonly DiscoveryCache discovery;
     private IDisposable? awake;
     private bool quitting;
 
@@ -294,7 +295,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
             if (hosting is not null || services.CreateHost is not { } create) return hosting;
             var host = create();
             if (host is LocalServerHost local) local.Hosting = () => HostingSettings.Read(services.Settings);
-            hosting = new HostSetupModel(host, Session, Flow, services.Credentials, action => Dispatcher.UIThread.Post(action));
+            hosting = new HostSetupModel(host, Session, Flow, services.Credentials, action => Dispatcher.UIThread.Post(action), () => discovery.Latest);
             host.Changed += () => Dispatcher.UIThread.Post(() => _ = UpdateKeepAwakeAsync());
             return hosting;
         }

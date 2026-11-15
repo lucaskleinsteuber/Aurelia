@@ -64,17 +64,28 @@ public sealed class ServerPage : StackPanel
 
     private async Task LoadAsync()
     {
+        var moved = false;
         var loaded = await scope.RunAsync(async () =>
         {
             var statusTask = Client.StatusAsync();
             var healthTask = Client.HealthAsync();
             var capabilitiesTask = Client.CapabilitiesAsync();
             var settingsTask = Client.SettingsAsync();
-            await Task.WhenAll(statusTask, healthTask, capabilitiesTask, settingsTask);
+            try
+            {
+                await Task.WhenAll(statusTask, healthTask, capabilitiesTask, settingsTask);
+            }
+            catch (AureliaApiException failure) when (failure.IsServerMoved)
+            {
+                moved = true;
+                throw;
+            }
             (status, health, capabilities, configuration) = (statusTask.Result, healthTask.Result, capabilitiesTask.Result, settingsTask.Result);
         }, message);
         Children.Clear();
         Children.Add(message);
+        // A server that moved away answers only its move: its owner can still undo it here.
+        if (!loaded && moved && scope.IsOwner && !powerOnly) Children.Add(new ServerMoveSection(scope));
         if (!loaded && status is null) return;
         if (powerOnly)
         {
@@ -96,6 +107,7 @@ public sealed class ServerPage : StackPanel
         if (scope.IsOwner && Client.Library.Supports(ServerFeatures.ServerSpeech)) Children.Add(await ServerSpeechSection.BuildAsync(scope));
         if (await VideoConversionAsync() is { } conversion) Children.Add(conversion);
         if (scope.IsOwner && Client.Library.Supports(ServerFeatures.Automation)) Children.Add(new AutomationSection(scope));
+        if (scope.IsOwner) Children.Add(new ServerMoveSection(scope, status?.NetworkAddresses));
         var advanced = new Expander { Header = "Advanced Settings", IsExpanded = showsAdvanced, HorizontalAlignment = HorizontalAlignment.Stretch };
         var advancedContent = new StackPanel { Spacing = 22, Margin = new Thickness(0, 12, 0, 0) };
         advanced.Content = advancedContent;
