@@ -4,6 +4,7 @@ import SwiftUI
 struct IOSPlaybackSettingsView: View {
   @EnvironmentObject private var model: IOSAppModel
   @State private var value = IOSPlaybackPreferences.defaultValue
+  @AppStorage(IOSDownloadQualityPreference.key) private var downloadQuality = IOSDownloadQualityPreference.ask
   @State private var error: String?
   @State private var loaded = false
   @State private var confirmForget = false
@@ -66,6 +67,17 @@ struct IOSPlaybackSettingsView: View {
         } footer: {
           Text(
             "Before a film that starts from the beginning: one of Aurelia's made-up ads (nothing is for sale), trailers of films nobody has watched yet, and the curtain."
+          )
+        }
+      }
+      if model.supportsConvertedDownloads {
+        Section {
+          Picker("Download Quality", selection: $downloadQuality) {
+            ForEach(IOSDownloadQualityPreference.choices, id: \.id) { Text($0.title).tag($0.id) }
+          }.accessibilityIdentifier("settings-download-quality")
+        } footer: {
+          Text(
+            "Original keeps the file itself. A smaller quality has the server convert a copy while it downloads, which saves space on this device; a title that is already small keeps its original."
           )
         }
       }

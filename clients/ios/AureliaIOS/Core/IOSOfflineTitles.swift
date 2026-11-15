@@ -38,6 +38,8 @@ struct IOSOfflineTitle: Codable, Identifiable, Equatable, Sendable {
   var posterFile: String?
   var backdropFile: String?
   var seriesPosterFile: String?
+  /// The quality of a smaller copy the server converted ("720p"); nil for the original file.
+  var quality: String? = nil
 
   var isEpisode: Bool { kind == "episode" }
   var episodeLabel: String? {
@@ -91,9 +93,12 @@ struct IOSOfflinePending: Codable, Identifiable, Equatable, Sendable {
   var receivedBytes: Int64 = 0
   /// Where a stopped transfer can continue, in the title's folder.
   var resumeFile: String?
+  /// A smaller copy the server converts: how far it is, so it continues where it stopped.
+  var converted: IOSConvertedProgress? = nil
   var id: UUID { title.id }
 
   var share: Double {
+    if let converted { return converted.share }
     guard title.bytes > 0 else { return 0 }
     return min(1, Double(receivedBytes) / Double(title.bytes))
   }

@@ -253,6 +253,7 @@ private struct IOSOfflineSections: View {
   private func details(_ title: IOSOfflineTitle) -> String {
     var parts: [String] = []
     if !title.isEpisode, let year = title.year { parts.append(String(year)) }
+    if let quality = title.quality { parts.append(quality) }
     parts.append(title.bytes.formatted(.byteCount(style: .file)))
     if title.isCompleted { parts.append("Watched") }
     if title.progressDirty { parts.append("Progress not yet on the server") }
@@ -278,7 +279,10 @@ private struct IOSPendingDownloadRow: View {
       if entry.state == .downloading {
         ProgressView(value: entry.share)
         Text(
-          "\(entry.receivedBytes.formatted(.byteCount(style: .file))) of \(entry.title.bytes.formatted(.byteCount(style: .file)))"
+          entry.converted.map { converted in
+            "\(converted.quality) · \(entry.receivedBytes.formatted(.byteCount(style: .file))) of about \(entry.title.bytes.formatted(.byteCount(style: .file))), converted by the server"
+          }
+            ?? "\(entry.receivedBytes.formatted(.byteCount(style: .file))) of \(entry.title.bytes.formatted(.byteCount(style: .file)))"
         )
         .font(.caption).foregroundStyle(.secondary)
       } else if entry.state == .waiting {

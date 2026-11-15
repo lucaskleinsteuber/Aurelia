@@ -234,6 +234,8 @@ struct IOSCapabilities: Codable, Equatable, Sendable {
   var supportsMonthlyWrapped: Bool { capabilities?.contains("monthly-wrapped-v1") == true }
   /// HLS in several qualities, converted live by the server.
   var supportsAdaptiveStreaming: Bool { capabilities?.contains("adaptive-streaming-v1") == true }
+  /// Smaller downloads the server converts live; only this device keeps them.
+  var supportsConvertedDownloads: Bool { capabilities?.contains("converted-downloads-v1") == true }
   /// Family Requests / Wishes.
   var supportsWishes: Bool { capabilities?.contains("wishes-v1") == true }
 }

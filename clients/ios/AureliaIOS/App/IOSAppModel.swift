@@ -141,6 +141,7 @@ final class IOSAppModel: ObservableObject {
       let assistantFixture = false
     #endif
     offline = Self.offlineStore(fixture: fixture)
+    if !fixture { convertedBackground = IOSConvertedBackground(store: offline) }
     if !fixture { IOSTestEdition.forgetLeftoversAfterReinstall() }
     let alreadyConnected = !fixture && (try? IOSCredentialStore().load()) != nil
     setupGuide = IOSSetupGuide(
@@ -1192,31 +1193,71 @@ final class IOSAppModel: ObservableObject {
       pictureKey: session.user.pictureKey, pictureRevision: session.user.pictureRevision ?? 0)
   }
 
+  /// Keeps converted downloads going in the background; nil in UI tests.
+  private var convertedBackground: IOSConvertedBackground?
+  /// Downloads whose quality the person chooses now (Settings › Playback › Download Quality).
+  @Published var downloadChoice: IOSPendingDownloadChoice?
+  var supportsConvertedDownloads: Bool { capabilities?.supportsConvertedDownloads ?? false }
+
   /// Downloads a movie or episode for the open profile.
   func download(_ item: IOSCatalogItem) {
-    guard let client, IOSOfflineRules.canDownload(item) else { return }
-    Task {
-      let series: IOSCatalogItem? =
-        if item.kind == .episode, let parent = item.parentId {
-          try? await client.summary(id: parent)
-        } else { nil }
-      await offline.download(item, series: series, api: client)
-    }
+    guard IOSOfflineRules.canDownload(item) else { return }
+    chooseQuality(for: [item])
   }
 
   /// Downloads every episode of a season that isn't on this device yet, one after another.
   func download(episodes: [IOSCatalogItem]) {
-    guard let client else { return }
     let wanted = episodes.filter {
       IOSOfflineRules.canDownload($0) && offline.title($0.id) == nil && offline.pending($0.id) == nil
     }
-    guard let first = wanted.first else { return }
+    guard !wanted.isEmpty else { return }
+    chooseQuality(for: wanted)
+  }
+
+  /// The original, or a smaller copy when the server offers one: as set, or asked for now.
+  private func chooseQuality(for items: [IOSCatalogItem]) {
+    guard let client, let first = items.first else { return }
+    let preference =
+      UserDefaults.standard.string(forKey: IOSDownloadQualityPreference.key) ?? IOSDownloadQualityPreference.ask
+    guard supportsConvertedDownloads, preference != IOSDownloadQualityPreference.original else {
+      startDownloads(items, quality: nil)
+      return
+    }
+    Task {
+      let options = try? await client.downloadOptions(mediaID: first.id)
+      guard self.session?.sessionId == client.session?.sessionId else { return }
+      switch IOSDownloadQualityPreference.resolve(preference, options: options) {
+      case .original: startDownloads(items, quality: nil)
+      case .ask: if let options { downloadChoice = IOSPendingDownloadChoice(items: items, options: options) }
+      case .converted(let quality): startDownloads(items, quality: quality, audio: options?.audioTrack, options: options)
+      }
+    }
+  }
+
+  /// Starts the downloads in one quality; nil keeps the original files. Each further episode
+  /// takes the same quality, or its own original when that quality would not be smaller.
+  func startDownloads(
+    _ items: [IOSCatalogItem], quality: String?, audio: Int? = nil, options: IOSDownloadOptions? = nil
+  ) {
+    guard let client, let first = items.first else { return }
     Task {
       let series: IOSCatalogItem? =
-        if let parent = first.parentId { try? await client.summary(id: parent) } else { nil }
-      for episode in wanted {
+        if first.kind == .episode, let parent = first.parentId {
+          try? await client.summary(id: parent)
+        } else { nil }
+      for (index, item) in items.enumerated() {
         guard self.session?.sessionId == client.session?.sessionId else { return }
-        await offline.download(episode, series: series, api: client)
+        var chosen = quality
+        var expected = options?.qualities.first { $0.id == quality }?.estimatedBytes
+        if index > 0, let wanted = quality {
+          let own = try? await client.downloadOptions(mediaID: item.id)
+          let match = own?.qualities.first { $0.id == wanted }
+          chosen = match == nil ? nil : wanted
+          expected = match?.estimatedBytes
+        }
+        await offline.download(
+          item, series: series, api: client, quality: chosen, audio: chosen == nil ? nil : audio,
+          expectedBytes: expected)
       }
     }
   }

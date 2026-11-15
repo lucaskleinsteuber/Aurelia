@@ -81,6 +81,7 @@ struct IOSRootView: View {
             .tag(IOSLibraryTab.profile)
         }
         .tint(.white)
+        .modifier(IOSDownloadQualityDialog())
         .sheet(isPresented: $model.wishesPresented) {
           NavigationStack {
             IOSWishesView()

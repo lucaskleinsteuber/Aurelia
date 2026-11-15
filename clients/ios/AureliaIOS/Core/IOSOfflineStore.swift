@@ -20,6 +20,14 @@ final class IOSOfflineStore: ObservableObject {
 
   let root: URL
   private var downloader: IOSOfflineDownloader?
+  /// Converted downloads running now, and the client each one continues with.
+  private var convertedTasks: [UUID: Task<Void, Never>] = [:]
+  private var convertedClients: [UUID: IOSAPIClient] = [:]
+  /// Lets the app keep a converted download going in the background (BGContinuedProcessingTask):
+  /// called when one starts, as it moves on (0…1) and when it ends.
+  var convertedStarted: ((UUID, String) -> Void)?
+  var convertedProgressed: ((UUID, Double) -> Void)?
+  var convertedEnded: ((UUID, Bool) -> Void)?
   /// The system's completion handler after it woke the app for finished transfers.
   var backgroundCompletion: (() -> Void)?
 
@@ -86,7 +94,13 @@ final class IOSOfflineStore: ObservableObject {
 
   /// Downloads a movie or episode for the profile `api` is signed in with. Subtitles and
   /// pictures load first; the file itself then keeps loading while the app is in the background.
-  func download(_ item: IOSCatalogItem, series: IOSCatalogItem?, api: IOSAPIClient) async {
+  ///
+  /// With a `quality` the server converts a smaller copy ("converted-downloads-v1"), fetched
+  /// segment by segment while the app runs (owner's decision, 15.11.2026).
+  func download(
+    _ item: IOSCatalogItem, series: IOSCatalogItem?, api: IOSAPIClient, quality: String? = nil,
+    audio: Int? = nil, expectedBytes: Int64? = nil
+  ) async {
     guard IOSOfflineRules.canDownload(item), let connection = api.connection,
       let session = api.session, let downloader, !preparing.contains(item.id),
       pending(item.id) == nil
@@ -104,9 +118,10 @@ final class IOSOfflineStore: ObservableObject {
     let folder = folder(for: item.id)
     var ticketID: UUID?
     do {
-      let ticket = try await api.createTicket(mediaID: item.id)
+      let ticket = try await api.createTicket(mediaID: item.id, forDownload: true)
       ticketID = ticket.id
-      guard IOSOfflineRules.hasRoom(for: ticket.contentLength, available: availableBytes) else {
+      let needed = quality == nil ? ticket.contentLength : (expectedBytes ?? 0)
+      guard IOSOfflineRules.hasRoom(for: needed, available: availableBytes) else {
         throw IOSOfflineError.notEnoughSpace
       }
       try prepareRoot()
@@ -114,8 +129,9 @@ final class IOSOfflineStore: ObservableObject {
       var title = IOSOfflineTitle(
         id: item.id, serverID: connection.serverID, profileID: session.user.id, title: item.title,
         subtitle: IOSOfflineRules.subtitle(for: item), kind: item.kind.rawValue,
-        fileName: "title.\(IOSOfflineRules.fileExtension(ticket.contentType))",
-        contentType: ticket.contentType, bytes: ticket.contentLength, downloadedAt: Date(),
+        fileName: quality == nil ? "title.\(IOSOfflineRules.fileExtension(ticket.contentType))" : "title.mp4",
+        contentType: quality == nil ? ticket.contentType : "video/mp4",
+        bytes: quality == nil ? ticket.contentLength : (expectedBytes ?? 0), downloadedAt: Date(),
         positionMilliseconds: ticket.progress.positionMilliseconds,
         durationMilliseconds: ticket.progress.durationMilliseconds,
         isCompleted: ticket.progress.isCompleted, progressSavedAt: nil, progressDirty: false,
@@ -123,6 +139,7 @@ final class IOSOfflineStore: ObservableObject {
         year: item.year, genres: item.genres, parentID: item.parentId,
         parentTitle: item.parentTitle ?? series?.title, seasonNumber: item.seasonNumber,
         episodeNumber: item.episodeNumber)
+      title.quality = quality
       title.subtitles = await Self.subtitles(ticket: ticket, into: folder, api: api)
       title.posterFile = await Self.keep(item.poster, width: 640, as: "poster.image", in: folder, api: api)
       title.backdropFile = await Self.keep(
@@ -137,9 +154,19 @@ final class IOSOfflineStore: ObservableObject {
       // The profile may have closed meanwhile; then nothing starts.
       guard pending(item.id) == nil, self.title(item.id) == nil else { return }
       let startNow = !pending.contains { $0.state == .downloading }
-      let entry = IOSOfflinePending(
+      var entry = IOSOfflinePending(
         title: title, ticketID: ticket.id, startedAt: Date(),
         state: startNow ? .downloading : .waiting, fingerprint: connection.fingerprint)
+      if let quality {
+        entry.converted = IOSConvertedProgress(quality: quality, audio: audio)
+        pending.append(entry)
+        savePending()
+        convertedClients[item.id] = api
+        // The converted copy asks for its own ticket when it starts; this one has done its part.
+        Task { try? await api.revokeTicket(id: ticket.id) }
+        if startNow { startConverted(item.id) }
+        return
+      }
       pending.append(entry)
       savePending()
       downloader.start(
@@ -154,6 +181,21 @@ final class IOSOfflineStore: ObservableObject {
   /// Tries a stopped download again: where it stopped when it can, otherwise from the start.
   func retry(_ id: UUID, api: IOSAPIClient?) async {
     guard let entry = pending(id), entry.state == .failed, let downloader else { return }
+    if entry.converted != nil {
+      // A converted copy continues at the segment where it stopped, with the open profile.
+      guard let api, api.session?.user.id == entry.title.profileID else {
+        update(id) { $0.message = "Open Aurelia at home to continue this download." }
+        return
+      }
+      convertedClients[id] = api
+      let startNow = !pending.contains { $0.state == .downloading }
+      update(id) {
+        $0.state = startNow ? .downloading : .waiting
+        $0.message = nil
+      }
+      if startNow { startConverted(id) }
+      return
+    }
     if entry.canResume(), let name = entry.resumeFile,
       let data = try? Data(contentsOf: folder(for: id).appendingPathComponent(name))
     {
@@ -178,6 +220,8 @@ final class IOSOfflineStore: ObservableObject {
   }
 
   func cancel(_ id: UUID) {
+    convertedTasks.removeValue(forKey: id)?.cancel()
+    convertedClients[id] = nil
     downloader?.cancel(media: id)
     discard(id)
     startNextWaiting()
@@ -189,7 +233,95 @@ final class IOSOfflineStore: ObservableObject {
       let next = pending.filter({ $0.state == .waiting }).min(by: { $0.startedAt < $1.startedAt })
     else { return }
     update(next.id) { $0.state = .downloading }
-    downloader.startQueued(media: next.id)
+    if next.converted != nil {
+      startConverted(next.id)
+    } else {
+      downloader.startQueued(media: next.id)
+    }
+  }
+
+  // MARK: Converted downloads
+
+  /// Fetches a converted copy segment by segment, continuing where it stopped.
+  private func startConverted(_ id: UUID) {
+    guard let entry = pending(id), let converted = entry.converted, convertedTasks[id] == nil else { return }
+    guard let api = convertedClients[id] else {
+      transferFailed(id, message: "Open Aurelia at home to continue this download.", resumeData: nil)
+      return
+    }
+    convertedStarted?(id, entry.title.title)
+    let folder = folder(for: id)
+    let partial = folder.appendingPathComponent("title.mp4.part")
+    convertedTasks[id] = Task { [weak self] in
+      let tickets = IOSDownloadTickets()
+      do {
+        let ticket = try await api.createTicket(mediaID: id, forDownload: true)
+        await tickets.add(ticket.id)
+        let size = try await IOSConvertedDownloader(api: api, mediaID: id).run(
+          ticket: ticket, from: converted, into: partial,
+          saved: { [weak self] state in await self?.convertedSaved(id, state) },
+          renewed: { ticket in await tickets.add(ticket.id) })
+        self?.convertedFinished(id, partial: partial, size: size)
+      } catch is CancellationError {
+        self?.convertedStopped(id, message: nil)
+      } catch {
+        self?.convertedStopped(id, message: Self.describe(error))
+      }
+      let used = await tickets.all
+      Task { for ticket in used { try? await api.revokeTicket(id: ticket) } }
+    }
+  }
+
+  private func convertedSaved(_ id: UUID, _ state: IOSConvertedProgress) {
+    guard let index = pending.firstIndex(where: { $0.id == id }) else { return }
+    let before = pending[index].converted?.nextSegment ?? 0
+    pending[index].converted = state
+    pending[index].receivedBytes = state.writtenBytes
+    // Saved every few segments, so a stop loses little and the disk isn't written constantly.
+    if state.nextSegment == 0 || state.nextSegment == state.segmentCount
+      || (state.nextSegment != before && state.nextSegment % 5 == 0)
+    {
+      savePending()
+    }
+    convertedProgressed?(id, state.share)
+  }
+
+  private func convertedFinished(_ id: UUID, partial: URL, size: Int64) {
+    convertedTasks[id] = nil
+    convertedClients[id] = nil
+    guard let index = pending.firstIndex(where: { $0.id == id }) else {
+      try? FileManager.default.removeItem(at: partial)
+      return
+    }
+    var title = pending[index].title
+    let destination = fileURL(for: title)
+    do {
+      try? FileManager.default.removeItem(at: destination)
+      try FileManager.default.moveItem(at: partial, to: destination)
+    } catch {
+      convertedStopped(id, message: "The file could not be saved.")
+      return
+    }
+    title.bytes = size
+    title.downloadedAt = Date()
+    pending.remove(at: index)
+    savePending()
+    record(title)
+    convertedEnded?(id, true)
+    startNextWaiting()
+  }
+
+  /// A converted download that stopped keeps what it has; Try Again continues from there.
+  private func convertedStopped(_ id: UUID, message: String?) {
+    convertedTasks[id] = nil
+    convertedEnded?(id, false)
+    guard pending(id) != nil else { return }
+    transferFailed(id, message: message ?? "Paused. Try Again continues where it stopped.", resumeData: nil)
+  }
+
+  /// The system ended the time it gave the app in the background: the download pauses.
+  func pauseConverted(_ id: UUID) {
+    convertedTasks[id]?.cancel()
   }
 
   /// Removes the downloaded file; progress not yet sent goes with it.
@@ -531,6 +663,12 @@ final class IOSOfflineStore: ObservableObject {
     default: "The server answered \(status)."
     }
   }
+}
+
+/// The tickets one converted download used, so every one is closed at its end.
+actor IOSDownloadTickets {
+  private(set) var all: [UUID] = []
+  func add(_ id: UUID) { all.append(id) }
 }
 
 enum IOSOfflineError: LocalizedError {

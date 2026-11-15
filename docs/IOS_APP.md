@@ -114,7 +114,11 @@ server and without a VPN.
 
 Good to know:
 
-- A download is the original file, with the subtitle files next to it, its poster and its
+- A download is the original file, or, with Aurelia Server 2.20 or newer, a smaller copy: set
+  **Settings › Playback › Download Quality** (Ask Every Time, Original, 1080p, 720p, 480p).
+  The server converts the smaller copy while it downloads, with stereo sound; it keeps going
+  for a while in the background with the system's progress, and **Try Again** continues where
+  it stopped. Either way it comes with the subtitle files next to it, its poster and its
   description. It plays with the normal player: sound tracks, subtitles, speed, Dialogue Boost,
   scrub previews, the sleep timer and Up Next for the next downloaded episode. Watch Together
   needs the server and is off for downloads.

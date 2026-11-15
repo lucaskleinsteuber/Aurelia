@@ -513,8 +513,12 @@ struct IOSAPIClient: Sendable {
     return value
   }
 
-  func createTicket(mediaID: UUID) async throws -> IOSPlaybackTicket {
-    let data = try await send("/api/v1/media/\(mediaID.uuidString)/playback", method: "POST")
+  /// A playback ticket. `forDownload` tells the server nobody watches yet: Smart Home hears
+  /// nothing and no scrub previews are made (servers before 2.20.0 ignore it).
+  func createTicket(mediaID: UUID, forDownload: Bool = false) async throws -> IOSPlaybackTicket {
+    let data = try await send(
+      "/api/v1/media/\(mediaID.uuidString)/playback", method: "POST",
+      query: forDownload ? [URLQueryItem(name: "purpose", value: "download")] : [])
     let ticket = try Self.decode(IOSPlaybackTicket.self, data: data)
     try ticket.progress.validate(mediaID: mediaID)
     guard ticket.mediaId == mediaID, ticket.contentLength > 0,
@@ -524,6 +528,26 @@ struct IOSAPIClient: Sendable {
     }
     _ = try validatedStreamURL(path: ticket.streamPath)
     return ticket
+  }
+  /// The original's size and the smaller qualities the server can convert ("converted-downloads-v1").
+  func downloadOptions(mediaID: UUID) async throws -> IOSDownloadOptions {
+    try await get("/api/v1/media/\(mediaID.uuidString.lowercased())/download-options")
+  }
+  /// One piece of a converted download (playlist, init or media segment) over the pinned
+  /// connection; a segment may take a while, the server converts it first.
+  func downloadPiece(streamPath: String, quality: String, piece: String, audio: Int?) async throws
+    -> Data
+  {
+    _ = try validatedStreamURL(path: streamPath)
+    guard IOSConvertedDownloadPlan.isValidPiece(quality: quality, piece: piece) else {
+      throw IOSCoreError.invalidRequest
+    }
+    var query = audio.map { [URLQueryItem(name: "audio", value: String($0))] } ?? []
+    query.append(URLQueryItem(name: "purpose", value: "download"))
+    var request = try request("\(streamPath)/hls/\(quality)/\(piece)", query: query, authentication: .profile)
+    request.setValue("*/*", forHTTPHeaderField: "Accept")
+    request.timeoutInterval = 90
+    return try await execute(request).body
   }
   /// Trailers of films nobody in this profile has watched yet, for cinema mode before `mediaID`.
   func cinemaTrailers(mediaID: UUID, count: Int) async throws -> [IOSCinemaTrailer] {
