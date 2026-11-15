@@ -233,7 +233,9 @@ struct SetupIntroductionView: View {
         .font(.system(size: 28, weight: .medium))
         .symbolRenderingMode(.hierarchical)
         .frame(width: 64, height: 64)
-        .background(AureliaDesign.raisedSurface, in: RoundedRectangle(cornerRadius: 18))
+        .background(
+          AureliaDesign.raisedSurface,
+          in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
       Text(title).font(.headline)
       Text(detail).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
         .fixedSize(horizontal: false, vertical: true)
@@ -254,7 +256,7 @@ struct SetupIntroductionView: View {
           .frame(width: 44, height: 44)
           .background(
             primary ? Color.white.opacity(0.94) : AureliaDesign.raisedSurface,
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
           )
           .foregroundStyle(primary ? Color.black : Color.primary)
         VStack(alignment: .leading, spacing: 4) {
@@ -406,7 +408,8 @@ struct SetupFinishView: View {
               Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
             }
             .padding(12)
-            .background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: 12))
+            .background(
+              AureliaDesign.surface, in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius))
           }
         }
       }
@@ -440,7 +443,7 @@ struct SetupFinishView: View {
         )
         .accessibilityIdentifier("setup-person-admin")
         if let problem {
-          Text(problem).font(.callout).foregroundStyle(.orange)
+          ErrorBanner(message: problem, inline: true)
             .accessibilityIdentifier("setup-person-problem")
         }
         Button(working ? "Adding…" : "Add Person") { add() }
@@ -515,14 +518,10 @@ struct SetupFinishView: View {
     Task {
       defer { working = false }
       do {
-        var created = try await createWithUnlock {
+        let created = try await createWithUnlock {
           try await client.createProfile(request: request)
         }
-        if let upload {
-          created = try await createWithUnlock {
-            try await client.uploadProfilePhoto(id: created.id, image: upload)
-          }
-        }
+        // The person exists from here on: the form clears so Add Person can't create them twice.
         added.append(created)
         name = ""
         pin = ""
@@ -530,6 +529,20 @@ struct SetupFinishView: View {
         photo = nil
         isChild = false
         canManage = false
+        guard let upload else { return }
+        do {
+          let updated = try await createWithUnlock {
+            try await client.uploadProfilePhoto(id: created.id, image: upload)
+          }
+          if let index = added.firstIndex(where: { $0.id == updated.id }) {
+            added[index] = updated
+          }
+        } catch is CancellationError {
+        } catch {
+          problem =
+            "\(created.shownName) was added, but the photo couldn't be saved. "
+            + "You can add it later in Settings. \(error.localizedDescription)"
+        }
       } catch is CancellationError {
       } catch {
         problem = error.localizedDescription

@@ -44,6 +44,7 @@ struct ActivityStatisticsView: View {
   @State private var error: String?
   @State private var selectedYear: Int?
   @State private var review: YearInReview?
+  @State private var yearError: String?
   @State private var selectedWeek: String?
 
   /// Synthetic statistics can be passed in for rendering checks; a signed-in profile loads its own.
@@ -56,8 +57,9 @@ struct ActivityStatisticsView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 20) {
       if loading && stats == nil {
-        ProgressView("Loading statistics…")
+        AureliaDelayedProgress()
           .frame(maxWidth: .infinity, minHeight: 160)
+          .accessibilityLabel("Loading statistics")
       } else if let error, stats == nil {
         AureliaSettingsSection(
           "Statistics Unavailable", symbol: "exclamationmark.triangle.fill", description: error
@@ -92,6 +94,10 @@ struct ActivityStatisticsView: View {
     .aureliaAnimation(AureliaMotion.standard, value: stats == nil)
     .aureliaAnimation(AureliaMotion.standard, value: review?.year)
     .task(id: model.profile?.sessionId) { await load() }
+    // One tracked load per chosen year: switching years quickly cancels the older request.
+    .task(id: "\(model.profile?.sessionId.uuidString ?? "none"):\(selectedYear ?? 0)") {
+      if let selectedYear { await loadYear(selectedYear) }
+    }
     .accessibilityIdentifier("activity-statistics")
   }
 
@@ -159,9 +165,11 @@ struct ActivityStatisticsView: View {
     }
     .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
     .padding(14)
-    .background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .background(
+      AureliaDesign.surface,
+      in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
     .overlay {
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
+      RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
         .stroke(AureliaDesign.hairline, lineWidth: 1)
     }
   }
@@ -249,14 +257,19 @@ struct ActivityStatisticsView: View {
           "Year",
           selection: Binding(
             get: { selectedYear ?? years[0] },
-            set: { year in
-              selectedYear = year
-              Task { await loadYear(year) }
-            })
+            set: { selectedYear = $0 })
         ) {
           ForEach(years, id: \.self) { Text(String($0)).tag($0) }
         }
         .frame(width: 160)
+        if let yearError {
+          ErrorBanner(
+            message: "Couldn't load this year. \(yearError)",
+            retry: {
+              guard let year = selectedYear else { return }
+              Task { await loadYear(year) }
+            }, inline: true)
+        }
         if model.supportsWrapped {
           let year = selectedYear ?? years[0]
           Button {
@@ -274,8 +287,11 @@ struct ActivityStatisticsView: View {
             }
             .foregroundStyle(.white)
             .padding(14)
-            .background(Color(wrappedHex: 0x6A4CFF), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(
+              Color(wrappedHex: 0x6A4CFF),
+              in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
+            .contentShape(
+              RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
           }
           .buttonStyle(AureliaPressableButtonStyle())
           .accessibilityIdentifier("statistics-wrapped")
@@ -335,7 +351,8 @@ struct ActivityStatisticsView: View {
       let loaded = try await APIClient(profile: profile).statistics()
       stats = loaded
       error = nil
-      if let year = selectedYear ?? loaded.yearsAvailable?.first { await loadYear(year) }
+      // Choosing the year starts its review load in the year task above.
+      if selectedYear == nil { selectedYear = loaded.yearsAvailable?.first }
     } catch is CancellationError {
     } catch {
       self.error = error.localizedDescription
@@ -344,7 +361,16 @@ struct ActivityStatisticsView: View {
 
   private func loadYear(_ year: Int) async {
     guard let profile = model.profile else { return }
-    review = try? await APIClient(profile: profile).yearInReview(year: year)
+    do {
+      let loaded = try await APIClient(profile: profile).yearInReview(year: year)
+      guard !Task.isCancelled, year == selectedYear else { return }
+      review = loaded
+      yearError = nil
+    } catch is CancellationError {
+    } catch {
+      guard !Task.isCancelled, year == selectedYear else { return }
+      yearError = error.localizedDescription
+    }
   }
 }
 
@@ -359,6 +385,8 @@ struct ActivityHistoryView: View {
   @State private var total = 0
   @State private var loading = false
   @State private var error: String?
+  /// The list failed to load: no "No Watch History" then, and the banner offers Try Again.
+  @State private var loadFailed = false
   @State private var confirmClear = false
 
   init(onSelect: ((UUID) -> Void)? = nil, items: [WatchHistoryItem] = [], total: Int = 0) {
@@ -391,15 +419,18 @@ struct ActivityHistoryView: View {
             .accessibilityIdentifier("clear-history-button")
         }
       }
-      if let error { Text(error).font(.callout).foregroundStyle(.orange) }
+      if let error {
+        ErrorBanner(
+          message: error,
+          retry: loadRetry,
+          retryDisabled: loading, inline: true)
+      }
       if loading && items.isEmpty {
-        ProgressView("Loading history…").frame(maxWidth: .infinity, minHeight: 160)
+        AureliaDelayedProgress()
+          .frame(maxWidth: .infinity, minHeight: 160)
+          .accessibilityLabel("Loading history")
       } else if items.isEmpty {
-        ContentUnavailableView(
-          "No Watch History", systemImage: "clock.arrow.circlepath",
-          description: Text("Movies and episodes you watch appear here.")
-        )
-        .frame(maxWidth: .infinity, minHeight: 200)
+        if !loadFailed { emptyHistory }
       } else {
         ForEach(days, id: \.title) { day in
           AureliaSettingsSection(day.title, symbol: "calendar") {
@@ -430,6 +461,19 @@ struct ActivityHistoryView: View {
     .accessibilityIdentifier("activity-history")
   }
 
+  private var loadRetry: (() -> Void)? {
+    guard loadFailed else { return nil }
+    return { Task { await load(offset: items.count) } }
+  }
+
+  private var emptyHistory: some View {
+    ContentUnavailableView(
+      "No Watch History", systemImage: "clock.arrow.circlepath",
+      description: Text("Movies and episodes you watch appear here.")
+    )
+    .frame(maxWidth: .infinity, minHeight: 200)
+  }
+
   private func row(_ item: WatchHistoryItem) -> some View {
     HStack(spacing: 14) {
       AuthenticatedArtwork(
@@ -437,9 +481,9 @@ struct ActivityHistoryView: View {
         placeholderSymbolSize: 16
       )
       .frame(width: 40, height: 60)
-      .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+      .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.tinyRadius, style: .continuous))
       .overlay {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
+        RoundedRectangle(cornerRadius: AureliaDesign.tinyRadius, style: .continuous)
           .stroke(AureliaDesign.hairline, lineWidth: 1)
       }
       VStack(alignment: .leading, spacing: 3) {
@@ -493,9 +537,11 @@ struct ActivityHistoryView: View {
       items = offset == 0 ? page.items : items + page.items
       total = page.total
       error = nil
+      loadFailed = false
     } catch is CancellationError {
     } catch {
       self.error = error.localizedDescription
+      loadFailed = true
     }
   }
 

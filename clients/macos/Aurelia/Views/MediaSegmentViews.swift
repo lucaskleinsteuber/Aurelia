@@ -141,10 +141,7 @@ struct MediaSegmentsPanel: View {
         if working { ProgressView().controlSize(.small) }
       }
       if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
-      if let errorText {
-        Label(errorText, systemImage: "exclamationmark.triangle.fill")
-          .foregroundStyle(.orange).font(.callout)
-      }
+      if let errorText { ErrorBanner(message: errorText, inline: true) }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .disabled(working)
@@ -248,6 +245,7 @@ struct ServerMediaSegmentsEditor: View {
   /// Restarts the view's refresh after an action, so it ends when the page closes.
   @State private var refreshRound = 0
   @State private var message: String?
+  @State private var loadError: String?
 
   var body: some View {
     Group {
@@ -305,11 +303,16 @@ struct ServerMediaSegmentsEditor: View {
               }
               .accessibilityIdentifier("server-media-segments-series")
             }
-            if let message { Text(message).font(.caption).foregroundStyle(.orange) }
+            if let message = message ?? loadError { ErrorBanner(message: message, inline: true) }
           }
           .frame(maxWidth: .infinity, alignment: .leading).disabled(working)
         }
         .accessibilityIdentifier("server-media-segments")
+      } else if let loadError {
+        AureliaSettingsSection("Intros and Credits", symbol: "forward.end") {
+          ErrorBanner(
+            message: loadError, retry: { refreshRound += 1 }, retryDisabled: working, inline: true)
+        }
       }
     }
     .task(id: "\(model.administrationGeneration)-\(refreshRound)") { await refreshWhileWorking() }
@@ -432,11 +435,13 @@ struct ServerMediaSegmentsEditor: View {
           try await scope.request { try await client.mediaSegmentSeries() }
         }
       }
+      loadError = nil
     } catch let failure as APIClientError where failure.httpStatus == 404 {
       // A server before 2.8.0 has no detection.
       stored = nil
+      loadError = nil
     } catch {
-      message = scope.message(for: error)
+      loadError = scope.message(for: error)
     }
   }
 

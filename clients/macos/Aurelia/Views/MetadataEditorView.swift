@@ -134,7 +134,9 @@ struct MetadataEditorSheet: View {
         .aureliaOverlayScrollbars()
         .disabled(draft.busy)
       } else {
-        ProgressView("Loading editor…").frame(maxWidth: .infinity, maxHeight: .infinity)
+        AureliaDelayedProgress()
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .accessibilityLabel("Loading editor")
       }
       if let error = draft.error {
         HStack(alignment: .top) {
@@ -398,9 +400,13 @@ struct MetadataEditorSheet: View {
             }
             .accessibilityLabel("Remove \(person.name)")
           }.buttonStyle(.borderless)
-        }.padding(16).background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: 12))
+        }.padding(16)
+          .background(
+            AureliaDesign.surface, in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius)
+          )
           .overlay {
-            RoundedRectangle(cornerRadius: 12).stroke(AureliaDesign.hairline, lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: AureliaDesign.compactRadius)
+              .stroke(AureliaDesign.hairline, lineWidth: 0.5)
           }
       }
       if draft.values.credits.isEmpty {
@@ -592,11 +598,21 @@ struct MetadataEditorSheet: View {
           revision: document.revision, values: draft.values,
           overrideFields: draft.overrides.sorted(), relativeSourcePath: draft.source))
       draft.load(saved)
+    } catch {
+      draft.error = error.localizedDescription
+      return
+    }
+    // The server has the changes now: a library refresh failing afterwards is no save failure,
+    // so the sheet closes and the library's own banner offers Try Again.
+    do {
       try await model.refresh()
-      await onSaved()
-      discardUploads()
-      dismiss()
-    } catch { draft.error = error.localizedDescription }
+    } catch is CancellationError {
+    } catch {
+      model.errorMessage = "Saved. The library couldn't be updated. \(error.localizedDescription)"
+    }
+    await onSaved()
+    discardUploads()
+    dismiss()
   }
   private func cancel() {
     if draft.dirty {
@@ -632,7 +648,10 @@ private struct EditorTagList: View {
             values.remove(at: index)
           } label: {
             Image(systemName: "minus.circle")
-          }.buttonStyle(.borderless)
+          }
+          .buttonStyle(.borderless)
+          .help("Remove \(value)")
+          .accessibilityLabel("Remove \(value)")
         }
       }
       HStack {
@@ -756,6 +775,11 @@ enum CropImage {
 }
 
 private struct ServerVideoPicker: View {
+  private struct ListingKey: Equatable {
+    let path: String
+    let attempt: Int
+  }
+
   @Environment(\.dismiss) private var dismiss
   let client: APIClient
   let mediaId: UUID
@@ -763,38 +787,47 @@ private struct ServerVideoPicker: View {
   @State private var listing: ServerFileListing?
   @State private var error: String?
   @State private var path = "."
+  @State private var attempt = 0
   var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      Text("Choose Server Video").font(.title2.bold())
-      Text("Storage location / \(path)").font(.callout.monospaced())
-      Button("Parent Folder", systemImage: "arrow.up") {
-        path = (path as NSString).deletingLastPathComponent
-        if path.isEmpty { path = "." }
-      }.disabled(path == ".")
-      List(listing?.entries ?? []) { entry in
-        Button {
-          if entry.isDirectory { path = entry.relativePath } else { onSelect(entry.relativePath) }
-        } label: {
-          Label(entry.name, systemImage: entry.isDirectory ? "folder" : "film").frame(
-            maxWidth: .infinity, alignment: .leading)
-        }.buttonStyle(.plain)
-      }
-      if let error { Text(error).foregroundStyle(.orange) }
-      HStack {
+    AureliaSheet(
+      title: "Choose Server Video",
+      subtitle: "Pick the file on the server that this title plays.",
+      symbol: "film",
+      errorMessage: error,
+      retry: { attempt += 1 },
+      onCancel: { dismiss() },
+      leading: {
         Text("Only files in this title's server storage are available.").font(.caption)
           .foregroundStyle(.secondary)
-        Spacer()
-        Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
       }
-    }.padding(24).frame(width: 650, height: 550).background(AureliaBackdrop())
-      .task(id: path) {
-        do {
-          listing = try await client.editorFiles(id: mediaId, path: path)
-          error = nil
-        } catch {
-          listing = nil
-          self.error = error.localizedDescription
+    ) {
+      VStack(alignment: .leading, spacing: 16) {
+        Text("Storage location / \(path)").font(.callout.monospaced())
+        Button("Parent Folder", systemImage: "arrow.up") {
+          path = (path as NSString).deletingLastPathComponent
+          if path.isEmpty { path = "." }
+        }.disabled(path == ".")
+        List(listing?.entries ?? []) { entry in
+          Button {
+            if entry.isDirectory { path = entry.relativePath } else { onSelect(entry.relativePath) }
+          } label: {
+            Label(entry.name, systemImage: entry.isDirectory ? "folder" : "film").frame(
+              maxWidth: .infinity, alignment: .leading)
+          }.buttonStyle(.plain)
         }
       }
+      .padding(20)
+    }
+    .frame(width: 650, height: 550)
+    .task(id: ListingKey(path: path, attempt: attempt)) {
+      do {
+        listing = try await client.editorFiles(id: mediaId, path: path)
+        error = nil
+      } catch is CancellationError {
+      } catch {
+        listing = nil
+        self.error = error.localizedDescription
+      }
+    }
   }
 }

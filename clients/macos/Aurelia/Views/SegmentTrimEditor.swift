@@ -197,6 +197,13 @@ struct SegmentTrimEditor: View {
 
   var body: some View {
     VStack(spacing: 0) {
+      AureliaSheetHeader(
+        title: part == .intro ? "Set the Intro" : "Set the Credits",
+        subtitle: part == .intro
+          ? "Mark where this episode's intro begins and ends, so Skip Intro jumps past it."
+          : "Mark where this episode's credits begin, so Up Next appears there.",
+        symbol: part == .intro ? "forward.end" : "list.and.film")
+      Divider()
       ZStack {
         Color.black
         SegmentTrimVideo(engine: player.engine)
@@ -205,7 +212,7 @@ struct SegmentTrimEditor: View {
             Label("The episode can't be played right now.", systemImage: "exclamationmark.triangle")
               .foregroundStyle(.secondary)
           } else {
-            ProgressView().controlSize(.large)
+            AureliaDelayedProgress().accessibilityLabel("Loading episode")
           }
         }
       }
@@ -268,14 +275,15 @@ struct SegmentTrimEditor: View {
         )
         .font(.caption).foregroundStyle(.secondary)
         if let errorText {
-          Label(errorText, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.callout)
+          ErrorBanner(message: errorText, inline: true)
         }
       }
       .padding(16)
 
       Divider()
       HStack {
-        Button(part == .intro ? "No Intro" : "No Credits", role: .destructive) { Task { await save(remove: true) } }
+        Button(part == .intro ? "No Intro" : "No Credits", role: .destructive) { confirmRemoval() }
+          .disabled(saving)
           .help(
             part == .intro
               ? "Saves that this episode has no intro, so Skip Intro never appears in it."
@@ -286,7 +294,7 @@ struct SegmentTrimEditor: View {
           .keyboardShortcut(.cancelAction)
           .help("Closes without changing anything.")
         Button("Save \(part.title)") { Task { await save(remove: false) } }
-          .buttonStyle(AureliaPrimaryActionButtonStyle())
+          .buttonStyle(AureliaPrimaryActionButtonStyle(compact: true))
           .keyboardShortcut(.defaultAction)
           .help("Saves the yellow selection as this episode's \(part.title.lowercased()). Detection never replaces it.")
           .disabled(!player.ready || saving)
@@ -294,7 +302,7 @@ struct SegmentTrimEditor: View {
       }
       .padding(16)
     }
-    .frame(minWidth: 760, idealWidth: 900, minHeight: 600)
+    .frame(minWidth: 760, idealWidth: 900, minHeight: 680)
     .background(AureliaBackdrop())
     .task { await prepare() }
     .onDisappear { player.close() }
@@ -359,7 +367,24 @@ struct SegmentTrimEditor: View {
     }
   }
 
+  /// "No Intro" replaces times the episode already has, so it asks first; without any it saves.
+  private func confirmRemoval() {
+    let existing =
+      part == .intro ? times.introStartMilliseconds != nil : times.creditsStartMilliseconds != nil
+    if existing {
+      let ok = AureliaConfirm.ask(
+        part == .intro ? "Remove this episode's intro?" : "Remove this episode's credits?",
+        part == .intro
+          ? "Its intro times are deleted and Skip Intro no longer appears in this episode."
+          : "Its credits time is deleted and Up Next appears only in the last seconds.",
+        action: part == .intro ? "No Intro" : "No Credits")
+      guard ok else { return }
+    }
+    Task { await save(remove: true) }
+  }
+
   private func save(remove: Bool) async {
+    guard !saving else { return }
     guard let profile = model.profile else { return }
     saving = true
     defer { saving = false }
@@ -430,7 +455,7 @@ private struct SegmentTrimStrip: View {
         Color.black.opacity(0.45).frame(width: max(0, x(span.upperBound) - x(end))).offset(x: x(end))
           .allowsHitTesting(false)
 
-        RoundedRectangle(cornerRadius: 6)
+        RoundedRectangle(cornerRadius: AureliaDesign.tinyRadius)
           .stroke(Color.yellow, lineWidth: 4)
           .frame(width: max(2, x(end) - x(start) + handle * 2), height: geometry.size.height - 6)
           .offset(x: x(start) - handle)
@@ -474,7 +499,7 @@ private struct SegmentTrimStrip: View {
   }
 
   private func handleView(edge: HorizontalEdge) -> some View {
-    RoundedRectangle(cornerRadius: 5)
+    RoundedRectangle(cornerRadius: AureliaDesign.tinyRadius)
       .fill(Color.yellow)
       .frame(width: handle)
       .overlay(

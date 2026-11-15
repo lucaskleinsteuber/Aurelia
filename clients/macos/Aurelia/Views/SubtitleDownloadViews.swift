@@ -10,6 +10,8 @@ struct SubtitleDownloadSettingsSection: View {
   @State private var accountPassword = ""
   @State private var working = false
   @State private var errorText: String?
+  @State private var loading = false
+  @State private var loadError: String?
 
   private var isOwner: Bool { model.profile?.user?.role == .owner }
 
@@ -23,6 +25,13 @@ struct SubtitleDownloadSettingsSection: View {
       VStack(alignment: .leading, spacing: 14) {
         if let status, status.hasApiKey {
           configured(status)
+        } else if let loadError {
+          // Without the server's answer the setup form would wrongly suggest nothing is set up.
+          ErrorBanner(
+            message: loadError, retry: { Task { await load() } }, retryDisabled: loading,
+            inline: true)
+        } else if status == nil, loading {
+          AureliaDelayedProgress(controlSize: .small)
         } else if isOwner {
           setup
         } else {
@@ -30,8 +39,7 @@ struct SubtitleDownloadSettingsSection: View {
             .font(.caption).foregroundStyle(.secondary)
         }
         if let errorText {
-          Label(errorText, systemImage: "exclamationmark.triangle.fill")
-            .foregroundStyle(.orange).font(.callout)
+          ErrorBanner(message: errorText, inline: true)
             .accessibilityIdentifier("subtitles-error")
         }
       }
@@ -183,7 +191,19 @@ struct SubtitleDownloadSettingsSection: View {
 
   private func load() async {
     guard model.canManageMedia, let profile = model.profile else { return }
-    status = try? await APIClient(profile: profile).subtitleProviderStatus()
+    loading = true
+    defer { loading = false }
+    do {
+      status = try await APIClient(profile: profile).subtitleProviderStatus()
+      loadError = nil
+    } catch is CancellationError {
+    } catch let failure as APIClientError where failure.httpStatus == 404 {
+      // A server without subtitle downloads.
+      status = nil
+      loadError = nil
+    } catch {
+      loadError = error.localizedDescription
+    }
   }
 
   @discardableResult

@@ -24,7 +24,9 @@ struct DownloadsPage: View {
             .aureliaRiseIn(1)
         }
         if let error = downloads.errorMessage {
-          Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+          ErrorBanner(
+            message: error, retry: { downloads.errorMessage = nil }, retryLabel: "Dismiss",
+            inline: true)
         }
         if downloads.leftoverBytes > 0 {
           HStack(spacing: 12) {
@@ -115,8 +117,13 @@ private struct DownloadStorageSummary: View {
     }
     .padding(18)
     .frame(maxWidth: 760, alignment: .leading)
-    .background(AureliaDesign.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(AureliaDesign.hairline) }
+    .background(
+      AureliaDesign.surface.opacity(0.7),
+      in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
+        .stroke(AureliaDesign.hairline)
+    }
     .accessibilityElement(children: .combine)
   }
 
@@ -152,7 +159,9 @@ private struct ActiveDownloadCard: View {
       Button("Cancel", action: cancel)
     }
     .padding(14)
-    .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    .background(
+      .white.opacity(0.05),
+      in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
   }
 }
 
@@ -166,20 +175,8 @@ struct OfflineTitleList: View {
     model.offlineTitles.filter { !$0.isEpisode }.sorted { $0.downloadedAt > $1.downloadedAt }
   }
 
-  /// Episodes grouped by series, the most recently downloaded series first.
-  private var series: [(name: String, episodes: [OfflineTitle])] {
-    let groups = Dictionary(grouping: model.offlineTitles.filter(\.isEpisode)) {
-      $0.parentTitle ?? $0.title
-    }
-    return groups.map { name, episodes in
-      (name, episodes.sorted {
-        ($0.seasonNumber ?? 0, $0.episodeNumber ?? 0) < ($1.seasonNumber ?? 0, $1.episodeNumber ?? 0)
-      })
-    }
-    .sorted {
-      ($0.episodes.map(\.downloadedAt).max() ?? .distantPast)
-        > ($1.episodes.map(\.downloadedAt).max() ?? .distantPast)
-    }
+  private var series: [OfflineSeriesGroup] {
+    OfflineTitlePresentation.seriesGroups(model.offlineTitles)
   }
 
   var body: some View {
@@ -199,7 +196,7 @@ struct OfflineTitleList: View {
           }
         }
       }
-      ForEach(series, id: \.name) { group in
+      ForEach(series) { group in
         VStack(alignment: .leading, spacing: 14) {
           HStack(spacing: 12) {
             Group {
@@ -210,7 +207,7 @@ struct OfflineTitleList: View {
               }
             }
             .frame(width: 34, height: 51)
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.tinyRadius, style: .continuous))
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
               Text(group.name).font(AureliaDesign.sectionTitle)
@@ -253,7 +250,37 @@ struct OfflineTitleList: View {
   }
 }
 
+/// A series on the Downloads page with its downloaded episodes.
+struct OfflineSeriesGroup: Identifiable {
+  let id: String
+  let name: String
+  let episodes: [OfflineTitle]
+}
+
 enum OfflineTitlePresentation {
+  /// Episodes grouped by their series, the most recently downloaded series first. Grouped by the
+  /// series' id, so two series with the same name stay apart and a renamed one stays together;
+  /// downloads from before the id was kept fall back to the series name.
+  static func seriesGroups(_ titles: [OfflineTitle]) -> [OfflineSeriesGroup] {
+    let episodes = titles.filter(\.isEpisode)
+    let groups = Dictionary(grouping: episodes) { title in
+      title.parentId.map { "id:\($0.uuidString)" } ?? "name:\(title.parentTitle ?? title.title)"
+    }
+    return groups.map { key, episodes in
+      let sorted = episodes.sorted {
+        ($0.seasonNumber ?? 0, $0.episodeNumber ?? 0)
+          < ($1.seasonNumber ?? 0, $1.episodeNumber ?? 0)
+      }
+      let newest = sorted.max { $0.downloadedAt < $1.downloadedAt }
+      let name = newest?.parentTitle ?? sorted.first?.parentTitle ?? sorted.first?.title ?? ""
+      return OfflineSeriesGroup(id: key, name: name, episodes: sorted)
+    }
+    .sorted {
+      ($0.episodes.map(\.downloadedAt).max() ?? .distantPast)
+        > ($1.episodes.map(\.downloadedAt).max() ?? .distantPast)
+    }
+  }
+
   static func playLabel(_ title: OfflineTitle) -> String {
     title.positionMilliseconds > 0 && !title.isCompleted ? "Resume" : "Play"
   }

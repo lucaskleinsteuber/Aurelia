@@ -95,7 +95,8 @@ struct PlayerView: View {
         }
 
         if let preShow {
-          CinemaPreShowView(show: preShow, reduceMotion: reduceMotion)
+          CinemaPreShowView(
+            show: preShow, reduceMotion: reduceMotion, onClose: { closePlayer() })
             .frame(width: viewport.width, height: viewport.height)
             .transition(.opacity)
             // Moving the pointer shows it again over the pre-show, and it hides after a while.
@@ -185,7 +186,8 @@ struct PlayerView: View {
                 maxWidth: 320, alignment: .leading
               )
               .playerMaterial(
-                reduceTransparency: reduceTransparency, shape: RoundedRectangle(cornerRadius: 14)
+                reduceTransparency: reduceTransparency,
+                shape: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius)
               )
               .accessibilityIdentifier("scene-note-hint")
             }
@@ -463,7 +465,7 @@ struct PlayerView: View {
         .padding(20)
         .playerMaterial(
           reduceTransparency: reduceTransparency,
-          shape: RoundedRectangle(cornerRadius: 18, style: .continuous)
+          shape: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
         )
         .accessibilityIdentifier("player-preparing")
       }
@@ -843,7 +845,7 @@ struct PlayerView: View {
     .frame(maxWidth: 440)
     .playerMaterial(
       reduceTransparency: reduceTransparency,
-      shape: RoundedRectangle(cornerRadius: 22, style: .continuous))
+      shape: RoundedRectangle(cornerRadius: AureliaDesign.heroRadius, style: .continuous))
   }
 
   private func exportPlaybackDiagnostics() {
@@ -891,6 +893,7 @@ struct PlayerView: View {
         .playerMaterial(reduceTransparency: reduceTransparency, shape: Circle())
     }
     .buttonStyle(PlayerPressButtonStyle(reduceMotion: reduceMotion))
+    .help(title)
     .accessibilityLabel(title)
   }
 
@@ -912,7 +915,9 @@ struct PlayerView: View {
           .foregroundStyle(.secondary)
           .padding(.horizontal, 7)
           .padding(.vertical, 3)
-          .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(.secondary.opacity(0.6)))
+          .overlay(
+            RoundedRectangle(cornerRadius: AureliaDesign.tinyRadius)
+              .strokeBorder(.secondary.opacity(0.6)))
           .accessibilityHidden(true)
       }
       .font(.title3.weight(.semibold))
@@ -938,7 +943,7 @@ struct PlayerView: View {
           artwork: suggestion.item.poster, symbol: suggestion.item.kind == .movie ? "film" : "tv"
         )
         .frame(width: 54, height: 80)
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.tinyRadius, style: .continuous))
         VStack(alignment: .leading, spacing: 4) {
           Text(suggestion.item.title).font(.title3.weight(.semibold)).lineLimit(2)
           Text(SuggestionPolicy.caption(suggestion)).font(.callout).foregroundStyle(.secondary)
@@ -951,9 +956,7 @@ struct PlayerView: View {
         } label: {
           Label("Watch Now", systemImage: "play.fill").frame(minWidth: 110)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(.white)
-        .foregroundStyle(.black)
+        .buttonStyle(AureliaPrimaryActionButtonStyle())
         .help("Starts \(suggestion.item.title); this title counts as watched.")
         .accessibilityIdentifier("player-suggestion-play")
         Button("Watch Credits") { controller.dismissSuggestionCard() }
@@ -972,7 +975,7 @@ struct PlayerView: View {
     .frame(width: 400, alignment: .leading)
     .playerMaterial(
       reduceTransparency: reduceTransparency,
-      shape: RoundedRectangle(cornerRadius: 18, style: .continuous)
+      shape: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
     )
     .onHover { interaction("suggestion-hover", active: $0) }
     .accessibilityElement(children: .contain)
@@ -1004,7 +1007,7 @@ struct PlayerView: View {
         Text(words.title).font(.largeTitle.weight(.bold))
         Text(words.text).font(.title3).foregroundStyle(.secondary)
         Button("Done") { goodNightDone() }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(AureliaPrimaryActionButtonStyle())
           .controlSize(.large)
           .keyboardShortcut(.defaultAction)
           .padding(.top, 8)
@@ -1053,19 +1056,25 @@ struct PlayerView: View {
                 symbol: suggestion.item.kind == .movie ? "film" : "tv"
               )
               .frame(width: index == 0 ? 200 : 150, height: index == 0 ? 300 : 225)
-              .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+              .clipShape(
+                RoundedRectangle(cornerRadius: AureliaDesign.smallRadius, style: .continuous))
               Text(suggestion.item.title).font(index == 0 ? .title3.weight(.semibold) : .headline)
                 .lineLimit(2)
               Text(SuggestionPolicy.caption(suggestion)).font(.callout).foregroundStyle(.secondary)
                 .lineLimit(2)
-              Button {
+              let watchNow = Button {
                 playSuggestion(suggestion.item)
               } label: {
                 Label("Watch Now", systemImage: "play.fill")
               }
-              .buttonStyle(.borderedProminent)
-              .tint(index == 0 ? .white : .gray)
-              .foregroundStyle(index == 0 ? .black : .white)
+              // The main suggestion is the screen's one primary action; the others stay quieter.
+              Group {
+                if index == 0 {
+                  watchNow.buttonStyle(AureliaPrimaryActionButtonStyle())
+                } else {
+                  watchNow.buttonStyle(.bordered)
+                }
+              }
               .controlSize(.large)
               .accessibilityIdentifier("player-end-suggestion-\(index)")
             }
@@ -1135,9 +1144,7 @@ struct PlayerView: View {
             .monospacedDigit()
             .frame(minWidth: 120)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(.white)
-        .foregroundStyle(.black)
+        .buttonStyle(AureliaPrimaryActionButtonStyle())
         .accessibilityIdentifier("player-up-next-play")
         Button(upNext.duringCredits ? "Watch Credits" : "Cancel") { controller.dismissUpNext() }
           .buttonStyle(.bordered)
@@ -1150,7 +1157,7 @@ struct PlayerView: View {
     .frame(width: 320, alignment: .leading)
     .playerMaterial(
       reduceTransparency: reduceTransparency,
-      shape: RoundedRectangle(cornerRadius: 18, style: .continuous)
+      shape: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
     )
     .onHover { interaction("up-next-hover", active: $0) }
     .accessibilityElement(children: .contain)
@@ -1557,8 +1564,11 @@ private struct PlayerPreviewBubble: View {
         }
       }
       .frame(width: width, height: width * 9 / 16)
-      .clipShape(RoundedRectangle(cornerRadius: 8))
-      .overlay { RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.35), lineWidth: 1) }
+      .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.smallRadius))
+      .overlay {
+        RoundedRectangle(cornerRadius: AureliaDesign.smallRadius)
+          .stroke(.white.opacity(0.35), lineWidth: 1)
+      }
       .shadow(color: .black.opacity(0.45), radius: 10, y: 4)
       Text(preview.label)
         .font(.caption.weight(.semibold)).monospacedDigit()

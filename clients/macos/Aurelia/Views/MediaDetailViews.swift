@@ -45,10 +45,13 @@ struct MediaDetailView: View {
     ScrollView {
       if let detail = shownDetail {
         LazyVStack(alignment: .leading, spacing: 38) {
+          let playLabel = DetailPlaybackPresentation.label(detail: detail, plan: shownPlan)
           DetailHero(
             detail: detail,
             seasonNumber: activeSeason(detail)?.number,
-            playLabel: DetailPlaybackPresentation.label(detail: detail, plan: shownPlan),
+            playLabel: playLabel,
+            remainingText: playLabel.hasPrefix("Resume")
+              ? DetailPlaybackPresentation.remainingText(for: primaryTarget(detail)) : nil,
             playTarget: primaryTarget(detail),
             isPlayLoading: isLoadingPlaybackPlan || isStartingPlayback,
             canPlay: primaryTarget(detail).map(MediaAvailabilityPresentation.canPlay) == true,
@@ -288,7 +291,7 @@ struct MediaDetailView: View {
   private func primaryTarget(_ detail: CatalogDetailPresentation) -> CatalogItemSummary? {
     if model.supportsLibraryState { return shownPlan?.target }
     if detail.item.kind != .series { return detail.item }
-    return episodes(in: detail).first?.item
+    return DetailPlaybackPresentation.firstEpisode(episodes(in: detail))?.item
   }
 
   private func playOnDevice(_ device: RemotePlayerDevice, _ detail: CatalogDetailPresentation) {
@@ -309,7 +312,7 @@ struct MediaDetailView: View {
         artwork: CatalogPlaybackLogic.artwork(for: detail.item))
     } else {
       let availableEpisodes = episodes(in: detail)
-      if let episode = availableEpisodes.first {
+      if let episode = DetailPlaybackPresentation.firstEpisode(availableEpisodes) {
         play(episode, seriesTitle: detail.item.title, allEpisodes: availableEpisodes)
       }
     }
@@ -694,6 +697,23 @@ enum DetailPlaybackPresentation {
     else { return action }
     return "\(action) S\(String(format: "%02d", season)) E\(String(format: "%02d", episode))"
   }
+
+  /// The episode a series' Play starts without the server's plan: the first regular episode.
+  /// Specials (season 0) only when nothing else can be played.
+  static func firstEpisode(_ episodes: [EpisodePresentation]) -> EpisodePresentation? {
+    episodes.first { $0.seasonNumber > 0 } ?? episodes.first
+  }
+
+  /// "23 min left" beside Resume, from the title's saved progress.
+  static func remainingText(for target: CatalogItemSummary?) -> String? {
+    guard let progress = target?.progress, !progress.isCompleted,
+      progress.positionMilliseconds > 0,
+      progress.durationMilliseconds > progress.positionMilliseconds
+    else { return nil }
+    let seconds = Int((progress.durationMilliseconds - progress.positionMilliseconds) / 1_000)
+    guard seconds > 0 else { return nil }
+    return "\(WatchTime.text(seconds: seconds)) left"
+  }
 }
 
 enum MediaInformationPresentation {
@@ -739,6 +759,7 @@ private struct DetailHero: View {
   /// The season shown below, which "Mark Season as Watched" in More Actions acts on.
   let seasonNumber: Int?
   let playLabel: String
+  var remainingText: String? = nil
   let playTarget: CatalogItemSummary?
   let isPlayLoading: Bool
   let canPlay: Bool
@@ -882,6 +903,23 @@ private struct DetailHero: View {
           }
         }
         .aureliaRiseIn(4)
+        if let remainingText, !isPlayLoading {
+          HStack(spacing: 10) {
+            if let fraction = playTarget?.progressFraction {
+              ProgressView(value: fraction)
+                .progressViewStyle(.linear)
+                .tint(.white)
+                .frame(width: 120)
+                .accessibilityHidden(true)
+            }
+            Text(remainingText)
+              .font(.caption.weight(.medium))
+              .foregroundStyle(.white.opacity(0.8))
+              .monospacedDigit()
+          }
+          .accessibilityElement(children: .combine)
+          .aureliaRiseIn(4)
+        }
       }
       .padding(AureliaDesign.pagePadding)
       .padding(.bottom, 16)

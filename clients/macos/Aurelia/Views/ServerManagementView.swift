@@ -34,7 +34,10 @@ struct ServerManagementView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 20) {
-      if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+      if let error {
+        ErrorBanner(
+          message: error, retry: { Task { await reload() } }, retryDisabled: loading, inline: true)
+      }
       if part == .people {
         profiles
         ServerDevicesSection()
@@ -94,10 +97,8 @@ struct ServerManagementView: View {
   /// Linux server can sleep or turn off its computer; one the Aurelia app hosts only stops.
   @ViewBuilder private var powerParts: some View {
     if capabilities == nil && !model.isLocalHost && error == nil {
-      ProgressView("Loading power settings…")
-    }
-    if error != nil, capabilities == nil, !model.isLocalHost {
-      Button("Try Again") { Task { await reload() } }
+      AureliaDelayedProgress().frame(maxWidth: .infinity)
+        .accessibilityLabel("Loading power settings")
     }
     if let client, capabilities != nil || model.isLocalHost {
       if hosting.hostsOnMac {
@@ -109,7 +110,10 @@ struct ServerManagementView: View {
   }
 
   @ViewBuilder private var serverParts: some View {
-    if loading && status == nil { ProgressView("Loading server settings…") }
+    if loading && status == nil {
+      AureliaDelayedProgress().frame(maxWidth: .infinity)
+        .accessibilityLabel("Loading server settings")
+    }
     if let status {
       ServerSummaryCard(
         status: status, configuration: configuration, client: client,
@@ -125,10 +129,11 @@ struct ServerManagementView: View {
       ServerPerformanceCard(client: client)
     }
     if let configuration, let client {
+      // The boxes keep their unsaved edits when another box saves, so they are not keyed on
+      // the settings' revision.
       ServerEssentialsEditor(configuration: configuration, client: client) {
         self.configuration = $0
       }
-      .id("essentials-\(configuration.stored.revision)")
       ServerScrubPreviewsEditor(client: client)
       ServerMediaSegmentsEditor(client: client)
       if model.libraryCapabilities.contains(ServerFeatureNames.serverSpeech) {
@@ -146,24 +151,20 @@ struct ServerManagementView: View {
             configuration: configuration, client: client,
             nativeHostAvailable: capabilities?.nativeHostOperations == true
           ) { Task { await reload() } }
-          .id("network-\(configuration.stored.revision)")
         }
         ServerSecurityEditor(configuration: configuration, client: client) { configuration in
           self.configuration = configuration
-        }.id(configuration.stored.revision)
+        }
         ServerLibraryJobsEditor(configuration: configuration, client: client) {
           self.configuration = $0
         }
-        .id("jobs-\(configuration.stored.revision)")
         ServerBackupsEditor(
           configuration: configuration, client: client,
           nativeHostAvailable: capabilities?.nativeHostOperations == true
         ) { self.configuration = $0 }
-        .id("backups-\(configuration.stored.revision)")
         ServerDiagnosticsEditor(configuration: configuration, client: client) {
           self.configuration = $0
         }
-        .id("diagnostics-\(configuration.stored.revision)")
       }
     }
   }
@@ -337,7 +338,7 @@ private struct ServerSecurityEditor: View {
   let configuration: ServerConfigurationResponse
   let client: APIClient
   let saved: (ServerConfigurationResponse) -> Void
-  @State private var settings: ServerPolicySettings
+  @State private var draft: ServerSettingsDraft
   @State private var saving = false
   @State private var saveTask: Task<Void, Never>?
   @State private var error: String?
@@ -349,27 +350,28 @@ private struct ServerSecurityEditor: View {
     self.configuration = configuration
     self.client = client
     self.saved = saved
-    _settings = State(initialValue: configuration.stored)
+    _draft = State(initialValue: ServerSettingsDraft(configuration.stored))
   }
   var body: some View {
     AureliaSettingsSection("Sign-In & Streaming Limits", symbol: "gauge.with.dots.needle.50percent", description: "How many attempts and streams the server allows, so one device can't slow it down for everyone.") {
       VStack(alignment: .leading, spacing: 12) {
         Stepper(
-          "Keep new devices signed in for \(settings.deviceSessionDays) days",
-          value: $settings.deviceSessionDays, in: 1...365)
+          "Keep new devices signed in for \(draft.value.deviceSessionDays) days",
+          value: $draft.value.deviceSessionDays, in: 1...365)
         Stepper(
-          "Streams at the same time: \(settings.globalStreamLimit) in total",
-          value: $settings.globalStreamLimit, in: settings.userStreamLimit...128)
+          "Streams at the same time: \(draft.value.globalStreamLimit) in total",
+          value: $draft.value.globalStreamLimit, in: draft.value.userStreamLimit...128)
         Stepper(
-          "Streams at the same time: \(settings.userStreamLimit) per profile",
-          value: $settings.userStreamLimit, in: 1...min(16, settings.globalStreamLimit))
+          "Streams at the same time: \(draft.value.userStreamLimit) per profile",
+          value: $draft.value.userStreamLimit, in: 1...min(16, draft.value.globalStreamLimit))
         Text(
           "Existing sessions keep their current expiry. New pairing codes expire after five minutes. Device revocation stops affected streams immediately."
         )
         .font(.caption).foregroundStyle(.secondary)
-        if let error { Text(error).foregroundStyle(.red) }
+        if let error { ErrorBanner(message: error, inline: true) }
         Button(saving ? "Saving…" : "Save Limits") {
           let generation = model.administrationGeneration
+          let settings = draft.merged(onto: configuration.stored)
           saving = true
           saveTask = Task {
             defer {
@@ -395,9 +397,11 @@ private struct ServerSecurityEditor: View {
               self.error = error.localizedDescription
             }
           }
-        }.disabled(saving || settings == configuration.stored)
+        }.disabled(saving || !draft.isDirty)
       }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
-    }.onDisappear { saveTask?.cancel() }
+    }
+    .onChange(of: configuration.stored) { _, latest in draft.follow(latest) }
+    .onDisappear { saveTask?.cancel() }
   }
 }
 

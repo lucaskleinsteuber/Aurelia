@@ -17,7 +17,13 @@ struct ServerDevicesSection: View {
         Divider()
         browserAccess
         let sessions = model.sessions.filter(\.isActive)
-        if !sessions.isEmpty {
+        if securityListsDevices {
+          Divider()
+          Text(
+            "Signed-in devices are listed under Security below, where you can sign them out or block them."
+          )
+          .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        } else if !sessions.isEmpty {
           Divider()
           Text("Signed-In Devices").font(.headline)
           Text("Devices that can use this server now. Sign Out ends a device’s access; it then needs a new code.")
@@ -40,6 +46,12 @@ struct ServerDevicesSection: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
+  }
+
+  /// The owner's Security section lists the same devices with Sign Out and Block, so the page
+  /// shows one list instead of two.
+  private var securityListsDevices: Bool {
+    model.libraryCapabilities.contains("security-v1") && model.profile?.user?.role == .owner
   }
 
   /// The server serves Aurelia for web browsers itself; a browser signs in with a code too.
@@ -73,7 +85,8 @@ struct ServerDevicesSection: View {
           Button("Open") { NSWorkspace.shared.open(address.url) }
         }
         .padding(12)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+        .background(
+          .quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius))
         if !address.thisMacOnly {
           Text(
             "The first time, the browser warns that the connection isn’t private, because the server signs its own certificate. Continue to the page to use Aurelia."
@@ -156,7 +169,8 @@ struct ServerDevicesSection: View {
       .disabled(expired)
     }
     .padding(12)
-    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+    .background(
+      .quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius))
   }
 
   private func lastUsed(_ session: DeviceSessionSummary) -> Text {
@@ -179,7 +193,8 @@ private struct PairingDirection: View {
     }
     .padding(.vertical, 6)
     .padding(.horizontal, 10)
-    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+    .background(
+      .quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius))
     .accessibilityElement(children: .combine)
   }
 

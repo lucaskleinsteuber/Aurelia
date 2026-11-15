@@ -9,7 +9,10 @@ enum AureliaDesign {
   static let detailRailLeadingInset: CGFloat = pagePadding
   static let sectionSpacing: CGFloat = 30
   static let rowSpacing: CGFloat = 20
+  // Corner radii: tiny for tags and thumbnails, small for rows and fields, compact for tiles,
+  // card for cards and panels, hero for hero artwork. Literal radii map to the nearest one.
   static let cardRadius: CGFloat = 18
+  static let tinyRadius: CGFloat = 5
   static let smallRadius: CGFloat = 8
   static let compactRadius: CGFloat = 12
   static let heroRadius: CGFloat = 24
@@ -773,11 +776,12 @@ extension View {
 /// A spinner that appears only when loading takes longer than a moment, so fast loads never
 /// flash a progress indicator.
 struct AureliaDelayedProgress: View {
+  var controlSize: ControlSize = .large
   @State private var visible = false
 
   var body: some View {
     ProgressView()
-      .controlSize(.large)
+      .controlSize(controlSize)
       .opacity(visible ? 1 : 0)
       .task {
         try? await Task.sleep(for: .milliseconds(350))
@@ -1104,5 +1108,103 @@ struct ErrorBanner: View {
         .padding(.horizontal, AureliaDesign.pagePadding)
         .padding(.bottom, 18)
     }
+  }
+}
+
+/// The header every sheet shares: a symbol tile, the title and one sentence saying what it is for.
+struct AureliaSheetHeader: View {
+  let title: String
+  let subtitle: String
+  let symbol: String
+
+  var body: some View {
+    HStack(spacing: 14) {
+      Image(systemName: symbol).font(.title2).frame(width: 42, height: 42)
+        .background(.white.opacity(0.075), in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius))
+        .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 3) {
+        Text(title).font(.title2.bold())
+          .accessibilityAddTraits(.isHeader)
+        Text(subtitle).font(.callout).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      Spacer(minLength: 0)
+    }
+    .padding(20)
+  }
+}
+
+/// The main button of a sheet: Return runs it, it shows its busy title while it works.
+struct AureliaSheetAction {
+  let title: String
+  var busyTitle: String?
+  var isBusy = false
+  var isDisabled = false
+  var role: ButtonRole?
+  let action: () -> Void
+}
+
+/// The frame every sheet shares: a header saying what it is for, the content, an error banner
+/// above the footer, and a footer with an optional note or side action, Cancel (Escape) and the
+/// main action (Return). Without a main action the footer shows Done, which Escape also closes.
+struct AureliaSheet<Content: View, Leading: View>: View {
+  let title: String
+  let subtitle: String
+  let symbol: String
+  var errorMessage: String?
+  var retry: (() -> Void)?
+  var primary: AureliaSheetAction?
+  var cancelTitle = "Cancel"
+  let onCancel: () -> Void
+  @ViewBuilder var leading: () -> Leading
+  @ViewBuilder var content: () -> Content
+
+  var body: some View {
+    VStack(spacing: 0) {
+      AureliaSheetHeader(title: title, subtitle: subtitle, symbol: symbol)
+      Divider()
+      content()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+      if let errorMessage {
+        ErrorBanner(message: errorMessage, retry: retry, inline: true)
+          .padding(.horizontal, 20)
+          .padding(.vertical, 10)
+      }
+      Divider()
+      HStack(spacing: 10) {
+        leading()
+        Spacer(minLength: 12)
+        if let primary {
+          Button(cancelTitle, action: onCancel)
+            .keyboardShortcut(.cancelAction)
+          Button(role: primary.role, action: primary.action) {
+            HStack(spacing: 6) {
+              if primary.isBusy { ProgressView().controlSize(.small) }
+              Text(primary.isBusy ? (primary.busyTitle ?? primary.title) : primary.title)
+            }
+          }
+          .buttonStyle(AureliaPrimaryActionButtonStyle(compact: true))
+          .keyboardShortcut(.defaultAction)
+          .disabled(primary.isDisabled || primary.isBusy)
+        } else {
+          AureliaSheetDoneButton(title: cancelTitle == "Cancel" ? "Done" : cancelTitle, action: onCancel)
+        }
+      }
+      .padding(16)
+    }
+    .background(AureliaBackdrop())
+  }
+}
+
+extension AureliaSheet where Leading == EmptyView {
+  init(
+    title: String, subtitle: String, symbol: String, errorMessage: String? = nil,
+    retry: (() -> Void)? = nil, primary: AureliaSheetAction? = nil, cancelTitle: String = "Cancel",
+    onCancel: @escaping () -> Void, @ViewBuilder content: @escaping () -> Content
+  ) {
+    self.init(
+      title: title, subtitle: subtitle, symbol: symbol, errorMessage: errorMessage, retry: retry,
+      primary: primary, cancelTitle: cancelTitle, onCancel: onCancel, leading: { EmptyView() },
+      content: content)
   }
 }

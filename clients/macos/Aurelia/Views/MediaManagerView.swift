@@ -7,33 +7,34 @@ struct MediaManagerView: View {
   @State private var choosesServerFolder = false
 
   var body: some View {
-    VStack(spacing: 0) {
-      header
-      ScrollView {
-        VStack(alignment: .leading, spacing: 22) {
-          if model.canManageStorage {
-            addLocations
-          }
-          configuredLibraries
-          scanActivity
-          importAssignments
-          if let error = model.administrationErrorMessage {
-            Text(error).foregroundStyle(.orange).textSelection(.enabled)
-          }
-        }
-        .padding(AureliaDesign.pagePadding)
-      }
-      Divider()
-      HStack {
+    AureliaSheet(
+      title: "Manage Media",
+      subtitle: "Add storage locations, follow scans and review detected folders.",
+      symbol: "externaldrive.fill.badge.plus",
+      errorMessage: model.administrationErrorMessage,
+      retry: { Task { await model.reloadAdministration() } },
+      primary: nil,
+      onCancel: { dismiss() },
+      leading: {
         Text("Removing a location never deletes or changes media files.")
           .font(.caption)
           .foregroundStyle(.secondary)
-        Spacer()
-        AureliaSheetDoneButton { dismiss() }
+      },
+      content: {
+        ScrollView {
+          VStack(alignment: .leading, spacing: 22) {
+            if model.canManageStorage {
+              addLocations
+            }
+            configuredLibraries
+            scanActivity
+            importReview
+            importAssignments
+          }
+          .padding(AureliaDesign.pagePadding)
+        }
       }
-      .padding(.horizontal, AureliaDesign.pagePadding)
-      .padding(.vertical, 16)
-    }
+    )
     .frame(width: 800, height: 720)
     .sheet(isPresented: $choosesServerFolder) {
       ServerFolderPicker { path in
@@ -43,27 +44,10 @@ struct MediaManagerView: View {
       }
       .environmentObject(model)
     }
-    .background(AureliaBackdrop())
     .task { await model.reloadAdministration() }
     .sheet(item: $model.importPreviewLibrary) { library in
       ImportPreviewView(library: library).environmentObject(model)
     }
-  }
-
-  private var header: some View {
-    HStack(spacing: 14) {
-      Image(systemName: "externaldrive.fill.badge.plus")
-        .font(.system(size: 30, weight: .semibold))
-        .symbolRenderingMode(.hierarchical)
-      VStack(alignment: .leading, spacing: 3) {
-        Text("Manage Media").font(AureliaDesign.pageTitle)
-        Text("Add storage locations, follow scans, and review detected folders.")
-          .font(.callout).foregroundStyle(.secondary)
-      }
-      Spacer()
-    }
-    .padding(.horizontal, AureliaDesign.pagePadding)
-    .padding(.vertical, 22)
   }
 
   private var addLocations: some View {
@@ -155,7 +139,7 @@ struct MediaManagerView: View {
         ForEach(model.libraries) { library in
           LibraryLocationRow(
             library: library,
-            canEdit: model.isLocalHost && model.canManageMedia)
+            canEdit: model.canManageStorage)
           if library.id != model.libraries.last?.id { Divider() }
         }
       }
@@ -265,7 +249,7 @@ private struct TrailerImportReviewRow: View {
           .disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSearching)
       }
 
-      if isSearching { ProgressView().controlSize(.small) }
+      if isSearching { AureliaDelayedProgress(controlSize: .small) }
       ForEach(candidates) { movie in
         HStack {
           Text(movie.year.map { "\(movie.title) (\($0))" } ?? movie.title)
@@ -284,7 +268,7 @@ private struct TrailerImportReviewRow: View {
         .padding(.leading, 10)
       }
       if let errorMessage {
-        Text(errorMessage).font(.caption).foregroundStyle(.orange)
+        ErrorBanner(message: errorMessage, inline: true)
       }
     }
     .padding(12)

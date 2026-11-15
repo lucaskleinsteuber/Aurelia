@@ -78,7 +78,7 @@ struct OperatingModeView: View {
         .frame(width: 44, height: 44)
         .background(
           primary ? Color.white.opacity(0.94) : AureliaDesign.raisedSurface,
-          in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+          in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
         )
         .foregroundStyle(primary ? Color.black : Color.primary)
       VStack(alignment: .leading, spacing: 4) {
@@ -111,6 +111,7 @@ struct NativeHostSetupView: View {
   @State private var serverName = "Aurelia on \(Host.current().localizedName ?? "This Mac")"
   @State private var username = NSUserName().count >= 3 ? NSUserName() : "owner"
   @State private var password = ""
+  @State private var passwordRepeat = ""
   @State private var showsPassword = false
   @State private var showsAdvancedSetup = false
   @State private var lanPort = 43_111
@@ -178,6 +179,13 @@ struct NativeHostSetupView: View {
         Text("Choose a Server Password. Aurelia takes care of the server details.")
           .foregroundStyle(.secondary)
           .multilineTextAlignment(.center)
+        Text(
+          "The Server Password unlocks server administration, restoring backups and setting up Touch ID. It can't be recovered, so keep it somewhere safe."
+        )
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+        .fixedSize(horizontal: false, vertical: true)
       }
       HStack {
         Group {
@@ -197,8 +205,22 @@ struct NativeHostSetupView: View {
         .buttonStyle(.borderless)
         .accessibilityLabel(showsPassword ? "Hide Password" : "Show Password")
       }
+      Group {
+        if showsPassword {
+          TextField("Repeat Password", text: $passwordRepeat)
+        } else {
+          SecureField("Repeat Password", text: $passwordRepeat)
+        }
+      }
+      .textFieldStyle(.roundedBorder)
+      .accessibilityIdentifier("host-owner-password-repeat")
       if !password.isEmpty && password.count < 12 {
         Text("Use at least 12 characters.")
+          .font(.caption)
+          .foregroundStyle(.orange)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      } else if !passwordRepeat.isEmpty && passwordRepeat != password {
+        Text("The passwords don't match.")
           .font(.caption)
           .foregroundStyle(.orange)
           .frame(maxWidth: .infinity, alignment: .leading)
@@ -244,16 +266,17 @@ struct NativeHostSetupView: View {
             serverName: serverName,
             username: username,
             password: password,
-            confirmation: password,
+            confirmation: passwordRepeat,
             lanPort: lanPort)
         }
       }
       .buttonStyle(AureliaPrimaryActionButtonStyle())
       .controlSize(.large)
+      .keyboardShortcut(.defaultAction)
       .disabled(
         serverName.trimmingCharacters(in: .whitespaces).isEmpty
           || username.trimmingCharacters(in: .whitespaces).count < 3
-          || password.count < 12 || model.isWorking
+          || password.count < 12 || passwordRepeat != password || model.isWorking
       )
       .accessibilityIdentifier("create-local-server")
     }
@@ -270,6 +293,7 @@ struct NativeHostSetupView: View {
         Task { _ = await model.loginToLocalServer(username: username, password: password) }
       }
       .buttonStyle(AureliaPrimaryActionButtonStyle())
+      .keyboardShortcut(.defaultAction)
       .disabled(username.isEmpty || password.isEmpty || model.isWorking)
       .accessibilityIdentifier("local-server-sign-in")
     }

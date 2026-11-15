@@ -31,13 +31,66 @@ import UniformTypeIdentifiers
   }
 }
 
+/// The unsaved edits of one settings box. Every box edits a few fields of the same server
+/// settings, so saving one box must neither discard another box's edits nor send stale values.
+struct ServerSettingsDraft: Equatable {
+  /// The server's settings the edits are based on.
+  private(set) var base: ServerPolicySettings
+  var value: ServerPolicySettings
+
+  init(_ stored: ServerPolicySettings) {
+    base = stored
+    value = stored
+  }
+
+  var isDirty: Bool { value != base }
+
+  /// The latest server settings with only the fields this box changed.
+  func merged(onto latest: ServerPolicySettings) -> ServerPolicySettings {
+    var result = latest
+    func take<Value: Equatable>(_ path: WritableKeyPath<ServerPolicySettings, Value>) {
+      if value[keyPath: path] != base[keyPath: path] {
+        result[keyPath: path] = value[keyPath: path]
+      }
+    }
+    take(\.serverName)
+    take(\.lanAccessEnabled)
+    take(\.lanHttpsPort)
+    take(\.pairingEnabled)
+    take(\.deviceSessionDays)
+    take(\.globalStreamLimit)
+    take(\.userStreamLimit)
+    take(\.bonjourEnabled)
+    take(\.allowedNetworks)
+    take(\.monitoringEnabled)
+    take(\.reconciliationMinutes)
+    take(\.maintenanceStartHour)
+    take(\.maintenanceEndHour)
+    take(\.jobQueueLimit)
+    take(\.automaticBackupsEnabled)
+    take(\.backupIntervalHours)
+    take(\.dailyBackupsRetained)
+    take(\.weeklyBackupsRetained)
+    take(\.eventRetentionDays)
+    take(\.maximumEvents)
+    return result
+  }
+
+  /// Takes a newer server state as the base and keeps the fields this box changed; an unchanged
+  /// box simply shows the server's values.
+  mutating func follow(_ latest: ServerPolicySettings) {
+    value = merged(onto: latest)
+    base = latest
+  }
+}
+
 struct ServerNetworkEditor: View {
   @EnvironmentObject private var model: AppModel
   let configuration: ServerConfigurationResponse
   let client: APIClient
   let nativeHostAvailable: Bool
   let reload: () -> Void
-  @State private var draft: ServerPolicySettings
+  @State private var draft: ServerSettingsDraft
   @State private var networks: String
   @State private var confirmedDisconnect = false
   @State private var operation: HostOperationStatus?
@@ -54,31 +107,50 @@ struct ServerNetworkEditor: View {
     self.client = client
     self.nativeHostAvailable = nativeHostAvailable
     self.reload = reload
-    _draft = State(initialValue: configuration.stored)
-    _networks = State(
-      initialValue: (configuration.stored.allowedNetworks ?? []).joined(separator: "\n"))
+    _draft = State(initialValue: ServerSettingsDraft(configuration.stored))
+    _networks = State(initialValue: Self.networkLines(configuration.stored))
   }
+
+  private static func networkLines(_ settings: ServerPolicySettings) -> String {
+    (settings.allowedNetworks ?? []).joined(separator: "\n")
+  }
+
   var body: some View {
     AureliaSettingsSection("Network", symbol: "network", description: "Which networks may reach the server and how it shows up in your home network.") {
       VStack(alignment: .leading, spacing: 12) {
         LabeledContent("Active name", value: configuration.active.serverName)
         LabeledContent("Connected address", value: model.profile?.baseURL.absoluteString ?? "—")
-        TextField("Server name", text: $draft.serverName)
-        Toggle("Allow HTTPS access from LAN / private VPN", isOn: $draft.lanAccessEnabled)
+        TextField("Server name", text: $draft.value.serverName)
+        Toggle("Allow Devices on Your Network or VPN", isOn: $draft.value.lanAccessEnabled)
           .disabled(!model.isLocalHost && configuration.active.lanAccessEnabled)
-        Stepper("HTTPS port: \(draft.lanHttpsPort)", value: $draft.lanHttpsPort, in: 1024...65535)
-        Toggle("Advertise with Bonjour", isOn: $draft.bonjourEnabled)
-        Text("Allowed private networks (one CIDR per line, optional)").font(.caption)
+        caption(
+          "Other devices at home, or connected through your own private VPN, reach the server "
+            + "over an encrypted HTTPS connection. When this is off, only the server computer "
+            + "itself can connect.")
+        Stepper(
+          "HTTPS port: \(draft.value.lanHttpsPort)", value: $draft.value.lanHttpsPort,
+          in: 1024...65535)
+        Toggle("Show the Server on Your Network (Bonjour)", isOn: $draft.value.bonjourEnabled)
+        caption(
+          "Devices on the same network find the server by themselves, without typing its address.")
+        Text("Allowed networks (optional)").font(.caption.weight(.semibold))
         TextEditor(text: $networks).font(.system(.caption, design: .monospaced)).frame(height: 64)
-        Text(
-          "Local access is always retained. Public Internet addresses are blocked; no HTTP/TLS bypass is available."
-        )
-        .font(.caption).foregroundStyle(.secondary)
+        caption(
+          "Only devices in these networks may connect. Write one network per line in CIDR form, "
+            + "for example 192.168.1.0/24 for the addresses 192.168.1.0 to 192.168.1.255. "
+            + "Leave it empty to allow every private network.")
+        caption(
+          "The server computer itself can always connect. Addresses from the public Internet are "
+            + "always blocked, and there is no unencrypted way around that.")
         if let profile = model.profile {
-          Text("Pinned TLS public key: \(profile.publicKeyFingerprint)").font(.caption)
+          Text("Server fingerprint (pinned TLS public key): \(profile.publicKeyFingerprint)")
+            .font(.caption)
             .textSelection(.enabled)
+          caption(
+            "Aurelia remembers this fingerprint and refuses to connect when a different server "
+              + "answers at this address.")
         }
-        if !draft.lanAccessEnabled && configuration.active.lanAccessEnabled {
+        if !draft.value.lanAccessEnabled && configuration.active.lanAccessEnabled {
           Toggle("I understand that remote devices will lose access", isOn: $confirmedDisconnect)
         }
         if let operation, let trialProfile {
@@ -141,26 +213,32 @@ struct ServerNetworkEditor: View {
             }
           }.disabled(working)
         } else {
+          caption(
+            "Network changes are tried for 60 seconds first: the server restarts with the new "
+              + "settings, and you confirm them on the new connection with your Profile PIN and "
+              + "Server Password. Without that confirmation the previous settings return by "
+              + "themselves.")
           Button("Try Network Settings (60-second rollback)") {
             perform { scope in
               guard let profile = model.profile,
                 var parts = URLComponents(url: profile.baseURL, resolvingAgainstBaseURL: false)
               else { throw APIClientError.invalidResponse }
-              draft.allowedNetworks = networks.split(whereSeparator: \.isNewline).map {
+              draft.value.allowedNetworks = networks.split(whereSeparator: \.isNewline).map {
                 $0.trimmingCharacters(in: .whitespaces)
               }.filter { !$0.isEmpty }
+              let trial = draft.merged(onto: configuration.stored)
               let pending = try await scope.request {
-                try await client.trialNetwork(draft, confirmDisconnect: confirmedDisconnect)
+                try await client.trialNetwork(trial, confirmDisconnect: confirmedDisconnect)
               }
-              parts.scheme = draft.lanAccessEnabled ? "https" : "http"
-              parts.port = draft.lanHttpsPort
-              if !draft.lanAccessEnabled {
+              parts.scheme = trial.lanAccessEnabled ? "https" : "http"
+              parts.port = trial.lanHttpsPort
+              if !trial.lanAccessEnabled {
                 parts.host = "127.0.0.1"
                 parts.port = 43110
               }
               guard let address = parts.url else { throw APIClientError.invalidResponse }
               trialProfile = StoredServerProfile(
-                serverId: profile.serverId, name: draft.serverName, baseURL: address,
+                serverId: profile.serverId, name: trial.serverName, baseURL: address,
                 publicKeyFingerprint: profile.publicKeyFingerprint, token: profile.token,
                 sessionId: profile.sessionId, expiresAt: profile.expiresAt, user: profile.user,
                 locallyManaged: profile.locallyManaged, viewingSession: profile.viewingSession)
@@ -170,7 +248,7 @@ struct ServerNetworkEditor: View {
             }
           }.disabled(
             working || !nativeHostAvailable
-              || (!draft.lanAccessEnabled && configuration.active.lanAccessEnabled
+              || (!draft.value.lanAccessEnabled && configuration.active.lanAccessEnabled
                 && !confirmedDisconnect)
           )
         }
@@ -181,7 +259,17 @@ struct ServerNetworkEditor: View {
         }
         if let message { Text(message).font(.caption).textSelection(.enabled) }
       }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
-    }.onDisappear { actionTask?.cancel() }
+    }
+    .onChange(of: configuration.stored) { _, latest in
+      let networksUnchanged = networks == Self.networkLines(draft.base)
+      draft.follow(latest)
+      if networksUnchanged { networks = Self.networkLines(latest) }
+    }
+    .onDisappear { actionTask?.cancel() }
+  }
+  private func caption(_ text: String) -> some View {
+    Text(text).font(.caption).foregroundStyle(.secondary)
+      .fixedSize(horizontal: false, vertical: true)
   }
   private func perform(
     _ action: @escaping @MainActor (ServerAdministrationScope) async throws -> Void
@@ -289,6 +377,13 @@ struct ServerHostingEditor: View {
           }
           .accessibilityIdentifier("server-hosting-apply")
         }.disabled(working || !available)
+        if !available {
+          Text(
+            "This server doesn't offer changing how it runs from here. Change it in Aurelia on the server Mac."
+          )
+          .font(.caption).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+        }
         if let message { Text(message).font(.caption).textSelection(.enabled) }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -338,7 +433,7 @@ struct ServerLibraryJobsEditor: View {
   let configuration: ServerConfigurationResponse
   let client: APIClient
   let saved: (ServerConfigurationResponse) -> Void
-  @State private var settings: ServerPolicySettings
+  @State private var draft: ServerSettingsDraft
   @State private var libraries: [LibrarySummary] = []
   @State private var jobs: ServerJobHistory?
   @State private var working = false
@@ -351,36 +446,44 @@ struct ServerLibraryJobsEditor: View {
     self.configuration = configuration
     self.client = client
     self.saved = saved
-    _settings = State(initialValue: configuration.stored)
+    _draft = State(initialValue: ServerSettingsDraft(configuration.stored))
   }
   var body: some View {
     AureliaSettingsSection("Library Maintenance", symbol: "wrench.and.screwdriver", description: "When the server checks the library and tidies up, and how much work it may queue.") {
       VStack(alignment: .leading, spacing: 12) {
-        Toggle("Notice new and removed files automatically", isOn: $settings.monitoringEnabled)
+        Toggle(
+          "Notice new and removed files automatically", isOn: $draft.value.monitoringEnabled)
         Stepper(
-          "Full check every \(Self.interval(settings.reconciliationMinutes))",
-          value: $settings.reconciliationMinutes, in: 15...10080, step: 15)
+          "Full check every \(Self.interval(draft.value.reconciliationMinutes))",
+          value: $draft.value.reconciliationMinutes, in: 15...10080, step: 15)
+        caption(
+          "A full check walks through every storage location to catch changes that were missed, "
+            + "for example on a drive that was disconnected.")
         HStack {
           Stepper(
-            "Maintenance from \(settings.maintenanceStartHour):00",
-            value: $settings.maintenanceStartHour, in: 0...23)
+            "Maintenance from \(draft.value.maintenanceStartHour):00",
+            value: $draft.value.maintenanceStartHour, in: 0...23)
           Stepper(
-            "to \(settings.maintenanceEndHour):00", value: $settings.maintenanceEndHour,
+            "to \(draft.value.maintenanceEndHour):00", value: $draft.value.maintenanceEndHour,
             in: 1...24)
         }
+        caption(
+          "Automatic full checks run only in these hours, in the server computer's local time. "
+            + "Scans you start yourself run at any time.")
         Stepper(
-          "Maximum waiting tasks: \(settings.jobQueueLimit)", value: $settings.jobQueueLimit,
-          in: 10...10000, step: 10)
-        Text(
-          "Maintenance hours use the host's local time. Manual scans remain available. Media is read directly; Aurelia does not transcode or copy videos."
-        ).font(.caption).foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
+          "Maximum waiting tasks: \(draft.value.jobQueueLimit)",
+          value: $draft.value.jobQueueLimit, in: 10...10000, step: 10)
+        caption(
+          "How many scans and information lookups may wait in line. When the line is full, new "
+            + "ones are turned away until it shrinks.")
+        caption("Media is read directly; Aurelia never copies or changes videos.")
         Button("Save Maintenance Settings") {
+          let settings = draft.merged(onto: configuration.stored)
           run { scope in
             saved(try await scope.request { try await client.saveServerSettings(settings) })
           }
         }
-        .disabled(working || settings == configuration.stored)
+        .disabled(working || !draft.isDirty)
         Divider()
         ForEach(libraries) { library in
           HStack {
@@ -463,13 +566,19 @@ struct ServerLibraryJobsEditor: View {
         Button("Refresh Queue") { run { scope in try await refresh(scope) } }.disabled(working)
         if let message { Text(message).font(.caption).textSelection(.enabled) }
       }.frame(maxWidth: .infinity, alignment: .leading).padding(10).disabled(working)
-    }.task(id: model.administrationGeneration) {
+    }
+    .onChange(of: configuration.stored) { _, latest in draft.follow(latest) }
+    .task(id: model.administrationGeneration) {
       let scope = ServerAdministrationScope(
         model: model, generation: model.administrationGeneration)
       do { try await model.currentAdministration { try await refresh(scope) } } catch {
         if let failure = scope.message(for: error) { message = failure }
       }
     }.onDisappear { actionTask?.cancel() }
+  }
+  private func caption(_ text: String) -> some View {
+    Text(text).font(.caption).foregroundStyle(.secondary)
+      .fixedSize(horizontal: false, vertical: true)
   }
   static func interval(_ minutes: Int) -> String {
     guard minutes >= 60, minutes % 60 == 0 else { return "\(minutes) minutes" }
@@ -511,10 +620,11 @@ struct ServerBackupsEditor: View {
   let client: APIClient
   let nativeHostAvailable: Bool
   let saved: (ServerConfigurationResponse) -> Void
-  @State private var settings: ServerPolicySettings
+  @State private var draft: ServerSettingsDraft
   @State private var backups: [ServerBackupSummary] = []
   @State private var passphrase = ""
   @State private var confirmation = ""
+  @State private var restorePassphrase = ""
   @State private var prepared: PreparedServerRestore?
   @State private var restoreConfirmed = false
   @State private var acceptDifferentIdentity = false
@@ -529,26 +639,27 @@ struct ServerBackupsEditor: View {
     self.client = client
     self.nativeHostAvailable = nativeHostAvailable
     self.saved = saved
-    _settings = State(initialValue: configuration.stored)
+    _draft = State(initialValue: ServerSettingsDraft(configuration.stored))
   }
   var body: some View {
     AureliaSettingsSection("Backup Details", symbol: "externaldrive", description: "Encrypted backups you keep yourself, and restoring from one.") {
       VStack(alignment: .leading, spacing: 12) {
         Stepper(
-          "Automatic backup every \(settings.backupIntervalHours) hours",
-          value: $settings.backupIntervalHours,
+          "Automatic backup every \(draft.value.backupIntervalHours) hours",
+          value: $draft.value.backupIntervalHours,
           in: 1...168)
         Stepper(
-          "Keep \(settings.dailyBackupsRetained) daily backups",
-          value: $settings.dailyBackupsRetained, in: 1...30)
+          "Keep \(draft.value.dailyBackupsRetained) daily backups",
+          value: $draft.value.dailyBackupsRetained, in: 1...30)
         Stepper(
-          "Keep \(settings.weeklyBackupsRetained) weekly backups",
-          value: $settings.weeklyBackupsRetained, in: 1...12)
+          "Keep \(draft.value.weeklyBackupsRetained) weekly backups",
+          value: $draft.value.weeklyBackupsRetained, in: 1...12)
         Button("Save Backup Settings") {
+          let settings = draft.merged(onto: configuration.stored)
           run { scope in
             saved(try await scope.request { try await client.saveServerSettings(settings) })
           }
-        }.disabled(settings == configuration.stored)
+        }.disabled(!draft.isDirty)
         Button("Refresh Backups") {
           run { scope in backups = try await scope.request { try await client.serverBackups() } }
         }
@@ -573,8 +684,12 @@ struct ServerBackupsEditor: View {
         )
         .font(.caption).foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
-        SecureField("Backup passphrase (at least 12 characters)", text: $passphrase)
-        SecureField("Repeat passphrase for export", text: $confirmation)
+        Text("Export a Backup").font(.subheadline.weight(.semibold))
+        SecureField("New backup passphrase (at least 12 characters)", text: $passphrase)
+        SecureField("Repeat the new backup passphrase", text: $confirmation)
+        if !confirmation.isEmpty, passphrase != confirmation {
+          Text("The passphrases don't match.").font(.caption).foregroundStyle(.secondary)
+        }
         Button("Export Encrypted Backup…") {
           run { scope in
             let panel = NSSavePanel()
@@ -589,6 +704,9 @@ struct ServerBackupsEditor: View {
             message = "Encrypted backup saved. No media files were copied."
           }
         }.disabled(passphrase.count < 12 || passphrase != confirmation)
+        Divider()
+        Text("Restore a Backup").font(.subheadline.weight(.semibold))
+        SecureField("Passphrase of the backup to restore", text: $restorePassphrase)
         Toggle(
           "Restoring signs out every device; I will sign in and review trust again",
           isOn: $restoreConfirmed)
@@ -603,14 +721,13 @@ struct ServerBackupsEditor: View {
             guard panel.runModal() == .OK, let file = panel.url else { return }
             prepared = try await scope.request {
               try await client.prepareServerRestore(
-                from: file, passphrase: passphrase, acceptDifferentIdentity: acceptDifferentIdentity
-              )
+                from: file, passphrase: restorePassphrase,
+                acceptDifferentIdentity: acceptDifferentIdentity)
             }
-            passphrase = ""
-            confirmation = ""
+            restorePassphrase = ""
             message = "Backup verified in a private staging area. Active data has not changed."
           }
-        }.disabled(passphrase.count < 12 || !restoreConfirmed || !nativeHostAvailable)
+        }.disabled(restorePassphrase.count < 12 || !restoreConfirmed || !nativeHostAvailable)
         if let prepared {
           Button("Restore Verified Backup & Restart", role: .destructive) {
             run { scope in
@@ -622,8 +739,15 @@ struct ServerBackupsEditor: View {
         }
         if let message { Text(message).font(.caption).textSelection(.enabled) }
       }.frame(maxWidth: .infinity, alignment: .leading).padding(10).disabled(working)
-      if working { ProgressView("Working on the server…") }
-    }.task(id: model.administrationGeneration) {
+      if working {
+        HStack(spacing: 8) {
+          AureliaDelayedProgress(controlSize: .small)
+          Text("Working on the server…").font(.caption).foregroundStyle(.secondary)
+        }
+      }
+    }
+    .onChange(of: configuration.stored) { _, latest in draft.follow(latest) }
+    .task(id: model.administrationGeneration) {
       let scope = ServerAdministrationScope(
         model: model, generation: model.administrationGeneration)
       do {
@@ -657,6 +781,7 @@ struct ServerBackupsEditor: View {
   private func clearSecrets() {
     passphrase = ""
     confirmation = ""
+    restorePassphrase = ""
     prepared = nil
     restoreConfirmed = false
     acceptDifferentIdentity = false
@@ -668,7 +793,7 @@ struct ServerDiagnosticsEditor: View {
   let configuration: ServerConfigurationResponse
   let client: APIClient
   let saved: (ServerConfigurationResponse) -> Void
-  @State private var settings: ServerPolicySettings
+  @State private var draft: ServerSettingsDraft
   @State private var events: [ServerDiagnosticEvent] = []
   @State private var working = false
   @State private var actionTask: Task<Void, Never>?
@@ -680,22 +805,23 @@ struct ServerDiagnosticsEditor: View {
     self.configuration = configuration
     self.client = client
     self.saved = saved
-    _settings = State(initialValue: configuration.stored)
+    _draft = State(initialValue: ServerSettingsDraft(configuration.stored))
   }
   var body: some View {
     AureliaSettingsSection("Diagnostics", symbol: "stethoscope", description: "A report of the server's state, for when something goes wrong.") {
       VStack(alignment: .leading, spacing: 12) {
         Stepper(
-          "Retain events for \(settings.eventRetentionDays) days",
-          value: $settings.eventRetentionDays, in: 1...90)
+          "Retain events for \(draft.value.eventRetentionDays) days",
+          value: $draft.value.eventRetentionDays, in: 1...90)
         Stepper(
-          "Maximum events: \(settings.maximumEvents)", value: $settings.maximumEvents,
+          "Maximum events: \(draft.value.maximumEvents)", value: $draft.value.maximumEvents,
           in: 100...10000, step: 100)
         Button("Save Diagnostic Settings") {
+          let settings = draft.merged(onto: configuration.stored)
           run { scope in
             saved(try await scope.request { try await client.saveServerSettings(settings) })
           }
-        }.disabled(settings == configuration.stored)
+        }.disabled(!draft.isDirty)
         HStack {
           Button("Refresh Events") {
             run { scope in events = try await scope.request { try await client.serverDiagnostics() }
@@ -720,12 +846,18 @@ struct ServerDiagnosticsEditor: View {
         )
         .font(.caption).foregroundStyle(.secondary)
         ForEach(Array(events.prefix(20).enumerated()), id: \.offset) { _, event in
-          Text("\(event.at) · \(event.severity) · \(event.code)").font(.caption).textSelection(
-            .enabled)
+          Text(
+            "\(ServerDateText.display(event.at)) · \(ReadableState.text(event.severity)) · "
+              + ServerIssueText.title(for: event.code)
+          )
+          .font(.caption).textSelection(.enabled)
+          .help(event.code)
         }
         if let message { Text(message).font(.caption).textSelection(.enabled) }
       }.frame(maxWidth: .infinity, alignment: .leading).padding(10).disabled(working)
-    }.task(id: model.administrationGeneration) {
+    }
+    .onChange(of: configuration.stored) { _, latest in draft.follow(latest) }
+    .task(id: model.administrationGeneration) {
       let scope = ServerAdministrationScope(
         model: model, generation: model.administrationGeneration)
       do {

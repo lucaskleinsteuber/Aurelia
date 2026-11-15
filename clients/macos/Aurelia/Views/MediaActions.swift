@@ -103,6 +103,13 @@ struct AddToCollectionMenu: View {
       ForEach(editable) { collection in
         let isMember = seasonNumber == nil && collection.items.contains { $0.id == item.id }
         Button {
+          if isMember {
+            guard
+              AureliaConfirm.ask(
+                "Remove “\(item.title)” from “\(collection.name)”?",
+                "The title stays in your library.", action: "Remove")
+            else { return }
+          }
           Task {
             if isMember {
               await model.removeMediaFromCollection(collectionId: collection.id, mediaId: item.id)

@@ -30,11 +30,15 @@ struct ServerProfileEditor: View {
   @State private var working = false
   @State private var saveTask: Task<Void, Never>?
   @State private var error: String?
+  /// The profile being edited. A created profile switches the editor to editing it, so saving
+  /// again after a later step failed never creates it twice.
+  @State private var editingID: UUID?
 
   init(existing: UserAccessSummary? = nil, client: APIClient, completed: @escaping () -> Void) {
     self.existing = existing
     self.client = client
     self.completed = completed
+    _editingID = State(initialValue: existing?.id)
     _name = State(initialValue: existing?.user.shownName ?? "")
     _pictureKey = State(initialValue: existing?.user.pictureKey)
     _isChild = State(initialValue: existing?.user.ageLimit != nil)
@@ -45,7 +49,7 @@ struct ServerProfileEditor: View {
     _accessMode = State(initialValue: existing?.user.accessMode ?? .selectedTitles)
   }
 
-  private var creating: Bool { existing == nil }
+  private var creating: Bool { editingID == nil }
   private var hasExistingPIN: Bool {
     guard let user = snapshot?.user else { return false }
     return user.pinProtectionEnabled && !user.needsPinSetup
@@ -80,20 +84,17 @@ struct ServerProfileEditor: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      HStack(spacing: 12) {
-        Image(systemName: "person.crop.circle.fill")
-          .font(.system(size: 32)).symbolRenderingMode(.hierarchical).foregroundStyle(.secondary)
-        VStack(alignment: .leading, spacing: 3) {
-          Text(creating ? "Create Profile" : "Edit Profile").font(.title2.weight(.semibold))
-          Text(creating ? "Choose who can watch and what they can see." : name)
-            .font(.callout).foregroundStyle(.secondary)
-        }
-        Spacer()
-      }.padding(24)
+      AureliaSheetHeader(
+        title: creating ? "Create Profile" : "Edit Profile",
+        subtitle: "Choose who can watch and what they can see.",
+        symbol: "person.crop.circle.fill")
+      Divider()
       ScrollView {
         VStack(alignment: .leading, spacing: 18) {
-          if !creating, snapshot == nil {
-            ProgressView("Loading profile…")
+          if !creating, snapshot == nil, error == nil {
+            AureliaDelayedProgress(controlSize: .small)
+              .frame(maxWidth: .infinity)
+              .accessibilityLabel("Loading profile")
           }
           profileSection.disabled(working || (!creating && snapshot == nil))
           if model.supportsProfilePersonalization {
@@ -106,7 +107,7 @@ struct ServerProfileEditor: View {
           if model.supportsScreenTime && role == .user {
             ScreenTimeSection(
               rules: $screenTime, current: screenTimeSnapshot,
-              grant: existing.map { profile in { grant in await grantScreenTime(profile.id, grant) } }
+              grant: screenTimeGrant
             )
             .disabled(working || (!creating && snapshot == nil))
           }
@@ -114,28 +115,30 @@ struct ServerProfileEditor: View {
             contentSection.disabled(working || (!creating && snapshot == nil))
           }
           if let error {
-            Text(error).foregroundStyle(.orange).textSelection(.enabled)
-              .accessibilityIdentifier("profile-editor-error")
-            if !creating, snapshot == nil {
-              Button("Reload Profile") { Task { await load() } }
-            }
+            ErrorBanner(
+              message: error,
+              retry: !creating && snapshot == nil ? { reloadProfile() } : nil,
+              retryLabel: "Reload Profile", inline: true
+            )
+            .accessibilityIdentifier("profile-editor-error")
           }
         }.padding(24)
       }.scrollIndicators(.hidden).aureliaOverlayScrollbars()
       Divider()
-      HStack(spacing: 12) {
-        Text("Changes are saved together. Media files are never changed.")
+      HStack(spacing: 10) {
+        Text("Each change is saved in turn; if one fails, the ones before it stay saved.")
           .font(.caption).foregroundStyle(.secondary)
-        Spacer()
+        Spacer(minLength: 12)
         Button("Cancel") {
           clearPIN()
           dismiss()
         }.keyboardShortcut(.cancelAction).disabled(working)
           .accessibilityIdentifier("profile-editor-cancel")
         Button(working ? "Saving…" : (creating ? "Create Profile" : "Save")) { save() }
-          .buttonStyle(AureliaPrimaryActionButtonStyle()).keyboardShortcut(.defaultAction)
+          .buttonStyle(AureliaPrimaryActionButtonStyle(compact: true))
+          .keyboardShortcut(.defaultAction)
           .disabled(!canSave).accessibilityIdentifier("profile-editor-save")
-      }.padding(20).accessibilityElement(children: .contain)
+      }.padding(16).accessibilityElement(children: .contain)
     }.frame(minWidth: 560, idealWidth: 620, minHeight: 600, idealHeight: 700)
       .frame(width: 620, height: 700)
       .aureliaSettingRows()
@@ -193,7 +196,7 @@ struct ServerProfileEditor: View {
   private var pictureSection: some View {
     AureliaSettingsSection("Picture", symbol: "photo") {
       ProfilePicturePicker(
-        id: existing?.id, name: name, pictureRevision: snapshot?.user.pictureRevision ?? 0,
+        id: editingID, name: name, pictureRevision: snapshot?.user.pictureRevision ?? 0,
         key: $pictureKey, photo: $photo
       )
       .frame(maxWidth: .infinity, alignment: .leading).padding(10)
@@ -254,7 +257,9 @@ struct ServerProfileEditor: View {
             }.padding(12)
           }
           .frame(minHeight: 80, maxHeight: 170)
-          .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
+          .background(
+            .quaternary.opacity(0.25),
+            in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius))
           .scrollIndicators(.hidden).aureliaOverlayScrollbars()
         } else {
           Text(
@@ -369,7 +374,9 @@ struct ServerProfileEditor: View {
               }
             }.padding(12)
           }.frame(minHeight: 100, maxHeight: 190)
-            .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
+            .background(
+              .quaternary.opacity(0.25),
+              in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius))
             .scrollIndicators(.hidden).aureliaOverlayScrollbars()
           Text("A series includes all current and future seasons, episodes, extras and trailers.")
             .font(.caption).foregroundStyle(.secondary)
@@ -378,27 +385,35 @@ struct ServerProfileEditor: View {
     }
   }
 
+  private func reloadProfile() { Task { await load() } }
+
+  /// Today's extra time only exists for a profile the server already has.
+  private var screenTimeGrant: ((ScreenTimeGrant) async -> Void)? {
+    guard let id = editingID else { return nil }
+    return { grant in await grantScreenTime(id, grant) }
+  }
+
   @MainActor private func load() async {
-    guard let existing else { return }
+    guard let id = editingID else { return }
     let generation = model.administrationGeneration
     do {
       let loaded = try await model.currentAdministration {
         guard model.isCurrentAdministration(generation) else { throw CancellationError() }
-        return try await client.profileEditor(id: existing.id)
+        return try await client.profileEditor(id: id)
       }
       guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
       let age: ProfileAgeLimit? =
         model.supportsAgeLimits
         ? try await model.currentAdministration {
           guard model.isCurrentAdministration(generation) else { throw CancellationError() }
-          return try await client.ageLimit(user: existing.id)
+          return try await client.ageLimit(user: id)
         } : nil
       guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
       let screen: ProfileScreenTime? =
         model.supportsScreenTime
         ? try await model.currentAdministration {
           guard model.isCurrentAdministration(generation) else { throw CancellationError() }
-          return try await client.screenTime(user: existing.id)
+          return try await client.screenTime(user: id)
         } : nil
       guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
       screenTimeSnapshot = screen
@@ -493,44 +508,44 @@ struct ServerProfileEditor: View {
       do {
         try await model.currentAdministration {
           guard model.isCurrentAdministration(generation) else { throw CancellationError() }
-          if let existing, let snapshot {
+          if let id = editingID, let snapshot {
             // A children's profile ends before its role may change.
             if ageChanged, !child, wasChild {
-              let current = try await client.ageLimit(user: existing.id)
+              let current = try await client.ageLimit(user: id)
               _ = try await client.setAgeLimit(
-                user: existing.id,
+                user: id,
                 ProfileAgeLimit(
                   ageLimit: nil, allowedTitleIds: [], hiddenTitleIds: [],
                   revision: current.revision))
             }
             _ = try await client.updateProfile(
-              id: existing.id,
+              id: id,
               request: ProfileUpdateRequest(
                 revision: snapshot.revision, role: role, isEnabled: enabled,
                 pinProtectionEnabled: pinProtected, pin: newPIN, accessMode: effectiveMode,
                 titleIds: changedAccess ? titles : nil))
             if ageChanged, child {
-              let current = try await client.ageLimit(user: existing.id)
+              let current = try await client.ageLimit(user: id)
               _ = try await client.setAgeLimit(
-                user: existing.id,
+                user: id,
                 ProfileAgeLimit(
                   ageLimit: chosenAge, allowedTitleIds: allowed, hiddenTitleIds: hidden,
                   revision: current.revision))
             }
             var user: UserSummary?
-            if renamed { user = try await client.renameProfile(id: existing.id, name: trimmedName) }
+            if renamed { user = try await client.renameProfile(id: id, name: trimmedName) }
             if pictureChanged {
               if let upload {
-                user = try await client.uploadProfilePhoto(id: existing.id, image: upload)
+                user = try await client.uploadProfilePhoto(id: id, image: upload)
               } else {
-                user = try await client.setProfilePicture(id: existing.id, builtin: builtin)
+                user = try await client.setProfilePicture(id: id, builtin: builtin)
               }
             }
             if let user { model.updateProfileUser(user) }
             if screenTimeChanged {
-              let current = try await client.screenTime(user: existing.id)
+              let current = try await client.screenTime(user: id)
               _ = try await client.setScreenTime(
-                user: existing.id,
+                user: id,
                 ProfileScreenTimeUpdate(rules: chosenScreenTime, revision: current.revision))
             }
           } else {
@@ -542,6 +557,7 @@ struct ServerProfileEditor: View {
                 titleIds: role == .owner ? [] : titles,
                 pictureKey: model.supportsProfilePersonalization ? builtin : nil,
                 ageLimit: child ? chosenAge : nil))
+            editingID = created.id
             if let upload, model.supportsProfilePersonalization {
               _ = try await client.uploadProfilePhoto(id: created.id, image: upload)
             }
@@ -560,13 +576,44 @@ struct ServerProfileEditor: View {
         guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
         if let failure = error as? APIClientError, failure.isManagementLocked {
           guard await model.unlockManagementInteractively() else { return }
+          await refreshSnapshots(model.administrationGeneration)
           save()
           return
         }
         if reportManagementFailure(error, generation: generation) { return }
         self.error = error.localizedDescription
+        await refreshSnapshots(generation)
       }
     }
+  }
+
+  /// After a save stopped part-way, the server's current state becomes the base of the next save
+  /// without touching the edits: steps that went through are not sent again, and the next save
+  /// uses the new revision.
+  @MainActor private func refreshSnapshots(_ generation: UUID) async {
+    guard let id = editingID else { return }
+    do {
+      let loaded = try await model.currentAdministration {
+        guard model.isCurrentAdministration(generation) else { throw CancellationError() }
+        return try await client.profileEditor(id: id)
+      }
+      let age: ProfileAgeLimit? =
+        model.supportsAgeLimits
+        ? try await model.currentAdministration {
+          guard model.isCurrentAdministration(generation) else { throw CancellationError() }
+          return try await client.ageLimit(user: id)
+        } : nil
+      let screen: ProfileScreenTime? =
+        model.supportsScreenTime
+        ? try await model.currentAdministration {
+          guard model.isCurrentAdministration(generation) else { throw CancellationError() }
+          return try await client.screenTime(user: id)
+        } : nil
+      guard model.isCurrentAdministration(generation) else { return }
+      snapshot = loaded
+      ageSnapshot = age
+      screenTimeSnapshot = screen
+    } catch {}
   }
 
   private func reportManagementFailure(_ error: Error, generation: UUID) -> Bool {

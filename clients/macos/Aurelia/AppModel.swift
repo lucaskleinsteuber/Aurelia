@@ -193,6 +193,8 @@ final class AppModel: ObservableObject {
   private var remoteDeviceHeartbeatTask: Task<Void, Never>?
   private var remoteDeviceCommandTask: Task<Void, Never>?
   private var remoteDeviceStatusTask: Task<Void, Never>?
+  /// A seek sent to the remote player; status polls older than it would move the slider back.
+  private var remoteSeekSentAt: Date?
 
   var macDeviceId: String {
     if let saved = UserDefaults.standard.string(forKey: "AureliaMacDeviceId") {
@@ -2294,12 +2296,18 @@ final class AppModel: ObservableObject {
   }
 
   func refreshWatchlist() async {
+    try? await reloadWatchlist()
+  }
+
+  /// The Watchlist page's load: it throws, so the page can tell loading, failure and an empty
+  /// list apart instead of calling a failed load empty.
+  func reloadWatchlist() async throws {
     guard let profile, supportsWatchlist else { return }
     let generation = connectionGeneration
-    if let loaded = try? await APIClient(profile: profile).watchlist(), isCurrent(generation) {
-      watchlistItems = loaded.items
-      watchlistIds = Set(loaded.mediaIds)
-    }
+    let loaded = try await APIClient(profile: profile).watchlist()
+    guard isCurrent(generation) else { throw CancellationError() }
+    watchlistItems = loaded.items
+    watchlistIds = Set(loaded.mediaIds)
   }
 
   func setWatchlist(mediaId: UUID, isWatchlisted: Bool) async -> Bool {
@@ -3046,8 +3054,15 @@ final class AppModel: ObservableObject {
     Task { [weak self] in
       // Movie Night fades out first, so the player opens over the library.
       try? await Task.sleep(for: .milliseconds(400))
-      guard let self, let detail = try? await self.catalogDetail(id: mediaId) else { return }
-      self.startPlayback(item: detail.item)
+      guard let self else { return }
+      do {
+        let detail = try await self.catalogDetail(id: mediaId)
+        self.startPlayback(item: detail.item)
+      } catch {
+        if !(error is CancellationError) {
+          self.errorMessage = "Couldn't start tonight's movie. \(self.failureMessage(error))"
+        }
+      }
     }
   }
 
@@ -4511,6 +4526,7 @@ final class AppModel: ObservableObject {
     if action == "resume" { isRemotePlaying = true }
     if let pos = positionSeconds { remotePlaybackPosition = pos }
     if let skip = skipSeconds { remotePlaybackPosition = max(0, remotePlaybackPosition + skip) }
+    if positionSeconds != nil || skipSeconds != nil { remoteSeekSentAt = Date() }
 
     Task {
       _ = try? await APIClient(profile: profile).sendPlayerCommand(
@@ -4546,7 +4562,9 @@ final class AppModel: ObservableObject {
           let status = try await APIClient(profile: profile).playerStatus(deviceId: device.deviceId)
           await MainActor.run {
             self.isRemotePlaying = status.isPlaying && !status.isPaused
-            if let pos = status.positionSeconds { self.remotePlaybackPosition = pos }
+            let seekSettled =
+              self.remoteSeekSentAt.map { Date().timeIntervalSince($0) > 3 } ?? true
+            if seekSettled, let pos = status.positionSeconds { self.remotePlaybackPosition = pos }
             if let dur = status.durationSeconds, dur > 0 { self.remotePlaybackDuration = dur }
           }
         } catch let err as APIClientError where err.httpStatus == 404 || err.httpStatus == 409 {

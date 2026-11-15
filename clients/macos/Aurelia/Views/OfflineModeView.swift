@@ -114,7 +114,8 @@ private struct OfflineProfileChooser: View {
       }
       if choices.contains(where: { $0.card == nil }) {
         Text(
-          "Dimmed profiles haven’t been opened on this Mac since the offline mode exists. Open them once while the server answers to use their downloads offline."
+          "Dimmed profiles haven’t been opened on this Mac since offline viewing was added. "
+            + "Open them once while the server answers to use their downloads offline."
         )
         .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
         .frame(maxWidth: 460)
@@ -408,6 +409,7 @@ private struct OfflinePosterCard: View {
   @ObservedObject private var downloads = OfflineDownloads.shared
   let title: OfflineTitle
   @State private var hovering = false
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
 
   var body: some View {
     VStack(alignment: .leading, spacing: 9) {
@@ -429,8 +431,9 @@ private struct OfflinePosterCard: View {
       Text(title.year.map(String.init) ?? "Movie").font(.caption).foregroundStyle(.secondary)
         .frame(width: 154, alignment: .leading)
     }
-    .scaleEffect(hovering ? 1.035 : 1)
-    .animation(.spring(response: 0.3, dampingFraction: 0.78), value: hovering)
+    .scaleEffect(hovering && !reduceMotion ? 1.035 : 1)
+    .animation(
+      reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.78), value: hovering)
     .onHover { hovering = $0 }
   }
 }
@@ -439,6 +442,7 @@ private struct OfflineLandscapeCard: View {
   @ObservedObject private var downloads = OfflineDownloads.shared
   let title: OfflineTitle
   @State private var hovering = false
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -463,8 +467,9 @@ private struct OfflineLandscapeCard: View {
       }
       Text(title.title).font(.headline).lineLimit(1).frame(width: 300, alignment: .leading)
     }
-    .scaleEffect(hovering ? 1.03 : 1)
-    .animation(.spring(response: 0.3, dampingFraction: 0.78), value: hovering)
+    .scaleEffect(hovering && !reduceMotion ? 1.03 : 1)
+    .animation(
+      reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.78), value: hovering)
     .onHover { hovering = $0 }
   }
 }

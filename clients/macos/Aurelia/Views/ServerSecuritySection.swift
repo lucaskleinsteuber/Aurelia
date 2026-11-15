@@ -98,31 +98,65 @@ struct ServerSecuritySection: View {
     }
   }
 
+  /// The one list of signed-in devices (the Devices section leaves it to this one): every
+  /// device with Sign Out, and with what the security log knows, That Was Me and Block.
   @ViewBuilder private var devicesRows: some View {
+    let sessions = model.sessions.filter(\.isActive)
+    let others = devices.filter { device in !sessions.contains { $0.id == device.id } }
     Divider()
     Text("Signed-In Devices").font(.headline)
-    ForEach(devices) { device in
-      HStack(alignment: .top) {
-        VStack(alignment: .leading, spacing: 2) {
-          HStack(spacing: 6) {
-            Text(device.deviceName + (device.isCurrent ? " (This Mac)" : ""))
-            if device.isNew {
-              Text("New").font(.caption2.weight(.bold)).padding(.horizontal, 6).padding(.vertical, 1)
-                .background(Capsule().fill(Color.orange.opacity(0.85)))
-            }
+    Text(
+      "Sign Out ends a device's access; it can connect again with a new code. Block also keeps it from signing in or pairing again until you unblock it."
+    )
+    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+    ForEach(sessions) { session in
+      deviceRow(
+        id: session.id, name: session.deviceName, isCurrent: session.isCurrent,
+        lastSeenAt: session.lastSeenAt, security: devices.first { $0.id == session.id })
+    }
+    ForEach(others) { device in
+      deviceRow(
+        id: device.id, name: device.deviceName, isCurrent: device.isCurrent,
+        lastSeenAt: device.lastSeenAt, security: device)
+    }
+  }
+
+  private func deviceRow(
+    id: UUID, name: String, isCurrent: Bool, lastSeenAt: String, security: ServerSecurityDevice?
+  ) -> some View {
+    HStack(alignment: .top) {
+      VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 6) {
+          Text(name + (isCurrent ? " (This Mac)" : ""))
+          if security?.isNew == true {
+            Text("New").font(.caption2.weight(.bold)).padding(.horizontal, 6).padding(.vertical, 1)
+              .background(Capsule().fill(Color.orange.opacity(0.85)))
           }
-          let line = SecurityText.deviceLine(platform: device.platform, ipAddress: device.ipAddress)
+        }
+        if let security {
+          let line = SecurityText.deviceLine(platform: security.platform, ipAddress: security.ipAddress)
           if !line.isEmpty { Text(line).font(.caption).foregroundStyle(.secondary) }
-          Text("\(device.userName) · last used \(ServerDateText.display(device.lastSeenAt))")
-            .font(.caption2).foregroundStyle(.secondary)
         }
-        Spacer()
-        if device.isNew {
-          Button("That Was Me") { Task { await acknowledge(device) } }
+        Text(
+          [security?.userName, "last used \(ServerDateText.display(lastSeenAt))"]
+            .compactMap { $0 }.joined(separator: " · ")
+        )
+        .font(.caption2).foregroundStyle(.secondary)
+      }
+      Spacer()
+      if let security, security.isNew {
+        Button("That Was Me") { Task { await acknowledge(security) } }
+      }
+      if !isCurrent {
+        Button("Sign Out", role: .destructive) {
+          Task {
+            await model.revokeSession(id: id)
+            await reload()
+          }
         }
-        if device.canBlock {
-          Button("Block…", role: .destructive) { Task { await block(device) } }
-        }
+      }
+      if let security, security.canBlock {
+        Button("Block…", role: .destructive) { Task { await block(security) } }
       }
     }
   }
@@ -240,10 +274,13 @@ struct SecurityLogSheet: View {
   @State private var error: String?
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      HStack {
-        Text("Security Log").font(.title2.bold())
-        Spacer()
+    AureliaSheet(
+      title: "Security Log",
+      subtitle: "Who signed in when and from which device, failed attempts and changes, newest first.",
+      symbol: "list.bullet.rectangle", errorMessage: error,
+      retry: { Task { await load(more: false) } }, onCancel: { dismiss() }
+    ) {
+      VStack(alignment: .leading, spacing: 12) {
         Picker("Show", selection: $filter) {
           Text("All").tag("all")
           Text("Sign-Ins").tag("succeeded")
@@ -252,40 +289,43 @@ struct SecurityLogSheet: View {
         }
         .pickerStyle(.segmented)
         .frame(width: 320)
-      }
-      List {
-        ForEach(events) { event in
-          HStack(alignment: .top, spacing: 10) {
-            Image(
-              systemName: event.outcome == "failed"
-                ? "exclamationmark.triangle.fill" : event.outcome == "succeeded" ? "person.badge.key" : "slider.horizontal.3"
-            )
-            .foregroundStyle(event.outcome == "failed" ? Color.orange : .secondary)
-            .frame(width: 20)
-            VStack(alignment: .leading, spacing: 2) {
-              Text(SecurityText.kind(event.kind) + (event.detail.map { " · \($0)" } ?? ""))
-              Text(
-                [event.userName, event.deviceName, SecurityText.deviceLine(platform: event.platform, ipAddress: event.ipAddress)]
-                  .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-              )
-              .font(.caption).foregroundStyle(.secondary)
+        List {
+          if events.isEmpty {
+            if loading {
+              AureliaDelayedProgress(controlSize: .small).frame(maxWidth: .infinity)
+            } else if error == nil {
+              Text("Nothing logged yet.").foregroundStyle(.secondary)
             }
-            Spacer()
-            Text(ServerDateText.display(event.at)).font(.caption).foregroundStyle(.secondary)
+          }
+          ForEach(events) { event in
+            HStack(alignment: .top, spacing: 10) {
+              Image(
+                systemName: event.outcome == "failed"
+                  ? "exclamationmark.triangle.fill" : event.outcome == "succeeded" ? "person.badge.key" : "slider.horizontal.3"
+              )
+              .foregroundStyle(event.outcome == "failed" ? Color.orange : .secondary)
+              .frame(width: 20)
+              VStack(alignment: .leading, spacing: 2) {
+                Text(SecurityText.kind(event.kind) + (event.detail.map { " · \($0)" } ?? ""))
+                Text(
+                  [event.userName, event.deviceName, SecurityText.deviceLine(platform: event.platform, ipAddress: event.ipAddress)]
+                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+                )
+                .font(.caption).foregroundStyle(.secondary)
+              }
+              Spacer()
+              Text(ServerDateText.display(event.at)).font(.caption).foregroundStyle(.secondary)
+            }
+          }
+          if before != nil {
+            Button("Load More") { Task { await load(more: true) } }.disabled(loading)
           }
         }
-        if before != nil {
-          Button("Load More") { Task { await load(more: true) } }.disabled(loading)
-        }
+        .scrollContentBackground(.hidden)
       }
-      if let error { Text(error).font(.caption).foregroundStyle(.red) }
-      HStack {
-        Spacer()
-        AureliaSheetDoneButton { dismiss() }
-      }
+      .padding(20)
     }
-    .padding(20)
-    .frame(minWidth: 720, minHeight: 520)
+    .frame(minWidth: 720, minHeight: 560)
     .task(id: filter) { await load(more: false) }
   }
 
@@ -460,7 +500,9 @@ struct SecurityAlertBanner: View {
     VStack(alignment: .leading, spacing: 10) { content() }
       .padding(14)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+      .background(
+        .regularMaterial,
+        in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
       .shadow(color: .black.opacity(0.3), radius: 10, y: 3)
   }
 }

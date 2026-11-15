@@ -5,6 +5,8 @@ import SwiftUI
 struct CinemaPreShowView: View {
   @ObservedObject var show: CinemaPreShow
   let reduceMotion: Bool
+  /// Closes the player, as Escape does; the pre-show has no other visible way out.
+  var onClose: (() -> Void)? = nil
 
   var body: some View {
     ZStack {
@@ -63,6 +65,10 @@ struct CinemaPreShowView: View {
             .overlay(Capsule().strokeBorder(.white.opacity(0.25)))
         }
         Spacer()
+        if let onClose {
+          CinemaChromeButton(title: "Close", symbol: "xmark", key: "esc", action: onClose)
+            .accessibilityIdentifier("cinema-close")
+        }
       }
       Spacer()
       HStack(spacing: 10) {

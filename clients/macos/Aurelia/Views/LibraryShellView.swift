@@ -124,10 +124,14 @@ struct LibraryShellView: View {
       LibraryFindShortcut(isBlocked: {
         model.playback != nil || model.movieNightLaunch != nil || model.wrappedLaunch != nil
       }) {
-        let leaving = destination == .home || selection != nil
+        // Wishes has its own search; every page without a library search switches to Library.
+        let searchesHere: Set<LibraryDestination> = [
+          .library, .recentlyAdded, .tvShows, .movies, .wishes,
+        ]
+        let leaving = !searchesHere.contains(destination) || selection != nil
         if leaving {
           selection = nil
-          destination = .library
+          if destination != .wishes { destination = .library }
         }
         findRequest = FindRequest(startsNewSearch: leaving)
       }
@@ -340,6 +344,7 @@ struct LibraryShellView: View {
         .background(.ultraThinMaterial, in: Circle())
     }
     .buttonStyle(AureliaPressableButtonStyle())
+    .help(sidebarVisible ? "Hide Sidebar (⌃⌘S)" : "Show Sidebar (⌃⌘S)")
     .accessibilityLabel(sidebarVisible ? "Hide Sidebar" : "Show Sidebar")
     .accessibilityIdentifier("toggle-sidebar")
     .keyboardShortcut("s", modifiers: [.command, .control])
@@ -389,6 +394,7 @@ struct LibraryShellView: View {
       // follows the library and its settings itself.
       StablePage(key: BrowsePageKey(destination: destination, findRequest: findRequest)) { browsePage }
         .equatable()
+        .environment(\.aureliaBrowsePageCovered, selection != nil)
         .id(destination)
         .transition(.opacity)
         .opacity(selection == nil ? 1 : 0)
@@ -498,7 +504,7 @@ struct LibraryShellView: View {
     case .watchlist:
       WatchlistPage(onSelect: { open(.media($0)) })
     case .wishes:
-      WishesPage(onOpenMedia: { open(.media($0)) })
+      WishesPage(onOpenMedia: { open(.media($0)) }, findRequestID: findRequest?.id)
     case .recentlyAdded:
       LibraryPage(
         section: .recentlyAdded, findRequest: findRequest,
@@ -1034,10 +1040,10 @@ private struct LibraryPage: View {
       Button {
         model.showMediaManager()
       } label: {
-        Image(systemName: "plus").frame(width: 32, height: 32)
+        Image(systemName: "plus").frame(height: 32)
       }
-      .buttonStyle(.borderedProminent)
-      .clipShape(Circle())
+      .buttonStyle(AureliaPrimaryActionButtonStyle(compact: true))
+      .help("Add Media")
       .accessibilityLabel("Add Media")
       .accessibilityIdentifier("library-add-media")
       Button {
@@ -1046,6 +1052,7 @@ private struct LibraryPage: View {
         Image(systemName: "rectangle.stack.badge.plus").frame(width: 32, height: 32)
       }
       .buttonStyle(.bordered)
+      .help("Create Collection")
       .accessibilityLabel("Create Collection")
     }
   }
@@ -1289,6 +1296,8 @@ private struct CollectionDetailView: View {
   @State private var isUpdatingOrder = false
   @State private var isSavingCopy = false
   @State private var errorMessage: String?
+  /// The collection itself failed to load; its banner then offers Try Again.
+  @State private var loadFailed = false
 
   private var summary: CollectionSummary { detail?.asSummary ?? collection }
   private var canEdit: Bool { detail?.canEdit ?? collection.canEdit }
@@ -1300,9 +1309,7 @@ private struct CollectionDetailView: View {
         collectionHero
         VStack(alignment: .leading, spacing: 16) {
           if let errorMessage {
-            Text(errorMessage)
-              .font(.callout)
-              .foregroundStyle(.orange)
+            ErrorBanner(message: errorMessage, retry: detailRetry, inline: true)
           }
 
           HStack(alignment: .firstTextBaseline) {
@@ -1541,9 +1548,10 @@ private struct CollectionDetailView: View {
           symbol: member.kind == .series ? "tv" : "film"
         )
         .frame(width: 48, height: 72)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.tinyRadius))
         .overlay {
-          RoundedRectangle(cornerRadius: 6).stroke(AureliaDesign.hairline, lineWidth: 1)
+          RoundedRectangle(cornerRadius: AureliaDesign.tinyRadius)
+            .stroke(AureliaDesign.hairline, lineWidth: 1)
         }
 
         VStack(alignment: .leading, spacing: 4) {
@@ -1622,6 +1630,8 @@ private struct CollectionDetailView: View {
           }
           .buttonStyle(.borderless)
           .disabled(isUpdatingOrder || index == 0)
+          .help("Move Up")
+          .accessibilityLabel("Move \(member.title) Up")
 
           Button {
             Task { await moveMember(from: index, to: index + 1) }
@@ -1630,8 +1640,15 @@ private struct CollectionDetailView: View {
           }
           .buttonStyle(.borderless)
           .disabled(isUpdatingOrder || index == total - 1)
+          .help("Move Down")
+          .accessibilityLabel("Move \(member.title) Down")
 
           Button {
+            guard
+              AureliaConfirm.ask(
+                "Remove “\(member.title)” from “\(summary.name)”?",
+                "The title stays in your library.", action: "Remove")
+            else { return }
             Task { await removeMember(member) }
           } label: {
             Image(systemName: "trash")
@@ -1640,6 +1657,7 @@ private struct CollectionDetailView: View {
           .buttonStyle(.borderless)
           .disabled(isUpdatingOrder)
           .help("Remove from Collection")
+          .accessibilityLabel("Remove \(member.title) from Collection")
         }
       }
 
@@ -1694,7 +1712,7 @@ private struct CollectionDetailView: View {
       rowCard
         .draggable(member.memberId.uuidString)
         .dropDestination(for: String.self) { items, _ in
-          guard let raw = items.first,
+          guard !isUpdatingOrder, let raw = items.first,
             let draggedId = UUID(uuidString: raw),
             let sourceIndex = members.firstIndex(where: { $0.memberId == draggedId }),
             sourceIndex != index
@@ -1743,14 +1761,24 @@ private struct CollectionDetailView: View {
   }
 
   private func loadDetail() async {
-    errorMessage = nil
-    if let fetched = try? await model.collectionDetail(id: collection.id) {
-      detail = fetched
+    do {
+      detail = try await model.collectionDetail(id: collection.id)
+      errorMessage = nil
+      loadFailed = false
+    } catch {
+      guard !(error is CancellationError) else { return }
+      errorMessage = "Couldn't load this collection. \(error.localizedDescription)"
+      loadFailed = true
     }
   }
 
+  private var detailRetry: (() -> Void)? {
+    guard loadFailed else { return nil }
+    return { Task { await loadDetail() } }
+  }
+
   private func moveMember(from sourceIndex: Int, to targetIndex: Int) async {
-    guard var reordered = detail?.members,
+    guard !isUpdatingOrder, var reordered = detail?.members,
       reordered.indices.contains(sourceIndex),
       reordered.indices.contains(targetIndex),
       sourceIndex != targetIndex
@@ -1821,13 +1849,27 @@ private struct WatchlistPage: View {
 
   @EnvironmentObject private var model: AppModel
   let onSelect: (UUID) -> Void
+  @State private var hasLoaded = false
+  @State private var loadError: String?
 
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 26) {
         AureliaSectionHeading(title: "Watchlist", count: model.watchlistItems.count)
           .aureliaRiseIn(0)
-        if model.watchlistItems.isEmpty {
+        if let loadError {
+          ErrorBanner(
+            message: "Couldn't load your watchlist. \(loadError)",
+            retry: { Task { await load() } }, inline: true)
+        }
+        if !model.watchlistItems.isEmpty {
+          posterGrid(model.watchlistItems, onSelect: onSelect)
+            .aureliaRiseIn(1)
+        } else if !hasLoaded && loadError == nil {
+          AureliaDelayedProgress()
+            .frame(maxWidth: .infinity, minHeight: 330)
+            .accessibilityLabel("Loading Watchlist")
+        } else if loadError == nil {
           ContentUnavailableView(
             "Your Watchlist Is Empty",
             systemImage: "bookmark",
@@ -1837,9 +1879,6 @@ private struct WatchlistPage: View {
           )
           .frame(maxWidth: .infinity, minHeight: 330)
           .aureliaRiseIn(1)
-        } else {
-          posterGrid(model.watchlistItems, onSelect: onSelect)
-            .aureliaRiseIn(1)
         }
       }
       .padding(AureliaDesign.pagePadding)
@@ -1847,9 +1886,25 @@ private struct WatchlistPage: View {
     }
     .scrollClipDisabled()
     .aureliaOverlayScrollbars()
-    .task { await model.refreshWatchlist() }
+    .task { await load() }
     .accessibilityIdentifier("watchlist-page")
   }
+
+  private func load() async {
+    do {
+      try await model.reloadWatchlist()
+      loadError = nil
+      hasLoaded = true
+    } catch {
+      guard !(error is CancellationError) else { return }
+      loadError = error.localizedDescription
+    }
+  }
+}
+
+private struct PersonLoadKey: Equatable {
+  let person: PersonSelection
+  let retryRevision: Int
 }
 
 private struct PersonDetailView: View {
@@ -1865,6 +1920,7 @@ private struct PersonDetailView: View {
   @State private var detail: PersonDetailResponse?
   @State private var isLoading = true
   @State private var errorMessage: String?
+  @State private var retryRevision = 0
 
   var body: some View {
     ScrollView {
@@ -1895,14 +1951,17 @@ private struct PersonDetailView: View {
           Spacer()
         }
         if isLoading {
-          ProgressView("Loading titles…")
+          AureliaDelayedProgress()
             .frame(maxWidth: .infinity, minHeight: 240)
+            .accessibilityLabel("Loading titles")
         } else if let errorMessage {
-          ContentUnavailableView(
-            "Couldn’t Load Person",
-            systemImage: "exclamationmark.triangle",
-            description: Text(errorMessage)
-          )
+          ContentUnavailableView {
+            Label("Couldn’t Load Person", systemImage: "exclamationmark.triangle")
+          } description: {
+            Text(errorMessage)
+          } actions: {
+            Button("Try Again") { retryRevision += 1 }
+          }
           .frame(maxWidth: .infinity, minHeight: 260)
         } else if let items = detail?.items, !items.isEmpty {
           posterGrid(items, onSelect: onSelect)
@@ -1922,7 +1981,7 @@ private struct PersonDetailView: View {
     .scrollClipDisabled()
     .aureliaOverlayScrollbars()
     .aureliaCompactHeader(title: detail?.name ?? person.name, threshold: 200, onBack: onBack)
-    .task(id: person) {
+    .task(id: PersonLoadKey(person: person, retryRevision: retryRevision)) {
       isLoading = true
       errorMessage = nil
       do {
@@ -2109,6 +2168,9 @@ private struct ActivityPageScroll<Content: View>: View {
 struct MacMiniRemoteView: View {
   @EnvironmentObject private var model: AppModel
   let device: RemotePlayerDevice
+  /// The slider's position while it is dragged: one seek is sent on release, and status polls
+  /// can't move the knob under the pointer meanwhile.
+  @State private var scrubPosition: Double?
 
   var body: some View {
     HStack(spacing: 16) {
@@ -2137,6 +2199,8 @@ struct MacMiniRemoteView: View {
             .font(.system(size: 14))
         }
         .buttonStyle(AureliaPressableButtonStyle())
+        .help("Back 10 Seconds")
+        .accessibilityLabel("Back 10 Seconds")
 
         Button {
           model.sendRemotePlaybackCommand(action: model.isRemotePlaying ? "pause" : "resume")
@@ -2145,6 +2209,8 @@ struct MacMiniRemoteView: View {
             .font(.system(size: 18))
         }
         .buttonStyle(AureliaPressableButtonStyle())
+        .help(model.isRemotePlaying ? "Pause" : "Play")
+        .accessibilityLabel(model.isRemotePlaying ? "Pause" : "Play")
 
         Button {
           model.sendRemotePlaybackCommand(action: "skip", skipSeconds: 10)
@@ -2153,17 +2219,25 @@ struct MacMiniRemoteView: View {
             .font(.system(size: 14))
         }
         .buttonStyle(AureliaPressableButtonStyle())
+        .help("Forward 10 Seconds")
+        .accessibilityLabel("Forward 10 Seconds")
       }
 
       if model.remotePlaybackDuration > 0 {
         Slider(
           value: Binding(
-            get: { model.remotePlaybackPosition },
-            set: { model.sendRemotePlaybackCommand(action: "seek", positionSeconds: $0) }
+            get: { scrubPosition ?? model.remotePlaybackPosition },
+            set: { scrubPosition = $0 }
           ),
-          in: 0...model.remotePlaybackDuration
+          in: 0...model.remotePlaybackDuration,
+          onEditingChanged: { editing in
+            guard !editing, let position = scrubPosition else { return }
+            model.sendRemotePlaybackCommand(action: "seek", positionSeconds: position)
+            scrubPosition = nil
+          }
         )
         .frame(minWidth: 160, maxWidth: 280)
+        .accessibilityLabel("Playback Position")
       }
 
       Button {
@@ -2174,13 +2248,14 @@ struct MacMiniRemoteView: View {
           .foregroundStyle(.secondary)
       }
       .buttonStyle(AureliaPressableButtonStyle())
+      .help("Stop Remote Playback")
       .accessibilityLabel("Stop remote playback")
     }
     .padding(.horizontal, 20)
     .padding(.vertical, 12)
-    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
     .overlay(
-      RoundedRectangle(cornerRadius: 16)
+      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
         .stroke(Color.white.opacity(0.12), lineWidth: 1)
     )
     .shadow(color: .black.opacity(0.4), radius: 20, y: 10)

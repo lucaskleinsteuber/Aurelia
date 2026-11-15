@@ -55,13 +55,11 @@ struct ServerSpeechEditor: View {
                 .help("Downloads the chosen model once from whisper.cpp's model page into the server's data folder.")
                 .accessibilityIdentifier("server-speech-download")
             }
-            if let error = settings.downloadError {
-              Text(error).font(.caption).foregroundStyle(.orange)
-            }
+            if let error = settings.downloadError { ErrorBanner(message: error, inline: true) }
             ForEach(settings.jobs.filter(\.isRunning), id: \.mediaId) { job in
               ServerSpeechJobRow(job: job) { Task { await cancel(job) } }
             }
-            if let message { Text(message).font(.caption).foregroundStyle(.orange) }
+            if let message { ErrorBanner(message: message, inline: true) }
           }
           .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -69,6 +67,11 @@ struct ServerSpeechEditor: View {
           Button("Remove Model", role: .destructive) { Task { await remove() } }
         } message: {
           Text("Subtitles from speech then stay off until a model is downloaded again.")
+        }
+      } else if let message {
+        // Loading failed: the section says so instead of staying away.
+        AureliaSettingsSection("Speech Recognition", symbol: "waveform") {
+          ErrorBanner(message: message, retry: { Task { await load() } }, inline: true)
         }
       }
     }

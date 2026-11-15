@@ -113,13 +113,12 @@ struct ServerPowerEditor: View {
           .foregroundStyle(.secondary)
       } else if loadFailed {
         // A failed load used to leave the page empty; it now says so and can try again.
-        VStack(alignment: .leading, spacing: 8) {
-          Text(message ?? "The power settings couldn't be loaded.")
-            .foregroundStyle(.orange).textSelection(.enabled)
-          Button("Try Again") { Task { await load() } }
-        }
+        ErrorBanner(
+          message: message ?? "The power settings couldn't be loaded.",
+          retry: { Task { await load() } }, inline: true)
       } else {
-        ProgressView("Loading power settings…")
+        AureliaDelayedProgress().frame(maxWidth: .infinity)
+          .accessibilityLabel("Loading power settings")
       }
     }
     .task(id: model.administrationGeneration) { await load() }
@@ -410,11 +409,15 @@ struct ServerScrubPreviewsEditor: View {
                 .accessibilityIdentifier("server-scrub-previews-delete")
               if working { ProgressView().controlSize(.small) }
             }
-            if let message { Text(message).font(.caption).foregroundStyle(.orange) }
+            if let message { ErrorBanner(message: message, inline: true) }
           }
           .frame(maxWidth: .infinity, alignment: .leading).disabled(working)
         }
         .accessibilityIdentifier("server-scrub-previews")
+      } else if let message {
+        AureliaSettingsSection("Scrub Previews", symbol: "film.stack") {
+          ErrorBanner(message: message, retry: { Task { await load() } }, inline: true)
+        }
       }
     }
     .task(id: model.administrationGeneration) { await load() }
@@ -422,6 +425,7 @@ struct ServerScrubPreviewsEditor: View {
 
   private func load() async {
     let scope = ServerAdministrationScope(model: model, generation: model.administrationGeneration)
+    message = nil
     do {
       let settings = try await model.currentAdministration {
         try await scope.request { try await client.serverScrubPreviews() }
@@ -570,9 +574,13 @@ struct ServerVideoConversionCard: View {
               LabeledContent(session.title, value: TranscodingStatus.sessionSummary(session))
                 .font(.caption)
             }
-            if let message { Text(message).font(.caption).foregroundStyle(.red) }
+            if let message { ErrorBanner(message: message, inline: true) }
           }
           .frame(maxWidth: .infinity, alignment: .leading)
+        }
+      } else if let message {
+        AureliaSettingsSection("Video Conversion", symbol: "cpu") {
+          ErrorBanner(message: message, retry: { Task { await load() } }, inline: true)
         }
       }
     }
@@ -581,6 +589,7 @@ struct ServerVideoConversionCard: View {
 
   private func load() async {
     let scope = ServerAdministrationScope(model: model, generation: model.administrationGeneration)
+    message = nil
     do {
       status = try await model.currentAdministration {
         try await scope.request { try await client.serverTranscoding() }

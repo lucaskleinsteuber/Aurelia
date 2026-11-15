@@ -100,6 +100,7 @@ struct ImportPreviewView: View {
   var body: some View {
     VStack(spacing: 0) {
       header
+      Divider()
       if let summary {
         counts(summary.counts)
         controls
@@ -123,14 +124,19 @@ struct ImportPreviewView: View {
         }
       } else {
         VStack(spacing: 12) {
-          if isWorking { ProgressView("Analyzing filenames and folder structure…") }
+          if isWorking {
+            AureliaDelayedProgress()
+              .accessibilityLabel("Analyzing filenames and folder structure")
+            Text("Analyzing filenames and folder structure…")
+          }
           Text("No catalog entries are imported until you confirm this preview.")
             .foregroundStyle(.secondary)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
       }
       if let errorMessage {
-        Text(errorMessage).font(.callout).foregroundStyle(.orange)
-          .textSelection(.enabled).padding(16)
+        ErrorBanner(message: errorMessage, inline: true)
+          .padding(.horizontal, 20)
+          .padding(.vertical, 10)
       }
       Divider()
       footer
@@ -166,17 +172,20 @@ struct ImportPreviewView: View {
   }
 
   private var header: some View {
-    HStack(spacing: 12) {
-      Image(systemName: "folder.badge.questionmark").font(.title)
-      VStack(alignment: .leading, spacing: 3) {
-        Text("Import Preview").font(AureliaDesign.pageTitle)
-        Text(library.name).font(.headline)
-        Text(library.path).font(.caption).foregroundStyle(.secondary)
-          .lineLimit(1).truncationMode(.middle)
+    VStack(alignment: .leading, spacing: 0) {
+      AureliaSheetHeader(
+        title: "Import Preview",
+        subtitle:
+          "Check how Aurelia recognized the files in “\(library.name)” before they are imported.",
+        symbol: "folder.badge.questionmark"
+      )
+      .overlay(alignment: .topTrailing) {
+        if isWorking { ProgressView().controlSize(.small).padding(20) }
       }
-      Spacer()
-      if isWorking { ProgressView().controlSize(.small) }
-    }.padding(22)
+      Text(library.path).font(.caption).foregroundStyle(.secondary)
+        .lineLimit(1).truncationMode(.middle)
+        .padding(.leading, 76).padding(.trailing, 20).padding(.bottom, 14)
+    }
   }
 
   private func counts(_ counts: ImportPreviewCounts) -> some View {
@@ -185,6 +194,21 @@ struct ImportPreviewView: View {
       Text("\(counts.movies) movies · \(counts.series) series · \(counts.episodes) episodes")
       Text("\(counts.extras) extras · \(counts.trailers) trailers")
       Spacer()
+      if counts.errors > 0 {
+        // Import stays off while errors remain; this says why and leads to them.
+        Button {
+          filter = .error
+        } label: {
+          Label(
+            "\(counts.errors) \(counts.errors == 1 ? "error" : "errors") – fix or ignore "
+              + "\(counts.errors == 1 ? "it" : "them") to import",
+            systemImage: "exclamationmark.triangle.fill")
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.orange)
+        .help("Show only the files with errors")
+        .accessibilityIdentifier("import-show-errors")
+      }
       Text("\(counts.pending) need review").foregroundStyle(
         counts.pending > 0 ? Color.orange : .secondary)
     }.font(.caption).padding(.horizontal, 22).padding(.vertical, 12)
@@ -259,7 +283,8 @@ struct ImportPreviewView: View {
       {
         Task { await confirm() }
       }
-      .buttonStyle(AureliaPrimaryActionButtonStyle())
+      .buttonStyle(AureliaPrimaryActionButtonStyle(compact: true))
+      .keyboardShortcut(.defaultAction)
       .disabled(summary == nil || isWorking || summary?.counts.errors != 0)
       .accessibilityIdentifier("confirm-import-preview")
     }.padding(18)
@@ -483,8 +508,23 @@ struct ImportAssignmentEditor: View {
   }
 
   var body: some View {
+    AureliaSheet(
+      title: "Edit Import Assignment",
+      subtitle: "Choose what the selected files are and which title they belong to.",
+      symbol: "pencil",
+      errorMessage: errorMessage,
+      primary: AureliaSheetAction(
+        title: "Save Assignment", busyTitle: "Saving…", isBusy: isWorking, isDisabled: !canSave,
+        action: { Task { await save() } }),
+      onCancel: { if !isWorking { dismiss() } }
+    ) {
+      form
+    }
+    .frame(width: 610, height: 630)
+  }
+
+  private var form: some View {
     VStack(alignment: .leading, spacing: 18) {
-      Text("Edit Import Assignment").font(.title2.bold())
       Text(items.count == 1 ? items[0].relativePath : "\(items.count) selected files or folders")
         .font(.caption).foregroundStyle(.secondary).lineLimit(2)
       Form {
@@ -546,16 +586,9 @@ struct ImportAssignmentEditor: View {
         "Folder rules are inherited. Individual file assignments take precedence. Unnumbered episodes are only numbered when you explicitly choose TV Show · Force Import."
       )
       .font(.caption).foregroundStyle(.secondary)
-      if let errorMessage { Text(errorMessage).foregroundStyle(.orange) }
-      HStack {
-        Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(isWorking)
-        Spacer()
-        if isWorking { ProgressView().controlSize(.small) }
-        Button("Save Assignment") { Task { await save() } }
-          .buttonStyle(AureliaPrimaryActionButtonStyle()).disabled(!canSave)
-          .keyboardShortcut(.defaultAction)
-      }
-    }.padding(24).frame(width: 610, height: 590).background(AureliaBackdrop())
+    }
+    .padding(.horizontal, 24)
+    .padding(.vertical, 16)
   }
 
   private func save() async {

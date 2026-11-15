@@ -60,7 +60,11 @@ struct ProfilePickerView: View {
       if phase == .active { Task { await reloadProfilesIfSafe() } }
     }
     .onExitCommand {
-      if choice != nil { returnToProfiles() }
+      if recoveringOwner {
+        if !model.isSelectingProfile { leaveOwnerRecovery() }
+      } else if choice != nil {
+        returnToProfiles()
+      }
     }
     .onDisappear {
       if model.requiresProfileSelection {
@@ -134,7 +138,9 @@ struct ProfilePickerView: View {
         Text(error).foregroundStyle(.orange).frame(maxWidth: 480)
           .multilineTextAlignment(.center)
       }
-      if model.isSelectingProfile { ProgressView().controlSize(.small) }
+      if model.isSelectingProfile {
+        AureliaDelayedProgress(controlSize: .small).accessibilityLabel("Opening profile")
+      }
     }
   }
 
@@ -258,7 +264,10 @@ struct ProfilePickerView: View {
             confirmation = ""
           }
         }
-      }.buttonStyle(AureliaPrimaryActionButtonStyle()).disabled(
+      }
+      .buttonStyle(AureliaPrimaryActionButtonStyle())
+      .keyboardShortcut(.defaultAction)
+      .disabled(
         password.isEmpty || !ProfilePIN.isValid(pin) || pin != confirmation
           || model.isSelectingProfile)
     }.frame(maxWidth: 440)
@@ -326,13 +335,9 @@ struct ProfilePickerView: View {
       SecureField("Confirm new owner PIN", text: $confirmation)
       PINRequirementNote(pin: pin, confirmation: confirmation)
       HStack {
-        Button("Cancel") {
-          recoveringOwner = false
-          model.clearProfileSelectionError()
-          password = ""
-          pin = ""
-          confirmation = ""
-        }.disabled(model.isSelectingProfile)
+        Button("Cancel") { leaveOwnerRecovery() }
+          .keyboardShortcut(.cancelAction)
+          .disabled(model.isSelectingProfile)
         Button("Recover PIN") {
           Task {
             if await model.recoverOwnerPIN(password: password, pin: pin) {
@@ -343,11 +348,22 @@ struct ProfilePickerView: View {
               confirmation = ""
             }
           }
-        }.disabled(
+        }
+        .buttonStyle(AureliaPrimaryActionButtonStyle(compact: true))
+        .keyboardShortcut(.defaultAction)
+        .disabled(
           password.isEmpty || !ProfilePIN.isValid(pin) || pin != confirmation
             || model.isSelectingProfile)
       }
     }.frame(maxWidth: 440).textFieldStyle(.roundedBorder)
+  }
+
+  private func leaveOwnerRecovery() {
+    recoveringOwner = false
+    model.clearProfileSelectionError()
+    password = ""
+    pin = ""
+    confirmation = ""
   }
 }
 

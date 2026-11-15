@@ -214,16 +214,24 @@ struct CollectionEditorSheet: View {
   @State private var isSaving = false
   @State private var errorMessage: String?
   @State private var showingDeleteConfirmation = false
+  /// What the sheet opened with, so the full details loading afterwards never replace members or
+  /// an order the person already changed.
+  private let initialMemberIds: [String]
+  private let initialSortMode: String
 
   init(collection: CollectionSummary?) {
     self.collection = collection
     _name = State(initialValue: collection?.name ?? "")
     _overview = State(initialValue: collection?.overview ?? "")
-    _sortMode = State(initialValue: collection?.sortMode ?? ((collection?.isSmart ?? false) ? "release" : "custom"))
-    _members = State(
-      initialValue: (collection?.items ?? []).map {
-        CollectionMemberDraft(mediaId: $0.id, seasonNumber: nil, title: $0.title, kind: $0.kind)
-      })
+    let sort =
+      collection?.sortMode ?? ((collection?.isSmart ?? false) ? "release" : "custom")
+    _sortMode = State(initialValue: sort)
+    initialSortMode = sort
+    let drafts = (collection?.items ?? []).map {
+      CollectionMemberDraft(mediaId: $0.id, seasonNumber: nil, title: $0.title, kind: $0.kind)
+    }
+    _members = State(initialValue: drafts)
+    initialMemberIds = drafts.map(\.id)
     _isSmart = State(initialValue: collection?.isSmart ?? false)
     _isShared = State(initialValue: collection?.isShared ?? false)
     if let rulesJson = collection?.rulesJson,
@@ -409,7 +417,8 @@ struct CollectionEditorSheet: View {
     .padding(12)
     .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
     .overlay {
-      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius).stroke(AureliaDesign.hairline, lineWidth: 1)
+      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
+        .stroke(AureliaDesign.hairline, lineWidth: 1)
     }
   }
 
@@ -437,9 +446,10 @@ struct CollectionEditorSheet: View {
           }
         }
         .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.smallRadius))
         .overlay {
-          RoundedRectangle(cornerRadius: 8).stroke(AureliaDesign.hairline, lineWidth: 1)
+          RoundedRectangle(cornerRadius: AureliaDesign.smallRadius)
+            .stroke(AureliaDesign.hairline, lineWidth: 1)
         }
 
         VStack(alignment: .leading, spacing: 6) {
@@ -519,7 +529,7 @@ struct CollectionEditorSheet: View {
           }
           .listStyle(.inset)
           .frame(height: min(CGFloat(members.count) * 34 + 16, 175))
-          .clipShape(RoundedRectangle(cornerRadius: 8))
+          .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.smallRadius))
         }
       }
 
@@ -635,7 +645,7 @@ struct CollectionEditorSheet: View {
       }
       .listStyle(.inset)
       .frame(minHeight: 200)
-      .clipShape(RoundedRectangle(cornerRadius: 8))
+      .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.smallRadius))
     }
   }
 
@@ -699,7 +709,7 @@ struct CollectionEditorSheet: View {
       HStack {
         Image(systemName: "sparkles")
           .foregroundStyle(.tint)
-        Text("Matching \(previewMatchCount) titles in your library")
+        Text(previewMatchText)
           .font(.callout)
           .foregroundStyle(.secondary)
       }
@@ -707,46 +717,21 @@ struct CollectionEditorSheet: View {
     }
   }
 
-  private var previewMatchCount: Int {
-    model.catalogItems.filter { item in
-      var matches: [Bool] = []
-      if smartKind == "movies" {
-        matches.append(item.kind == .movie)
-      } else if smartKind == "series" {
-        matches.append(item.kind == .series)
-      }
-      if let yMin = Int(smartYearMin), let itemYear = item.year { matches.append(itemYear >= yMin) }
-      if let yMax = Int(smartYearMax), let itemYear = item.year { matches.append(itemYear <= yMax) }
-      if !smartGenre.isEmpty {
-        let targets = smartGenre.components(separatedBy: ",").map {
-          $0.trimmingCharacters(in: .whitespaces).lowercased()
-        }.filter { !$0.isEmpty }
-        if !targets.isEmpty {
-          matches.append(
-            item.genres.contains { g in targets.contains(where: { g.lowercased().contains($0) }) })
-        }
-      }
-      if smartWatched == "watched" {
-        matches.append(item.watchState == .completed)
-      } else if smartWatched == "unwatched" {
-        matches.append(item.watchState != .completed)
-      }
-      if smartFavoritesOnly { matches.append(item.isFavorite) }
-      if !smartSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        matches.append(
-          item.title.localizedCaseInsensitiveContains(
-            smartSearch.trimmingCharacters(in: .whitespacesAndNewlines)))
-      }
-      if matches.isEmpty { return true }
-      return smartMatch == "any" ? matches.contains(true) : !matches.contains(false)
-    }.count
+  private var previewMatchText: String {
+    let count = SmartCollectionPreview.matchCount(model.catalogItems, rules: builtRules)
+    let titles = count == 1 ? "1 title" : "\(count) titles"
+    // The library list carries no ratings; the server applies Min Rating when the list is saved.
+    guard builtRules.ratingMin != nil else { return "Matching \(titles) in your library" }
+    return smartMatch == "any"
+      ? "At least \(titles) match; Min Rating is checked when you save."
+      : "Up to \(titles) match; Min Rating is checked when you save."
   }
 
-  private var builtRulesJson: String? {
+  private var builtRules: SmartCollectionRules {
     let genresList = smartGenre.components(separatedBy: ",").map {
       $0.trimmingCharacters(in: .whitespaces)
     }.filter { !$0.isEmpty }
-    let rules = SmartCollectionRules(
+    return SmartCollectionRules(
       kind: smartKind == "all" ? nil : smartKind,
       genres: genresList.isEmpty ? nil : genresList,
       yearMin: Int(smartYearMin),
@@ -760,7 +745,10 @@ struct CollectionEditorSheet: View {
         ? nil : smartSearch.trimmingCharacters(in: .whitespacesAndNewlines),
       match: smartMatch
     )
-    guard let data = try? JSONEncoder().encode(rules) else { return nil }
+  }
+
+  private var builtRulesJson: String? {
+    guard let data = try? JSONEncoder().encode(builtRules) else { return nil }
     return String(data: data, encoding: .utf8)
   }
 
@@ -859,7 +847,8 @@ struct CollectionEditorSheet: View {
     if overview.isEmpty, let fetchedOverview = detail.overview {
       overview = fetchedOverview
     }
-    sortMode = detail.sortMode
+    if sortMode == initialSortMode { sortMode = detail.sortMode }
+    guard members.map(\.id) == initialMemberIds else { return }
     members = detail.members.map {
       CollectionMemberDraft(
         mediaId: $0.mediaId,
@@ -921,17 +910,31 @@ struct MetadataReviewQueueSheet: View {
   @State private var reviews: [MetadataReviewSummary] = []
   @State private var errorMessage: String?
   @State private var manualReview: MetadataReviewSummary?
+  @State private var hasLoaded = false
+  /// The queue itself failed to load: no "Nothing to Review" then, and the banner offers Try Again.
+  @State private var loadFailed = false
 
   var body: some View {
-    VStack(spacing: 0) {
-      sheetHeader(
-        "Review Queue", subtitle: "Resolve uncertain metadata matches.", symbol: "checklist")
-      if reviews.isEmpty {
-        ContentUnavailableView(
-          "Nothing to Review", systemImage: "checkmark.circle",
-          description: Text("Items that need a decision will appear here.")
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    AureliaSheet(
+      title: "Review Queue",
+      subtitle: "Choose the right match for titles Aurelia wasn't sure about.",
+      symbol: "checklist",
+      errorMessage: errorMessage,
+      retry: loadRetry,
+      onCancel: { dismiss() }
+    ) {
+      if !hasLoaded && !loadFailed {
+        AureliaDelayedProgress()
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .accessibilityLabel("Loading Review Queue")
+      } else if reviews.isEmpty {
+        if !loadFailed {
+          ContentUnavailableView(
+            "Nothing to Review", systemImage: "checkmark.circle",
+            description: Text("Items that need a decision will appear here.")
+          )
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
       } else {
         List(reviews) { review in
           VStack(alignment: .leading, spacing: 10) {
@@ -961,15 +964,8 @@ struct MetadataReviewQueueSheet: View {
           }.padding(.vertical, 8)
         }
       }
-      if let errorMessage { Text(errorMessage).foregroundStyle(.orange).padding() }
-      Divider()
-      HStack {
-        Spacer()
-        AureliaSheetDoneButton { dismiss() }
-      }.padding(16)
     }
     .frame(width: 720, height: 640)
-    .background(AureliaBackdrop())
     .task { await load() }
     .sheet(item: $manualReview) { review in
       MetadataMatchSheet(mediaId: review.mediaId, title: review.title) {
@@ -979,9 +975,21 @@ struct MetadataReviewQueueSheet: View {
     }
   }
 
+  private var loadRetry: (() -> Void)? {
+    guard loadFailed else { return nil }
+    return { Task { await load() } }
+  }
+
   private func load() async {
-    do { reviews = try await model.metadataReviews() } catch {
-      errorMessage = error.localizedDescription
+    do {
+      reviews = try await model.metadataReviews()
+      hasLoaded = true
+      loadFailed = false
+      errorMessage = nil
+    } catch is CancellationError {
+    } catch {
+      loadFailed = true
+      errorMessage = "Couldn't load the review queue. \(error.localizedDescription)"
     }
   }
   private func choose(_ review: MetadataReviewSummary, _ candidate: MetadataCandidateSummary) async
@@ -996,16 +1004,49 @@ struct MetadataReviewQueueSheet: View {
   }
 }
 
-private func sheetHeader(_ title: String, subtitle: String, symbol: String) -> some View {
-  HStack(spacing: 14) {
-    Image(systemName: symbol).font(.title2).frame(width: 42, height: 42)
-      .background(.white.opacity(0.075), in: RoundedRectangle(cornerRadius: 12))
-    VStack(alignment: .leading, spacing: 3) {
-      Text(title).font(.title2.bold())
-      Text(subtitle).font(.callout).foregroundStyle(.secondary)
+/// Counts the library titles a smart list's rules match, as far as this Mac knows: the library
+/// list carries no ratings, so the rating rule is left to the server.
+enum SmartCollectionPreview {
+  static func matchCount(
+    _ items: [CatalogItemSummary], rules: SmartCollectionRules, now: Date = Date()
+  ) -> Int {
+    items.filter { matches($0, rules: rules, now: now) }.count
+  }
+
+  static func matches(_ item: CatalogItemSummary, rules: SmartCollectionRules, now: Date) -> Bool {
+    var matches: [Bool] = []
+    if rules.kind == "movies" {
+      matches.append(item.kind == .movie)
+    } else if rules.kind == "series" {
+      matches.append(item.kind == .series)
     }
-    Spacer()
-  }.padding(20)
+    if let yMin = rules.yearMin, let itemYear = item.year { matches.append(itemYear >= yMin) }
+    if let yMax = rules.yearMax, let itemYear = item.year { matches.append(itemYear <= yMax) }
+    let targets = (rules.genres ?? []).map {
+      $0.trimmingCharacters(in: .whitespaces).lowercased()
+    }.filter { !$0.isEmpty }
+    if !targets.isEmpty {
+      matches.append(
+        item.genres.contains { genre in targets.contains { genre.lowercased().contains($0) } })
+    }
+    if rules.watched == "watched" {
+      matches.append(item.watchState == .completed)
+    } else if rules.watched == "unwatched" {
+      matches.append(item.watchState != .completed)
+    }
+    if rules.favoritesOnly == true { matches.append(item.isFavorite) }
+    let search = rules.search?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !search.isEmpty { matches.append(item.title.localizedCaseInsensitiveContains(search)) }
+    if let days = rules.addedWithinDays, let added = ServerDate.parse(item.addedAt) {
+      matches.append(now.timeIntervalSince(added) <= Double(days) * 86_400)
+    }
+    if matches.isEmpty { return true }
+    return rules.match == "any" ? matches.contains(true) : !matches.contains(false)
+  }
+}
+
+private func sheetHeader(_ title: String, subtitle: String, symbol: String) -> some View {
+  AureliaSheetHeader(title: title, subtitle: subtitle, symbol: symbol)
 }
 
 private func nilIfEmpty(_ value: String) -> String? {

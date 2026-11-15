@@ -18,18 +18,21 @@ struct LibraryHealthView: View {
   @State private var duplicateGroups: [DuplicateGroup] = []
   @State private var isLoadingDuplicates = false
   @State private var duplicateError: String?
+  @State private var loadedDuplicates = false
 
   // Offline State
   @State private var offlineTitles: [OfflineTitleSummary] = []
   @State private var offlineDays: Int = 30
   @State private var isLoadingOffline = false
   @State private var offlineError: String?
+  @State private var loadedOffline = false
   @State private var offlineRemoval: OfflineTitleSummary?
 
   // Unmatched State
   @State private var unmatchedTitles: [UnmatchedTitleSummary] = []
   @State private var isLoadingUnmatched = false
   @State private var unmatchedError: String?
+  @State private var loadedUnmatched = false
   @State private var matchingTarget: UnmatchedTitleSummary?
 
   // Exclusions State
@@ -45,42 +48,41 @@ struct LibraryHealthView: View {
   @State private var showingMergeConfirmation = false
 
   var body: some View {
-    VStack(spacing: 0) {
-      HStack {
-        Label("Library Health & Maintenance", systemImage: "stethoscope")
-          .font(.title2.bold())
-        Spacer()
-        AureliaSheetDoneButton { dismiss() }
-      }
-      .padding(20)
-
-      Picker("Tab", selection: $selectedTab) {
-        ForEach(LibraryHealthTab.allCases) { tab in
-          Text(tab.rawValue).tag(tab)
-        }
-      }
-      .pickerStyle(.segmented)
-      .padding(.horizontal, 20)
-      .padding(.bottom, 16)
-
-      ScrollView {
-        VStack(alignment: .leading, spacing: 20) {
-          switch selectedTab {
-          case .duplicates:
-            duplicatesContent
-          case .offline:
-            offlineContent
-          case .unmatched:
-            unmatchedContent
-          case .exclusions:
-            exclusionsContent
+    AureliaSheet(
+      title: "Library Health & Maintenance",
+      subtitle: "Find duplicate, missing and unmatched titles, and bring back excluded ones.",
+      symbol: "stethoscope",
+      onCancel: { dismiss() }
+    ) {
+      VStack(spacing: 0) {
+        Picker("Tab", selection: $selectedTab) {
+          ForEach(LibraryHealthTab.allCases) { tab in
+            Text(tab.rawValue).tag(tab)
           }
         }
-        .padding(20)
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+
+        ScrollView {
+          VStack(alignment: .leading, spacing: 20) {
+            switch selectedTab {
+            case .duplicates:
+              duplicatesContent
+            case .offline:
+              offlineContent
+            case .unmatched:
+              unmatchedContent
+            case .exclusions:
+              exclusionsContent
+            }
+          }
+          .padding(20)
+        }
       }
     }
     .frame(minWidth: 780, minHeight: 580)
-    .background(AureliaBackdrop())
     .task(id: selectedTab) {
       await loadCurrentTab()
     }
@@ -121,9 +123,18 @@ struct LibraryHealthView: View {
       .font(.caption)
       .foregroundStyle(.secondary)
 
-      if isLoadingDuplicates && duplicateGroups.isEmpty {
-        ProgressView("Analyzing duplicates…")
+      if let duplicateError {
+        ErrorBanner(
+          message: duplicateError, retry: { Task { await loadDuplicates() } },
+          retryDisabled: isLoadingDuplicates, inline: true)
+      }
+      if duplicateGroups.isEmpty && duplicateError != nil {
+        // A failed check is not "no duplicates": the banner above offers Try Again.
+        EmptyView()
+      } else if (isLoadingDuplicates || !loadedDuplicates) && duplicateGroups.isEmpty {
+        AureliaDelayedProgress()
           .frame(maxWidth: .infinity, minHeight: 200)
+          .accessibilityLabel("Analyzing duplicates")
       } else if duplicateGroups.isEmpty {
         ContentUnavailableView(
           "No Duplicates Found",
@@ -180,18 +191,19 @@ struct LibraryHealthView: View {
                   }
                 }
                 .padding(10)
-                .background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: 8))
+                .background(
+                  AureliaDesign.surface,
+                  in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius))
               }
             }
           }
           .padding(14)
-          .background(AureliaDesign.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+          .background(
+            AureliaDesign.surface.opacity(0.5),
+            in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius))
         }
       }
 
-      if let duplicateError {
-        Text(duplicateError).foregroundStyle(.orange).font(.caption)
-      }
     }
   }
 
@@ -222,9 +234,18 @@ struct LibraryHealthView: View {
         }
       }
 
-      if isLoadingOffline && offlineTitles.isEmpty {
-        ProgressView("Checking offline titles…")
+      if let offlineError {
+        ErrorBanner(
+          message: offlineError, retry: { Task { await loadOffline() } },
+          retryDisabled: isLoadingOffline, inline: true)
+      }
+      if offlineTitles.isEmpty && offlineError != nil {
+        // A failed check is not "all reachable": the banner above offers Try Again.
+        EmptyView()
+      } else if (isLoadingOffline || !loadedOffline) && offlineTitles.isEmpty {
+        AureliaDelayedProgress()
           .frame(maxWidth: .infinity, minHeight: 200)
+          .accessibilityLabel("Checking offline titles")
       } else if offlineTitles.isEmpty {
         ContentUnavailableView(
           "No Offline Titles",
@@ -261,13 +282,12 @@ struct LibraryHealthView: View {
             .controlSize(.small)
           }
           .padding(10)
-          .background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: 8))
+          .background(
+            AureliaDesign.surface,
+            in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius))
         }
       }
 
-      if let offlineError {
-        Text(offlineError).foregroundStyle(.orange).font(.caption)
-      }
     }
     .confirmationDialog(
       "Remove “\(offlineRemoval?.title ?? "")” from the library?",
@@ -296,9 +316,18 @@ struct LibraryHealthView: View {
         .font(.caption)
         .foregroundStyle(.secondary)
 
-      if isLoadingUnmatched && unmatchedTitles.isEmpty {
-        ProgressView("Finding unmatched titles…")
+      if let unmatchedError {
+        ErrorBanner(
+          message: unmatchedError, retry: { Task { await loadUnmatched() } },
+          retryDisabled: isLoadingUnmatched, inline: true)
+      }
+      if unmatchedTitles.isEmpty && unmatchedError != nil {
+        // A failed check is not "all matched": the banner above offers Try Again.
+        EmptyView()
+      } else if (isLoadingUnmatched || !loadedUnmatched) && unmatchedTitles.isEmpty {
+        AureliaDelayedProgress()
           .frame(maxWidth: .infinity, minHeight: 200)
+          .accessibilityLabel("Finding unmatched titles")
       } else if unmatchedTitles.isEmpty {
         ContentUnavailableView(
           "All Titles Matched",
@@ -331,13 +360,12 @@ struct LibraryHealthView: View {
             .controlSize(.small)
           }
           .padding(10)
-          .background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: 8))
+          .background(
+            AureliaDesign.surface,
+            in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius))
         }
       }
 
-      if let unmatchedError {
-        Text(unmatchedError).foregroundStyle(.orange).font(.caption)
-      }
     }
   }
 
@@ -371,14 +399,17 @@ struct LibraryHealthView: View {
             .controlSize(.small)
         }
         .padding(10)
-        .background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: 8))
+        .background(
+          AureliaDesign.surface,
+          in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius))
       }
 
       if library != nil && exclusions.isEmpty {
         Text("No excluded items.").foregroundStyle(.secondary).padding(.top, 8)
       }
       if let exclusionError {
-        Text(exclusionError).foregroundStyle(.orange).font(.caption)
+        ErrorBanner(
+          message: exclusionError, retry: { Task { await loadExclusions() } }, inline: true)
       }
     }
     .confirmationDialog(
@@ -433,6 +464,7 @@ struct LibraryHealthView: View {
       duplicateGroups = try await APIClient(profile: profile).healthDuplicates()
       duplicateError = nil
       isLoadingDuplicates = false
+      loadedDuplicates = true
     } catch {
       isLoadingDuplicates = false
       duplicateError = error.localizedDescription
@@ -446,6 +478,7 @@ struct LibraryHealthView: View {
       offlineTitles = try await APIClient(profile: profile).healthOffline(days: offlineDays)
       offlineError = nil
       isLoadingOffline = false
+      loadedOffline = true
     } catch {
       isLoadingOffline = false
       offlineError = error.localizedDescription
@@ -459,6 +492,7 @@ struct LibraryHealthView: View {
       unmatchedTitles = try await APIClient(profile: profile).healthUnmatched()
       unmatchedError = nil
       isLoadingUnmatched = false
+      loadedUnmatched = true
     } catch {
       isLoadingUnmatched = false
       unmatchedError = error.localizedDescription
@@ -523,8 +557,39 @@ struct LibraryResetSheet: View {
   @State private var error: String?
   @State private var operationTask: Task<Void, Never>?
   var body: some View {
+    VStack(spacing: 0) {
+      AureliaSheetHeader(
+        title: "Reset Library",
+        subtitle: "Remove storage locations and everything Aurelia knows about their titles.",
+        symbol: "exclamationmark.triangle")
+      Divider()
+      resetContent
+      Divider()
+      footer
+    }
+    .frame(minWidth: 650, minHeight: 600).background(AureliaBackdrop())
+    .interactiveDismissDisabled(working)
+    .onDisappear { operationTask?.cancel() }
+    .onChange(of: model.profile?.sessionId) { _, _ in
+      operationTask?.cancel()
+      dismiss()
+    }
+    .confirmationDialog(
+      "Permanently reset the selected libraries?", isPresented: $confirmation,
+      titleVisibility: .visible
+    ) {
+      Button("Reset Selected Libraries", role: .destructive) {
+        operationTask = Task { await reset() }
+      }
+    } message: {
+      Text(
+        "The selected libraries will be removed using your current management unlock. Your video files will not be changed. This cannot be undone without restoring a backup."
+      )
+    }
+  }
+
+  private var resetContent: some View {
     VStack(alignment: .leading, spacing: 18) {
-      Label("Reset Library", systemImage: "exclamationmark.triangle").font(.title2.bold())
       Text(
         "Choose the storage locations to remove. This deletes catalog entries, metadata, images, favorites and playback history for all users. Storage locations must be explicitly added again afterward."
       )
@@ -558,44 +623,38 @@ struct LibraryResetSheet: View {
         if let serverError = result.error { ErrorBanner(message: serverError, inline: true) }
       }
       if let error { ErrorBanner(message: error, inline: true) }
-      HStack {
-        if working { ProgressView().controlSize(.small) }
-        Spacer()
-        Button(result == nil ? "Cancel" : "Done") { dismiss() }
+    }
+    .padding(24)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+  }
+
+  private var footer: some View {
+    HStack {
+      if working { ProgressView().controlSize(.small) }
+      Spacer()
+      if result == nil {
+        Button("Cancel") { dismiss() }
           .keyboardShortcut(.cancelAction)
           .disabled(working)
-        if result == nil {
-          Button(
-            preview == nil ? "Review Reset" : "Reset Selected Libraries…",
-            role: preview == nil ? nil : .destructive
-          ) {
-            if preview != nil {
-              confirmation = true
-            } else {
-              operationTask = Task { await review() }
-            }
-          }.disabled(selected.isEmpty || working || !model.canManageStorage)
+        Button(
+          preview == nil ? "Review Reset" : "Reset Selected Libraries…",
+          role: preview == nil ? nil : .destructive
+        ) {
+          if preview != nil {
+            confirmation = true
+          } else {
+            operationTask = Task { await review() }
+          }
         }
+        .buttonStyle(AureliaPrimaryActionButtonStyle(compact: true))
+        .keyboardShortcut(.defaultAction)
+        .disabled(selected.isEmpty || working || !model.canManageStorage)
+      } else {
+        AureliaSheetDoneButton { dismiss() }
+          .disabled(working)
       }
-    }.padding(24).frame(minWidth: 650, minHeight: 530).background(AureliaBackdrop())
-      .interactiveDismissDisabled(working)
-      .onDisappear { operationTask?.cancel() }
-      .onChange(of: model.profile?.sessionId) { _, _ in
-        operationTask?.cancel()
-        dismiss()
-      }
-      .confirmationDialog(
-        "Permanently reset the selected libraries?", isPresented: $confirmation,
-        titleVisibility: .visible
-      ) {
-        Button("Reset Selected Libraries", role: .destructive) {
-          operationTask = Task { await reset() }
-        }
-      } message: {
-        Text(
-          "The selected libraries will be removed using your current management unlock. Your video files will not be changed. This cannot be undone without restoring a backup."
-        )
-      }
+    }
+    .padding(16)
   }
   private func review() async {
     guard let profile = model.profile, model.canManageStorage else { return }

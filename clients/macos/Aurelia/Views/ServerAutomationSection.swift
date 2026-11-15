@@ -8,6 +8,9 @@ struct ServerAutomationSection: View {
   @EnvironmentObject private var model: AppModel
   @State private var overview: AutomationOverview?
   @State private var message: String?
+  /// Why the settings couldn't be loaded or an action failed, shown above the sections.
+  @State private var problem: String?
+  @State private var loading = true
   @State private var working = false
   @State private var editing: WebhookEditorTarget?
   @State private var deliveriesFor: AutomationWebhook?
@@ -40,6 +43,11 @@ struct ServerAutomationSection: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 22) {
+      if let problem {
+        ErrorBanner(
+          message: problem, retry: { Task { await reload() } }, retryDisabled: loading,
+          inline: true)
+      }
       AureliaSettingsSection(
         "Smart Home", symbol: "house",
         description:
@@ -59,8 +67,10 @@ struct ServerAutomationSection: View {
             ForEach(overview.webhooks) { webhookRow($0, overview: overview) }
             Button("Add Webhook…") { editing = WebhookEditorTarget(webhook: nil) }
               .accessibilityIdentifier("automation-add-webhook")
+          } else if loading {
+            AureliaDelayedProgress(controlSize: .small)
           } else {
-            ProgressView().controlSize(.small)
+            unavailable
           }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -95,6 +105,10 @@ struct ServerAutomationSection: View {
               }
             }
             Button("Create Key…") { creatingToken = true }
+          } else if loading {
+            AureliaDelayedProgress(controlSize: .small)
+          } else {
+            unavailable
           }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -132,6 +146,10 @@ struct ServerAutomationSection: View {
                 .help(AutomationText.powerDetail(action))
               }
             }
+          } else if loading {
+            AureliaDelayedProgress(controlSize: .small)
+          } else {
+            unavailable
           }
           if let message { Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
         }
@@ -155,7 +173,9 @@ struct ServerAutomationSection: View {
     }
     .sheet(isPresented: $creatingToken) {
       if let client {
-        IntegrationTokenSheet(client: client) { value in
+        IntegrationTokenSheet(
+          client: client, unlock: { await model.unlockManagementInteractively() }
+        ) { value in
           creatingToken = false
           shownToken = value
           Task { await reload() }
@@ -166,6 +186,7 @@ struct ServerAutomationSection: View {
     .sheet(isPresented: Binding(get: { shownToken != nil }, set: { if !$0 { shownToken = nil } })) {
       AutomationValueSheet(
         title: "Key Created",
+        subtitle: "Copy the key now; Aurelia shows it only once.",
         explanation: "Copy the key now: it is shown only once. Aurelia keeps only a fingerprint of it. Send it as “Authorization: Bearer <key>”.",
         value: shownToken ?? "")
     }
@@ -178,6 +199,11 @@ struct ServerAutomationSection: View {
     } message: { item in
       Text(item.message)
     }
+  }
+
+  /// What a section shows when the settings couldn't be loaded (the reason is above).
+  private var unavailable: some View {
+    Text("Not loaded.").font(.callout).foregroundStyle(.secondary)
   }
 
   private var siriSection: some View {
@@ -258,7 +284,8 @@ struct ServerAutomationSection: View {
       .controlSize(.small)
     }
     .padding(10)
-    .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.05)))
+    .background(
+      RoundedRectangle(cornerRadius: AureliaDesign.smallRadius).fill(Color.white.opacity(0.05)))
   }
 
   private var siriKeyName: String { "Siri on \(Host.current().localizedName ?? "Mac")" }
@@ -273,7 +300,7 @@ struct ServerAutomationSection: View {
       siriReady = true
       AureliaShortcuts.updateAppShortcutParameters()
     } catch {
-      message = "This Mac couldn't keep the key. Try again."
+      problem = "This Mac couldn't keep the key. Try again."
     }
   }
 
@@ -304,19 +331,32 @@ struct ServerAutomationSection: View {
         action: AutomationText.powerTitle(action)
       ) { Task { await powerNow(action, force: true) } }
     } catch {
-      message = error.localizedDescription
+      problem = error.localizedDescription
     }
   }
 
   private func reload() async {
-    guard model.libraryCapabilities.contains("automation-v1"), let client else { return }
+    guard model.libraryCapabilities.contains("automation-v1"), let client else {
+      loading = false
+      return
+    }
+    loading = true
+    var unlocked = false
     do {
       overview = try await client.automationOverview()
+      problem = nil
     } catch let failure as APIClientError where failure.isManagementLocked {
-      if await model.unlockManagementInteractively() { await reload() }
+      loading = false
+      unlocked = await model.unlockManagementInteractively()
+      if !unlocked {
+        problem = "The Smart Home settings need the Server Password. Try again to enter it."
+      }
+    } catch is CancellationError {
     } catch {
-      message = error.localizedDescription
+      problem = error.localizedDescription
     }
+    loading = false
+    if unlocked { await reload() }
   }
 
   @discardableResult
@@ -332,7 +372,7 @@ struct ServerAutomationSection: View {
       guard await model.unlockManagementInteractively() else { return nil }
       return await run(work)
     } catch {
-      message = error.localizedDescription
+      problem = error.localizedDescription
       return nil
     }
   }
@@ -396,11 +436,19 @@ struct AutomationWebhookEditor: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
+    AureliaSheet(
+      title: webhook == nil ? "Add Webhook" : "Edit Webhook",
+      subtitle:
+        "Aurelia sends an event the moment it happens, such as a movie starting on the living room TV, so lights or scenes can follow.",
+      symbol: "dot.radiowaves.left.and.right",
+      errorMessage: problem,
+      primary: AureliaSheetAction(
+        title: webhook == nil ? "Add Webhook" : "Save", busyTitle: "Saving…", isBusy: saving,
+        action: { Task { await save() } }),
+      onCancel: { done(nil) }
+    ) {
       Form {
         Section {
-          Text("Aurelia sends an event the moment it happens, such as a movie starting on the living room TV, so lights or scenes can follow.")
-            .font(.callout).foregroundStyle(.secondary)
           TextField("Name", text: $name)
           Picker("Receiver", selection: $preset) {
             Text("Home Assistant").tag("homeAssistant")
@@ -415,6 +463,13 @@ struct AutomationWebhookEditor: View {
             TextField("Address", text: $url, prompt: Text("https://…"))
             Text("Receives a signed JSON POST for each event. Use https:// outside your home network.")
               .font(.caption).foregroundStyle(.secondary)
+          }
+          Toggle(isOn: $enabled) {
+            VStack(alignment: .leading, spacing: 1) {
+              Text("Send Events")
+              Text("Off pauses this webhook without removing it.")
+                .font(.caption).foregroundStyle(.secondary)
+            }
           }
         }
         Section("Events") {
@@ -452,20 +507,12 @@ struct AutomationWebhookEditor: View {
               Text("Nothing is sent while a children's profile watches.").font(.caption).foregroundStyle(.secondary)
             }
           }
-          Toggle("On", isOn: $enabled)
         }
-        if let problem { Section { Text(problem).foregroundStyle(.orange) } }
       }
       .formStyle(.grouped)
-      HStack {
-        Spacer()
-        Button("Cancel") { done(nil) }.keyboardShortcut(.cancelAction)
-        Button(webhook == nil ? "Add Webhook" : "Save") { Task { await save() } }
-          .keyboardShortcut(.defaultAction).disabled(saving)
-      }
-      .padding()
+      .scrollContentBackground(.hidden)
     }
-    .frame(width: 560, height: 640)
+    .frame(width: 560, height: 700)
   }
 
   private func binding<Value: Hashable>(_ value: Value, in set: Binding<Set<Value>>) -> Binding<Bool> {
@@ -510,20 +557,24 @@ struct AutomationSecretSheet: View {
   let webhook: AutomationWebhook
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text("Webhook Saved").font(.title2.bold())
-      Text("Every event carries a signature made with this secret (header X-Aurelia-Signature). Keep it if your receiver checks signatures; it is shown only now.")
-        .fixedSize(horizontal: false, vertical: true)
-      CopyableText(text: secret)
-      if webhook.preset == "homeAssistant" {
-        Text("Example Automation").font(.headline)
-        Text("In Home Assistant: Settings › Automations › Create Automation › ⋯ › Edit in YAML, paste this and change the lights to yours.")
-          .font(.caption).foregroundStyle(.secondary)
-        CopyableText(text: AutomationText.homeAssistantExample(webhookID: AutomationText.splitHomeAssistantURL(webhook.url).webhookID))
+    AureliaSheet(
+      title: "Webhook Saved",
+      subtitle: "Copy the webhook's secret now; Aurelia shows it only once.",
+      symbol: "checkmark.seal", onCancel: { dismiss() }
+    ) {
+      VStack(alignment: .leading, spacing: 12) {
+        Text("Every event carries a signature made with this secret (header X-Aurelia-Signature). Keep it if your receiver checks signatures.")
+          .fixedSize(horizontal: false, vertical: true)
+        CopyableText(text: secret)
+        if webhook.preset == "homeAssistant" {
+          Text("Example Automation").font(.headline)
+          Text("In Home Assistant: Settings › Automations › Create Automation › ⋯ › Edit in YAML, paste this and change the lights to yours.")
+            .font(.caption).foregroundStyle(.secondary)
+          CopyableText(text: AutomationText.homeAssistantExample(webhookID: AutomationText.splitHomeAssistantURL(webhook.url).webhookID))
+        }
       }
-      HStack { Spacer(); AureliaSheetDoneButton { dismiss() } }
+      .padding(20)
     }
-    .padding(20)
     .frame(width: 560)
   }
 }
@@ -531,17 +582,18 @@ struct AutomationSecretSheet: View {
 struct AutomationValueSheet: View {
   @Environment(\.dismiss) private var dismiss
   let title: String
+  let subtitle: String
   let explanation: String
   let value: String
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text(title).font(.title2.bold())
-      Text(explanation).fixedSize(horizontal: false, vertical: true)
-      CopyableText(text: value)
-      HStack { Spacer(); AureliaSheetDoneButton { dismiss() } }
+    AureliaSheet(title: title, subtitle: subtitle, symbol: "key", onCancel: { dismiss() }) {
+      VStack(alignment: .leading, spacing: 12) {
+        Text(explanation).fixedSize(horizontal: false, vertical: true)
+        CopyableText(text: value)
+      }
+      .padding(20)
     }
-    .padding(20)
     .frame(width: 520)
   }
 }
@@ -558,7 +610,8 @@ private struct CopyableText: View {
       }
       .frame(maxHeight: 220)
       .padding(8)
-      .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.06)))
+      .background(
+        RoundedRectangle(cornerRadius: AureliaDesign.tinyRadius).fill(Color.white.opacity(0.06)))
       Button(copied ? "Copied" : "Copy") {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
@@ -571,6 +624,8 @@ private struct CopyableText: View {
 struct IntegrationTokenSheet: View {
   @Environment(\.dismiss) private var dismiss
   let client: APIClient
+  /// Asks for the Server Password when the management session is locked; true once unlocked.
+  let unlock: () async -> Bool
   let created: (String) -> Void
   @State private var name = "Home Assistant"
   @State private var scopes: Set<String> = ["status"]
@@ -578,47 +633,66 @@ struct IntegrationTokenSheet: View {
   @State private var creating = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text("Create a Key").font(.title2.bold())
-      Text("A key lets Home Assistant or a shortcut talk to Aurelia without a profile. It can do only what you allow here, and you can remove it any time.")
-        .fixedSize(horizontal: false, vertical: true)
-      TextField("Name", text: $name)
-      ForEach(AutomationText.scopes, id: \.id) { scope in
-        Toggle(isOn: Binding(
-          get: { scopes.contains(scope.id) },
-          set: { on in if on { scopes.insert(scope.id) } else { scopes.remove(scope.id) } })
-        ) {
-          VStack(alignment: .leading, spacing: 1) {
-            Text(scope.title)
-            Text(scope.detail).font(.caption).foregroundStyle(.secondary)
-          }
-        }
-      }
-      if let problem { Text(problem).foregroundStyle(.orange) }
-      HStack {
-        Spacer()
-        Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-        Button(creating ? "Creating…" : "Create Key") {
-          // One key per click: a second click would replace the first key's one-time value.
-          creating = true
-          Task {
-            defer { creating = false }
-            do {
-              let result = try await client.createIntegrationToken(
-                name: name.trimmingCharacters(in: .whitespaces), scopes: AutomationText.scopes.map(\.id).filter(scopes.contains))
-              created(result.value)
-            } catch {
-              problem = error.localizedDescription
+    AureliaSheet(
+      title: "Create a Key",
+      subtitle: "A key lets Home Assistant or a shortcut talk to Aurelia without a profile.",
+      symbol: "key",
+      errorMessage: problem,
+      primary: AureliaSheetAction(
+        title: "Create Key", busyTitle: "Creating…", isBusy: creating,
+        isDisabled: name.trimmingCharacters(in: .whitespaces).isEmpty || scopes.isEmpty,
+        action: create),
+      onCancel: { dismiss() }
+    ) {
+      VStack(alignment: .leading, spacing: 12) {
+        Text("It can do only what you allow here, and you can remove it any time.")
+          .font(.callout).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+        TextField("Name", text: $name)
+        ForEach(AutomationText.scopes, id: \.id) { scope in
+          Toggle(isOn: Binding(
+            get: { scopes.contains(scope.id) },
+            set: { on in if on { scopes.insert(scope.id) } else { scopes.remove(scope.id) } })
+          ) {
+            VStack(alignment: .leading, spacing: 1) {
+              Text(scope.title)
+              Text(scope.detail).font(.caption).foregroundStyle(.secondary)
             }
           }
         }
-        .buttonStyle(AureliaPrimaryActionButtonStyle())
-        .keyboardShortcut(.defaultAction)
-        .disabled(creating || name.trimmingCharacters(in: .whitespaces).isEmpty || scopes.isEmpty)
+      }
+      .padding(20)
+    }
+    .frame(width: 480)
+  }
+
+  private func create() {
+    // One key per click: a second click would replace the first key's one-time value.
+    guard !creating else { return }
+    creating = true
+    problem = nil
+    let keyName = name.trimmingCharacters(in: .whitespaces)
+    let chosen = AutomationText.scopes.map(\.id).filter(scopes.contains)
+    Task {
+      defer { creating = false }
+      do {
+        created(try await makeKey(keyName, chosen))
+      } catch let failure as APIClientError where failure.isManagementLocked {
+        // The same handling as the section's other actions: unlock, then create once more.
+        guard await unlock() else { return }
+        do {
+          created(try await makeKey(keyName, chosen))
+        } catch {
+          problem = error.localizedDescription
+        }
+      } catch {
+        problem = error.localizedDescription
       }
     }
-    .padding(20)
-    .frame(width: 480)
+  }
+
+  private func makeKey(_ keyName: String, _ chosen: [String]) async throws -> String {
+    try await client.createIntegrationToken(name: keyName, scopes: chosen).value
   }
 }
 
@@ -630,11 +704,17 @@ struct AutomationDeliveriesSheet: View {
   @State private var problem: String?
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text("Deliveries of “\(webhook.name)”").font(.title2.bold())
-      Text("The last 100 deliveries of the past seven days, with how long the receiver took. The events themselves are not kept.")
-        .font(.callout).foregroundStyle(.secondary)
+    AureliaSheet(
+      title: "Deliveries of “\(webhook.name)”",
+      subtitle:
+        "The last 100 deliveries of the past seven days, with how long the receiver took. The events themselves are not kept.",
+      symbol: "paperplane", errorMessage: problem, retry: { Task { await load() } },
+      onCancel: { dismiss() }
+    ) {
       List {
+        if deliveries == nil, problem == nil {
+          AureliaDelayedProgress(controlSize: .small).frame(maxWidth: .infinity)
+        }
         if let deliveries, deliveries.isEmpty { Text("Nothing sent yet.").foregroundStyle(.secondary) }
         ForEach(deliveries ?? []) { delivery in
           VStack(alignment: .leading, spacing: 2) {
@@ -652,13 +732,14 @@ struct AutomationDeliveriesSheet: View {
         }
       }
       .frame(minHeight: 260)
-      if let problem { Text(problem).foregroundStyle(.orange) }
-      HStack { Spacer(); AureliaSheetDoneButton { dismiss() } }
+      .scrollContentBackground(.hidden)
     }
-    .padding(20)
-    .frame(width: 560, height: 480)
-    .task {
-      do { deliveries = try await client.webhookDeliveries(id: webhook.id) } catch { problem = error.localizedDescription }
-    }
+    .frame(width: 560, height: 520)
+    .task { await load() }
+  }
+
+  private func load() async {
+    problem = nil
+    do { deliveries = try await client.webhookDeliveries(id: webhook.id) } catch { problem = error.localizedDescription }
   }
 }

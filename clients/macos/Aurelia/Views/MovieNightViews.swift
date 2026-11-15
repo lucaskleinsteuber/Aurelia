@@ -15,9 +15,22 @@ enum MovieNightPalette {
   static let ink = Color(red: 0.17, green: 0.11, blue: 0.07)
 }
 
+private struct BrowsePageCoveredKey: EnvironmentKey {
+  static let defaultValue = false
+}
+
+extension EnvironmentValues {
+  /// True while a detail page covers the browsing page, which stays alive beneath it.
+  var aureliaBrowsePageCovered: Bool {
+    get { self[BrowsePageCoveredKey.self] }
+    set { self[BrowsePageCoveredKey.self] = newValue }
+  }
+}
+
 /// A line on Home: start a Movie Night, or join the one someone else started.
 struct MovieNightHomeStrip: View {
   @EnvironmentObject private var model: AppModel
+  @Environment(\.aureliaBrowsePageCovered) private var covered
   @State private var nights: [MovieNightSummary] = []
 
   var body: some View {
@@ -27,10 +40,12 @@ struct MovieNightHomeStrip: View {
     } label: {
       HStack(spacing: 16) {
         ZStack {
-          RoundedRectangle(cornerRadius: 5).fill(MovieNightPalette.nope)
+          RoundedRectangle(cornerRadius: AureliaDesign.tinyRadius).fill(MovieNightPalette.nope)
             .frame(width: 22, height: 32).rotationEffect(.degrees(-12)).offset(x: -10)
-          RoundedRectangle(cornerRadius: 5).fill(.white.opacity(0.14)).frame(width: 22, height: 32)
-          RoundedRectangle(cornerRadius: 5).fill(MovieNightPalette.yes)
+          RoundedRectangle(cornerRadius: AureliaDesign.tinyRadius)
+            .fill(.white.opacity(0.14))
+            .frame(width: 22, height: 32)
+          RoundedRectangle(cornerRadius: AureliaDesign.tinyRadius).fill(MovieNightPalette.yes)
             .frame(width: 22, height: 32).rotationEffect(.degrees(12)).offset(x: 10)
         }
         .frame(width: 46, height: 40)
@@ -45,13 +60,17 @@ struct MovieNightHomeStrip: View {
         Image(systemName: "chevron.right").foregroundStyle(.secondary)
       }
       .padding(14)
-      .background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-      .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+      .background(
+        AureliaDesign.surface,
+        in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
+      .contentShape(RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
     }
     .buttonStyle(AureliaPressableButtonStyle())
     .padding(.horizontal, AureliaDesign.pagePadding)
     .accessibilityIdentifier("home-movie-night")
-    .task {
+    // Polling pauses while a title page covers Home and resumes when Home shows again.
+    .task(id: covered) {
+      guard !covered else { return }
       while !Task.isCancelled {
         nights = await model.movieNights()
         try? await Task.sleep(for: .seconds(15))
@@ -85,14 +104,10 @@ struct MovieNightView: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 22) {
           if let error = session.errorText {
-            HStack {
-              Text(error)
-              Spacer()
-              Button { session.errorText = nil } label: { Image(systemName: "xmark") }
-                .buttonStyle(AureliaPressableButtonStyle()).accessibilityLabel("Dismiss")
-            }
-            .padding(12)
-            .background(MovieNightPalette.nope.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
+            ErrorBanner(
+              message: error, retry: { session.errorText = nil }, retryLabel: "Dismiss",
+              inline: true
+            )
             .transition(.move(edge: .top).combined(with: .opacity))
           }
           content
@@ -137,7 +152,7 @@ struct MovieNightView: View {
     switch session.screen {
     case .intro:
       if session.errorText == nil {
-        ProgressView().frame(maxWidth: .infinity).padding(.top, 200)
+        AureliaDelayedProgress().frame(maxWidth: .infinity).padding(.top, 200)
       } else {
         Button("Try Again") {
           Task { if let joining { await session.join(joining) } else { await session.start() } }
@@ -181,7 +196,9 @@ struct MovieNightView: View {
         }
         .padding(.vertical, 9)
         .padding(.horizontal, 12)
-        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(
+          .white.opacity(0.05),
+          in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
         .transition(.move(edge: .leading).combined(with: .opacity))
       }
     }
@@ -269,9 +286,11 @@ struct MovieNightView: View {
       LinearGradient(
         colors: [Color(red: 0.17, green: 0.19, blue: 0.21), Color(red: 0.14, green: 0.15, blue: 0.17)],
         startPoint: .topLeading, endPoint: .bottomTrailing),
-      in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+      in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
     )
-    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(.white.opacity(0.08)))
+    .overlay(
+      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
+        .strokeBorder(.white.opacity(0.08)))
     .shadow(color: .black.opacity(0.35), radius: 24, y: 14)
   }
 
@@ -303,8 +322,12 @@ struct MovieNightView: View {
         .fixedSize(horizontal: false, vertical: true)
     }
     .padding(18)
-    .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(.white.opacity(0.08)))
+    .background(
+      .white.opacity(0.04),
+      in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous))
+    .overlay(
+      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
+        .strokeBorder(.white.opacity(0.08)))
   }
 
   @ViewBuilder
@@ -336,7 +359,9 @@ struct MovieNightView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(
+          AureliaDesign.surface,
+          in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
       }
       HStack(spacing: 12) {
         if let card = outcome.card {
@@ -502,7 +527,7 @@ private struct MovieNightCardView: View {
       }
       .overlay(alignment: .topLeading) { stamp("Yes!", color: MovieNightPalette.yes, angle: -14).opacity(like) }
       .overlay(alignment: .topTrailing) { stamp("Nope", color: MovieNightPalette.nope, angle: 14).opacity(nope) }
-      .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+      .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous))
       .shadow(color: .black.opacity(0.45), radius: 20, y: 14)
       .accessibilityElement(children: .combine)
   }
@@ -512,7 +537,9 @@ private struct MovieNightCardView: View {
       .font(.system(size: 32, weight: .black))
       .padding(.horizontal, 12)
       .padding(.vertical, 2)
-      .overlay(RoundedRectangle(cornerRadius: 10).stroke(color, lineWidth: 4))
+      .overlay(
+        RoundedRectangle(cornerRadius: AureliaDesign.smallRadius)
+          .stroke(color, lineWidth: 4))
       .foregroundStyle(color)
       .rotationEffect(.degrees(angle))
       .padding(24)
@@ -548,7 +575,7 @@ private struct MovieNightConfetti: View {
       GeometryReader { geometry in
         ForEach(pieces.indices, id: \.self) { index in
           let piece = pieces[index]
-          RoundedRectangle(cornerRadius: 2)
+          RoundedRectangle(cornerRadius: AureliaDesign.tinyRadius)
             .fill(piece.color)
             .frame(width: 8, height: 14)
             .rotationEffect(.degrees(fallen ? piece.spin : 0))
@@ -576,7 +603,8 @@ private struct MovieNightTicket: View {
         if let card = outcome.card {
           AuthenticatedArtwork(artwork: card.poster ?? card.backdrop, symbol: "film")
             .frame(width: 128, height: 192)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(
+              RoundedRectangle(cornerRadius: AureliaDesign.smallRadius, style: .continuous))
         }
         VStack(alignment: .leading, spacing: 10) {
           Text(outcome.headline).font(.system(size: 32, weight: .black))
@@ -603,7 +631,7 @@ private struct MovieNightTicket: View {
     .foregroundStyle(MovieNightPalette.ink)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(MovieNightPalette.paper)
-    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous))
     .shadow(color: .black.opacity(0.5), radius: 24, y: 16)
     // The ticket drops in and tips forward, as if handed over the counter.
     .rotation3DEffect(.degrees(landed || reduceMotion ? 0 : 55), axis: (x: 1, y: 0, z: 0), anchor: .top, perspective: 0.6)

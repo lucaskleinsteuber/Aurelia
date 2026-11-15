@@ -262,7 +262,7 @@ struct AppSettingsView: View {
       .padding(.vertical, 6)
       .padding(.horizontal, 10)
       .background(
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
+        RoundedRectangle(cornerRadius: AureliaDesign.tinyRadius, style: .continuous)
           .fill(isSelected ? Color.accentColor : Color.clear)
       )
       .contentShape(Rectangle())
@@ -1063,7 +1063,8 @@ struct AppSettingsView: View {
       VStack(alignment: .leading, spacing: 14) {
         if model.libraries.isEmpty {
           if isLoadingAdministration {
-            ProgressView("Loading storage…")
+            AureliaDelayedProgress(controlSize: .small)
+              .accessibilityLabel("Loading storage")
           } else {
             Text("No storage locations yet.")
               .foregroundStyle(.secondary)
@@ -1319,13 +1320,13 @@ struct AppSettingsView: View {
             .accessibilityIdentifier("updates-install")
         }
 
-        Toggle("Check for updates automatically", isOn: $automaticUpdateChecks)
+        Toggle("Check for Updates Automatically", isOn: $automaticUpdateChecks)
           .accessibilityIdentifier("updates-automatic")
 
-        Toggle("Beta updates", isOn: $betaUpdates)
+        Toggle("Beta Updates", isOn: $betaUpdates)
           .accessibilityIdentifier("updates-beta")
         Text(
-          "Get test versions before everyone else. They may have bugs. Turn this off to stay on the stable version from the next stable release on."
+          "Get test versions before everyone else. They may have bugs. If you turn this off, you keep the test version you have until the next stable version comes out, which then replaces it."
         )
         .font(.callout).foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
@@ -1520,7 +1521,8 @@ struct SidebarCustomizerView: View {
             .padding(.vertical, 6)
             .padding(.horizontal, 10)
             .background(AureliaDesign.raisedSurface.opacity(isItemVisible(item) ? 1.0 : 0.5))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .clipShape(
+              RoundedRectangle(cornerRadius: AureliaDesign.smallRadius, style: .continuous))
             .opacity(dragged == item ? 0.55 : 1)
             .onDrop(
               of: [.text],

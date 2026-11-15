@@ -22,6 +22,8 @@ struct WishesPage: View {
 
   @EnvironmentObject private var model: AppModel
   let onOpenMedia: (UUID) -> Void
+  /// Cmd-F on this page focuses the wish search instead of switching to the library.
+  var findRequestID: UUID?
 
   @State private var wishes: [WishSummary] = []
   @State private var filter: Filter = .open
@@ -31,6 +33,11 @@ struct WishesPage: View {
   @State private var providerEnabled = true
   @State private var bannerMessage: String?
   @State private var errorMessage: String?
+  /// The list itself failed to load, so it is not shown as empty and the banner offers Try Again.
+  @State private var loadFailed = false
+  /// Counts list reloads; an answer for an older filter or reload is dropped.
+  @State private var loadGeneration = 0
+  @FocusState private var searchFocused: Bool
   /// A wish waiting for "Withdraw" or "Delete" to be confirmed.
   @State private var deletingWish: WishSummary?
   @State private var alreadyInLibraryConflict: WishAlreadyInLibraryProblem?
@@ -73,7 +80,17 @@ struct WishesPage: View {
       await loadWishes(reset: true, markSeen: true)
     }
     .onChange(of: filter) { _, _ in
+      // The old filter's list must not stay visible or receive "Load More" pages meanwhile.
+      wishes = []
+      hasMore = false
       Task { await loadWishes(reset: true, markSeen: false) }
+    }
+    .task(id: findRequestID) {
+      guard findRequestID != nil else { return }
+      searchFocused = false
+      await Task.yield()
+      guard !Task.isCancelled else { return }
+      searchFocused = true
     }
     .sheet(item: $decliningWish) { wish in
       declineSheet(for: wish)
@@ -107,12 +124,9 @@ struct WishesPage: View {
   private var composerSection: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack(spacing: 10) {
-        AureliaSearchField(
-          prompt: "Search for a movie or TV series to wish…",
-          text: $searchQuery
-        )
-        .onSubmit { Task { await runSearch() } }
-        .accessibilityIdentifier("wishes-search-field")
+        wishSearchField
+          .onSubmit { Task { await runSearch() } }
+          .accessibilityIdentifier("wishes-search-field")
 
         Picker("Type", selection: $searchKindFilter) {
           Text("Any Type").tag(Optional<MediaKind>.none)
@@ -156,7 +170,39 @@ struct WishesPage: View {
       }
     }
     .padding(18)
-    .background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    .background(
+      AureliaDesign.surface,
+      in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
+  }
+
+  /// The look of AureliaSearchField, with focus so Cmd-F can reach it.
+  private var wishSearchField: some View {
+    HStack(spacing: 9) {
+      Image(systemName: "magnifyingglass")
+        .foregroundStyle(.secondary)
+      TextField("Search for a movie or TV series to wish…", text: $searchQuery)
+        .textFieldStyle(.plain)
+        .focused($searchFocused)
+      if !searchQuery.isEmpty {
+        Button {
+          searchQuery = ""
+        } label: {
+          Image(systemName: "xmark.circle.fill")
+            .foregroundStyle(.tertiary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Clear Search")
+      }
+    }
+    .padding(.horizontal, 12)
+    .frame(height: 38)
+    .background(
+      AureliaDesign.raisedSurface, in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius)
+    )
+    .overlay {
+      RoundedRectangle(cornerRadius: AureliaDesign.smallRadius)
+        .stroke(AureliaDesign.hairline, lineWidth: 1)
+    }
   }
 
   private var manualComposer: some View {
@@ -164,7 +210,8 @@ struct WishesPage: View {
       Text(
         providerEnabled
           ? "Add a wish by title when search does not find it."
-          : "TMDB search is off on this server. Add your wish by title and optional year."
+          : "Searching the movie database is off on this server. Add your wish by title and "
+            + "optional year."
       )
       .font(.callout)
       .foregroundStyle(.secondary)
@@ -289,7 +336,9 @@ struct WishesPage: View {
       }
     }
     .padding(12)
-    .background(AureliaDesign.raisedSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    .background(
+      AureliaDesign.raisedSurface,
+      in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius, style: .continuous))
   }
 
   @ViewBuilder
@@ -308,7 +357,9 @@ struct WishesPage: View {
         .buttonStyle(AureliaPrimaryActionButtonStyle())
       }
       .padding(14)
-      .background(Color.green.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+      .background(
+        Color.green.opacity(0.14),
+        in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
     }
 
     if let bannerMessage {
@@ -316,16 +367,13 @@ struct WishesPage: View {
         .font(.callout)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(
+          Color.accentColor.opacity(0.14),
+          in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
     }
 
     if let errorMessage {
-      Text(errorMessage)
-        .font(.callout)
-        .foregroundStyle(.red)
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+      ErrorBanner(message: errorMessage, retry: loadRetry, retryDisabled: isLoading, inline: true)
     }
   }
 
@@ -340,15 +388,19 @@ struct WishesPage: View {
       .frame(maxWidth: 420)
 
       if isLoading && wishes.isEmpty {
-        ProgressView("Loading family wishes…")
+        AureliaDelayedProgress()
           .frame(maxWidth: .infinity, minHeight: 160)
+          .accessibilityLabel("Loading family wishes")
       } else if wishes.isEmpty {
-        ContentUnavailableView(
-          "No Wishes Here",
-          systemImage: "sparkles",
-          description: Text("Search above to wish for a movie or TV series.")
-        )
-        .frame(maxWidth: .infinity, minHeight: 220)
+        // A failed load shows its banner above with Try Again instead of an empty list.
+        if !loadFailed {
+          ContentUnavailableView(
+            "No Wishes Here",
+            systemImage: "sparkles",
+            description: Text(emptyListMessage)
+          )
+          .frame(maxWidth: .infinity, minHeight: 220)
+        }
       } else {
         VStack(spacing: 12) {
           ForEach(wishes) { wish in
@@ -374,6 +426,19 @@ struct WishesPage: View {
         }
       }
     }
+  }
+
+  private var emptyListMessage: String {
+    switch filter {
+    case .all, .open: "Search above to wish for a movie or TV series."
+    case .fulfilled: "Wishes appear here once their title has been added to the library."
+    case .declined: "No wishes have been declined."
+    }
+  }
+
+  private var loadRetry: (() -> Void)? {
+    guard loadFailed else { return nil }
+    return { Task { await loadWishes(reset: true, markSeen: false) } }
   }
 
   private func wishCard(_ wish: WishSummary) -> some View {
@@ -492,7 +557,9 @@ struct WishesPage: View {
       }
     }
     .padding(16)
-    .background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    .background(
+      AureliaDesign.surface,
+      in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
   }
 
   @ViewBuilder
@@ -519,7 +586,9 @@ struct WishesPage: View {
       }
     }
     .padding(10)
-    .background(AureliaDesign.raisedSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    .background(
+      AureliaDesign.raisedSurface,
+      in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius, style: .continuous))
   }
 
   @ViewBuilder
@@ -602,18 +671,24 @@ struct WishesPage: View {
   private func loadWishes(reset: Bool, markSeen: Bool) async {
     guard let profile = model.profile, model.supportsWishes else { return }
     if reset {
+      // A newer reload or filter replaces any page still loading for the old list.
+      loadGeneration += 1
       isLoading = true
+      isLoadingMore = false
     } else {
+      guard !isLoading else { return }
       isLoadingMore = true
     }
-    defer {
-      isLoading = false
-      isLoadingMore = false
-    }
+    let generation = loadGeneration
+    let requestedFilter = filter
     let offset = reset ? 0 : wishes.count
     do {
       let response = try await APIClient(profile: profile).wishes(
-        state: filter.wishState, offset: offset, limit: Self.pageSize)
+        state: requestedFilter.wishState, offset: offset, limit: Self.pageSize)
+      guard generation == loadGeneration, requestedFilter == filter else { return }
+      isLoading = false
+      isLoadingMore = false
+      loadFailed = false
       providerEnabled = response.providerEnabled
       if reset {
         wishes = response.wishes
@@ -633,6 +708,10 @@ struct WishesPage: View {
         }
       }
     } catch {
+      guard generation == loadGeneration, requestedFilter == filter else { return }
+      isLoading = false
+      isLoadingMore = false
+      if reset { loadFailed = true }
       errorMessage = WishPresentation.describeError(error)
     }
   }
@@ -823,7 +902,7 @@ private struct WishPosterThumbnail: View {
 
   var body: some View {
     ZStack {
-      RoundedRectangle(cornerRadius: 8, style: .continuous)
+      RoundedRectangle(cornerRadius: AureliaDesign.smallRadius, style: .continuous)
         .fill(AureliaDesign.raisedSurface)
       if let displayed = image ?? cache.cachedImage(posterPath: posterPath, width: width, profile: profile) {
         Image(nsImage: displayed)
@@ -835,7 +914,7 @@ private struct WishPosterThumbnail: View {
           .foregroundStyle(.secondary)
       }
     }
-    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.smallRadius, style: .continuous))
     .task(id: posterPath) {
       image = await cache.image(posterPath: posterPath, width: width, profile: profile)
     }

@@ -156,6 +156,7 @@ struct ServerEssentialsEditor: View {
   @State private var pairingEnabled: Bool
   @State private var automaticBackups: Bool
   @State private var lastBackup: ServerBackupSummary?
+  @State private var backupsLoaded = false
   @State private var working = false
   @State private var actionTask: Task<Void, Never>?
   @State private var message: String?
@@ -192,6 +193,7 @@ struct ServerEssentialsEditor: View {
             run { scope in
               try await scope.request { try await client.createDatabaseBackup() }
               lastBackup = try await scope.request { try await client.serverBackups() }.first
+              backupsLoaded = true
               message = "Backup created and checked."
             }
           }
@@ -206,6 +208,12 @@ struct ServerEssentialsEditor: View {
     }
     .onChange(of: pairingEnabled) { _, value in save { $0.pairingEnabled = value } }
     .onChange(of: automaticBackups) { _, value in save { $0.automaticBackupsEnabled = value } }
+    // Another box saved: the switches show the server's values (they save on change, so they
+    // never hold unsaved edits).
+    .onChange(of: configuration.stored) { _, latest in
+      pairingEnabled = latest.pairingEnabled
+      automaticBackups = latest.automaticBackupsEnabled
+    }
     .task(id: model.administrationGeneration) {
       let scope = ServerAdministrationScope(
         model: model, generation: model.administrationGeneration)
@@ -213,12 +221,16 @@ struct ServerEssentialsEditor: View {
         lastBackup = try await model.currentAdministration {
           try await scope.request { try await client.serverBackups() }
         }.first
+        backupsLoaded = true
       } catch { if let failure = scope.message(for: error) { message = failure } }
     }
     .onDisappear { actionTask?.cancel() }
   }
 
   private var lastBackupText: String {
+    guard backupsLoaded else {
+      return message == nil ? "Looking for the last backup…" : "The last backup couldn't be checked."
+    }
     guard let lastBackup else { return "No backup yet." }
     return "Last backup: \(ServerDateText.display(lastBackup.createdAt))"
   }
