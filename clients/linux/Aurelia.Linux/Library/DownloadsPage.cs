@@ -222,6 +222,7 @@ public sealed class DownloadsPage : LibraryPageBase
         var details = new List<string>();
         if (!string.IsNullOrEmpty(title.Subtitle)) details.Add(title.Subtitle);
         else if (title.Year is { } year) details.Add(year.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (title.Quality is { } quality) details.Add(quality);
         details.Add(Management.AdminScope.Bytes(title.Bytes));
         if (title.IsCompleted) details.Add("Watched");
         else if (title.PositionMilliseconds > 0 && title.DurationMilliseconds > 0) details.Add($"{title.PositionMilliseconds * 100 / title.DurationMilliseconds} % watched");

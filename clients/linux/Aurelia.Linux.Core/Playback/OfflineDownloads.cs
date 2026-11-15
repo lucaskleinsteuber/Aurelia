@@ -43,7 +43,9 @@ public sealed record OfflineTitle(
     int? EpisodeNumber = null,
     string? PosterFile = null,
     string? BackdropFile = null,
-    string? SeriesPosterFile = null)
+    string? SeriesPosterFile = null,
+    // The quality of a smaller copy the server converted ("720p"); null for the original file.
+    string? Quality = null)
 {
     public bool HasArtwork => PosterFile is not null || BackdropFile is not null;
 
@@ -109,8 +111,13 @@ public sealed class OfflineDownloads
 
     public string FileOf(OfflineTitle title) => Path.Combine(Folder(title.Id), title.FileName);
 
-    /// <summary>Downloads a movie or episode with the playback client of the open profile.</summary>
-    public async Task DownloadAsync(PlaybackClient client, CatalogItemSummary item, string? subtitle, CatalogItemSummary? series = null)
+    /// <summary>
+    /// Downloads a movie or episode with the playback client of the open profile. With a
+    /// <paramref name="quality"/> the server converts a smaller copy ("converted-downloads-v1");
+    /// only this computer keeps it (owner's decision, 15.11.2026).
+    /// </summary>
+    public async Task DownloadAsync(PlaybackClient client, CatalogItemSummary item, string? subtitle, CatalogItemSummary? series = null,
+        string? quality = null, int? audio = null, long? expectedBytes = null)
     {
         if (item.Kind is not (MediaKind.Movie or MediaKind.Episode)) return;
         if (Find(item.Id) is { } existing)
@@ -139,40 +146,57 @@ public sealed class OfflineDownloads
         var folder = Folder(item.Id);
         try
         {
-            var ticket = await client.StartAsync(item.Id, cancel.Token);
+            var ticket = await client.StartAsync(item.Id, cancel.Token, forDownload: true);
+            var tickets = new List<Guid> { ticket.Id };
             try
             {
-                if (ticket.ContentLength > 0 && ticket.ContentLength + 1_000_000_000 > FreeSpace(Root))
+                var needed = quality is null ? ticket.ContentLength : expectedBytes ?? 0;
+                if (needed > 0 && needed + 1_000_000_000 > FreeSpace(Root))
                     throw new IOException("There isn't enough free space on this computer.");
                 PrivateFiles.CreateDirectory(Root);
                 PrivateFiles.CreateDirectory(folder);
-                var fileName = "title." + Extension(ticket.ContentType);
+                // A converted copy is one fragmented MP4, whatever the original was.
+                var contentType = quality is null ? ticket.ContentType : "video/mp4";
+                var fileName = "title." + Extension(contentType);
                 await using var relay = new LoopbackStreamRelay(client.StreamConnection, client.StreamToken, client.StreamUri(ticket));
                 var local = relay.Start();
                 using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
                 var partial = Path.Combine(folder, fileName + ".part");
-                using (var response = await http.GetAsync(local, HttpCompletionOption.ResponseHeadersRead, cancel.Token))
+                if (quality is not null)
                 {
-                    response.EnsureSuccessStatusCode();
-                    var total = response.Content.Headers.ContentLength ?? ticket.ContentLength;
-                    await using var source = await response.Content.ReadAsStreamAsync(cancel.Token);
                     await using var target = PrivateFile(partial);
-                    var buffer = new byte[1 << 20];
-                    long written = 0;
                     var reported = DateTimeOffset.MinValue;
-                    int read;
-                    while ((read = await source.ReadAsync(buffer, cancel.Token)) > 0)
+                    await ConvertedDownloads.FetchAsync(client, item.Id, ticket, quality, audio, target, share =>
                     {
-                        await target.WriteAsync(buffer.AsMemory(0, read), cancel.Token);
-                        written += read;
-                        if (total > 0 && DateTimeOffset.UtcNow - reported > TimeSpan.FromMilliseconds(300))
+                        if (DateTimeOffset.UtcNow - reported < TimeSpan.FromMilliseconds(300) && share < 1) return;
+                        reported = DateTimeOffset.UtcNow;
+                        lock (gate) active[item.Id] = share;
+                        Changed?.Invoke();
+                    }, renewed => { lock (gate) tickets.Add(renewed.Id); }, cancel.Token);
+                }
+                else
+                    using (var response = await http.GetAsync(local, HttpCompletionOption.ResponseHeadersRead, cancel.Token))
+                    {
+                        response.EnsureSuccessStatusCode();
+                        var total = response.Content.Headers.ContentLength ?? ticket.ContentLength;
+                        await using var source = await response.Content.ReadAsStreamAsync(cancel.Token);
+                        await using var target = PrivateFile(partial);
+                        var buffer = new byte[1 << 20];
+                        long written = 0;
+                        var reported = DateTimeOffset.MinValue;
+                        int read;
+                        while ((read = await source.ReadAsync(buffer, cancel.Token)) > 0)
                         {
-                            reported = DateTimeOffset.UtcNow;
-                            lock (gate) active[item.Id] = (double)written / total;
-                            Changed?.Invoke();
+                            await target.WriteAsync(buffer.AsMemory(0, read), cancel.Token);
+                            written += read;
+                            if (total > 0 && DateTimeOffset.UtcNow - reported > TimeSpan.FromMilliseconds(300))
+                            {
+                                reported = DateTimeOffset.UtcNow;
+                                lock (gate) active[item.Id] = (double)written / total;
+                                Changed?.Invoke();
+                            }
                         }
                     }
-                }
                 File.Move(partial, Path.Combine(folder, fileName), overwrite: true);
                 var subtitles = new List<OfflineSubtitle>();
                 try
@@ -191,17 +215,22 @@ public sealed class OfflineDownloads
                 }
                 var progress = item.Progress;
                 var title = new OfflineTitle(item.Id, client.Library.Server.ServerId, client.Library.Profile.User.Id, item.Title, subtitle, item.Kind,
-                    fileName, ticket.ContentType, new FileInfo(Path.Combine(folder, fileName)).Length, DateTimeOffset.UtcNow,
+                    fileName, contentType, new FileInfo(Path.Combine(folder, fileName)).Length, DateTimeOffset.UtcNow,
                     progress?.PositionMilliseconds ?? 0, progress?.DurationMilliseconds ?? 0, progress?.IsCompleted ?? false, null, false, subtitles,
-                    progress?.Revision);
+                    progress?.Revision, Quality: quality);
                 title = await WithDetailsAsync(title, client.Library, item, series, folder, cancel.Token);
                 lock (gate) titles.Add(title);
                 Save();
             }
             finally
             {
-                try { await client.RevokeAsync(ticket.Id, CancellationToken.None); }
-                catch (Exception failure) when (failure is AureliaApiException or HttpRequestException or TaskCanceledException) { }
+                List<Guid> used;
+                lock (gate) used = [.. tickets];
+                foreach (var id in used)
+                {
+                    try { await client.RevokeAsync(id, CancellationToken.None); }
+                    catch (Exception failure) when (failure is AureliaApiException or HttpRequestException or TaskCanceledException) { }
+                }
             }
         }
         catch (Exception failure) when (failure is OperationCanceledException or AureliaApiException or HttpRequestException or IOException or UnauthorizedAccessException)

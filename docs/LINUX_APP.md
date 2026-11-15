@@ -170,6 +170,12 @@ every voter likes shows as a ticket with Play. Statistics plays the year as **Wr
 over the whole window (click right or left, ← → Space, Esc closes), and from the 2nd of a month
 last month's Wrapped, also on Home in that first week. `Core/Playback/MovieNight.cs` holds the rules.
 
+**Download** keeps a movie or episode on this PC, in the app's data folder. With Aurelia Server
+2.20 or newer it can be a smaller copy (1080p, 720p or 480p, with its size and how long the
+server needs): **Settings › Playback › Download Quality** asks every time or always uses one. The
+server converts the copy while it downloads and stores nothing; `Core/Playback/ConvertedDownloads.cs`
+holds the rules.
+
 ## Settings
 
 Settings open with Ctrl+, or the gear next to the profile, inside the main window over the

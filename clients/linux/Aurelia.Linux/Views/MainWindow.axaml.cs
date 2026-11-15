@@ -7,6 +7,7 @@ using Aurelia.Linux.Core.Flow;
 using Aurelia.Linux.Core.Hosting;
 using Aurelia.Linux.Core.Platform;
 using Aurelia.Linux.Hosting;
+using Aurelia.Linux.Library;
 using Aurelia.Linux.Core.Library;
 using Aurelia.Linux.Core.Playback;
 using Aurelia.Linux.Playback;
@@ -543,7 +544,39 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
             : item.Year?.ToString(System.Globalization.CultureInfo.InvariantCulture);
         // The series poster goes along, so an episode looks like its series on the Downloads page.
         var series = item.ParentId is { } parent ? library.Catalog.FirstOrDefault(each => each.Id == parent) : null;
-        _ = Task.Run(() => downloads.DownloadAsync(new PlaybackClient(Session.Api, library.Client), item, subtitle, series));
+        var client = new PlaybackClient(Session.Api, library.Client);
+        var preference = PlaybackPreferences.Load(services.Settings).DownloadQuality;
+        if (!library.Client.Supports(Aurelia.Contracts.ServerFeatures.ConvertedDownloads) || preference == ConvertedDownloads.Original)
+        {
+            _ = Task.Run(() => downloads.DownloadAsync(client, item, subtitle, series));
+            return;
+        }
+        _ = ChooseDownloadAsync(downloads, client, item, subtitle, series, preference);
+    }
+
+    /// <summary>The original or a smaller copy the server converts: as set, or asked for now.</summary>
+    private async Task ChooseDownloadAsync(OfflineDownloads downloads, PlaybackClient client, Aurelia.Contracts.CatalogItemSummary item,
+        string? subtitle, Aurelia.Contracts.CatalogItemSummary? series, string preference)
+    {
+        Aurelia.Contracts.DownloadOptionsResponse? options = null;
+        try { options = await client.DownloadOptionsAsync(item.Id, CancellationToken.None); }
+        catch (Exception failure) when (failure is AureliaApiException or HttpRequestException) { }
+        var choice = ConvertedDownloads.Resolve(preference, options);
+        string? quality = choice.Quality;
+        if (choice.Kind == DownloadChoiceKind.Ask && options is not null && shell?.SheetHost is { } sheets)
+        {
+            var sheet = new DownloadQualitySheet(item.Title, options, sheets);
+            if (!await sheets.ShowAsync(sheet)) return;
+            quality = sheet.Quality;
+            if (sheet.Remember)
+                (PlaybackPreferences.Load(services.Settings) with { DownloadQuality = quality ?? ConvertedDownloads.Original }).Save(services.Settings);
+        }
+        else if (choice.Kind != DownloadChoiceKind.Converted)
+        {
+            quality = null;
+        }
+        var expected = options?.Qualities.FirstOrDefault(each => each.Id == quality)?.EstimatedBytes;
+        _ = Task.Run(() => downloads.DownloadAsync(client, item, subtitle, series, quality, quality is null ? null : options?.AudioTrack, expected));
     }
 
     /// <summary>Plays a download; it works while the server is asleep or out of reach.</summary>

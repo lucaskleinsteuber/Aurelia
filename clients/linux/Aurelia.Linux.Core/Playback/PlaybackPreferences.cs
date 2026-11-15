@@ -28,7 +28,8 @@ public sealed record PlaybackPreferences(
     bool CinemaAds = true,
     int CinemaTrailers = 2,
     bool PlaySuggestionsAutomatically = false,
-    bool ShowGoodNightOnSleepTimer = false)
+    bool ShowGoodNightOnSleepTimer = false,
+    string DownloadQuality = ConvertedDownloads.Ask)
 {
     [JsonIgnore]
     public VolumeLeveling EffectiveLeveling => VolumeLeveling ?? (NightMode ? Playback.VolumeLeveling.Standard : Playback.VolumeLeveling.Off);
@@ -61,6 +62,7 @@ public sealed record PlaybackPreferences(
             SeekIntervalSeconds = Math.Clamp(SeekIntervalSeconds / 5 * 5, 5, 60),
             DefaultAudioLanguage = DefaultAudioLanguage == "original" || Languages.Contains(DefaultAudioLanguage) ? DefaultAudioLanguage : "original",
             DefaultSubtitleLanguage = DefaultSubtitleLanguage == "off" || Languages.Contains(DefaultSubtitleLanguage) ? DefaultSubtitleLanguage : "off",
+            DownloadQuality = ConvertedDownloads.Choices.Any(choice => choice.Value == DownloadQuality) ? DownloadQuality : ConvertedDownloads.Ask,
         };
     }
 

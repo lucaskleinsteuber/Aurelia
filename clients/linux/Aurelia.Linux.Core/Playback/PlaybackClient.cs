@@ -15,14 +15,45 @@ public sealed class PlaybackClient(AureliaApi api, LibraryClient library)
 
     private string Token => Library.Profile.Token;
 
-    /// <summary>POST /api/v1/media/{id}/playback: a short-lived ticket for one stream.</summary>
-    public async Task<PlaybackSourceResponse> StartAsync(Guid mediaId, CancellationToken cancellation)
+    /// <summary>
+    /// POST /api/v1/media/{id}/playback: a short-lived ticket for one stream. <paramref name="forDownload"/>
+    /// tells the server nobody watches yet: Smart Home hears nothing (servers before 2.20.0 ignore it).
+    /// </summary>
+    public async Task<PlaybackSourceResponse> StartAsync(Guid mediaId, CancellationToken cancellation, bool forDownload = false)
     {
-        var ticket = await Send<PlaybackSourceResponse>(HttpMethod.Post, $"/api/v1/media/{mediaId}/playback", null, cancellation);
+        var ticket = await Send<PlaybackSourceResponse>(HttpMethod.Post,
+            $"/api/v1/media/{mediaId}/playback" + (forDownload ? "?purpose=download" : ""), null, cancellation);
         if (ticket.MediaId != mediaId || ticket.Progress.MediaId != mediaId) throw AureliaApiException.InvalidResponse();
         if (!ticket.StreamPath.StartsWith("/api/v1/streams/", StringComparison.Ordinal) || ticket.StreamPath.Contains('?') || ticket.StreamPath.Contains('#'))
             throw AureliaApiException.InvalidResponse();
         return ticket;
+    }
+
+    /// <summary>The original's size and the smaller qualities the server can convert ("converted-downloads-v1").</summary>
+    public Task<DownloadOptionsResponse> DownloadOptionsAsync(Guid mediaId, CancellationToken cancellation) =>
+        Send<DownloadOptionsResponse>(HttpMethod.Get, $"/api/v1/media/{mediaId}/download-options", null, cancellation);
+
+    /// <summary>One piece of a converted download (playlist, init or segment); a segment may take a while to convert.</summary>
+    public async Task<byte[]> DownloadPieceAsync(PlaybackSourceResponse ticket, string quality, string piece, int? audio, CancellationToken cancellation)
+    {
+        ArgumentNullException.ThrowIfNull(ticket);
+        if (!System.Text.RegularExpressions.Regex.IsMatch(quality, "^[1-9][0-9]{2,3}p$")
+            || !System.Text.RegularExpressions.Regex.IsMatch(piece, @"^(index\.m3u8|init\.mp4|[0-9]{1,6}\.m4s)$"))
+            throw AureliaApiException.InvalidResponse();
+        using var request = new HttpRequestMessage(HttpMethod.Get, ConvertedDownloads.PiecePath(ticket.StreamPath, quality, piece, audio));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        timeout.CancelAfter(TimeSpan.FromSeconds(90));
+        try
+        {
+            using var response = await Pinned.SendAsync(request, timeout.Token);
+            if (!response.IsSuccessStatusCode) throw await AureliaApi.ProblemAsync(response, cancellation);
+            return await response.Content.ReadAsByteArrayAsync(timeout.Token);
+        }
+        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+        {
+            throw new HttpRequestException("The server took too long to convert a part of the title.");
+        }
     }
 
     /// <summary>The stream's full address on the server, which only the relay uses.</summary>

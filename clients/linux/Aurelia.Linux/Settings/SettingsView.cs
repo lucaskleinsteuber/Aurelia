@@ -560,6 +560,13 @@ public sealed class SettingsView : UserControl
                 Choice("Trailers", "From the trailer files in your film folders.", [(0, "None"), (1, "1 Trailer"), (2, "2 Trailers"), (3, "3 Trailers")],
                     current.CinemaTrailers, value => Save(PlaybackPreferences.Load(Prefs.Store) with { CinemaTrailers = value }))));
         }
+        if (shell?.Client?.Supports(Aurelia.Contracts.ServerFeatures.ConvertedDownloads) == true)
+        {
+            page.Children.Add(Section("Downloads",
+                Choice("Download Quality", "Original keeps the file itself. A smaller quality has the server convert a copy while it downloads, which saves space on this computer; a title that is already small keeps its original.",
+                    ConvertedDownloads.Choices, current.DownloadQuality,
+                    value => Save(PlaybackPreferences.Load(Prefs.Store) with { DownloadQuality = value }))));
+        }
         if (shell?.Client?.SupportsAdaptiveStreaming == true)
         {
             page.Children.Add(Section("Streaming",
