@@ -2320,6 +2320,106 @@ struct APIClient: Sendable {
       try FileManager.default.moveItem(at: temporary, to: destination)
     }
   }
+  // MARK: Moving to a new server (docs/SERVER_MOVE.md)
+
+  func serverMoveStatus() async throws -> ServerMoveStatusResponse {
+    try await get("/api/v1/server/move")
+  }
+
+  /// Starts a move over the network: the old server shows a move code for the new one.
+  func startNetworkServerMove() async throws -> ServerMoveStartResponse {
+    struct Request: Encodable { let method = "network" }
+    return try Self.decode(
+      ServerMoveStartResponse.self,
+      from: await perform(
+        path: "/api/v1/server/move", method: "POST", body: JSONEncoder().encode(Request())))
+  }
+
+  /// Writes the encrypted moving file for the new server to `destination`.
+  func exportServerMovingFile(passphrase: String, to destination: URL) async throws {
+    struct Request: Encodable {
+      let method = "file"
+      let passphrase: String
+    }
+    let started = try Self.decode(
+      ServerMoveStartResponse.self,
+      from: await perform(
+        path: "/api/v1/server/move", method: "POST",
+        body: JSONEncoder().encode(Request(passphrase: passphrase)), timeout: 300))
+    guard let id = started.transferId else { throw APIClientError.invalidResponse }
+    try await downloadTransfer(id: id, to: destination)
+  }
+
+  /// For a moving file the new server couldn't report back to: the old one steps aside.
+  func markServerMoved() async throws {
+    _ = try await perform(path: "/api/v1/server/move/mark-moved", method: "POST")
+  }
+
+  /// Cancels a waiting move, or undoes a finished one on the old server.
+  func cancelServerMove() async throws {
+    _ = try await perform(path: "/api/v1/server/move", method: "DELETE")
+  }
+
+  func storageRelocationSuggestions(libraryId: UUID) async throws -> StorageRelocationSuggestions {
+    try await Self.decode(
+      StorageRelocationSuggestions.self,
+      from: perform(
+        path: "/api/v1/libraries/\(libraryId.uuidString)/relocate/suggestions", timeout: 60))
+  }
+
+  func previewStorageRelocation(libraryId: UUID, path: String) async throws
+    -> StorageRelocationPreview
+  {
+    struct Request: Encodable { let path: String }
+    return try Self.decode(
+      StorageRelocationPreview.self,
+      from: await perform(
+        path: "/api/v1/libraries/\(libraryId.uuidString)/relocate/preview", method: "POST",
+        body: JSONEncoder().encode(Request(path: path)), timeout: 60))
+  }
+
+  /// Points a storage location at the folder where its files are now; nothing is copied.
+  func relocateStorage(libraryId: UUID, path: String, force: Bool) async throws {
+    struct Request: Encodable {
+      let path: String
+      let force: Bool
+    }
+    _ = try await perform(
+      path: "/api/v1/libraries/\(libraryId.uuidString)/relocate", method: "POST",
+      body: JSONEncoder().encode(Request(path: path, force: force)), timeout: 60)
+  }
+
+  /// Downloads a backup or moving-file transfer and removes it from the server afterwards.
+  private func downloadTransfer(id: UUID, to destination: URL) async throws {
+    let access = destination.startAccessingSecurityScopedResource()
+    defer { if access { destination.stopAccessingSecurityScopedResource() } }
+    defer {
+      Task {
+        _ = try? await self.perform(
+          path: "/api/v1/server/backups/transfers/\(id.uuidString)", method: "DELETE")
+      }
+    }
+    var request = URLRequest(
+      url: profile.baseURL.appendingPathComponent(
+        "api/v1/server/backups/transfers/\(id.uuidString)"))
+    request.setValue("Bearer \(profile.token)", forHTTPHeaderField: "Authorization")
+    let delegate = TLSTrustDelegate(
+      mode: .pinned(profile.publicKeyFingerprint), allowedHost: profile.baseURL.host ?? "")
+    let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+    defer { session.invalidateAndCancel() }
+    let (temporary, response) = try await session.download(for: request)
+    defer { try? FileManager.default.removeItem(at: temporary) }
+    try Task.checkCancellation()
+    guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+      throw APIClientError.invalidResponse
+    }
+    if FileManager.default.fileExists(atPath: destination.path) {
+      _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)
+    } else {
+      try FileManager.default.moveItem(at: temporary, to: destination)
+    }
+  }
+
   func prepareServerRestore(
     from file: URL, passphrase: String, acceptDifferentIdentity: Bool = false
   ) async throws -> PreparedServerRestore {

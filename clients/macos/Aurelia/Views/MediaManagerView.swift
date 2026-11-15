@@ -311,6 +311,7 @@ private struct LibraryLocationRow: View {
   let library: LibrarySummary
   let canEdit: Bool
   @State private var confirmingRemoval = false
+  @State private var relocating = false
 
   var body: some View {
     HStack(spacing: 12) {
@@ -351,6 +352,10 @@ private struct LibraryLocationRow: View {
         Button("Rescan") { Task { await model.scanLibrary(id: library.id) } }
           .frame(minHeight: AureliaDesign.minimumControlSize)
           .disabled(library.importPreviewRequired == true)
+        Button("Moved…") { relocating = true }
+          .frame(minHeight: AureliaDesign.minimumControlSize)
+          .help("Storage Location Moved: point it at the folder where its files are now")
+          .accessibilityLabel("Storage Location Moved for \(library.name)")
         Button(role: .destructive) {
           confirmingRemoval = true
         } label: {
@@ -364,6 +369,7 @@ private struct LibraryLocationRow: View {
       }
     }
     .padding(10)
+    .sheet(isPresented: $relocating) { StorageLocationMovedSheet(library: library) }
     // The same question Settings › Library asks: removing resets this location's library.
     .confirmationDialog(
       "Remove \(library.name)?", isPresented: $confirmingRemoval, titleVisibility: .visible

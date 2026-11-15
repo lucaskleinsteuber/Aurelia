@@ -73,6 +73,7 @@ struct AppSettingsView: View {
 
   // Dialog & Sheet States
   @State private var libraryToRemove: LibrarySummary?
+  @State private var libraryToRelocate: LibrarySummary?
   @State private var showingSwitchConfirmation = false
   @State private var pendingLocations: [StorageLocationDraft] = []
   @State private var showingCombineConfirmation = false
@@ -149,6 +150,7 @@ struct AppSettingsView: View {
         Task { await model.reloadDevices() }
       }
     }
+    .sheet(item: $libraryToRelocate) { StorageLocationMovedSheet(library: $0) }
     .confirmationDialog(
       "Remove \(libraryToRemove?.name ?? "Storage Location")?",
       isPresented: Binding(
@@ -1084,6 +1086,9 @@ struct AppSettingsView: View {
               .font(.caption).foregroundStyle(.secondary)
             Button("Scan") { Task { await model.scanLibrary(id: library.id) } }
               .disabled(library.importPreviewRequired == true)
+            Button("Moved…") { libraryToRelocate = library }
+              .help("Storage Location Moved: point it at the folder where its files are now")
+              .accessibilityLabel("Storage Location Moved for \(library.name)")
             Button(role: .destructive) {
               libraryToRemove = library
             } label: {

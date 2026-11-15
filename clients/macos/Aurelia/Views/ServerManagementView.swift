@@ -165,6 +165,7 @@ struct ServerManagementView: View {
         ServerDiagnosticsEditor(configuration: configuration, client: client) {
           self.configuration = $0
         }
+        ServerMoveSection(client: client)
       }
     }
   }
