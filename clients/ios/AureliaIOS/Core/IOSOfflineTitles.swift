@@ -103,6 +103,33 @@ struct IOSOfflinePending: Codable, Identifiable, Equatable, Sendable {
   }
 }
 
+/// Wrong offline PINs, as on the Mac: after five, each further try waits, doubling from 30
+/// seconds up to five minutes (audit C-L8). A correct PIN starts over.
+struct IOSOfflinePinLock: Equatable {
+  private(set) var failures = 0
+  private(set) var lockedUntil: Date?
+
+  func isLocked(now: Date = Date()) -> Bool { lockedUntil.map { $0 > now } ?? false }
+
+  /// The message for a locked try, with the seconds left.
+  func message(now: Date = Date()) -> String? {
+    guard let until = lockedUntil, until > now else { return nil }
+    return "Too many wrong PINs. Try again in \(Int(until.timeIntervalSince(now).rounded(.up))) s."
+  }
+
+  mutating func recordFailure(now: Date = Date()) {
+    failures += 1
+    if failures >= 5 {
+      lockedUntil = now.addingTimeInterval(min(300, 30 * pow(2, Double(failures - 5))))
+    }
+  }
+
+  mutating func recordSuccess() {
+    failures = 0
+    lockedUntil = nil
+  }
+}
+
 /// The rules downloads follow, kept apart from files and transfers so they can be tested.
 enum IOSOfflineRules {
   /// Room left on the device besides the file, so a download never fills it up.

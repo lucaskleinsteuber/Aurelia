@@ -93,6 +93,8 @@ struct AppRelease: Equatable, Sendable {
   let diskImageName: String
   let diskImageURL: URL
   let checksumsURL: URL
+  /// The owner's minisign signature of the checksum list; without it nothing is installed.
+  let signatureURL: URL?
   let pageURL: URL?
   let downloadBytes: Int64?
   /// A GitHub pre-release, offered only to Macs that turned on beta updates.
@@ -100,7 +102,8 @@ struct AppRelease: Equatable, Sendable {
 
   init(
     tag: String, version: String, build: Int, diskImageName: String, diskImageURL: URL,
-    checksumsURL: URL, pageURL: URL?, downloadBytes: Int64? = nil, isBeta: Bool = false
+    checksumsURL: URL, signatureURL: URL? = nil, pageURL: URL?, downloadBytes: Int64? = nil,
+    isBeta: Bool = false
   ) {
     self.tag = tag
     self.version = version
@@ -108,6 +111,7 @@ struct AppRelease: Equatable, Sendable {
     self.diskImageName = diskImageName
     self.diskImageURL = diskImageURL
     self.checksumsURL = checksumsURL
+    self.signatureURL = signatureURL
     self.pageURL = pageURL
     self.downloadBytes = downloadBytes
     self.isBeta = isBeta
@@ -137,7 +141,10 @@ enum AppUpdatePreferences {
   ) -> Bool {
     guard checksAutomatically(in: defaults) else { return false }
     let last = defaults.object(forKey: checkKey(repository)) as? Date ?? .distantPast
-    return now.timeIntervalSince(last) >= checkInterval
+    // A check "in the future" means the clock was set back; it doesn't silence checks until the
+    // clock catches up (audit C-X13).
+    let since = now.timeIntervalSince(last)
+    return since < 0 || since >= checkInterval
   }
 
   static func checkKey(_ repository: String?) -> String {
@@ -203,18 +210,22 @@ enum AppUpdateLogic {
     return release.version.compare(current.version, options: .numeric) != .orderedAscending
   }
 
-  /// The SHA-256 the release's SHA256SUMS lists for a file, in lowercase hex.
+  /// The SHA-256 the release's SHA256SUMS lists for a file, in lowercase hex. A file listed
+  /// more than once has no unambiguous checksum, as on Linux (audit C-X10).
   static func checksum(for fileName: String, in sums: String) -> String? {
+    var found: [String] = []
     for line in sums.split(whereSeparator: \.isNewline) {
       let fields = line.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
       guard fields.count == 2 else { continue }
       var name = fields[1].trimmingCharacters(in: .whitespaces)
       if name.hasPrefix("*") { name.removeFirst() }
       if name.hasPrefix("./") { name.removeFirst(2) }
+      guard name == fileName else { continue }
       let hash = fields[0].lowercased()
-      if name == fileName, hash.count == 64, hash.allSatisfy(\.isHexDigit) { return hash }
+      guard hash.count == 64, hash.allSatisfy(\.isHexDigit) else { return nil }
+      found.append(hash)
     }
-    return nil
+    return found.count == 1 ? found[0] : nil
   }
 
   /// The newest release from GitHub's "latest release" answer, when it carries this app's disk
@@ -290,10 +301,13 @@ enum AppUpdateLogic {
     let imageAsset = assets.first { $0["name"] as? String == imageName }
     let bytes = downloadBytes(from: imageAsset?["size"])
     let sums = try assetURL("SHA256SUMS")
+    let signature =
+      assets.contains { $0["name"] as? String == "SHA256SUMS.minisig" }
+      ? try assetURL("SHA256SUMS.minisig") : nil
     let page = (object["html_url"] as? String).flatMap(URL.init(string:))
     return AppRelease(
       tag: tag, version: parsed.version, build: parsed.build, diskImageName: imageName,
-      diskImageURL: image, checksumsURL: sums,
+      diskImageURL: image, checksumsURL: sums, signatureURL: signature,
       pageURL: page.flatMap { isReleasePageURL($0, repository: repository) ? $0 : nil },
       downloadBytes: bytes, isBeta: isBeta)
   }

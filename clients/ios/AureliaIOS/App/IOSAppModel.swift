@@ -82,6 +82,8 @@ final class IOSAppModel: ObservableObject {
   }
   /// Aurelia without the server, showing only this device's downloads.
   @Published private(set) var offlineMode: OfflineMode?
+  /// Wrong PINs in the offline mode, which no server limits.
+  @Published private(set) var offlinePinLock = IOSOfflinePinLock()
   private var syncTask: Task<Void, Never>?
   private var progressObserver: Task<Void, Never>?
   private var refreshTask: Task<Void, Never>?
@@ -252,7 +254,7 @@ final class IOSAppModel: ObservableObject {
 
   func reconnect(userInitiated: Bool = false) async {
     guard let saved = connection, !isBusy else { return }
-    if userInitiated { allowWaking() }
+    if userInitiated { allowWaking(explicit: true) }
     let run = beginWork()
     defer { finish(run) }
     if savedServerUnreachable { wakeIfAllowed(saved.serverID) }
@@ -303,7 +305,12 @@ final class IOSAppModel: ObservableObject {
     }
   }
 
-  private func allowWaking() { wakeAllowedUntil = Date().addingTimeInterval(600) }
+  /// The app may wake the server for ten minutes. Someone asking for it (Try Again, Wake Server)
+  /// also ends the quiet hour after a sleep timer.
+  private func allowWaking(explicit: Bool = false) {
+    wakeAllowedUntil = Date().addingTimeInterval(600)
+    if explicit { IOSSleepTimerWakeRule.clear() }
+  }
 
   /// What Settings shows about waking the saved server.
   var wakeOnLanStatus: IOSWakeOnLan.Status {
@@ -325,7 +332,7 @@ final class IOSAppModel: ObservableObject {
     guard let saved = connection, !isWakingServer, wakeOnLanStatus.canWake else { return }
     isWakingServer = true
     defer { isWakingServer = false }
-    allowWaking()
+    allowWaking(explicit: true)
     let deadline = Date().addingTimeInterval(TimeInterval(IOSWakeOnLan.Plan.totalSeconds))
     while Date() < deadline, phase == .connection, connection?.serverID == saved.serverID {
       IOSWakeOnLan.wake(serverID: saved.serverID)
@@ -335,7 +342,9 @@ final class IOSAppModel: ObservableObject {
   }
 
   private func wakeIfAllowed(_ serverID: UUID) {
-    guard isForeground, let until = wakeAllowedUntil, until > Date() else { return }
+    guard isForeground, let until = wakeAllowedUntil, until > Date(),
+      IOSSleepTimerWakeRule.mayWakeAutomatically()
+    else { return }
     IOSWakeOnLan.wake(serverID: serverID)
   }
 
@@ -1212,9 +1221,14 @@ final class IOSAppModel: ObservableObject {
     }
   }
 
-  /// Opens a profile's downloads offline; false when its PIN is wrong.
+  /// Opens a profile's downloads offline; false when its PIN is wrong or too many were.
   func openOffline(_ card: IOSOfflineProfileCard, pin: String) -> Bool {
-    guard card.serverID == connection?.serverID, card.accepts(pin) else { return false }
+    guard card.serverID == connection?.serverID, !offlinePinLock.isLocked() else { return false }
+    guard card.accepts(pin) else {
+      offlinePinLock.recordFailure()
+      return false
+    }
+    offlinePinLock.recordSuccess()
     offlineMode = .open(
       IOSOfflineSession(
         serverID: card.serverID, profileID: card.profileID, name: card.name,

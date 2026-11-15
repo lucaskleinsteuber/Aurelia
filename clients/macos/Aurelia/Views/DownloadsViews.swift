@@ -25,6 +25,14 @@ struct DownloadsPage: View {
         if let error = downloads.errorMessage {
           Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
         }
+        if downloads.leftoverBytes > 0 {
+          HStack(spacing: 12) {
+            Text(
+              "\(ByteCountFormatter.string(fromByteCount: downloads.leftoverBytes, countStyle: .file)) of earlier downloads can no longer be played."
+            )
+            Button("Remove") { downloads.removeLeftovers() }
+          }
+        }
         if !downloads.active.isEmpty {
           VStack(alignment: .leading, spacing: 14) {
             AureliaSectionHeading(title: "Downloading", count: downloads.active.count)

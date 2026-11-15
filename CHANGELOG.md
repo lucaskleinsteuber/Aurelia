@@ -64,6 +64,19 @@ versioned commit, so their skipped numbers are preserved.
 - Browser and Mac: "Franchises in Library" and Save as Collection work again, and the browser can create and rename collections.
 - Server: the wish poster cache keeps as many posters as its size allows; it no longer removes one more than needed while saving a new one.
 - Server: removing or resetting a library no longer deletes smart lists and your own collections; a film that leaves a film series is removed from that collection.
+- Server: on a Linux server, intro, credits, speech and scrub-preview work no longer keeps an unused computer awake for hours; it continues after the next wake. A library scan or metadata job still finishes first. On Linux arm64 (such as a Raspberry Pi), media files are opened with the right flags instead of the x86 ones.
+- Apple TV and iPhone & iPad: after the sleep timer has ended, the app no longer wakes the server by itself for an hour; it did so right after the server turned off. Waking by hand still works.
+- Mac, Linux and iPhone & iPad: folders left by a cancelled download or a damaged download list are cleaned up instead of taking space unseen, and a damaged list is kept aside. On the Mac, cancelling a download and starting it again at once no longer removes the new one; on iPhone & iPad, a stopped download no longer claims the server's identity couldn't be confirmed.
+- Browser: Try Again on the "server asleep" page no longer starts several reconnect loops; the mini remote stops when you sign out, switch profiles or the session ends; Speech and Intros & Credits stop asking the server once left; the playback speed survives a renewed ticket.
+- Linux: a restore that takes over ten minutes is stopped and reported, and the server starts again; a settings file that can't be read for a moment is no longer replaced by defaults; the autostart entry works for programs in paths with special characters. Mac and Linux: automatic update checks no longer pause after the clock was set back; a Mac update may take up to an hour on a slow line.
+
+### Security
+
+- Mac: updates must carry the owner's signature, as on Linux, and the installer checks the new app with Apple's certificate chain and the team. The Linux app's signature also covers the release channel and repository, and the package is checked again right before it is installed.
+- iPhone, iPad and Mac: Siri and Shortcuts need an unlocked device to play or turn the server off, and turning it off always asks first. Mac sign-ins and keys move to the data-protection keychain. iPhone & iPad: the offline PIN waits after five wrong tries, as on the Mac.
+- Server: changing a role, creating an owner or administrator, and switching off an owner or administrator or giving them a new PIN need the Server Password, as the security model says. Wrong PINs lock per device with a higher limit for the profile, a PIN reset lifts the lock, and wrong pairing codes from one address no longer end pairing for everyone.
+- Server: integration keys stop working when their creator is no longer an enabled owner; webhooks skip certificate checks only for home addresses; the speech model is checked against its published SHA-256; the sleep-timer countdown needs recent playback; conversions and players have per-profile limits. The browser setup code is no longer written to the log, and the certificate is renewed while the server runs.
+- Linux server: the one-line install and the Docker build always require the signature and refuse an older build than the installed one; the root `aurelia` command ignores test settings; the service runs with tighter systemd restrictions; a power cut while an update swaps the program no longer leaves a server that doesn't start.
 
 ## [Linux app 2.4.0 (29), Apple TV 2.4.0 (39) and iPhone & iPad 2.7.0 (23)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/linux-app-2.4.0-29) - 12.11.2026
 

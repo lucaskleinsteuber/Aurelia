@@ -22,6 +22,7 @@ public sealed partial class LoopbackStreamRelay : IAsyncDisposable
     private readonly string secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
     private readonly CancellationTokenSource lifetime = new();
     private readonly Lock gate = new();
+    private readonly HashSet<Task> serving = [];
     private Uri source;
     private TcpListener? listener;
     private bool reportedFailure;
@@ -67,7 +68,16 @@ public sealed partial class LoopbackStreamRelay : IAsyncDisposable
     {
         await lifetime.CancelAsync();
         listener?.Stop();
-        lifetime.Dispose();
+        // Open connections still read the cancellation token; it is released only after they
+        // ended (audit C-X16). One that hangs keeps it until the collector takes it.
+        Task[] open;
+        lock (gate) open = [.. serving];
+        var finished = Task.WhenAll(open);
+        if (await Task.WhenAny(finished, Task.Delay(TimeSpan.FromSeconds(2))) == finished)
+        {
+            _ = finished.Exception;
+            lifetime.Dispose();
+        }
     }
 
     private async Task AcceptLoopAsync(TcpListener server)
@@ -83,7 +93,12 @@ public sealed partial class LoopbackStreamRelay : IAsyncDisposable
             {
                 return;
             }
-            _ = ServeAsync(connection);
+            var served = ServeAsync(connection);
+            lock (gate) serving.Add(served);
+            _ = served.ContinueWith(done =>
+            {
+                lock (gate) serving.Remove(done);
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
     }
 

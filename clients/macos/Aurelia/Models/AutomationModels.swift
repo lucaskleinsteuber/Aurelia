@@ -140,7 +140,10 @@ enum AutomationText {
     guard !trimmed.isEmpty, !id.isEmpty,
       id.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_" })
     else { return nil }
-    let withScheme = trimmed.lowercased().hasPrefix("http") ? trimmed : "http://" + trimmed
+    // Only a real scheme counts; a computer named "httpbox.lan" still gets one (audit C-X18).
+    let lowered = trimmed.lowercased()
+    let withScheme =
+      lowered.hasPrefix("http://") || lowered.hasPrefix("https://") ? trimmed : "http://" + trimmed
     guard var components = URLComponents(string: withScheme), let host = components.host, !host.isEmpty
     else { return nil }
     if components.port == nil, components.scheme == "http" { components.port = 8123 }

@@ -10,7 +10,8 @@ struct SiriKeyStore {
     AppEdition.isTest ? "com.lucas.aurelia.media.test.siri" : "com.lucas.aurelia.media.siri"
 
   func load(server: UUID) -> String? {
-    var query = Self.query(server)
+    AureliaKeychain.migrate(service: Self.service, accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)
+    var query = AureliaKeychain.item(Self.query(server))
     query[kSecReturnData as String] = true
     query[kSecMatchLimit as String] = kSecMatchLimitOne
     var result: CFTypeRef?
@@ -22,14 +23,14 @@ struct SiriKeyStore {
 
   func save(_ key: String, server: UUID) throws {
     guard Self.isKey(key) else { throw APIClientError.invalidResponse }
-    SecItemDelete(Self.query(server) as CFDictionary)
-    var query = Self.query(server)
+    AureliaKeychain.delete(Self.query(server))
+    var query = AureliaKeychain.item(Self.query(server))
     query[kSecValueData as String] = Data(key.utf8)
     query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
     guard SecItemAdd(query as CFDictionary, nil) == errSecSuccess else { throw APIClientError.invalidResponse }
   }
 
-  func delete(server: UUID) { SecItemDelete(Self.query(server) as CFDictionary) }
+  func delete(server: UUID) { AureliaKeychain.delete(Self.query(server)) }
 
   static func isKey(_ text: String) -> Bool {
     text.hasPrefix("aur_it_") && (40...128).contains(text.utf8.count) && !text.contains(where: \.isWhitespace)

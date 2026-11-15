@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Security
 import Testing
 
 @testable import Aurelia
@@ -108,6 +109,31 @@ struct ConnectionReliabilityTests {
     await model.reloadWatchingProfiles()
     #expect(model.errorMessage == nil)
     #expect(model.isResting)
+  }
+
+  @Test func aSignInKeptInTheLoginKeychainMovesToTheDataProtectionKeychain() throws {
+    let service = "Aurelia.tests.move.\(UUID().uuidString)"
+    let profile = syntheticProfile()
+    // The login keychain alone: without the flag set to false, macOS also finds the new copy.
+    let legacy: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+      kSecAttrAccount as String: "active-server", kSecUseDataProtectionKeychain as String: false,
+    ]
+    var add = legacy
+    add[kSecValueData as String] = try JSONEncoder().encode(profile)
+    #expect(SecItemAdd(add as CFDictionary, nil) == errSecSuccess)
+    let store = KeychainServerStore(service: service)
+    defer {
+      try? store.delete()
+      SecItemDelete(legacy as CFDictionary)
+    }
+    #expect(try store.load() == profile)
+    if AureliaKeychain.usesDataProtection {
+      #expect(SecItemCopyMatching(legacy as CFDictionary, nil) == errSecItemNotFound)
+    }
+    #expect(try store.load() == profile)
+    try store.delete()
+    #expect(try store.load() == nil)
   }
 
   @Test func viewingCredentialCannotReplacePersistedDeviceCredential() throws {
@@ -287,5 +313,15 @@ private final class PendingArtwork {
   }
   func complete(_ index: Int, with data: Data) {
     pending.removeValue(forKey: index)?.resume(returning: data)
+  }
+}
+
+struct PinnedHostMatchingTests {
+  @Test func aPinnedHostMatchesHoweverItsAddressIsWritten() {
+    #expect(TLSTrustDelegate.sameHost("Aurelia.local", "aurelia.local"))
+    #expect(TLSTrustDelegate.sameHost("fe80::1%en0", "[fe80::1%25en0]"))
+    #expect(TLSTrustDelegate.sameHost("[fd00::5]", "fd00::5"))
+    #expect(!TLSTrustDelegate.sameHost("fd00::5", "fd00::6"))
+    #expect(!TLSTrustDelegate.sameHost("", ""))
   }
 }

@@ -401,9 +401,9 @@ struct AppUpdateLogicTests {
     let folder = try testFolder()
     defer { try? FileManager.default.removeItem(at: folder) }
     let transport = StubUpdateTransport(steps: [
-      .body(releaseData()), .body(checksums()), .body(Data("abc".utf8)),
+      .body(releaseData()), .body(checksums()), .body(signature()), .body(Data("abc".utf8)),
     ])
-    let client = AppUpdateClient(transport: transport)
+    let client = AppUpdateClient(transport: transport, signingKey: UpdateSigningFixture.publicKey)
     let release = try await client.latest(repository: "owner/repo")
     let image = try await client.download(
       release, repository: "owner/repo", currentBuild: 99,
@@ -414,7 +414,7 @@ struct AppUpdateLogicTests {
       atPath: image.deletingLastPathComponent().path)
     #expect((modes[.posixPermissions] as? NSNumber)?.intValue == 0o700)
     let requests = await transport.requests
-    #expect(requests.count == 3)
+    #expect(requests.count == 4)
     #expect(requests[1].value(forHTTPHeaderField: "Accept") == "application/octet-stream")
   }
 
@@ -427,8 +427,10 @@ struct AppUpdateLogicTests {
   {
     let folder = try testFolder()
     defer { try? FileManager.default.removeItem(at: folder) }
-    let transport = StubUpdateTransport(steps: [.body(checksums()), .partialFailure(failure)])
-    let client = AppUpdateClient(transport: transport)
+    let transport = StubUpdateTransport(steps: [
+      .body(checksums()), .body(signature()), .partialFailure(failure),
+    ])
+    let client = AppUpdateClient(transport: transport, signingKey: UpdateSigningFixture.publicKey)
     let release = try AppUpdateLogic.validatedRelease(
       fromLatest: releaseData(), repository: "owner/repo")
     do {
@@ -442,12 +444,13 @@ struct AppUpdateLogicTests {
 
   @Test func wrongChecksumAndMissingChecksumDoNotLeaveDownloadedFiles() async throws {
     for steps: [StubUpdateTransport.Step] in [
-      [.body(checksums()), .body(Data("tampered".utf8))],
-      [.body(Data("no checksum".utf8))],
+      [.body(checksums()), .body(signature()), .body(Data("tampered".utf8))],
+      [.body(Data("no checksum".utf8)), .body(signature(for: Data("no checksum".utf8)))],
     ] {
       let folder = try testFolder()
       defer { try? FileManager.default.removeItem(at: folder) }
-      let client = AppUpdateClient(transport: StubUpdateTransport(steps: steps))
+      let client = AppUpdateClient(
+        transport: StubUpdateTransport(steps: steps), signingKey: UpdateSigningFixture.publicKey)
       let release = try AppUpdateLogic.validatedRelease(fromLatest: releaseData())
       do {
         _ = try await client.download(
@@ -455,10 +458,67 @@ struct AppUpdateLogicTests {
           folder: folder)
         Issue.record("An unchecked image must never reach the installer.")
       } catch let error as AppUpdateError {
-        #expect(error == (steps.count == 1 ? .noChecksum : .checksumMismatch))
+        #expect(error == (steps.count == 2 ? .noChecksum : .checksumMismatch))
       }
       #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path).isEmpty)
     }
+  }
+
+  @Test func aRealMinisignSignatureIsAcceptedAndAnyChangeRefused() {
+    let sums = Data(UpdateSigningFixture.realSignedSums.utf8)
+    let file = UpdateSigningFixture.minisignSignature
+    let key = UpdateSigningFixture.minisignPublicKey
+    #expect(AppUpdateSignature.verify(sums, signatureFile: file, publicKey: key))
+    #expect(!AppUpdateSignature.verify(sums + Data("x".utf8), signatureFile: file, publicKey: key))
+    #expect(
+      !AppUpdateSignature.verify(
+        sums, signatureFile: file.replacingOccurrences(of: "(100)", with: "(101)"), publicKey: key))
+    #expect(
+      !AppUpdateSignature.verify(
+        sums, signatureFile: file, publicKey: UpdateSigningFixture.publicKey))
+    // The owner's key reads as a key; a test signature is never valid for it.
+    #expect(AppUpdateSignature.readPublicKey(AppUpdateSignature.publicKey) != nil)
+    #expect(!AppUpdateSignature.verify(sums, signatureFile: file))
+  }
+
+  @Test func anUnsignedOrWronglySignedReleaseIsNeverDownloaded() async throws {
+    let folder = try testFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    var object = try #require(
+      JSONSerialization.jsonObject(with: releaseData()) as? [String: Any])
+    object["assets"] = (object["assets"] as? [[String: Any]])?.filter {
+      $0["name"] as? String != "SHA256SUMS.minisig"
+    }
+    let unsigned = try AppUpdateLogic.validatedRelease(
+      fromLatest: JSONSerialization.data(withJSONObject: object), repository: "owner/repo")
+    #expect(unsigned.signatureURL == nil)
+    let quiet = StubUpdateTransport(steps: [])
+    do {
+      _ = try await AppUpdateClient(transport: quiet, signingKey: UpdateSigningFixture.publicKey)
+        .download(unsigned, repository: "owner/repo", currentBuild: 99, folder: folder)
+      Issue.record("An unsigned release must not be downloaded.")
+    } catch let error as AppUpdateError { #expect(error == .unsigned) }
+    #expect(await quiet.requests.isEmpty)
+
+    let release = try AppUpdateLogic.validatedRelease(
+      fromLatest: releaseData(), repository: "owner/repo")
+    let otherKey = StubUpdateTransport(steps: [
+      .body(checksums()), .body(Data(UpdateSigningFixture.minisignSignature.utf8)),
+    ])
+    do {
+      _ = try await AppUpdateClient(transport: otherKey, signingKey: UpdateSigningFixture.publicKey)
+        .download(release, repository: "owner/repo", currentBuild: 99, folder: folder)
+      Issue.record("A signature by another key must be refused.")
+    } catch let error as AppUpdateError { #expect(error == .badSignature) }
+    #expect(await otherKey.requests.count == 2)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path).isEmpty)
+  }
+
+  @Test func aFileListedTwiceHasNoChecksum() {
+    let hash = String(repeating: "a", count: 64)
+    let other = String(repeating: "b", count: 64)
+    #expect(AppUpdateLogic.checksum(for: "A.dmg", in: "\(hash)  A.dmg\n") == hash)
+    #expect(AppUpdateLogic.checksum(for: "A.dmg", in: "\(hash)  A.dmg\n\(other)  A.dmg\n") == nil)
   }
 
   @Test(arguments: [100, 101])
@@ -480,15 +540,15 @@ struct AppUpdateLogicTests {
     let folder = try testFolder()
     defer { try? FileManager.default.removeItem(at: folder) }
     let transport = StubUpdateTransport(steps: [
-      .body(releaseData()), .body(checksums()), .body(Data("abc".utf8)),
+      .body(releaseData()), .body(checksums()), .body(signature()), .body(Data("abc".utf8)),
     ])
-    let client = AppUpdateClient(transport: transport)
+    let client = AppUpdateClient(transport: transport, signingKey: UpdateSigningFixture.publicKey)
     let release = try await client.latest(repository: "owner/repo")
     let image = try await client.download(
       release, repository: "owner/repo", currentBuild: 99, folder: folder)
     #expect(try Data(contentsOf: image) == Data("abc".utf8))
     let requests = await transport.requests
-    #expect(requests.count == 3)
+    #expect(requests.count == 4)
     for request in requests {
       #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
     }
@@ -626,10 +686,18 @@ struct AppUpdateLogicTests {
           "name": checksumName,
           "url": "https://api.github.com/repos/\(repository)/releases/assets/2",
         ],
+        [
+          "name": "SHA256SUMS.minisig",
+          "url": "https://api.github.com/repos/\(repository)/releases/assets/3",
+        ],
       ],
     ]
     if let notes { release["body"] = notes }
     return try! JSONSerialization.data(withJSONObject: release)
+  }
+
+  private func signature(for message: Data? = nil) -> Data {
+    UpdateSigningFixture.signature(for: message ?? checksums())
   }
 
   private func checksums() -> Data {
@@ -787,7 +855,9 @@ struct AppUpdateFakeGitHubHarnessTests {
   private func makeClient() -> AppUpdateClient {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [FakeGitHubURLProtocol.self]
-    return AppUpdateClient(transport: AppUpdateURLSessionTransport(sessionConfiguration: config))
+    return AppUpdateClient(
+      transport: AppUpdateURLSessionTransport(sessionConfiguration: config),
+      signingKey: UpdateSigningFixture.publicKey)
   }
 
   private func testRunFolder() throws -> URL {
@@ -824,6 +894,10 @@ struct AppUpdateFakeGitHubHarnessTests {
           {
             "name": "SHA256SUMS",
             "url": "https://api.github.com/repos/owner/repo/releases/assets/102"
+          },
+          {
+            "name": "SHA256SUMS.minisig",
+            "url": "https://api.github.com/repos/owner/repo/releases/assets/109"
           }
         ]
       }
@@ -841,6 +915,11 @@ struct AppUpdateFakeGitHubHarnessTests {
           body: Data(releaseJson.utf8))
       }
 
+      if host == "api.github.com" && path.hasSuffix("/assets/109") {
+        return .respond(
+          status: 200, headers: ["Content-Type": "application/octet-stream"],
+          body: UpdateSigningFixture.signature(for: Data(sumsText.utf8)))
+      }
       if host == "api.github.com" && path.hasSuffix("/assets/102") {
         return .respond(
           status: 200,
@@ -884,7 +963,7 @@ struct AppUpdateFakeGitHubHarnessTests {
     #expect(try Data(contentsOf: destination) == syntheticDmgData)
 
     let requests = FakeGitHubURLProtocol.requests()
-    #expect(requests.count == 4)
+    #expect(requests.count == 5)
 
     // Initial requests to GitHub are anonymous
     let apiRequests = requests.filter { $0.url?.host == "api.github.com" }
@@ -924,6 +1003,10 @@ struct AppUpdateFakeGitHubHarnessTests {
           {
             "name": "SHA256SUMS",
             "url": "https://api.github.com/repos/owner/repo/releases/assets/202"
+          },
+          {
+            "name": "SHA256SUMS.minisig",
+            "url": "https://api.github.com/repos/owner/repo/releases/assets/209"
           }
         ]
       }
@@ -937,6 +1020,11 @@ struct AppUpdateFakeGitHubHarnessTests {
       if host == "api.github.com" && path.hasSuffix("/releases/latest") {
         return .respond(
           status: 200, headers: ["Content-Type": "application/json"], body: Data(releaseJson.utf8))
+      }
+      if host == "api.github.com" && path.hasSuffix("/assets/209") {
+        return .respond(
+          status: 200, headers: ["Content-Type": "application/octet-stream"],
+          body: UpdateSigningFixture.signature(for: Data(sumsText.utf8)))
       }
       if host == "api.github.com" && path.hasSuffix("/assets/202") {
         return .respond(
@@ -991,6 +1079,10 @@ struct AppUpdateFakeGitHubHarnessTests {
           {
             "name": "SHA256SUMS",
             "url": "https://api.github.com/repos/owner/repo/releases/assets/302"
+          },
+          {
+            "name": "SHA256SUMS.minisig",
+            "url": "https://api.github.com/repos/owner/repo/releases/assets/309"
           }
         ]
       }
@@ -1005,6 +1097,11 @@ struct AppUpdateFakeGitHubHarnessTests {
       if host == "api.github.com" && path.hasSuffix("/releases/latest") {
         return .respond(
           status: 200, headers: ["Content-Type": "application/json"], body: Data(releaseJson.utf8))
+      }
+      if host == "api.github.com" && path.hasSuffix("/assets/309") {
+        return .respond(
+          status: 200, headers: ["Content-Type": "application/octet-stream"],
+          body: UpdateSigningFixture.signature(for: Data(sumsText.utf8)))
       }
       if host == "api.github.com" && path.hasSuffix("/assets/302") {
         return .respond(
@@ -1199,6 +1296,10 @@ struct AppUpdateFakeGitHubHarnessTests {
             "name": "SHA256SUMS",
             "browser_download_url": "https://github.com/owner/repo/releases/download/1.20.0-110/SHA256SUMS",
             "url": "https://api.github.com/repos/owner/repo/releases/assets/502"
+          },
+          {
+            "name": "SHA256SUMS.minisig",
+            "url": "https://api.github.com/repos/owner/repo/releases/assets/509"
           }
         ]
       }
@@ -1220,6 +1321,11 @@ struct AppUpdateFakeGitHubHarnessTests {
           body: Data(releaseJson.utf8))
       }
 
+      if host == "api.github.com" && path.hasSuffix("/assets/509") {
+        return .respond(
+          status: 200, headers: ["Content-Type": "application/octet-stream"],
+          body: UpdateSigningFixture.signature(for: Data(sumsText.utf8)))
+      }
       if host == "api.github.com" && path.hasSuffix("/releases/assets/502") {
         return .respond(
           status: 200,

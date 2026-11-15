@@ -398,18 +398,84 @@ public sealed class OfflineDownloads
 
     private string IndexPath => Path.Combine(Root, "index.json");
 
+    /// <summary>
+    /// Space taken by download folders no listed title uses, kept only after the list of downloads
+    /// was damaged; the Downloads page shows it with a button to remove it (audit C-L7).
+    /// </summary>
+    public long LeftoverBytes { get { lock (gate) return leftoverBytes; } }
+
+    private long leftoverBytes;
+
     private void Load()
     {
+        var readable = true;
         try
         {
-            if (!File.Exists(IndexPath)) return;
-            var stored = JsonSerializer.Deserialize<List<OfflineTitle>>(File.ReadAllText(IndexPath), Json) ?? [];
-            // A title whose file is gone (removed by hand) is forgotten.
-            titles = [.. stored.Where(title => File.Exists(FileOf(title)))];
+            if (File.Exists(IndexPath))
+            {
+                var stored = JsonSerializer.Deserialize<List<OfflineTitle>>(File.ReadAllText(IndexPath), Json) ?? [];
+                // A title whose file is gone (removed by hand) is forgotten.
+                titles = [.. stored.Where(title => File.Exists(FileOf(title)))];
+            }
         }
         catch (Exception failure) when (failure is JsonException or IOException or UnauthorizedAccessException)
         {
             titles = [];
+            readable = false;
+            // Kept beside the folders instead of being replaced by the next save.
+            try { File.Move(IndexPath, Path.Combine(Root, $"index-damaged-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}.json"), overwrite: true); }
+            catch (Exception moveFailure) when (moveFailure is IOException or UnauthorizedAccessException) { }
+            Error = "The list of downloads was damaged and has been set aside.";
+        }
+        // Folders without a listed title are downloads that were cut off (the app quit or crashed
+        // midway) or titles forgotten above: they are removed. After a damaged list they may be
+        // whole downloads, so they stay until the person removes them on the Downloads page.
+        var orphans = OrphanFolders();
+        if (readable)
+        {
+            foreach (var folder in orphans) TryDelete(folder);
+        }
+        else
+        {
+            leftoverBytes = orphans.Sum(FolderBytes);
+        }
+    }
+
+    /// <summary>Removes the folders a damaged list of downloads left behind.</summary>
+    public void RemoveLeftovers()
+    {
+        foreach (var folder in OrphanFolders()) TryDelete(folder);
+        lock (gate) leftoverBytes = 0;
+        if (Error?.StartsWith("The list of downloads was damaged", StringComparison.Ordinal) == true) Error = null;
+        Changed?.Invoke();
+    }
+
+    /// <summary>Download folders (named after a title id) that no listed or running download uses.</summary>
+    private List<string> OrphanFolders()
+    {
+        try
+        {
+            if (!Directory.Exists(Root)) return [];
+            HashSet<Guid> used;
+            lock (gate) used = [.. titles.Select(title => title.Id), .. running.Keys];
+            return [.. Directory.EnumerateDirectories(Root)
+                .Where(folder => Guid.TryParseExact(Path.GetFileName(folder), "N", out var id) && !used.Contains(id))];
+        }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    private static long FolderBytes(string folder)
+    {
+        try
+        {
+            return new DirectoryInfo(folder).EnumerateFiles("*", SearchOption.AllDirectories).Sum(file => file.Length);
+        }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+        {
+            return 0;
         }
     }
 

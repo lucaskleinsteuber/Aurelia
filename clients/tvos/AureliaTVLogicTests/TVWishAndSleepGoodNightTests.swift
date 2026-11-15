@@ -73,6 +73,21 @@ struct TVWishAndSleepGoodNightTests {
     #expect(legacy.text.isEmpty)
   }
 
+  // Audit B-5: after the sleep timer ended the server turned off, and the app woke it again
+  // 33 seconds later. For an hour only someone asking (Try Again, Wake Server) wakes it.
+  @Test func anEndedSleepTimerKeepsTheAppFromWakingTheServerForAnHour() throws {
+    let defaults = try #require(UserDefaults(suiteName: "aurelia-sleep-wake-\(UUID().uuidString)"))
+    let ended = Date(timeIntervalSince1970: 1_800_000_000)
+    #expect(TVSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended))
+    TVSleepTimerWakeRule.markEnded(defaults, now: ended)
+    #expect(!TVSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(33)))
+    #expect(!TVSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(3599)))
+    #expect(TVSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(3600)))
+    TVSleepTimerWakeRule.markEnded(defaults, now: ended)
+    TVSleepTimerWakeRule.clear(defaults)
+    #expect(TVSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(60)))
+  }
+
   @Test func sleepTimerGoodNightPolicyRespectsSettingAndNeverSwitchesProfile() {
     #expect(TVSleepTimerGoodNightPolicy.autoCloseDurationSeconds == 300)
     #expect(

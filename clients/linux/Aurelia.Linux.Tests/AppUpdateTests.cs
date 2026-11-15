@@ -434,6 +434,40 @@ public sealed class AppUpdateTests
     }
 
     [Fact]
+    public void TheSignedCommentNamesTheRepositoryAndAStableReleaseMustBeSignedAsStable()
+    {
+        const string repository = UpdateFeed.StandardRepository;
+        Assert.True(MinisignSignature.CommentAllows($"Aurelia for Linux 2.9.0 (36) channel=stable repository={repository}", repository, isBeta: false));
+        Assert.True(MinisignSignature.CommentAllows($"Aurelia for Linux 2.9.0 (36) channel=beta repository={repository}", repository, isBeta: true));
+        Assert.True(MinisignSignature.CommentAllows($"Aurelia for Linux 2.9.0 (36) channel=stable repository={repository}", repository, isBeta: true));
+        Assert.False(MinisignSignature.CommentAllows($"Aurelia for Linux 2.9.0 (36) channel=beta repository={repository}", repository, isBeta: false));
+        Assert.False(MinisignSignature.CommentAllows("Aurelia for Linux 2.9.0 (36) channel=stable repository=someone/else", repository, isBeta: false));
+        Assert.False(MinisignSignature.CommentAllows("Aurelia for Linux 2.9.0 (36)", repository, isBeta: true));
+        Assert.False(MinisignSignature.CommentAllows(null, repository, isBeta: true));
+        Assert.Equal("legacy", MinisignSignature.TrustedComment(ReferenceLegacy));
+    }
+
+    [Fact]
+    public async Task ABetaSignedForTheBetaChannelIsNotInstalledAsAStableRelease()
+    {
+        var source = new FakeSource { Signature = TestSigning.Sign(new FakeSource().Sums, $"Aurelia for Linux 9.0.0 (999) channel=beta repository={UpdateFeed.StandardRepository}") };
+        var installer = new FakeInstaller();
+        var cache = Path.Combine(Path.GetTempPath(), "aurelia-update-" + Guid.NewGuid().ToString("N"));
+        using var updater = new AppUpdater(source, installer, new MemorySettingsStore(), cache, new Version(0, 3, 0), 4,
+            architecture: System.Runtime.InteropServices.Architecture.X64, signingKey: TestSigning.PublicKey);
+        try
+        {
+            await updater.CheckAsync(true, TestContext.Current.CancellationToken);
+            Assert.NotNull(updater.Available);
+            Assert.False(updater.Available!.IsBeta);
+            Assert.False(await updater.InstallAsync(cancellation: TestContext.Current.CancellationToken));
+            Assert.False(installer.Installed);
+            Assert.Contains("another channel", updater.Status, StringComparison.Ordinal);
+        }
+        finally { if (Directory.Exists(cache)) Directory.Delete(cache, true); }
+    }
+
+    [Fact]
     public async Task APackageWhoseChecksumListIsNotSignedByTheOwnerIsNeverInstalled()
     {
         // Someone with access to the GitHub release replaced the package and its checksum list.

@@ -57,6 +57,28 @@ public static class MinisignSignature
         return Ed25519.Verify(globalSignature, 0, key, 0, global, 0, global.Length);
     }
 
+    /// <summary>The signed comment of a signature file; trustworthy only after <see cref="Verify"/> accepted it.</summary>
+    public static string? TrustedComment(string signatureFile)
+    {
+        var lines = signatureFile.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        return lines.Length >= 3 && lines[2].StartsWith("trusted comment: ", StringComparison.Ordinal) ? lines[2]["trusted comment: ".Length..] : null;
+    }
+
+    /// <summary>
+    /// Whether a signed comment allows this release: it names the repository the release comes
+    /// from, and a stable release must have been signed for the stable channel, so a beta cannot
+    /// be passed off as stable by changing only the release on GitHub (audit C-L14).
+    /// </summary>
+    public static bool CommentAllows(string? comment, string repository, bool isBeta)
+    {
+        if (comment is null) return false;
+        var fields = comment.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var channel = fields.LastOrDefault(field => field.StartsWith("channel=", StringComparison.Ordinal))?["channel=".Length..];
+        var source = fields.LastOrDefault(field => field.StartsWith("repository=", StringComparison.Ordinal))?["repository=".Length..];
+        if (!string.Equals(source, repository, StringComparison.OrdinalIgnoreCase)) return false;
+        return channel == "stable" || (isBeta && channel == "beta");
+    }
+
     /// <summary>A minisign public key: "Ed", an eight-byte key id and the 32-byte Ed25519 key.</summary>
     public static bool TryReadPublicKey(string text, out byte[] keyId, out byte[] key)
     {

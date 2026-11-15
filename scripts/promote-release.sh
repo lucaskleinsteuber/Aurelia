@@ -27,5 +27,27 @@ notice = open(sys.argv[1]).read().strip()
 body = sys.stdin.read()
 print(body.replace(notice, "", 1).lstrip("\n"), end="")
 ' "$repository_root/scripts/beta-notice.md" > "$notes"
+if [[ "$tag" == linux-app-* ]]; then
+  # The Linux app installs a stable release only when its signed comment says so (audit C-L14):
+  # sign the same SHA256SUMS again for the stable channel before the release turns stable.
+  . "$repository_root/scripts/workspace-paths.sh"
+  command -v minisign >/dev/null || { echo "Install minisign to promote a Linux app release." >&2; exit 1; }
+  signing_key="${AURELIA_MINISIGN_SECRET_KEY:-$HOME/.minisign/aurelia-linux.key}"
+  [ -s "$signing_key" ] || { echo "Missing the minisign secret key $signing_key." >&2; exit 1; }
+  public_key=$(sed -n 's/.*SigningPublicKey = "\([A-Za-z0-9+\/=]*\)";.*/\1/p' \
+    "$repository_root/clients/linux/Aurelia.Linux.Core/Updates/UpdateFeed.cs")
+  repository=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+  signing=$(mktemp -d)
+  trap 'rm -f "$notes"; rm -rf "$signing"' EXIT
+  gh release download "$tag" --pattern SHA256SUMS --pattern SHA256SUMS.minisig --dir "$signing"
+  minisign -V -P "$public_key" -m "$signing/SHA256SUMS" -x "$signing/SHA256SUMS.minisig" >/dev/null \
+    || { echo "The beta's signature is not valid; nothing was promoted." >&2; exit 1; }
+  rm -f "$signing/SHA256SUMS.minisig"
+  minisign -S -s "$signing_key" -m "$signing/SHA256SUMS" -x "$signing/SHA256SUMS.minisig" \
+    -t "$title channel=stable repository=$repository"
+  minisign -V -P "$public_key" -m "$signing/SHA256SUMS" -x "$signing/SHA256SUMS.minisig" >/dev/null \
+    || { echo "The new signature does not match the app's public key; nothing was promoted." >&2; exit 1; }
+  gh release upload "$tag" "$signing/SHA256SUMS.minisig" --clobber
+fi
 gh release edit "$tag" --prerelease=false --latest="$latest" --title "$title" --notes-file "$notes"
 echo "Promoted $tag to the stable release: $title."

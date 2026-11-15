@@ -72,9 +72,15 @@ final class OfflineDownloads: ObservableObject {
   /// The names of the titles downloading now, for the Downloads page.
   @Published private(set) var activeNames: [UUID: String] = [:]
   @Published var errorMessage: String?
+  /// Space taken by download folders no listed title uses, kept only after the list of downloads
+  /// was damaged; the Downloads page offers to remove it.
+  @Published private(set) var leftoverBytes: Int64 = 0
 
   let root: URL
   private var tasks: [UUID: Task<Void, Never>] = [:]
+  /// The current attempt per title. A cancelled download finishes later and then only cleans up
+  /// after itself, never after a download of the same title started again meanwhile (audit C-L9).
+  private var attempts: [UUID: UUID] = [:]
 
   init(root: URL? = nil) {
     // Inside this app's own (sandboxed) Application Support, never next to the media.
@@ -138,17 +144,26 @@ final class OfflineDownloads: ObservableObject {
     active[item.id] = 0
     activeNames[item.id] = subtitle.map { "\(item.title) · \($0)" } ?? item.title
     errorMessage = nil
+    let attempt = UUID()
+    attempts[item.id] = attempt
     tasks[item.id] = Task { [weak self] in
       guard let self else { return }
       do {
         let downloaded = try await self.fetch(
-          item, subtitle: subtitle, profile: profile, userId: userId, series: series)
-        self.titles.append(downloaded)
-        self.save()
+          item, subtitle: subtitle, profile: profile, userId: userId, series: series,
+          attempt: attempt)
+        if self.attempts[item.id] == attempt {
+          self.titles.append(downloaded)
+          self.save()
+        }
       } catch is CancellationError {
       } catch {
-        self.errorMessage = "\(item.title) could not be downloaded. \(error.localizedDescription)"
+        if self.attempts[item.id] == attempt {
+          self.errorMessage = "\(item.title) could not be downloaded. \(error.localizedDescription)"
+        }
       }
+      guard self.attempts[item.id] == attempt else { return }
+      self.attempts[item.id] = nil
       self.active[item.id] = nil
       self.activeNames[item.id] = nil
       self.tasks[item.id] = nil
@@ -158,6 +173,7 @@ final class OfflineDownloads: ObservableObject {
   func cancel(_ id: UUID) {
     tasks[id]?.cancel()
     tasks[id] = nil
+    attempts[id] = nil
     active[id] = nil
     activeNames[id] = nil
     try? FileManager.default.removeItem(at: folder(for: id))
@@ -222,12 +238,14 @@ final class OfflineDownloads: ObservableObject {
   }
 
   private static func details(
-    of item: CatalogItemSummary, series: CatalogItemSummary?, into folder: URL, api: APIClient
+    of item: CatalogItemSummary, series: CatalogItemSummary?, into folder: URL, api: APIClient,
+    isCurrent: () -> Bool = { true }
   ) async -> Details {
     func keep(_ artwork: ArtworkSummary?, width: Int, name: String) async -> String? {
       guard let artwork else { return nil }
       let variant = ArtworkVariantRequest.artwork(artwork, width: width)
       guard let data = try? await api.artworkData(path: variant.path), NSImage(data: data) != nil,
+        isCurrent(),
         (try? data.write(to: folder.appendingPathComponent(name), options: .atomic)) != nil
       else { return nil }
       return name
@@ -282,8 +300,14 @@ final class OfflineDownloads: ObservableObject {
 
   private func fetch(
     _ item: CatalogItemSummary, subtitle: String?, profile: StoredServerProfile, userId: UUID,
-    series: CatalogItemSummary?
+    series: CatalogItemSummary?, attempt: UUID
   ) async throws -> OfflineTitle {
+    // Checked before every write into the title's folder: after a cancel it may already belong
+    // to a new download of the same title.
+    let isCurrent = { [weak self] in
+      self?.attempts[item.id] == attempt && !Task.isCancelled
+    }
+    func ensureCurrent() throws { if !isCurrent() { throw CancellationError() } }
     let api = APIClient(profile: profile)
     let ticket = try await api.createPlayback(mediaId: item.id)
     defer { Task { try? await api.revokePlayback(id: ticket.id) } }
@@ -302,14 +326,19 @@ final class OfflineDownloads: ObservableObject {
     defer { relay.stop() }
     let local = try await relay.start()
     let folder = folder(for: item.id)
+    try ensureCurrent()
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     let extensionName = Self.fileExtension(ticket.contentType)
     let fileName = "title.\(extensionName)"
     let destination = folder.appendingPathComponent(fileName)
     do {
       let id = item.id
-      let temporary = try await OfflineFileDownload.run(from: local) { [weak self] share in
+      let temporary = try await OfflineFileDownload.run(from: local, into: folder) { [weak self] share in
         Task { @MainActor in if self?.active[id] != nil { self?.active[id] = share } }
+      }
+      do { try ensureCurrent() } catch {
+        try? FileManager.default.removeItem(at: temporary)
+        throw error
       }
       try? FileManager.default.removeItem(at: destination)
       try FileManager.default.moveItem(at: temporary, to: destination)
@@ -321,6 +350,7 @@ final class OfflineDownloads: ObservableObject {
             (response as? HTTPURLResponse)?.statusCode == 200
           else { continue }
           let name = "subtitle-\(track.index).vtt"
+          try ensureCurrent()
           try data.write(to: folder.appendingPathComponent(name))
           subtitles.append(
             OfflineSubtitle(
@@ -331,7 +361,9 @@ final class OfflineDownloads: ObservableObject {
       let size =
         (try? FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? Int64)
         ?? ticket.contentLength
-      let details = await Self.details(of: item, series: series, into: folder, api: api)
+      let details = await Self.details(
+        of: item, series: series, into: folder, api: api, isCurrent: isCurrent)
+      try ensureCurrent()
       var downloaded = OfflineTitle(
         id: item.id, serverId: profile.serverId, userId: userId, title: item.title,
         subtitle: subtitle, kind: item.kind.rawValue, fileName: fileName,
@@ -343,7 +375,8 @@ final class OfflineDownloads: ObservableObject {
       details.apply(to: &downloaded)
       return downloaded
     } catch {
-      try? FileManager.default.removeItem(at: folder)
+      // A cancel already removed the folder; it may now hold a new download of this title.
+      if attempts[item.id] == attempt { try? FileManager.default.removeItem(at: folder) }
       throw error
     }
   }
@@ -386,12 +419,66 @@ final class OfflineDownloads: ObservableObject {
     return formatter.date(from: text)
   }
 
+  private static let damagedListMessage = "The list of downloads was damaged and has been set aside."
+
   private func load() {
-    guard let data = try? Data(contentsOf: indexURL),
-      let stored = try? JSONDecoder().decode([OfflineTitle].self, from: data)
-    else { return }
-    // A title whose file is gone (removed by hand) is forgotten.
-    titles = stored.filter { FileManager.default.fileExists(atPath: fileURL(for: $0).path) }
+    var readable = true
+    if let data = try? Data(contentsOf: indexURL) {
+      if let stored = try? JSONDecoder().decode([OfflineTitle].self, from: data) {
+        // A title whose file is gone (removed by hand) is forgotten.
+        titles = stored.filter { FileManager.default.fileExists(atPath: fileURL(for: $0).path) }
+      } else {
+        // Kept beside the folders instead of being replaced by the next save.
+        readable = false
+        let stamp = ISO8601DateFormatter.string(
+          from: Date(), timeZone: .gmt, formatOptions: [.withYear, .withMonth, .withDay, .withTime])
+        try? FileManager.default.moveItem(
+          at: indexURL, to: root.appendingPathComponent("index-damaged-\(stamp).json"))
+        errorMessage = Self.damagedListMessage
+      }
+    }
+    // Folders without a listed title are downloads that were cut off (the app quit midway) or
+    // titles forgotten above: they are removed. After a damaged list they may be whole
+    // downloads, so they stay until the person removes them on the Downloads page (audit C-L7).
+    let orphans = orphanFolders()
+    if readable {
+      for folder in orphans { try? FileManager.default.removeItem(at: folder) }
+    } else {
+      leftoverBytes = orphans.reduce(0) { $0 + Self.bytes(in: $1) }
+    }
+  }
+
+  /// Removes the folders a damaged list of downloads left behind.
+  func removeLeftovers() {
+    for folder in orphanFolders() { try? FileManager.default.removeItem(at: folder) }
+    leftoverBytes = 0
+    if errorMessage == Self.damagedListMessage { errorMessage = nil }
+  }
+
+  /// Download folders (named after a title id) that no listed or running download uses.
+  private func orphanFolders() -> [URL] {
+    let used = Set(titles.map(\.id)).union(attempts.keys)
+    let folders =
+      (try? FileManager.default.contentsOfDirectory(
+        at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+    return folders.filter { folder in
+      guard let id = UUID(uuidString: folder.lastPathComponent), !used.contains(id) else {
+        return false
+      }
+      return (try? folder.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+    }
+  }
+
+  private static func bytes(in folder: URL) -> Int64 {
+    guard
+      let files = FileManager.default.enumerator(
+        at: folder, includingPropertiesForKeys: [.fileSizeKey])
+    else { return 0 }
+    var total: Int64 = 0
+    for case let file as URL in files {
+      total += Int64((try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+    }
+    return total
   }
 
   private func save() {
@@ -417,15 +504,21 @@ enum OfflineDownloadError: LocalizedError {
 /// One file download with progress, from the local relay to a temporary file.
 final class OfflineFileDownload: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
   private let progress: @Sendable (Double) -> Void
+  private let folder: URL
   private var continuation: CheckedContinuation<URL, Error>?
   private let lock = NSLock()
 
-  private init(progress: @escaping @Sendable (Double) -> Void) {
+  private init(folder: URL, progress: @escaping @Sendable (Double) -> Void) {
+    self.folder = folder
     self.progress = progress
   }
 
-  static func run(from url: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
-    let download = OfflineFileDownload(progress: progress)
+  /// Downloads into the title's own folder, so a file left by a crash lies with the downloads and
+  /// leaves with them, never unseen in the temporary folder (audit C-X8).
+  static func run(
+    from url: URL, into folder: URL, progress: @escaping @Sendable (Double) -> Void
+  ) async throws -> URL {
+    let download = OfflineFileDownload(folder: folder, progress: progress)
     let configuration = URLSessionConfiguration.ephemeral
     configuration.timeoutIntervalForRequest = 120
     configuration.timeoutIntervalForResource = 60 * 60 * 24
@@ -467,7 +560,7 @@ final class OfflineFileDownload: NSObject, URLSessionDownloadDelegate, @unchecke
       return
     }
     // The file at `location` is removed when this method returns; keep it.
-    let kept = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let kept = folder.appendingPathComponent(".partial-" + UUID().uuidString)
     do {
       try FileManager.default.moveItem(at: location, to: kept)
       finish(.success(kept))

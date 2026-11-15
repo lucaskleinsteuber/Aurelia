@@ -6,6 +6,7 @@ enum AppUpdateError: Error, Equatable, LocalizedError, Sendable {
   case github(Int)
   case rateLimited, notModified, privateRepository
   case invalidRelease, invalidTag, noDiskImage, noChecksum, checksumMismatch, noFolder
+  case unsigned, badSignature
   case invalidURL, invalidResponse, tooLarge, emptyDownload, incompleteDownload, notNewer
   case timedOut, connectionLost, diskFull, writeFailed
 
@@ -30,6 +31,9 @@ enum AppUpdateError: Error, Equatable, LocalizedError, Sendable {
     case .noChecksum: "The newest release has no checksum for its disk image."
     case .checksumMismatch:
       "The downloaded disk image doesn't match its published checksum, so it wasn't installed."
+    case .unsigned:
+      "The newest release isn't signed, so it wasn't installed. Download it from the release page if you trust it."
+    case .badSignature: "The release signature isn't valid, so the update wasn't installed."
     case .noFolder: "Aurelia couldn't prepare a folder for the download."
     case .invalidURL: "The release contains an unexpected download address. It wasn't installed."
     case .invalidResponse: "GitHub returned an unexpected download response. Try again later."
@@ -215,7 +219,8 @@ struct AppUpdateURLSessionTransport: AppUpdateTransport {
         config.urlCredentialStorage = nil
         config.urlCache = nil
         config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 600
+        // A whole image over a slow line may take long; Linux allows 30 minutes (audit C-L11).
+        config.timeoutIntervalForResource = 3600
         return config
       }()
     let session = URLSession(configuration: configuration)
@@ -268,9 +273,15 @@ struct AppUpdateURLSessionTransport: AppUpdateTransport {
 
 struct AppUpdateClient: Sendable {
   let transport: any AppUpdateTransport
+  /// The minisign key the checksum list must be signed with; tests pass their own.
+  let signingKey: String
 
-  init(transport: any AppUpdateTransport = AppUpdateURLSessionTransport()) {
+  init(
+    transport: any AppUpdateTransport = AppUpdateURLSessionTransport(),
+    signingKey: String = AppUpdateSignature.publicKey
+  ) {
     self.transport = transport
+    self.signingKey = signingKey
   }
 
   func latestRelease(
@@ -349,6 +360,10 @@ struct AppUpdateClient: Sendable {
     guard AppUpdateLogic.isNewer(build: release.build, than: currentBuild) else {
       throw AppUpdateError.notNewer
     }
+    guard let signatureURL = release.signatureURL else { throw AppUpdateError.unsigned }
+    guard AppUpdateLogic.isAnyAssetURL(signatureURL, repository: repository) else {
+      throw AppUpdateError.invalidRelease
+    }
     let directory = folder.appendingPathComponent(UUID().uuidString, isDirectory: true)
     var complete = false
     defer { if !complete { try? FileManager.default.removeItem(at: directory) } }
@@ -356,6 +371,12 @@ struct AppUpdateClient: Sendable {
       try FileManager.default.createDirectory(
         at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
       let sums = try await transfer(release.checksumsURL, maximumBytes: 1_024 * 1_024)
+      let signature = try await transfer(signatureURL, maximumBytes: 64 * 1_024)
+      guard
+        AppUpdateSignature.verify(
+          sums.data, signatureFile: String(decoding: signature.data, as: UTF8.self),
+          publicKey: signingKey)
+      else { throw AppUpdateError.badSignature }
       guard
         let expected = AppUpdateLogic.checksum(
           for: release.diskImageName, in: String(decoding: sums.data, as: UTF8.self))

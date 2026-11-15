@@ -23,6 +23,9 @@ final class AutomationTests: XCTestCase {
     XCTAssertEqual(
       AutomationText.homeAssistantURL(base: "https://ha.example.com/", webhookID: "abc"),
       "https://ha.example.com/api/webhook/abc")
+    XCTAssertEqual(
+      AutomationText.homeAssistantURL(base: "httpbox.lan", webhookID: "abc"),
+      "http://httpbox.lan:8123/api/webhook/abc")
     XCTAssertNil(AutomationText.homeAssistantURL(base: "homeassistant.local", webhookID: "bad id!"))
     XCTAssertNil(AutomationText.homeAssistantURL(base: "", webhookID: "abc"))
     let parts = AutomationText.splitHomeAssistantURL("http://homeassistant.local:8123/api/webhook/aurelia_lights")

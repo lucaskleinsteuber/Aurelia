@@ -49,7 +49,8 @@ struct KeychainServerStore: ServerProfileStore {
   }
 
   private func load(service: String) throws -> StoredServerProfile? {
-    var query = baseQuery(service: service)
+    AureliaKeychain.migrate(service: service)
+    var query = AureliaKeychain.item(baseQuery(service: service))
     query[kSecReturnData as String] = true
     query[kSecMatchLimit as String] = kSecMatchLimitOne
     var result: CFTypeRef?
@@ -71,7 +72,7 @@ struct KeychainServerStore: ServerProfileStore {
       kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
     ]
     let updateStatus = SecItemUpdate(
-      baseQuery(service: service) as CFDictionary,
+      AureliaKeychain.item(baseQuery(service: service)) as CFDictionary,
       attributes as CFDictionary)
     if updateStatus == errSecSuccess {
       return
@@ -80,7 +81,7 @@ struct KeychainServerStore: ServerProfileStore {
       throw StoreError.unexpectedStatus(updateStatus)
     }
 
-    var insert = baseQuery(service: service)
+    var insert = AureliaKeychain.item(baseQuery(service: service))
     for (key, value) in attributes {
       insert[key] = value
     }
@@ -98,7 +99,7 @@ struct KeychainServerStore: ServerProfileStore {
   }
 
   private func delete(service: String) throws {
-    let status = SecItemDelete(baseQuery(service: service) as CFDictionary)
+    let status = AureliaKeychain.delete(baseQuery(service: service))
     guard status == errSecSuccess || status == errSecItemNotFound else {
       throw StoreError.unexpectedStatus(status)
     }

@@ -28,18 +28,21 @@ public sealed class MemorySettingsStore : ISettingsStore
 /// <summary>
 /// Preferences in one JSON file that only this user may read. Every change is written at once
 /// through a temporary file, so a crash never leaves a half-written file. A damaged file is set
-/// aside and the defaults apply.
+/// aside and the defaults apply. A file that exists but cannot be read right now (a passing disk or
+/// permission error) is left alone: changes then stay in memory for this session, so the saved
+/// preferences are never replaced by defaults (audit C-X12).
 /// </summary>
 public sealed class JsonFileSettingsStore : ISettingsStore
 {
     private readonly Lock gate = new();
     private readonly string path;
     private readonly JsonObject values;
+    private readonly bool unreadable;
 
     public JsonFileSettingsStore(string path)
     {
         this.path = path;
-        values = Load(path);
+        (values, unreadable) = Load(path);
     }
 
     public T? Read<T>(string key)
@@ -75,18 +78,27 @@ public sealed class JsonFileSettingsStore : ISettingsStore
         }
     }
 
-    private static JsonObject Load(string path)
+    private static (JsonObject Values, bool Unreadable) Load(string path)
     {
-        if (!File.Exists(path)) return [];
+        if (!File.Exists(path)) return ([], false);
+        string text;
         try
         {
-            return JsonNode.Parse(File.ReadAllText(path)) as JsonObject ?? [];
+            text = File.ReadAllText(path);
         }
-        catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return ([], true);
+        }
+        try
+        {
+            return (JsonNode.Parse(text) as JsonObject ?? [], false);
+        }
+        catch (JsonException)
         {
             try { File.Move(path, path + ".damaged", overwrite: true); }
             catch (Exception move) when (move is IOException or UnauthorizedAccessException) { }
-            return [];
+            return ([], false);
         }
     }
 
@@ -96,6 +108,11 @@ public sealed class JsonFileSettingsStore : ISettingsStore
     /// </summary>
     private void Save()
     {
+        if (unreadable)
+        {
+            LastSaveFailed = true;
+            return;
+        }
         try
         {
             var directory = Path.GetDirectoryName(path)!;

@@ -68,7 +68,8 @@ enum PasskeyStore {
   }
 
   static func load(server: UUID, profile: UUID) -> StoredPasskey? {
-    var query = baseQuery(server: server, profile: profile)
+    AureliaKeychain.migrate(service: service)
+    var query = AureliaKeychain.item(baseQuery(server: server, profile: profile))
     query[kSecReturnData as String] = true
     query[kSecMatchLimit as String] = kSecMatchLimitOne
     var result: CFTypeRef?
@@ -80,7 +81,7 @@ enum PasskeyStore {
   static func save(_ passkey: StoredPasskey, server: UUID, profile: UUID) throws {
     let data = try JSONEncoder().encode(passkey)
     remove(server: server, profile: profile)
-    var query = baseQuery(server: server, profile: profile)
+    var query = AureliaKeychain.item(baseQuery(server: server, profile: profile))
     query[kSecValueData as String] = data
     query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
     let status = SecItemAdd(query as CFDictionary, nil)
@@ -90,7 +91,7 @@ enum PasskeyStore {
   }
 
   static func remove(server: UUID, profile: UUID) {
-    SecItemDelete(baseQuery(server: server, profile: profile) as CFDictionary)
+    AureliaKeychain.delete(baseQuery(server: server, profile: profile))
   }
 
   private static func baseQuery(server: UUID, profile: UUID) -> [String: Any] {

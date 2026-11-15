@@ -99,13 +99,41 @@ public sealed class LinuxHostingSystem : IHostingSystem
         File.WriteAllText(AutostartFile, AutostartEntry(File.Exists("/usr/bin/aurelia-desktop") ? "aurelia-desktop" : Environment.ProcessPath ?? "aurelia-desktop"));
     }
 
+    /// <summary>
+    /// One argument of a desktop entry's <c>Exec=</c> line, by the Desktop Entry Specification: a
+    /// field code sign doubled, reserved characters quoted, and inside the quotes <c>"</c>, <c>`</c>,
+    /// <c>$</c> and <c>\</c> escaped, after which the value's own backslash escaping applies
+    /// (audit C-X15).
+    /// </summary>
+    public static string ExecArgument(string value)
+    {
+        var argument = value.Replace("%", "%%", StringComparison.Ordinal);
+        if (argument.AsSpan().IndexOfAny(ExecReserved) >= 0)
+        {
+            var quoted = new System.Text.StringBuilder("\"");
+            foreach (var character in argument)
+            {
+                if (character is '"' or '`' or '$' or '\\') quoted.Append('\\');
+                quoted.Append(character);
+            }
+            argument = quoted.Append('"').ToString();
+        }
+        return argument.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal)
+            .Replace("\t", "\\t", StringComparison.Ordinal)
+            .Replace("\r", "\\r", StringComparison.Ordinal);
+    }
+
+    private static readonly System.Buffers.SearchValues<char> ExecReserved =
+        System.Buffers.SearchValues.Create(" \t\n\r\"'\\><~|&;$*?#()`");
+
     public static string AutostartEntry(string executable) =>
         $"""
         [Desktop Entry]
         Type=Application
         Name={AppInfo.DisplayName}
         Comment=Keeps this computer's Aurelia Server running
-        Exec={(AppInfo.IsTestEdition ? "env AURELIA_EDITION=test " : "")}{(executable.Contains(' ', StringComparison.Ordinal) ? "\"" + executable + "\"" : executable)} --background
+        Exec={(AppInfo.IsTestEdition ? "env AURELIA_EDITION=test " : "")}{ExecArgument(executable)} --background
         Icon={AppInfo.ApplicationId}
         Terminal=false
         NoDisplay=true

@@ -53,8 +53,13 @@ public_key=$(sed -n 's/.*SigningPublicKey = "\([A-Za-z0-9+\/=]*\)";.*/\1/p' \
 [ -n "$public_key" ] \
   || { echo "UpdateFeed.SigningPublicKey is empty; the app could not check this signature." >&2; exit 1; }
 rm -f "$checksums.minisig"
+channel=stable
+if [ "${AURELIA_RELEASE_BETA:-false}" = true ]; then channel=beta; fi
+# The channel and repository are part of the signed comment: a beta cannot be passed off as
+# stable, nor a release moved to another repository, without the secret key (audit C-L14).
+# Promoting a beta signs its SHA256SUMS again for the stable channel.
 minisign -S -s "$signing_key" -m "$checksums" -x "$checksums.minisig" \
-  -t "Aurelia for Linux $version ($build)"
+  -t "Aurelia for Linux $version ($build) channel=$channel repository=$repository"
 # Check with the exact key the published app carries, before anything is uploaded.
 minisign -V -P "$public_key" -m "$checksums" -x "$checksums.minisig" >/dev/null \
   || { echo "The signature does not match the app's public key; nothing was uploaded." >&2; exit 1; }

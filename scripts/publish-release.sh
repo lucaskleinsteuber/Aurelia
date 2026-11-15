@@ -103,6 +103,22 @@ else
   files+=("$transition")
   (cd "$output" && shasum -a 256 $(for file in "${files[@]}"; do printf './%s ' "${file##*/}"; done) > SHA256SUMS)
   files+=("$output/SHA256SUMS")
+  # The Mac updater installs nothing whose SHA256SUMS lacks the owner's minisign signature. It is
+  # made in minisign's legacy format (-l), which the app checks with CryptoKit.
+  command -v minisign >/dev/null \
+    || { echo "Install minisign (brew install minisign) to sign the release." >&2; exit 1; }
+  signing_key="${AURELIA_MINISIGN_SECRET_KEY:-$HOME/.minisign/aurelia-linux.key}"
+  [ -s "$signing_key" ] \
+    || { echo "Missing the minisign secret key $signing_key; see docs/LINUX_UPDATE_SIGNING.md." >&2; exit 1; }
+  public_key=$(sed -n 's/.*static let publicKey = "\([A-Za-z0-9+\/=]*\)".*/\1/p' \
+    "$repository_root/clients/macos/Aurelia/Updates/AppUpdateSignature.swift")
+  [ -n "$public_key" ] || { echo "AppUpdateSignature names no public key." >&2; exit 1; }
+  rm -f "$output/SHA256SUMS.minisig"
+  minisign -S -l -s "$signing_key" -m "$output/SHA256SUMS" -x "$output/SHA256SUMS.minisig" \
+    -t "Aurelia for Mac $version ($build)"
+  minisign -V -P "$public_key" -m "$output/SHA256SUMS" -x "$output/SHA256SUMS.minisig" >/dev/null \
+    || { echo "The signature does not match the Mac app's public key; nothing was uploaded." >&2; exit 1; }
+  files+=("$output/SHA256SUMS.minisig")
   title="Aurelia for Mac $version ($build)"
   downloads="- **Mac with Apple silicon (M1 and newer):** Aurelia-$tag-macOS-arm64.dmg
 - **Mac with Intel processor:** Aurelia-$tag-macOS-x64.dmg

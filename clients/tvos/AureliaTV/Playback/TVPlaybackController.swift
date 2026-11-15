@@ -678,6 +678,7 @@ final class TVPlaybackController: ObservableObject {
     runtime.setIdleTimerDisabled(false)
     await saveProgress(finished: false)
     guard !closed else { return }
+    TVSleepTimerWakeRule.markEnded()
     // Servers before 1.8.2 do not know the signal; servers before 2.13 return 204.
     let status = try? await api.sleepTimerEnded()
     guard !closed else { return }

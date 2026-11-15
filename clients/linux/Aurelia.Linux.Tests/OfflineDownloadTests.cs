@@ -62,6 +62,34 @@ public sealed class OfflineDownloadTests : IDisposable
     }
 
     [Fact]
+    public void ACutOffDownloadIsRemovedAndADamagedListIsSetAsideWithItsFoldersShown()
+    {
+        var title = Invented();
+        var cutOff = Path.Combine(root, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(cutOff);
+        File.WriteAllBytes(Path.Combine(cutOff, "title.mkv.part"), new byte[10]);
+        File.WriteAllText(Path.Combine(root, "notes.txt"), "not a download");
+        var downloads = new OfflineDownloads(root);
+        Assert.False(Directory.Exists(cutOff));
+        Assert.True(File.Exists(downloads.FileOf(title)));
+        Assert.True(File.Exists(Path.Combine(root, "notes.txt")));
+        Assert.Equal(0, downloads.LeftoverBytes);
+
+        // A damaged list is kept aside, and the folders it described stay until removed by hand.
+        File.WriteAllText(Path.Combine(root, "index.json"), "{ damaged");
+        var afterDamage = new OfflineDownloads(root);
+        Assert.Empty(afterDamage.Titles);
+        Assert.NotNull(afterDamage.Error);
+        Assert.Single(Directory.GetFiles(root, "index-damaged-*.json"));
+        Assert.True(File.Exists(downloads.FileOf(title)));
+        Assert.True(afterDamage.LeftoverBytes > 0);
+        afterDamage.RemoveLeftovers();
+        Assert.False(Directory.Exists(downloads.Folder(title.Id)));
+        Assert.Equal(0, afterDamage.LeftoverBytes);
+        Assert.Null(afterDamage.Error);
+    }
+
+    [Fact]
     public void OfflineProgressWinsWhileTheServerKeptItsRevisionWhateverTheClock()
     {
         var title = Invented() with { ServerRevision = 7, ProgressSavedAt = DateTimeOffset.UtcNow.AddHours(-2), ProgressDirty = true };

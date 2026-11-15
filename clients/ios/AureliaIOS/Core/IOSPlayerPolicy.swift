@@ -338,6 +338,29 @@ enum IOSChapterPolicy {
   }
 }
 
+/// After this device's sleep timer ended, the app does not wake the server by itself for an hour:
+/// the server turns off after a sleep timer, and returning to Aurelia (a screen saver ending, the TV
+/// waking) must not switch it on again moments later (audit B-5, 14.11.2026: off at 05:02, woken
+/// 33 seconds later). Wake Server and Try Again still wake it.
+enum IOSSleepTimerWakeRule {
+  static let key = "aurelia.sleepTimerEndedAt"
+  static let quietSeconds: TimeInterval = 3600
+
+  static func markEnded(_ defaults: UserDefaults = .standard, now: Date = Date()) {
+    defaults.set(now.timeIntervalSince1970, forKey: key)
+  }
+
+  /// Someone asked for the server: automatic waking counts again.
+  static func clear(_ defaults: UserDefaults = .standard) { defaults.removeObject(forKey: key) }
+
+  static func mayWakeAutomatically(_ defaults: UserDefaults = .standard, now: Date = Date()) -> Bool {
+    let ended = defaults.double(forKey: key)
+    guard ended > 0 else { return true }
+    let since = now.timeIntervalSince1970 - ended
+    return since < 0 || since >= quietSeconds
+  }
+}
+
 enum IOSSleepTimerGoodNightPolicy {
   static let autoCloseDurationSeconds: TimeInterval = 300
 

@@ -70,6 +70,8 @@ enum IOSPowerChoice: String, AppEnum {
 struct TurnOffServerIntent: AppIntent {
   static let title: LocalizedStringResource = "Turn Off Aurelia Server"
   static let description = IntentDescription("Puts the Aurelia server to sleep or turns it off.")
+  // Never from a locked device, and always confirmed (audit C-M2).
+  static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
   @Parameter(title: "Action", default: .shutdown) var action: IOSPowerChoice
 
@@ -79,8 +81,11 @@ struct TurnOffServerIntent: AppIntent {
     do { status = try await client.status() } catch { throw IOSSiriContext.message(error) }
     let wanted = status.powerActions.contains(action.rawValue) ? action.rawValue : status.powerActions.first
     guard let wanted else { return .result(dialog: "This server can't turn itself off.") }
-    if !status.playing.isEmpty {
-      try await requestConfirmation(dialog: "Someone is watching on \(status.playing[0].device.name). Turn the server off anyway?")
+    let question = wanted == "sleep" ? "Put the server to sleep?" : "Turn the server off?"
+    if let watching = status.playing.first {
+      try await requestConfirmation(dialog: "Someone is watching on \(watching.device.name). \(question)")
+    } else {
+      try await requestConfirmation(dialog: "\(question)")
     }
     do {
       return .result(dialog: "\(try await client.powerNow(wanted))")
@@ -92,6 +97,7 @@ struct TurnOffServerIntent: AppIntent {
 
 struct PlayInAureliaIntent: AppIntent {
   static let title: LocalizedStringResource = "Play in Aurelia"
+  static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
   static let description = IntentDescription(
     "Plays a movie or an episode on the Apple TV or another device that has Aurelia open, for example “Breaking Bad season 3 episode 4”.")
 
@@ -131,6 +137,8 @@ struct PlayInAureliaIntent: AppIntent {
 
 struct WhatsPlayingIntent: AppIntent {
   static let title: LocalizedStringResource = "What's Playing in Aurelia"
+  /// What someone watches is not told to anyone near a locked device.
+  static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
   static let description = IntentDescription("Says what is playing on which device.")
 
   func perform() async throws -> some IntentResult & ProvidesDialog {

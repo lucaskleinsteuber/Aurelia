@@ -70,6 +70,21 @@ struct IOSWishAndSleepGoodNightTests {
     #expect(shutdown.text == "The server turns off in about 1 minute.")
   }
 
+  // Audit B-5: after the sleep timer ended the server turned off, and the app woke it again
+  // 33 seconds later. For an hour only someone asking (Try Again, Wake Server) wakes it.
+  @Test func anEndedSleepTimerKeepsTheAppFromWakingTheServerForAnHour() throws {
+    let defaults = try #require(UserDefaults(suiteName: "aurelia-sleep-wake-\(UUID().uuidString)"))
+    let ended = Date(timeIntervalSince1970: 1_800_000_000)
+    #expect(IOSSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended))
+    IOSSleepTimerWakeRule.markEnded(defaults, now: ended)
+    #expect(!IOSSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(33)))
+    #expect(!IOSSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(3599)))
+    #expect(IOSSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(3600)))
+    IOSSleepTimerWakeRule.markEnded(defaults, now: ended)
+    IOSSleepTimerWakeRule.clear(defaults)
+    #expect(IOSSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(60)))
+  }
+
   @Test func sleepTimerGoodNightPolicyRespectsSettingAndNeverSwitchesProfile() {
     #expect(IOSSleepTimerGoodNightPolicy.autoCloseDurationSeconds == 300)
     #expect(

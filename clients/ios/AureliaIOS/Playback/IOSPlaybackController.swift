@@ -457,12 +457,14 @@ final class IOSPlaybackController: ObservableObject {
         showGoodNightOnSleepTimer: preferences.showGoodNightOnSleepTimer,
         closed: closed)
     else {
+      IOSSleepTimerWakeRule.markEnded()
       let api = api
       Task { try? await api.sleepTimerEnded() }
       close()
       return
     }
 
+    IOSSleepTimerWakeRule.markEnded()
     showsSleepTimerGoodNight = true
     showGoodNight()
     await saveProgress(finished: false)

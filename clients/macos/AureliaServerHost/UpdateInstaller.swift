@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import OSLog
+import Security
 
 /// Installs an update the app downloaded and checked: `--install-update <disk image> <build>
 /// <app pid> [--no-relaunch]`. It waits for the app to quit, checks the new bundle (same
@@ -142,6 +143,7 @@ enum UpdateInstaller {
         identity: identity,
         verifySignature: {
           _ = try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", $0.path])
+          try verifySigner($0, sameTeamAs: app)
         },
         waitForProcesses: waitForOtherProcesses,
         copy: { source, destination in
@@ -178,12 +180,42 @@ enum UpdateInstaller {
     throw InstallError.appStillRunning
   }
 
+  /// The team of a bundle's signature, read from the Security framework rather than from the
+  /// text `codesign` prints.
   private static func teamIdentifier(_ bundle: URL) throws -> String? {
-    let output = try run("/usr/bin/codesign", ["-dv", bundle.path])
-    return output.split(whereSeparator: \.isNewline)
-      .first { $0.hasPrefix("TeamIdentifier=") }
-      .map { String($0.dropFirst("TeamIdentifier=".count)) }
-      .flatMap { $0 == "not set" ? nil : $0 }
+    var code: SecStaticCode?
+    guard SecStaticCodeCreateWithPath(bundle as CFURL, [], &code) == errSecSuccess, let code
+    else { throw UpdateInstallation.Failure.wrongSigner }
+    var information: CFDictionary?
+    guard
+      SecCodeCopySigningInformation(
+        code, SecCSFlags(rawValue: kSecCSSigningInformation), &information) == errSecSuccess,
+      let values = information as? [String: Any]
+    else { throw UpdateInstallation.Failure.wrongSigner }
+    return (values[kSecCodeInfoTeamIdentifier as String] as? String).flatMap {
+      $0.isEmpty ? nil : $0
+    }
+  }
+
+  /// The candidate must be signed through Apple's certificate chain by the installed app's team,
+  /// checked with an explicit requirement over the whole bundle and every architecture. A
+  /// self-made certificate that merely names the same team is refused (audit C-M1).
+  private static func verifySigner(_ candidate: URL, sameTeamAs installed: URL) throws {
+    guard let team = try teamIdentifier(installed), !team.isEmpty,
+      team.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) })
+    else { throw UpdateInstallation.Failure.wrongSigner }
+    var code: SecStaticCode?
+    var requirement: SecRequirement?
+    let text = "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\""
+    guard SecStaticCodeCreateWithPath(candidate as CFURL, [], &code) == errSecSuccess, let code,
+      SecRequirementCreateWithString(text as CFString, [], &requirement) == errSecSuccess,
+      let requirement
+    else { throw UpdateInstallation.Failure.wrongSigner }
+    let flags = SecCSFlags(
+      rawValue: kSecCSCheckAllArchitectures | kSecCSCheckNestedCode | kSecCSStrictValidate)
+    guard SecStaticCodeCheckValidity(code, flags, requirement) == errSecSuccess else {
+      throw UpdateInstallation.Failure.wrongSigner
+    }
   }
 
   @discardableResult

@@ -20,8 +20,9 @@ internal static class TestSigning
     }
 
     /// <summary>A signature file as "minisign -S" writes it (BLAKE2b-512 prehash, algorithm "ED").</summary>
-    public static string Sign(string text, string comment = "timestamp:1762550000\tfile:SHA256SUMS\thashed")
+    public static string Sign(string text, string? comment = null)
     {
+        comment ??= $"Aurelia for Linux 9.0.0 (999) channel=stable repository={Aurelia.Linux.Core.Updates.UpdateFeed.StandardRepository}";
         var digest = new Blake2bDigest(512);
         var message = Encoding.UTF8.GetBytes(text);
         digest.BlockUpdate(message, 0, message.Length);

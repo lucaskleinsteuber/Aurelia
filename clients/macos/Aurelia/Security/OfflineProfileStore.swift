@@ -91,13 +91,14 @@ struct KeychainOfflineProfileStore: OfflineProfileStoring {
   func cards(serverId: UUID) -> [OfflineProfileCard] {
     // The Mac's file keychain refuses data together with "all matches" (errSecParam), so the
     // offline mode never saw a card: list the accounts first, then read each card on its own.
-    let query: [String: Any] = [
+    AureliaKeychain.migrate(service: service)
+    let query = AureliaKeychain.item([
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
       kSecReturnAttributes as String: true,
       kSecMatchLimit as String: kSecMatchLimitAll,
       kSecAttrSynchronizable as String: false,
-    ]
+    ])
     var result: CFTypeRef?
     guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
       let items = result as? [[String: Any]]
@@ -105,7 +106,7 @@ struct KeychainOfflineProfileStore: OfflineProfileStoring {
     let accounts = items.compactMap { $0[kSecAttrAccount as String] as? String }
       .filter { $0.hasPrefix(serverId.uuidString + ".") }
     return accounts.compactMap { account -> Data? in
-      var one = baseQuery(account: account)
+      var one = AureliaKeychain.item(baseQuery(account: account))
       one[kSecReturnData as String] = true
       one[kSecMatchLimit as String] = kSecMatchLimitOne
       var data: CFTypeRef?
@@ -120,7 +121,7 @@ struct KeychainOfflineProfileStore: OfflineProfileStoring {
   func remember(_ card: OfflineProfileCard) {
     guard let data = try? JSONEncoder().encode(card) else { return }
     let account = Self.account(card)
-    let base = baseQuery(account: account)
+    let base = AureliaKeychain.item(baseQuery(account: account))
     let attributes: [String: Any] = [
       kSecValueData as String: data,
       kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
@@ -135,7 +136,7 @@ struct KeychainOfflineProfileStore: OfflineProfileStoring {
 
   func forget(serverId: UUID) {
     for card in cards(serverId: serverId) {
-      SecItemDelete(baseQuery(account: Self.account(card)) as CFDictionary)
+      AureliaKeychain.delete(baseQuery(account: Self.account(card)))
     }
   }
 

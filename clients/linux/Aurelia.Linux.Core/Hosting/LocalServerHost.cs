@@ -96,6 +96,7 @@ public sealed class LocalServerHost : ILocalServerHost
     private const int AutomaticRestartLimit = 3;
     private static readonly TimeSpan RestartWindow = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan ReadyTimeout = TimeSpan.FromSeconds(90);
+    internal static TimeSpan RestoreTimeout { get; set; } = TimeSpan.FromMinutes(10);
     private static readonly JsonSerializerOptions Json = AureliaJson.Options;
     private readonly LocalServerOptions options;
     private readonly string secret = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
@@ -852,9 +853,20 @@ public sealed class LocalServerHost : ILocalServerHost
                     restoring.ErrorDataReceived += (_, line) => { if (line.Data is not null) log?.Write(line.Data); };
                     restoring.BeginOutputReadLine();
                     restoring.BeginErrorReadLine();
-                    using var limit = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-                    await restoring.WaitForExitAsync(limit.Token);
-                    succeeded = restoring.ExitCode == 0;
+                    using var limit = new CancellationTokenSource(RestoreTimeout);
+                    try
+                    {
+                        await restoring.WaitForExitAsync(limit.Token);
+                        succeeded = restoring.ExitCode == 0;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Too long: the restore stops, counts as failed and the server starts again
+                        // with its previous state, instead of staying "Restarting" (audit C-L5).
+                        try { restoring.Kill(entireProcessTree: true); }
+                        catch (InvalidOperationException) { }
+                        await restoring.WaitForExitAsync(CancellationToken.None);
+                    }
                 }
             }
             if (ReadOperation() is { } operation)

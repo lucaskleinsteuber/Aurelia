@@ -200,7 +200,7 @@ final class TVAppModel: ObservableObject {
 
   func reconnect(userInitiated: Bool = false) async {
     guard let saved = connection, !isBusy else { return }
-    if userInitiated { allowWaking() }
+    if userInitiated { allowWaking(explicit: true) }
     let run = beginWork()
     defer { finish(run) }
     if savedServerUnreachable { wakeIfAllowed(saved.serverID) }
@@ -251,10 +251,17 @@ final class TVAppModel: ObservableObject {
     }
   }
 
-  private func allowWaking() { wakeAllowedUntil = Date().addingTimeInterval(600) }
+  /// The app may wake the server for ten minutes. Someone asking for it (Try Again, Wake Server)
+  /// also ends the quiet hour after a sleep timer.
+  private func allowWaking(explicit: Bool = false) {
+    wakeAllowedUntil = Date().addingTimeInterval(600)
+    if explicit { TVSleepTimerWakeRule.clear() }
+  }
 
   private func wakeIfAllowed(_ serverID: UUID) {
-    guard isForeground, let until = wakeAllowedUntil, until > Date() else { return }
+    guard isForeground, let until = wakeAllowedUntil, until > Date(),
+      TVSleepTimerWakeRule.mayWakeAutomatically()
+    else { return }
     TVWakeOnLan.wake(serverID: serverID)
   }
 

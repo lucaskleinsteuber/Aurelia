@@ -88,7 +88,7 @@ public sealed class DownloadsPage : LibraryPageBase
         if (downloads is null) return page;
         var profile = Context.Store.Client.Profile.User.Id;
         var titles = downloads.For(Context.Store.Client.Server.ServerId, profile);
-        if (titles.Count == 0 && downloads.Active.Count == 0 && downloads.Error is null)
+        if (titles.Count == 0 && downloads.Active.Count == 0 && downloads.Error is null && downloads.LeftoverBytes == 0)
         {
             page.Children.Add(EmptyDownloads());
             return page;
@@ -106,6 +106,28 @@ public sealed class DownloadsPage : LibraryPageBase
             page.Children.Add(new TextBlock { Text = $"{Management.AdminScope.Bytes(downloads.TotalBytes)} used on this computer", FontSize = 12, Classes = { "subdued" }, Margin = Inset() });
         if (downloads.Error is { } error)
             page.Children.Add(new TextBlock { Text = error, TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.Parse("#FFB36B")), Margin = Inset() });
+        if (downloads.LeftoverBytes > 0)
+        {
+            var remove = new Button { Content = "Remove", Classes = { "chip" } };
+            remove.Click += (_, _) => downloads.RemoveLeftovers();
+            page.Children.Add(new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 12,
+                Margin = Inset(),
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = $"{Management.AdminScope.Bytes(downloads.LeftoverBytes)} of earlier downloads can no longer be played.",
+                        TextWrapping = TextWrapping.Wrap,
+                        MaxWidth = 520,
+                        VerticalAlignment = VerticalAlignment.Center,
+                    },
+                    remove,
+                },
+            });
+        }
         foreach (var (id, share) in downloads.Active)
         {
             var cancel = new Button { Content = "Cancel", Classes = { "chip" } };

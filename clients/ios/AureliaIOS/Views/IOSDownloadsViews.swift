@@ -37,6 +37,14 @@ struct IOSDownloadsView: View {
           Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
         }
       }
+      if store.leftoverBytes > 0 {
+        Section {
+          Text(
+            "\(store.leftoverBytes.formatted(.byteCount(style: .file))) of earlier downloads can no longer be played."
+          )
+          Button("Remove", role: .destructive) { store.removeLeftovers() }
+        }
+      }
       if !loading.isEmpty || !store.preparing.isEmpty {
         Section("Downloading") {
           ForEach(loading) { entry in
@@ -174,7 +182,7 @@ struct IOSOfflineModeView: View {
       }
       Button("Cancel", role: .cancel) { asking = nil }
     }
-    .alert(IOSProfilePIN.incorrect, isPresented: $rejected) {
+    .alert(model.offlinePinLock.message() ?? IOSProfilePIN.incorrect, isPresented: $rejected) {
       Button("OK") {}
     }
   }

@@ -26,6 +26,9 @@ public static class PrivateFiles
             Access = FileAccess.Write,
             UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
         });
+        // The creation mode applies only to a new file; an older one left behind with wider rights
+        // is narrowed too (audit C-X17).
+        File.SetUnixFileMode(stream.SafeFileHandle, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         using var writer = new StreamWriter(stream);
         writer.Write(contents);
     }

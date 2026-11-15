@@ -256,7 +256,10 @@ public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installe
     public async Task CheckAsync(bool userInitiated, CancellationToken cancellation = default)
     {
         if (IsBusy || RestartRequired || (!userInitiated && ((settings.Read<bool?>("automaticUpdateChecks") ?? true) == false
-            || settings.Read<DateTimeOffset?>(CheckKey) is { } last && clock.GetUtcNow() - last < TimeSpan.FromDays(1)))) return;
+            || settings.Read<DateTimeOffset?>(CheckKey) is { } last && clock.GetUtcNow() - last is var since
+                // A check "in the future" means the clock was set back; it no longer silences checks
+                // until the clock catches up (audit C-X13).
+                && since >= TimeSpan.Zero && since < TimeSpan.FromDays(1)))) return;
         if (!supportedArchitecture)
         {
             Available = null;
@@ -323,6 +326,14 @@ public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installe
             cancellation.ThrowIfCancellationRequested();
             if (beforeInstall is not null) await beforeInstall();
             cancellation.ThrowIfCancellationRequested();
+            // Checked again just before the package manager reads it, so the time a program of
+            // this user could swap the file is as short as it can be without a privileged helper
+            // (audit C-L13).
+            await using (var check = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                if (Convert.ToHexStringLower(await SHA256.HashDataAsync(check, cancellation)) != expected)
+                    throw new IOException("The downloaded package changed after it was checked. It was not installed.");
+            }
             Status = "Waiting for the package manager…";
             Notify();
             await installer.InstallAsync(path, cancellation);
@@ -370,6 +381,8 @@ public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installe
         var signature = await source.SignatureAsync(release, cancellation);
         if (!MinisignSignature.Verify(System.Text.Encoding.UTF8.GetBytes(sums), signature, publicKey))
             throw new IOException("The release signature is not valid, so the update was not installed.");
+        if (!MinisignSignature.CommentAllows(MinisignSignature.TrustedComment(signature), release.SourceRepository, release.IsBeta))
+            throw new IOException("The release was signed for another channel or repository, so the update was not installed.");
     }
 
     private void Notify() => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));

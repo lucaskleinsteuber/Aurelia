@@ -68,6 +68,63 @@ public sealed class SettingsTests : IDisposable
     }
 
     [Fact]
+    public void AFileThatCannotBeReadRightNowIsNeverReplacedByDefaults()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Unix permissions only.");
+            return;
+        }
+        Directory.CreateDirectory(folder);
+        var path = Path.Combine(folder, "settings.json");
+        File.WriteAllText(path, """{"operatingMode":"host"}""");
+        File.SetUnixFileMode(path, UnixFileMode.None);
+        try
+        {
+            var store = new JsonFileSettingsStore(path);
+            store.Write("operatingMode", "client");
+            Assert.True(store.LastSaveFailed);
+            Assert.Equal("client", store.Read<string>("operatingMode"));
+            Assert.False(File.Exists(path + ".damaged"));
+        }
+        finally
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+        Assert.Equal("host", new JsonFileSettingsStore(path).Read<string>("operatingMode"));
+    }
+
+    [Fact]
+    public void ALeftoverTemporaryFileWithWiderRightsIsNarrowed()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Unix permissions only.");
+            return;
+        }
+        Directory.CreateDirectory(folder);
+        var path = Path.Combine(folder, "settings.json");
+        File.WriteAllText(path + ".tmp", "");
+        File.SetUnixFileMode(path + ".tmp", UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+        new JsonFileSettingsStore(path).Write("a", 1);
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
+    }
+
+    [Theory]
+    [InlineData("/usr/bin/aurelia-desktop", "/usr/bin/aurelia-desktop")]
+    [InlineData("/opt/My Apps/aurelia", "\"/opt/My Apps/aurelia\"")]
+    [InlineData("/home/a/100%/aurelia", "/home/a/100%%/aurelia")]
+    [InlineData("/home/a/$HOME/aurelia", "\"/home/a/\\\\$HOME/aurelia\"")]
+    [InlineData("/home/a/\"x\"/aurelia", "\"/home/a/\\\\\"x\\\\\"/aurelia\"")]
+    [InlineData("/home/a/b\\c/aurelia", "\"/home/a/b\\\\\\\\c/aurelia\"")]
+    public void TheAutostartEntryQuotesItsProgramByTheDesktopEntryRules(string executable, string expected)
+    {
+        Assert.Equal(expected, LinuxHostingSystem.ExecArgument(executable));
+        Assert.Contains("Exec=" + (Aurelia.Linux.Core.AppInfo.IsTestEdition ? "env AURELIA_EDITION=test " : "") + expected + " --background\n",
+            LinuxHostingSystem.AutostartEntry(executable), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AWrongTypeReadsAsDefault()
     {
         var store = new JsonFileSettingsStore(Path.Combine(folder, "settings.json"));

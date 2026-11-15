@@ -27,9 +27,11 @@ public sealed class AppInstance : IDisposable
         var id = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..24];
         var pipe = "aurelia-desktop-" + id;
         // Unix named pipes use filesystem sockets, whose paths have a small fixed limit.
-        // TMPDIR can be long and can differ between a desktop launcher and a terminal.
-        // Keep both launches on the same bounded path; CurrentUserOnly still authenticates peers.
-        name = OperatingSystem.IsWindows() ? pipe : Path.Combine("/tmp", pipe);
+        // TMPDIR can be long and can differ between a desktop launcher and a terminal. The session's
+        // own runtime folder (/run/user/<id>, only this user's) is short and the same for both; a
+        // predictable name in the shared /tmp could be taken by another user first (audit C-L6).
+        // CurrentUserOnly still authenticates peers.
+        name = OperatingSystem.IsWindows() ? pipe : Path.Combine(SocketDirectory(Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR")), pipe);
         Settings.PrivateFiles.CreateDirectory(directory);
         var path = Path.Combine(directory, "instance.lock");
         var options = new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.None };
@@ -93,9 +95,20 @@ public sealed class AppInstance : IDisposable
                 await server.WriteAsync(new byte[] { 1 }, request.Token);
             }
             catch (OperationCanceledException) { }
-            catch (IOException) { }
+            catch (IOException)
+            {
+                // A path that cannot be listened on fails at once; without a pause this loop would
+                // keep a processor core busy (audit C-L6).
+                try { await Task.Delay(TimeSpan.FromSeconds(1), stop.Token); }
+                catch (OperationCanceledException) { }
+            }
         }
     }
+
+    /// <summary>The runtime folder when it is a usable absolute path, else /tmp.</summary>
+    internal static string SocketDirectory(string? runtimeDirectory) =>
+        runtimeDirectory is { Length: > 0 and <= 64 } && Path.IsPathRooted(runtimeDirectory) && Directory.Exists(runtimeDirectory)
+            ? runtimeDirectory : "/tmp";
 
     public void Dispose()
     {

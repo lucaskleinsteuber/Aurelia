@@ -14,6 +14,9 @@ final class IOSOfflineStore: ObservableObject {
   /// Titles whose download is being prepared (ticket, subtitles, pictures).
   @Published private(set) var preparing: Set<UUID> = []
   @Published var errorMessage: String?
+  /// Space taken by download folders no listed title uses, kept only after the list of downloads
+  /// was damaged; Downloads offers to remove it.
+  @Published private(set) var leftoverBytes: Int64 = 0
 
   let root: URL
   private var downloader: IOSOfflineDownloader?
@@ -293,7 +296,9 @@ final class IOSOfflineStore: ObservableObject {
     pending[index].state = .failed
     pending[index].message = message
     if let resumeData,
-      (try? resumeData.write(to: folder(for: id).appendingPathComponent("resume.data"))) != nil
+      (try? resumeData.write(
+        to: folder(for: id).appendingPathComponent("resume.data"),
+        options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])) != nil
     {
       pending[index].resumeFile = "resume.data"
     } else {
@@ -396,13 +401,24 @@ final class IOSOfflineStore: ObservableObject {
     try? folder.setResourceValues(values)
   }
 
+  private static let damagedListMessage = "The list of downloads was damaged and has been set aside."
+
   private func load() {
     let decoder = JSONDecoder()
-    if let data = try? Data(contentsOf: indexURL),
-      let stored = try? decoder.decode([IOSOfflineTitle].self, from: data)
-    {
-      // A title whose file is gone is forgotten.
-      titles = stored.filter { FileManager.default.fileExists(atPath: fileURL(for: $0).path) }
+    var readable = true
+    if let data = try? Data(contentsOf: indexURL) {
+      if let stored = try? decoder.decode([IOSOfflineTitle].self, from: data) {
+        // A title whose file is gone is forgotten.
+        titles = stored.filter { FileManager.default.fileExists(atPath: fileURL(for: $0).path) }
+      } else {
+        // Kept beside the folders instead of being replaced by the next save.
+        readable = false
+        let stamp = ISO8601DateFormatter.string(
+          from: Date(), timeZone: .gmt, formatOptions: [.withYear, .withMonth, .withDay, .withTime])
+        try? FileManager.default.moveItem(
+          at: indexURL, to: root.appendingPathComponent("index-damaged-\(stamp).json"))
+        errorMessage = Self.damagedListMessage
+      }
     }
     if let data = try? Data(contentsOf: pendingURL),
       let stored = try? decoder.decode([IOSOfflinePending].self, from: data)
@@ -414,6 +430,48 @@ final class IOSOfflineStore: ObservableObject {
     {
       cards = stored
     }
+    // Folders without a listed or loading title are downloads that were cut off or titles
+    // forgotten above: they are removed. After a damaged list they may be whole downloads, so
+    // they stay until the person removes them in Downloads (audit C-L7).
+    let orphans = orphanFolders()
+    if readable {
+      for folder in orphans { try? FileManager.default.removeItem(at: folder) }
+    } else {
+      leftoverBytes = orphans.reduce(0) { $0 + Self.bytes(in: $1) }
+    }
+  }
+
+  /// Removes the folders a damaged list of downloads left behind.
+  func removeLeftovers() {
+    for folder in orphanFolders() { try? FileManager.default.removeItem(at: folder) }
+    leftoverBytes = 0
+    if errorMessage == Self.damagedListMessage { errorMessage = nil }
+  }
+
+  /// Download folders (named after a title id) that no listed, loading or preparing title uses.
+  private func orphanFolders() -> [URL] {
+    let used = Set(titles.map(\.id)).union(pending.map(\.id)).union(preparing)
+    let folders =
+      (try? FileManager.default.contentsOfDirectory(
+        at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+    return folders.filter { folder in
+      guard let id = UUID(uuidString: folder.lastPathComponent), !used.contains(id) else {
+        return false
+      }
+      return (try? folder.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+    }
+  }
+
+  private static func bytes(in folder: URL) -> Int64 {
+    guard
+      let files = FileManager.default.enumerator(
+        at: folder, includingPropertiesForKeys: [.fileSizeKey])
+    else { return 0 }
+    var total: Int64 = 0
+    for case let file as URL in files {
+      total += Int64((try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+    }
+    return total
   }
 
   private func saveTitles() { write(titles, to: indexURL) }
@@ -508,6 +566,11 @@ final class IOSOfflineDownloader: NSObject, URLSessionDownloadDelegate, @uncheck
   private let root: URL
   private let events: Events
   private var session: URLSession!
+  /// Transfers this downloader stopped because the server's key did not match its pin. Only
+  /// those report an identity problem; any other cancellation is not a security warning
+  /// (audit C-L12).
+  private let rejectedLock = NSLock()
+  private var rejectedTasks: Set<Int> = []
 
   init(root: URL, events: Events) {
     self.root = root
@@ -581,10 +644,20 @@ final class IOSOfflineDownloader: NSObject, URLSessionDownloadDelegate, @uncheck
       let fingerprint = try? IOSServerIdentity.fingerprint(trust: trust),
       fingerprint.caseInsensitiveCompare(expected) == .orderedSame
     else {
+      rejectedLock.withLock { _ = rejectedTasks.insert(task.taskIdentifier) }
       completionHandler(.cancelAuthenticationChallenge, nil)
       return
     }
     completionHandler(.useCredential, URLCredential(trust: trust))
+  }
+
+  /// What a transfer that ended with an error tells the person.
+  static func failureMessage(_ error: NSError, rejectedIdentity: Bool) -> String {
+    if rejectedIdentity { return "The server’s identity could not be confirmed." }
+    if error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled {
+      return "The download stopped."
+    }
+    return "The connection to the server was lost."
   }
 
   func urlSession(
@@ -621,15 +694,13 @@ final class IOSOfflineDownloader: NSObject, URLSessionDownloadDelegate, @uncheck
   }
 
   func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    let rejected = rejectedLock.withLock { rejectedTasks.remove(task.taskIdentifier) != nil }
     guard let error, let media = Self.description(of: task)?.media else { return }
     // A transfer cancelled here was already forgotten by the store, which ignores this.
     let nsError = error as NSError
     let resumeData = nsError.userInfo[NSURLSessionDownloadTaskResumeData] as? Data
-    let message =
-      nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
-      ? "The server’s identity could not be confirmed."
-      : "The connection to the server was lost."
-    events.failed(media, message, resumeData)
+    events.failed(
+      media, Self.failureMessage(nsError, rejectedIdentity: rejected), resumeData)
   }
 
   func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {

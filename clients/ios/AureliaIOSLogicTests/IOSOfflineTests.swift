@@ -10,6 +10,23 @@ struct IOSOfflineTests {
 
   // MARK: Rules
 
+  @Test func fiveWrongOfflinePinsMakeEveryFurtherTryWait() {
+    let start = Date(timeIntervalSinceReferenceDate: 1_000_000)
+    var lock = IOSOfflinePinLock()
+    for _ in 1...4 { lock.recordFailure(now: start) }
+    #expect(!lock.isLocked(now: start))
+    lock.recordFailure(now: start)
+    #expect(lock.isLocked(now: start.addingTimeInterval(29)))
+    #expect(!lock.isLocked(now: start.addingTimeInterval(31)))
+    #expect(lock.message(now: start.addingTimeInterval(10)) == "Too many wrong PINs. Try again in 20 s.")
+    lock.recordFailure(now: start)
+    #expect(lock.isLocked(now: start.addingTimeInterval(59)))
+    for _ in 1...10 { lock.recordFailure(now: start) }
+    #expect(!lock.isLocked(now: start.addingTimeInterval(301)))
+    lock.recordSuccess()
+    #expect(!lock.isLocked(now: start) && lock.failures == 0)
+  }
+
   @Test func downloadsLeaveRoomOnTheDevice() {
     #expect(IOSOfflineRules.hasRoom(for: 4_000_000_000, available: 6_000_000_000))
     #expect(!IOSOfflineRules.hasRoom(for: 4_000_000_000, available: 4_500_000_000))
@@ -140,6 +157,45 @@ struct IOSOfflineTests {
     #expect(reopened.titles[0].progressDirty && reopened.titles[0].positionMilliseconds == 5_000)
     reopened.remove(kept.id)
     #expect(!FileManager.default.fileExists(atPath: reopened.folder(for: kept.id).path))
+  }
+
+  @Test @MainActor func cutOffDownloadsAreRemovedAndADamagedListIsSetAside() throws {
+    let root = temporaryRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = IOSOfflineStore(root: root, transfers: false)
+    let kept = title()
+    try writeFile(for: kept, in: store)
+    store.record(kept)
+    let cutOff = store.folder(for: UUID())
+    try FileManager.default.createDirectory(at: cutOff, withIntermediateDirectories: true)
+    try Data(count: 10).write(to: cutOff.appendingPathComponent("incoming"))
+    let reopened = IOSOfflineStore(root: root, transfers: false)
+    #expect(!FileManager.default.fileExists(atPath: cutOff.path))
+    #expect(reopened.titles.map(\.id) == [kept.id] && reopened.leftoverBytes == 0)
+
+    try Data("{ damaged".utf8).write(to: root.appendingPathComponent("index.json"))
+    let damaged = IOSOfflineStore(root: root, transfers: false)
+    #expect(damaged.titles.isEmpty && damaged.errorMessage != nil)
+    #expect(damaged.leftoverBytes > 0)
+    let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
+    #expect(names.contains { $0.hasPrefix("index-damaged-") })
+    damaged.removeLeftovers()
+    #expect(!FileManager.default.fileExists(atPath: damaged.folder(for: kept.id).path))
+    #expect(damaged.leftoverBytes == 0 && damaged.errorMessage == nil)
+  }
+
+  @Test func onlyARejectedServerKeyIsReportedAsAnIdentityProblem() {
+    let cancelled = NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+    #expect(
+      IOSOfflineDownloader.failureMessage(cancelled, rejectedIdentity: true)
+        == "The server’s identity could not be confirmed.")
+    #expect(
+      IOSOfflineDownloader.failureMessage(cancelled, rejectedIdentity: false)
+        == "The download stopped.")
+    #expect(
+      IOSOfflineDownloader.failureMessage(
+        NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost),
+        rejectedIdentity: false) == "The connection to the server was lost.")
   }
 
   @Test @MainActor func forgettingAServerRemovesItsDownloadsAndCards() throws {
