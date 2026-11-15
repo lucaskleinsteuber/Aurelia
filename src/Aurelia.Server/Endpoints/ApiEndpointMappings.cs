@@ -242,6 +242,8 @@ public static class ApiEndpointMappings
         ServerRuntimeOptions runtime,
         ServerTlsIdentity tlsIdentity,
         LiveConversionService live,
+        ServerMoveService moves,
+        Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions> json,
         CancellationToken cancellationToken)
     {
         var identity = await database.ServerIdentities
@@ -249,7 +251,7 @@ public static class ApiEndpointMappings
             .SingleAsync(candidate => candidate.Id == 1, cancellationToken);
         var isSetup = await database.Users.AnyAsync(cancellationToken);
         var version = ServerProductVersion.Current;
-        return Results.Ok(new ServerInfoResponse(
+        var info = new ServerInfoResponse(
             identity.ServerId,
             runtime.ServerName,
             version,
@@ -261,7 +263,13 @@ public static class ApiEndpointMappings
             ServerFeatures.Reported(await live.IsAvailableAsync(), await live.SpeechAudioAvailableAsync()),
             // A desktop or laptop that hosts Aurelia in its app is woken by its owner, not over the network.
             runtime.LanAccessEnabled && !ServerHosting.ByApp(ServerHosting.Kind(runtime)) ? WakeOnLan.LocalAddresses() : null,
-            ServerHosting.Kind(runtime)));
+            ServerHosting.Kind(runtime));
+        if (moves.MovedTo is not { } movedTo) return Results.Ok(info);
+        // A server that moved tells reconnecting devices where it went (docs/SERVER_MOVE.md).
+        var options = json.Value.SerializerOptions;
+        var document = JsonSerializer.SerializeToNode(info, options)!.AsObject();
+        document["moved"] = JsonSerializer.SerializeToNode(movedTo, options);
+        return Results.Json(document, options);
     }
 
     private static async Task<IResult> SetupOwnerAsync(

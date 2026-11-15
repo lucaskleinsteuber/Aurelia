@@ -42,6 +42,12 @@ if (commandLine.Command == "server")
     return;
 }
 
+if (commandLine.Command == "move")
+{
+    Environment.ExitCode = await ServerMoveCommandClient.RunAsync(commandLine, CancellationToken.None);
+    return;
+}
+
 if (commandLine.Command == "database")
 {
     var configuration = new ConfigurationBuilder().Build();
@@ -67,6 +73,8 @@ if (await FullServerBackupService.ApplyRequestedOnStartAsync(runtime, Cancellati
         : "Restoring the server from a backup failed; the previous state stays.");
 runtime = ServerRuntimeOptions.Resolve(builder.Configuration, args);
 await new DatabaseBackupService(runtime).RecoverPendingRestoreAsync(CancellationToken.None);
+// A server that just moved here makes a certificate for this computer with its moved key.
+ServerMoveArrival.PrepareStart(runtime);
 using var tlsIdentity = ServerTlsIdentity.LoadOrCreate(runtime);
 var dataProtectionDirectory = Path.Combine(runtime.DataDirectory, "DataProtectionKeys");
 PrivateFilePermissions.CreatePrivateDirectory(dataProtectionDirectory);
@@ -145,6 +153,14 @@ builder.Services.AddSingleton<TokenService>();
 builder.Services.AddSingleton<SessionActivityRecorder>();
 builder.Services.AddSingleton<DatabaseBackupService>();
 builder.Services.AddSingleton<FullServerBackupService>();
+// Moving to a new server (docs/SERVER_MOVE.md).
+builder.Services.AddSingleton<ServerMoveService>();
+builder.Services.AddSingleton<ServerMoveTransport>();
+builder.Services.AddSingleton<ServerMoveOptions>();
+builder.Services.AddSingleton<ServerMoveApplier>();
+builder.Services.AddSingleton<ServerMoveImportService>();
+builder.Services.AddScoped<LibraryRelocationService>();
+builder.Services.AddHostedService<ServerMoveArrivalReporter>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(PlaybackTicketPolicy.Resolve(
     builder.Environment.IsEnvironment("Testing"),
@@ -320,6 +336,16 @@ builder.Services.AddRateLimiter(options =>
             QueueLimit = 0,
             AutoReplenishment = true,
         }));
+    // Between two servers during a move: a handful of calls per move; the code's own five tries count separately.
+    options.AddPolicy("move", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "local",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 20,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true,
+        }));
     options.AddPolicy("pairing", context => RateLimitPartition.GetFixedWindowLimiter(
         context.User.Identity?.Name ?? "anonymous",
         _ => new FixedWindowRateLimiterOptions
@@ -376,7 +402,8 @@ app.Use(async (context, next) =>
             "Without HTTPS, Aurelia Server only answers on the server computer's own address."));
         return;
     }
-    var backupUpload = HttpMethods.IsPut(context.Request.Method) && (context.Request.Path.Value ?? "").StartsWith("/api/v1/server/backups/uploads/", StringComparison.OrdinalIgnoreCase);
+    var backupUpload = HttpMethods.IsPut(context.Request.Method) && ((context.Request.Path.Value ?? "").StartsWith("/api/v1/server/backups/uploads/", StringComparison.OrdinalIgnoreCase)
+        || context.Request.Path.Equals("/api/v1/setup/move/file", StringComparison.OrdinalIgnoreCase));
     var requestPath = context.Request.Path.Value ?? string.Empty;
     var editorPath = requestPath.Contains("/editor", StringComparison.Ordinal);
     var collectionArtworkUpload = HttpMethods.IsPost(context.Request.Method)
@@ -423,6 +450,8 @@ app.Use(async (context, next) =>
             context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, status);
     }
 });
+// A server that moved to another computer answers only what devices need to find it there.
+app.Use(ServerMoveGuard.InvokeAsync);
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
@@ -506,6 +535,7 @@ app.Use(async (context, next) =>
 });
 app.MapAureliaApi();
 app.MapServerManagement();
+app.MapServerMove();
 app.MapServerReadiness();
 app.MapMediaEditing();
 app.MapImportPlanning();

@@ -10,12 +10,15 @@ public sealed class AureliaServerFactory : WebApplicationFactory<Program>
     private readonly bool ownsDataDirectory;
     private readonly Action<IServiceCollection>? configureServices;
     private readonly Action<ILoggingBuilder>? configureLogging;
+    private readonly IReadOnlyDictionary<string, string>? settings;
 
     public AureliaServerFactory(
         string? dataDirectory = null,
         Action<IServiceCollection>? configureServices = null,
-        Action<ILoggingBuilder>? configureLogging = null)
+        Action<ILoggingBuilder>? configureLogging = null,
+        IReadOnlyDictionary<string, string>? settings = null)
     {
+        this.settings = settings;
         DataDirectory = dataDirectory ?? TestPaths.CreateDataDirectory();
         ownsDataDirectory = dataDirectory is null;
         this.configureServices = configureServices;
@@ -30,6 +33,10 @@ public sealed class AureliaServerFactory : WebApplicationFactory<Program>
         builder.UseSetting("Aurelia:DataDirectory", DataDirectory);
         builder.UseSetting("Aurelia:ListenUrl", "http://127.0.0.1:0");
         builder.UseSetting("Aurelia:BootstrapToken", ApiTestClient.BootstrapToken);
+        foreach (var (key, value) in settings ?? new Dictionary<string, string>())
+        {
+            builder.UseSetting(key, value);
+        }
         builder.ConfigureLogging(logging =>
         {
             logging.SetMinimumLevel(LogLevel.Warning);

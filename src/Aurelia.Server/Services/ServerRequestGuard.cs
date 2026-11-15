@@ -125,6 +125,12 @@ public sealed class ServerRequestGuard
 
         // 2. Critical: Backup restore (overwrites database)
         if (path.StartsWith("/api/v1/server/backups/restore", StringComparison.Ordinal)) return true;
+        // Moving the server to another computer hands out its whole state; marking or undoing a
+        // move decides which computer answers devices (docs/SERVER_MOVE.md).
+        if (path is "/api/v1/server/move" or "/api/v1/server/move/mark-moved") return true;
+        // Storage Location Moved rewrites where a location's titles are.
+        if (HttpMethods.IsPost(request.Method) && path.StartsWith("/api/v1/libraries/", StringComparison.Ordinal) && path.EndsWith("/relocate", StringComparison.Ordinal)
+            && path.Split('/').Length == 6) return true;
 
         // 3. Critical: Factory reset / destructive reset operations
         if (path == "/api/v1/server/reset"

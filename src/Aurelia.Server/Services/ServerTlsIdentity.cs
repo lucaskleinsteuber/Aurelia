@@ -52,6 +52,20 @@ public sealed class ServerTlsIdentity : IDisposable
         }
     }
 
+    /// <summary>
+    /// A server that moved to another computer (docs/SERVER_MOVE.md) brings its key along: a new
+    /// certificate names this computer and its addresses but is made with the same key, so every
+    /// device that pins the key keeps trusting the server. Does nothing without both identity files.
+    /// </summary>
+    public static bool ReissueForThisComputer(ServerRuntimeOptions runtime)
+    {
+        if (!File.Exists(runtime.CertificatePath) || !File.Exists(runtime.PrivateKeyPath)) return false;
+        using var current = X509Certificate2.CreateFromPemFile(runtime.CertificatePath, runtime.PrivateKeyPath);
+        using var key = current.GetECDsaPrivateKey() ?? throw new InvalidOperationException("The TLS private key is unavailable.");
+        CreateCertificate(runtime, key);
+        return true;
+    }
+
     public string? PublicKeyFingerprint { get; }
 
     public string? DisplayFingerprint { get; }

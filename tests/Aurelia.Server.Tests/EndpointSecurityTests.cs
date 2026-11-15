@@ -34,6 +34,19 @@ public sealed class EndpointSecurityTests
         "POST /api/v1/integration/power",
         "POST /api/v1/local/owner-pin",
         "POST /api/v1/setup/owner",
+        // Moving a server (docs/SERVER_MOVE.md): between the two servers the move code and the
+        // bundle's token are the credentials; on a new server without an owner, the setup code
+        // or an app host's bootstrap token.
+        "GET /api/v1/move/hello",
+        "POST /api/v1/move/claim",
+        "POST /api/v1/move/arrived",
+        "GET /api/v1/setup/move/",
+        "DELETE /api/v1/setup/move/",
+        "POST /api/v1/setup/move/network",
+        "PUT /api/v1/setup/move/file",
+        "POST /api/v1/setup/move/file/{uploadId:guid}/open",
+        "POST /api/v1/setup/move/locations/preview",
+        "POST /api/v1/setup/move/finish",
         // The browser app: its files, and the sign-in steps before a device credential exists.
         "GET,HEAD /web/{**file}",
         "GET,HEAD /web/v/{version}/{**file}",

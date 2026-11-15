@@ -10,7 +10,11 @@ namespace Aurelia.Server.Services;
 public sealed record BackupExportRequest(string Passphrase);
 public sealed record BackupExportResult(Guid Id, long Bytes, bool IncludesMedia = false, bool IncludesArtwork = false);
 public sealed record BackupRestoreRequest(Guid UploadId, string Passphrase, bool RevokeAllSessions, bool AcceptDifferentServerIdentity = false);
-public sealed record PreparedRestore(Guid Id, Guid ServerId, bool RevokesAllSessions);
+/// <param name="KeepsSessions">A server move keeps every device's sign-in (docs/SERVER_MOVE.md); a restore revokes them.</param>
+public sealed record PreparedRestore(Guid Id, Guid ServerId, bool RevokesAllSessions, bool KeepsSessions = false);
+/// <summary>Writes a staged backup into a transfer stream: a passphrase container or a move's key container.</summary>
+internal delegate Task BackupContainerWriter(string stage, IReadOnlyList<string> names, Guid serverId, Stream destination, CancellationToken token);
+internal delegate Task<BackupManifest> BackupContainerReader(Stream source, string stage, CancellationToken token);
 internal sealed record RestoreActivationJournal(int Version, Guid Id, string[] Originals, string[] Replacements);
 internal enum RestoreActivationStep { JournalWritten, OriginalMoved, ReplacementMoved, Verified }
 
@@ -25,7 +29,19 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
     private string DirectoryPath => Path.Combine(databaseBackups.BackupDirectory, "Transfers");
     public string TransferPath(Guid id) => Path.Combine(DirectoryPath, id.ToString("N") + ".aureliabackup");
 
-    public async Task<BackupExportResult> ExportAsync(string passphrase, CancellationToken token)
+    public Task<BackupExportResult> ExportAsync(string passphrase, CancellationToken token) =>
+        ExportCoreAsync((stage, names, serverId, stream, cancellation) =>
+            EncryptedBackupContainer.EncryptAsync(stage, names, serverId, stream, passphrase, cancellation), null, token);
+
+    /// <summary>
+    /// A move bundle: the full backup plus <c>move.json</c>, written into a transfer file. The move
+    /// manifest is made inside the catalog lease, so its samples describe the exported database.
+    /// </summary>
+    internal Task<BackupExportResult> ExportMoveAsync(BackupContainerWriter writer, Func<string, CancellationToken, Task<byte[]>> moveManifest,
+        CancellationToken token) => ExportCoreAsync(writer, moveManifest, token);
+
+    private async Task<BackupExportResult> ExportCoreAsync(BackupContainerWriter writer, Func<string, CancellationToken, Task<byte[]>>? moveManifest,
+        CancellationToken token)
     {
         await gate.WaitAsync(token);
         string? stage = null;
@@ -50,17 +66,25 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
                 var destination = Path.Combine(stage, entry.Key);
                 PrivateFilePermissions.CreatePrivateDirectory(Path.GetDirectoryName(destination)!);
                 await using var file = PrivateFilePermissions.OpenNewPrivateFile(destination);
-                await using var writer = new StreamWriter(file);
-                await writer.WriteAsync(entry.Value.AsMemory(), token);
+                await using var text = new StreamWriter(file);
+                await text.WriteAsync(entry.Value.AsMemory(), token);
             }
             // Always include the authoritative configuration, including a first-run default.
             var settingsPath = Path.Combine(stage, ServerHostSettings.FileName);
             await using (var settings = PrivateFilePermissions.OpenNewPrivateFile(settingsPath))
                 await JsonSerializer.SerializeAsync(settings, configuration.Current, Json, token);
+            var names = StateFiles(stage);
+            if (moveManifest is not null)
+            {
+                var bytes = await moveManifest(Path.Combine(stage, "aurelia.db"), token);
+                await using (var file = PrivateFilePermissions.OpenNewPrivateFile(Path.Combine(stage, EncryptedBackupContainer.MoveManifestName)))
+                    await file.WriteAsync(bytes, token);
+                names.Add(EncryptedBackupContainer.MoveManifestName);
+            }
             output = TransferPath(id);
             await using (var stream = PrivateFilePermissions.OpenNewPrivateFile(output))
             {
-                await EncryptedBackupContainer.EncryptAsync(stage, StateFiles(stage), await ServerIdAsync(Path.Combine(stage, "aurelia.db"), token), stream, passphrase, token);
+                await writer(stage, names, await ServerIdAsync(Path.Combine(stage, "aurelia.db"), token), stream, token);
                 await stream.FlushAsync(token);
                 stream.Flush(flushToDisk: true);
             }
@@ -69,7 +93,7 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
         catch { if (output is not null && File.Exists(output)) File.Delete(output); throw; }
         finally { if (stage is not null && Directory.Exists(stage)) Directory.Delete(stage, true); gate.Release(); }
     }
-    public async Task UploadAsync(Guid id, Stream source, long length, CancellationToken token)
+    public async Task UploadAsync(Guid id, Stream source, long length, CancellationToken token, Action<long>? progress = null)
     {
         if (length is < 1 or > EncryptedBackupContainer.MaximumBytes)
             throw new AccountException("backup_too_large", "The encrypted backup exceeds the transfer limit.", 413);
@@ -92,6 +116,7 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
                     written += count;
                     if (written > length) throw new InvalidDataException("Backup transfer length changed.");
                     await output.WriteAsync(buffer.AsMemory(0, count), token);
+                    progress?.Invoke(written);
                 }
                 if (written != length) throw new InvalidDataException("The encrypted backup transfer was truncated.");
                 await output.FlushAsync(token);
@@ -100,30 +125,50 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
         }
         finally { gate.Release(); }
     }
-    public async Task<PreparedRestore> PrepareRestoreAsync(BackupRestoreRequest request, CancellationToken token)
+    public Task<PreparedRestore> PrepareRestoreAsync(BackupRestoreRequest request, CancellationToken token)
     {
         if (!request.RevokeAllSessions) throw new AccountException("session_revocation_confirmation_required", "Restoring a backup signs out every device. Confirm this before continuing.", 400);
+        return PrepareCoreAsync(request.UploadId, (source, stage, cancellation) =>
+            EncryptedBackupContainer.DecryptAsync(source, stage, request.Passphrase, cancellation), request.AcceptDifferentServerIdentity, false, token);
+    }
+
+    /// <summary>
+    /// Verifies a received move bundle like a restore, with the moved server's identity accepted and
+    /// every device's sign-in kept. The staged files, <c>move.json</c> among them, stay in
+    /// <see cref="RestoreStagePath"/> until the move is finished or discarded.
+    /// </summary>
+    internal Task<PreparedRestore> PrepareMoveAsync(Guid uploadId, BackupContainerReader reader, CancellationToken token) =>
+        PrepareCoreAsync(uploadId, reader, true, true, token);
+
+    public string RestoreStagePath(Guid id) => RestoreStage(runtime, id);
+
+    private async Task<PreparedRestore> PrepareCoreAsync(Guid uploadId, BackupContainerReader reader, bool acceptDifferentIdentity,
+        bool keepSessions, CancellationToken token)
+    {
         await gate.WaitAsync(token);
         var id = Guid.NewGuid();
         var stage = RestoreStage(runtime, id);
         try
         {
-            var path = TransferPath(request.UploadId);
+            var path = TransferPath(uploadId);
             if (!File.Exists(path) || new FileInfo(path).LinkTarget is not null) throw new InvalidDataException("The backup upload was not found.");
-            await using var source = File.OpenRead(path);
-            var manifest = await EncryptedBackupContainer.DecryptAsync(source, stage, request.Passphrase, token);
+            BackupManifest manifest;
+            await using (var source = File.OpenRead(path))
+                manifest = await reader(source, stage, token);
             await ValidateStageAsync(stage, databaseBackups, token);
             if (manifest.ServerId != await ServerIdAsync(Path.Combine(stage, "aurelia.db"), token))
                 throw new InvalidDataException("The manifest and database identities differ.");
             var currentId = await ServerIdAsync(runtime.DatabasePath, token);
-            if (manifest.ServerId != currentId && !request.AcceptDifferentServerIdentity)
+            if (manifest.ServerId != currentId && !acceptDifferentIdentity)
                 throw new InvalidDataException("This backup belongs to another server. Its identity requires an explicit trust change.");
             var stageDatabase = Path.Combine(stage, "aurelia.db");
             await using (var database = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = stageDatabase, Pooling = false }.ToString()))
             {
                 await database.OpenAsync(token);
                 await using var command = database.CreateCommand();
-                command.CommandText = "UPDATE DeviceSessions SET RevokedAt=$now WHERE RevokedAt IS NULL; UPDATE PairingCodes SET ConsumedAt=$now WHERE ConsumedAt IS NULL; DELETE FROM PlaybackTickets;";
+                // A move keeps every device signed in; playback tickets are for one stream only either way.
+                command.CommandText = keepSessions ? "DELETE FROM PlaybackTickets;"
+                    : "UPDATE DeviceSessions SET RevokedAt=$now WHERE RevokedAt IS NULL; UPDATE PairingCodes SET ConsumedAt=$now WHERE ConsumedAt IS NULL; DELETE FROM PlaybackTickets;";
                 command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
                 await command.ExecuteNonQueryAsync(token);
                 command.CommandText = "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='DeviceAuthorizationRequests';";
@@ -140,9 +185,9 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
                 }
             }
             await using (var receipt = PrivateFilePermissions.OpenNewPrivateFile(Path.Combine(stage, "restore-receipt.json")))
-                await JsonSerializer.SerializeAsync(receipt, new PreparedRestore(id, manifest.ServerId, true), Json, token);
+                await JsonSerializer.SerializeAsync(receipt, new PreparedRestore(id, manifest.ServerId, !keepSessions, keepSessions), Json, token);
             File.Delete(path);
-            return new(id, manifest.ServerId, true);
+            return new(id, manifest.ServerId, !keepSessions, keepSessions);
         }
         catch (Exception exception) when (exception is CryptographicException or InvalidDataException or JsonException or FormatException or EndOfStreamException
             or XmlException or KeyNotFoundException or InvalidOperationException || exception is AccountException { StatusCode: 400 })
@@ -232,7 +277,7 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
         var receiptPath = Path.Combine(stage, "restore-receipt.json");
         if (!File.Exists(receiptPath) || new FileInfo(receiptPath).LinkTarget is not null) throw new InvalidDataException("A verified restore receipt is required.");
         var receipt = JsonSerializer.Deserialize<PreparedRestore>(await File.ReadAllTextAsync(receiptPath, token), Json);
-        if (receipt?.Id != id || !receipt.RevokesAllSessions) throw new InvalidDataException("Invalid restore receipt.");
+        if (receipt?.Id != id || receipt.RevokesAllSessions == receipt.KeepsSessions) throw new InvalidDataException("Invalid restore receipt.");
         await ValidateStageAsync(stage, backups, token);
         if (receipt.ServerId != await ServerIdAsync(Path.Combine(stage, "aurelia.db"), token)) throw new InvalidDataException("The prepared restore identity changed.");
         // Bound both the incoming state and the existing rollback state before

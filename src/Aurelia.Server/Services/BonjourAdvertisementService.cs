@@ -11,7 +11,8 @@ public sealed class BonjourAdvertisementService(
     ServerConfigurationStore configuration,
     IServiceScopeFactory scopeFactory,
     ILogger<BonjourAdvertisementService> logger,
-    TimeProvider timeProvider) : BackgroundService, IAsyncDisposable
+    TimeProvider timeProvider,
+    ServerMoveService moves) : BackgroundService, IAsyncDisposable
 {
     private static readonly string[] ServiceTypes = ["_aurelia._tcp", "_aurelia-home._tcp"];
     private static readonly int[] RetrySeconds = [3, 6, 12, 30];
@@ -53,6 +54,9 @@ public sealed class BonjourAdvertisementService(
             if (stopped) return;
             NetworkChange.NetworkAddressChanged += NetworkChanged;
             NetworkChange.NetworkAvailabilityChanged += NetworkAvailabilityChanged;
+            // A server that moved to another computer stops offering itself, and offers itself
+            // again when the move is undone (docs/SERVER_MOVE.md).
+            moves.Changed += MoveChanged;
             observingNetwork = true;
         }
         await base.StartAsync(cancellationToken);
@@ -95,6 +99,7 @@ public sealed class BonjourAdvertisementService(
                 {
                     if (stopped) return;
                     DisposeAdvertisersUnderLock();
+                    if (moves.IsMoved) return;
                     foreach (var serviceType in ServiceTypes)
                     {
                         var advertiser = new MdnsAdvertiser(CreateProfile(runtime, serverId, serviceType));
@@ -137,6 +142,7 @@ public sealed class BonjourAdvertisementService(
         => current - previous > TimeSpan.FromSeconds(40);
 
     private void NetworkChanged(object? sender, EventArgs arguments) => renewals.Writer.TryWrite(true);
+    private void MoveChanged() => renewals.Writer.TryWrite(true);
     private void NetworkAvailabilityChanged(object? sender, NetworkAvailabilityEventArgs arguments)
         => renewals.Writer.TryWrite(true);
 
@@ -169,6 +175,7 @@ public sealed class BonjourAdvertisementService(
             if (!observingNetwork) return;
             NetworkChange.NetworkAddressChanged -= NetworkChanged;
             NetworkChange.NetworkAvailabilityChanged -= NetworkAvailabilityChanged;
+            moves.Changed -= MoveChanged;
             observingNetwork = false;
         }
     }

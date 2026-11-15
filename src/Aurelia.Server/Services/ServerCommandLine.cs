@@ -21,19 +21,23 @@ public sealed record ServerCommandLine(
             || argument.Equals("metadata", StringComparison.OrdinalIgnoreCase)
             || argument.Equals("pairing", StringComparison.OrdinalIgnoreCase)
             || argument.Equals("server", StringComparison.OrdinalIgnoreCase)
+            || argument.Equals("move", StringComparison.OrdinalIgnoreCase)
             || argument.Equals("database", StringComparison.OrdinalIgnoreCase));
         var command = commandIndex >= 0 ? args[commandIndex].ToLowerInvariant() : "run";
-        var action = command is "library" or "metadata" or "pairing" or "server" or "database"
+        var action = command is "library" or "metadata" or "pairing" or "server" or "move" or "database"
             && commandIndex + 1 < args.Length
             && !args[commandIndex + 1].StartsWith("--", StringComparison.Ordinal)
                 ? args[commandIndex + 1].ToLowerInvariant()
                 : null;
         var options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var flags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var positionals = new List<string>();
         for (var index = 0; index < args.Length; index += 1)
         {
             if (!args[index].StartsWith("--", StringComparison.Ordinal))
             {
+                // Words after the command and its action, such as the file of `move export FILE`.
+                if (index > commandIndex + (action is null ? 0 : 1) && commandIndex >= 0) positionals.Add(args[index]);
                 continue;
             }
 
@@ -56,8 +60,11 @@ public sealed record ServerCommandLine(
             options.GetValueOrDefault("--device-name") ?? Environment.MachineName,
             flags.Contains("--password-stdin"),
             options,
-            flags);
+            flags)
+        { Positionals = positionals };
     }
+
+    public IReadOnlyList<string> Positionals { get; init; } = [];
 
     public string? Option(string name) => Options.GetValueOrDefault(name);
 

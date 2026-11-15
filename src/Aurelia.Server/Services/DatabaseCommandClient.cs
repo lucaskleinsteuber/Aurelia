@@ -25,7 +25,7 @@ public static class DatabaseCommandClient
                         if (!Guid.TryParse(commandLine.Option("--id"), out var id)) throw new ArgumentException("A verified restore ID is required.");
                         using var instanceLock = ServerInstanceLock.Acquire(runtime.DataDirectory);
                         await FullServerBackupService.ApplyPreparedAsync(runtime, id, cancellationToken);
-                        Console.WriteLine("Full server restore verified. All device sessions were revoked.");
+                        Console.WriteLine("The verified server state was applied.");
                         return 0;
                     }
                 case "backup":

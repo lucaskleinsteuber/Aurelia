@@ -145,6 +145,12 @@ Aurelia Server
   sudo aurelia setup [--name "Server Name"] [--power always|save|stop-only] [--browser | --terminal]
                                               --browser: set up in a web browser with a one-time code
                                               Create the owner, turn on network access, choose power use
+  sudo aurelia setup --move                   Move here from another Aurelia server: over the network
+                                              with its move code, or with a moving file
+  aurelia move code                           On the old server: show a move code for the new one
+  aurelia move export FILE                    On the old server: write an encrypted moving file
+  aurelia move status                         Is this server moving, or where did it move
+  sudo aurelia move undo                      This server answers devices again (new one off first)
   aurelia pair                                Show a code to type on a new device (Mac, Linux PC,
                                               Apple TV, iPhone, iPad or browser)
   aurelia approve [CODE]                      Allow an older app that shows a code itself
@@ -207,15 +213,35 @@ case "$command" in
     name=""
     power=""
     way=""
+    kind=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --name) name=${2:-}; shift 2 ;;
         --power) power=${2:-}; shift 2 ;;
-        --browser) way=browser; shift ;;
-        --terminal) way=terminal; shift ;;
+        --browser) way=browser; kind=new; shift ;;
+        --terminal) way=terminal; kind=new; shift ;;
+        --move) kind=move; shift ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
       esac
     done
+    if [ -z "$kind" ]; then
+      echo "Set up a new server or move from another Aurelia server?"
+      echo "  1) Set up a new server"
+      echo "  2) Move from another Aurelia server: its library, settings, profiles and signed-in devices"
+      echo "     come along; the media files stay where they are"
+      read -r -p "Choose 1 or 2 [1]: " kind || kind=""
+      case "${kind:-1}" in 2|move) kind=move ;; *) kind=new ;; esac
+    fi
+    if [ "$kind" = move ]; then
+      # A fresh start makes a fresh setup code, which the move uses on this computer only.
+      systemctl stop aurelia-start.socket aurelia 2>/dev/null || true
+      systemctl start aurelia
+      wait_until_ready
+      "$server" move receive --data-dir "$data_dir" || exit 1
+      echo
+      echo "Choose how much power this computer uses with: sudo aurelia sleep (always on unless changed)"
+      exit 0
+    fi
     if [ -z "$way" ]; then
       echo "How do you want to set up Aurelia?"
       echo "  1) In a web browser on any computer, phone or tablet at home (recommended)"
@@ -291,6 +317,15 @@ case "$command" in
   library|pairing|metadata)
     ensure_running
     exec "$server" "$command" "$@"
+    ;;
+  move)
+    # Moving to a new server (docs/SERVER_MOVE.md). code, export, status and undo sign in as the
+    # owner; receive is what `sudo aurelia setup --move` runs on the new server.
+    case "${1:-}" in
+      receive) require_root move receive; ensure_running; exec "$server" move receive --data-dir "$data_dir" ;;
+      code|export|status|undo) ensure_running; exec "$server" move "$@" ;;
+      *) echo "Use: aurelia move code | export FILE | status | undo" >&2; exit 2 ;;
+    esac
     ;;
   sleep)
     action=${1:-status}

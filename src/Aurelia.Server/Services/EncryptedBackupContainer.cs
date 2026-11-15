@@ -19,10 +19,14 @@ public static class EncryptedBackupContainer
     // Only the database can be large. Configuration, certificates and keys are
     // deliberately bounded before parsing them during restore validation.
     public static long MaximumEntryBytes(string name) => name == "aurelia.db" ? MaximumBytes
-        : name.StartsWith("Artwork/", StringComparison.Ordinal) ? EditorArtworkStore.MaximumUploadBytes : 1_048_576;
+        : name.StartsWith("Artwork/", StringComparison.Ordinal) ? EditorArtworkStore.MaximumUploadBytes
+        : name == MoveManifestName ? 16 * 1_048_576 : 1_048_576;
+
+    /// <summary>The storage locations and sample files of a move bundle (docs/SERVER_MOVE.md); never restored as state.</summary>
+    public const string MoveManifestName = "move.json";
 
     public static bool AllowedName(string? name) => name is "aurelia.db" or "server-settings.json" or "server-certificate.pem"
-        or "server-private-key.pem" or "metadata-settings.json" or "Secrets/tmdb-token"
+        or "server-private-key.pem" or "metadata-settings.json" or "Secrets/tmdb-token" or MoveManifestName
         || (name is not null && name.StartsWith("DataProtectionKeys/key-", StringComparison.Ordinal) && name.EndsWith(".xml", StringComparison.Ordinal)
             && Guid.TryParseExact(name["DataProtectionKeys/key-".Length..^4], "D", out _)) || ArtworkName(name);
 
@@ -35,10 +39,27 @@ public static class EncryptedBackupContainer
         return Guid.TryParseExact(stem, "N", out _);
     }
 
-    public static async Task<BackupManifest> EncryptAsync(string directory, IReadOnlyList<string> names, Guid serverId,
+    public static Task<BackupManifest> EncryptAsync(string directory, IReadOnlyList<string> names, Guid serverId,
         Stream destination, string passphrase, CancellationToken token)
     {
         ValidatePassphrase(passphrase);
+        return EncryptCoreAsync(directory, names, serverId, destination, Iterations, manifest => Derive(passphrase, manifest), token);
+    }
+
+    /// <summary>
+    /// The same container under a key the caller derived itself (a network move's HKDF key). Its
+    /// manifest says so with zero iterations, so it never opens with a passphrase, nor the reverse.
+    /// </summary>
+    public static Task<BackupManifest> EncryptWithKeyAsync(string directory, IReadOnlyList<string> names, Guid serverId,
+        Stream destination, ReadOnlyMemory<byte> key, CancellationToken token)
+    {
+        if (key.Length != 32) throw new InvalidDataException("A move key has 32 bytes.");
+        return EncryptCoreAsync(directory, names, serverId, destination, 0, _ => key.ToArray(), token);
+    }
+
+    private static async Task<BackupManifest> EncryptCoreAsync(string directory, IReadOnlyList<string> names, Guid serverId,
+        Stream destination, int iterations, Func<BackupManifest, byte[]> deriveKey, CancellationToken token)
+    {
         var files = new List<BackupManifestFile>();
         foreach (var name in names.Order(StringComparer.Ordinal))
         {
@@ -50,15 +71,15 @@ public static class EncryptedBackupContainer
             await using var input = File.OpenRead(path);
             files.Add(new(name, input.Length, Convert.ToHexString(await SHA256.HashDataAsync(input, token))));
         }
-        var manifest = new BackupManifest(2, ChunkBytes, Iterations, Convert.ToBase64String(RandomNumberGenerator.GetBytes(16)),
+        var manifest = new BackupManifest(2, ChunkBytes, iterations, Convert.ToBase64String(RandomNumberGenerator.GetBytes(16)),
             Convert.ToBase64String(RandomNumberGenerator.GetBytes(8)), serverId, DateTimeOffset.UtcNow, files, IncludesArtwork: names.Any(ArtworkName));
-        ValidateManifest(manifest);
+        ValidateManifest(manifest, iterations);
         var header = JsonSerializer.SerializeToUtf8Bytes(manifest, Json);
         if (header.Length > 8 * 1024 * 1024) throw new InvalidDataException("The backup manifest exceeds the format limit.");
         await destination.WriteAsync(Magic, token);
         await WriteIntAsync(destination, header.Length, token);
         await destination.WriteAsync(header, token);
-        var key = Derive(passphrase, manifest);
+        var key = deriveKey(manifest);
         var plaintext = new byte[ChunkBytes];
         try
         {
@@ -90,9 +111,21 @@ public static class EncryptedBackupContainer
         return manifest;
     }
 
-    public static async Task<BackupManifest> DecryptAsync(Stream source, string privateStage, string passphrase, CancellationToken token)
+    public static Task<BackupManifest> DecryptAsync(Stream source, string privateStage, string passphrase, CancellationToken token)
     {
         ValidatePassphrase(passphrase);
+        return DecryptCoreAsync(source, privateStage, Iterations, manifest => Derive(passphrase, manifest), token);
+    }
+
+    public static Task<BackupManifest> DecryptWithKeyAsync(Stream source, string privateStage, ReadOnlyMemory<byte> key, CancellationToken token)
+    {
+        if (key.Length != 32) throw new InvalidDataException("A move key has 32 bytes.");
+        return DecryptCoreAsync(source, privateStage, 0, _ => key.ToArray(), token);
+    }
+
+    private static async Task<BackupManifest> DecryptCoreAsync(Stream source, string privateStage, int iterations,
+        Func<BackupManifest, byte[]> deriveKey, CancellationToken token)
+    {
         var magic = new byte[8];
         await source.ReadExactlyAsync(magic, token);
         if (!magic.SequenceEqual(Magic)) throw new InvalidDataException("Unsupported backup format.");
@@ -101,9 +134,9 @@ public static class EncryptedBackupContainer
         var header = new byte[headerLength];
         await source.ReadExactlyAsync(header, token);
         var manifest = JsonSerializer.Deserialize<BackupManifest>(header, Json) ?? throw new InvalidDataException("Invalid backup manifest.");
-        ValidateManifest(manifest);
+        ValidateManifest(manifest, iterations);
         PrivateFilePermissions.CreatePrivateDirectory(privateStage);
-        var key = Derive(passphrase, manifest);
+        var key = deriveKey(manifest);
         var plaintext = new byte[ChunkBytes];
         try
         {
@@ -150,9 +183,10 @@ public static class EncryptedBackupContainer
     {
         if (value is null || value.Length is < 12 or > 1024) throw new InvalidDataException("Use a backup passphrase with 12 to 1024 characters.");
     }
-    private static void ValidateManifest(BackupManifest value)
+    private static void ValidateManifest(BackupManifest value, int iterations)
     {
-        if (value.Version is not 1 and not 2 || value.ChunkBytes != ChunkBytes || value.Iterations != Iterations
+        if (value.Version is not 1 and not 2 || value.ChunkBytes != ChunkBytes || value.Iterations != iterations
+            || iterations == 0 && value.Version != 2
             || value.ServerId == Guid.Empty || value.IncludesMedia || value.Version == 1 && value.IncludesArtwork
             || value.Files is null || value.Files.Count < 1 || value.Files.Count > (value.Version == 1 ? 256 : MaximumEntries) || value.Files.Any(file => file is null)
             || !value.Files.Any(file => file.Name == "aurelia.db")

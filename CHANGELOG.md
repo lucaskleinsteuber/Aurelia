@@ -15,6 +15,9 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
+- Server, browser, Mac and Linux: move a whole server to another computer. On the old server, Settings › Server › Move to a New Server shows a move code or saves an encrypted moving file; setting up the new server (browser, `sudo aurelia setup --move`, Set Up This Mac, hosting in the Linux app) offers Move from another Aurelia server. Titles, progress, favorites, profiles, settings, the server's identity and every device's sign-in come along; media files are not copied. See docs/SERVER_MOVE.md.
+- Server, browser, Mac and Linux: when the files now live in another folder, Aurelia suggests it ("412 of 415 sample files found") for each storage location during a move, and Storage Location Moved repoints a location at any time; titles, progress and favorites stay.
+- Mac, Linux, Apple TV and iPhone & iPad: devices follow a server that moved to another computer by themselves and stay signed in; they switch only to the same server with the same key. The old server steps aside and can undo the move.
 - Server, Mac, browser and Linux: screen time for children's profiles. Edit Profile › Screen Time sets a bedtime, a wake time and a daily limit for school nights (Sunday to Thursday) and the weekend. It also chooses whether only playback or the whole profile closes, and whether a playing title may finish (within a set number of minutes) or stops at once. The server decides in its own time zone and counts only time that actually played.
 - Server, Mac, browser and Linux: Today in Screen Time shows the time watched and offers +15, +30 or +60 minutes, No Bedtime Tonight and One More Episode, until the next wake time.
 - Mac, browser, Linux, Apple TV and iPhone & iPad: five minutes before the time, the player says it is the last episode and offers no Up Next. When time is up, a good-night screen shows the profile's name and when Aurelia opens again, instead of the next episode or an error. "Who's watching?" shows a closed profile with a moon and "Good night · back at 07:00".
@@ -44,6 +47,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Changed
 
+- Mac: Check for Updates… opens Settings › Updates and answers there; the download shows on that page and as a bar on the Dock icon instead of in a floating window.
 - Mac: every sheet has the same frame: a title with one sentence saying what it is for, Cancel on Escape and the main action on Return. A title's page shows how much is left under Resume, ⌘F searches from every page, the Server Password is typed twice and says what it unlocks, the Network and Backups settings explain themselves, and Security shows one list of signed-in devices.
 - Mac: Settings and server administration share one layout: the name and its explanation on the left, the switch or value on the right, groups with a symbol and a sentence saying what they are for, errors in one banner, and one style for main buttons. Playback options that weren't explained now are, Let the Server Rest is a switch with a time, and the sidebar is customized from one place.
 - Mac: the player's audio and subtitle menus show "English" or "Commentary (English)" instead of "Track 1 - [English]", and number tracks that would read the same. Continue Watching cards name the show, season and episode; extras and trailers no longer say "TV Show"; a title's rows line up with its name.

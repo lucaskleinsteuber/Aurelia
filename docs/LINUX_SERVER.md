@@ -140,6 +140,26 @@ aurelia library scan --all
 
 `aurelia help` lists all commands, `aurelia logs` follows the server log.
 
+## Moving to a new server
+
+A whole server moves to another computer with its titles, metadata, artwork, progress, profiles,
+settings, identity and every device's sign-in; media files are never copied. On the old server
+(a Linux server, or Aurelia for Mac or for Linux hosting one) start the move in **Settings › Server
+› Move to a New Server…**, or over SSH as its owner:
+
+```sh
+aurelia move code                          # a move code for the new server, 15 minutes, one use
+aurelia move export /media/usb/old.aureliamove   # or an encrypted moving file with a passphrase
+```
+
+Install Aurelia Server on the new computer, mount the media drives, then run
+`sudo aurelia setup --move` (or `sudo aurelia setup` and choose to move). It asks for the old
+server's address and code, or the moving file and its passphrase, suggests the folder that now
+holds each storage location's files ("3 of 3 sample files found") and restarts with the moved data.
+The old server then stops answering and points devices to the new one; `aurelia move status`
+shows it, and `sudo aurelia move undo` brings it back (turn the new one off first). See
+[SERVER_MOVE.md](SERVER_MOVE.md).
+
 ## Media drives
 
 The `aurelia` service may read everything except other users' private folders and writes only
