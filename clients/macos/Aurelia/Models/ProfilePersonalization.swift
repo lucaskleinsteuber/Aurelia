@@ -149,6 +149,8 @@ enum ServerFeatureNames {
   static let mediaSegments = "media-segments-v2"
   /// Subtitles from speech and Sync to Speech written by the server with whisper.cpp.
   static let serverSpeech = "server-speech-v1"
+  /// The server reads every file in the background and reports damaged files and drives.
+  static let fileChecks = "file-checks-v1"
   static let suggestions = "suggestions-v1"
   static let wishes = "wishes-v1"
 }

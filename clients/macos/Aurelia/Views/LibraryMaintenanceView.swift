@@ -5,8 +5,15 @@ enum LibraryHealthTab: String, CaseIterable, Identifiable, Sendable {
   case offline = "Offline Titles"
   case unmatched = "Unmatched Metadata"
   case exclusions = "Excluded Items"
+  case files = "File Problems"
+  case drives = "Drives"
 
   var id: String { rawValue }
+
+  /// The tabs this server offers: File Problems and Drives need the file watch (server 2.19.0).
+  static func available(fileChecks: Bool) -> [LibraryHealthTab] {
+    allCases.filter { fileChecks || ($0 != .files && $0 != .drives) }
+  }
 }
 
 struct LibraryHealthView: View {
@@ -50,13 +57,16 @@ struct LibraryHealthView: View {
   var body: some View {
     AureliaSheet(
       title: "Library Health & Maintenance",
-      subtitle: "Find duplicate, missing and unmatched titles, and bring back excluded ones.",
+      subtitle: "Find duplicate, missing, unmatched and damaged titles, and bring back excluded ones.",
       symbol: "stethoscope",
       onCancel: { dismiss() }
     ) {
       VStack(spacing: 0) {
         Picker("Tab", selection: $selectedTab) {
-          ForEach(LibraryHealthTab.allCases) { tab in
+          ForEach(
+            LibraryHealthTab.available(
+              fileChecks: model.libraryCapabilities.contains(ServerFeatureNames.fileChecks))
+          ) { tab in
             Text(tab.rawValue).tag(tab)
           }
         }
@@ -76,6 +86,10 @@ struct LibraryHealthView: View {
               unmatchedContent
             case .exclusions:
               exclusionsContent
+            case .files:
+              FileProblemsPanel()
+            case .drives:
+              DrivesPanel()
             }
           }
           .padding(20)
@@ -454,6 +468,7 @@ struct LibraryHealthView: View {
     case .offline: await loadOffline()
     case .unmatched: await loadUnmatched()
     case .exclusions: await loadExclusions()
+    case .files, .drives: break
     }
   }
 

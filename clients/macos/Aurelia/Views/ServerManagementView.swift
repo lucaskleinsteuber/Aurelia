@@ -139,6 +139,9 @@ struct ServerManagementView: View {
       if model.libraryCapabilities.contains(ServerFeatureNames.serverSpeech) {
         ServerSpeechEditor(client: client)
       }
+      if model.libraryCapabilities.contains(ServerFeatureNames.fileChecks) {
+        ServerFileWatchEditor(client: client)
+      }
       ServerVideoConversionCard(client: client)
     }
     ServerAdvancedDisclosure(isExpanded: $showsAdvanced) {

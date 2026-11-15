@@ -1203,6 +1203,43 @@ struct APIClient: Sendable {
       method: "DELETE")
   }
 
+  // MARK: The file watch ("file-checks-v1")
+
+  func serverFileChecks() async throws -> FileCheckSettings {
+    try await get("/api/v1/server/file-checks")
+  }
+
+  func saveServerFileChecks(_ request: UpdateFileCheckSettingsRequest) async throws -> FileCheckSettings {
+    let data = try await perform(
+      path: "/api/v1/server/file-checks", method: "PUT", body: try JSONEncoder().encode(request))
+    return try Self.decode(FileCheckSettings.self, from: data)
+  }
+
+  func fileProblems(ignored: Bool = false, offset: Int = 0, limit: Int = 100) async throws
+    -> [FileProblemSummary]
+  {
+    try await get("/api/v1/library/health/files?ignored=\(ignored)&offset=\(offset)&limit=\(limit)")
+  }
+
+  func recheckFile(mediaId: UUID) async throws {
+    _ = try await perform(
+      path: "/api/v1/library/health/files/\(mediaId.uuidString.lowercased())/recheck", method: "POST")
+  }
+
+  func setFileProblemIgnored(mediaId: UUID, ignored: Bool) async throws {
+    _ = try await perform(
+      path: "/api/v1/library/health/files/\(mediaId.uuidString.lowercased())/ignore",
+      method: ignored ? "POST" : "DELETE")
+  }
+
+  func drives(refresh: Bool = false) async throws -> DriveHealthResponse {
+    if refresh {
+      let data = try await perform(path: "/api/v1/library/health/drives/refresh", method: "POST")
+      return try Self.decode(DriveHealthResponse.self, from: data)
+    }
+    return try await get("/api/v1/library/health/drives")
+  }
+
   func sendPlayerHeartbeat(_ request: PlayerHeartbeatRequest) async throws
     -> PlayerHeartbeatResponse
   {
