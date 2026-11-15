@@ -43,7 +43,7 @@ internal static class StorageMounts
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return []; }
     }
 
-    private static string Unescape(string value)
+    internal static string Unescape(string value)
     {
         if (!value.Contains('\\', StringComparison.Ordinal)) return value;
         var result = new System.Text.StringBuilder(value.Length);

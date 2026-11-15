@@ -225,6 +225,16 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     healthUnmatched: (parameters = { offset: 0, limit: 50 }, options = {}) => request(`/api/v1/library/health/unmatched?${new URLSearchParams(parameters)}`, options),
     mergeHealthDuplicates: (sourceMediaId, targetMediaId) => request("/api/v1/library/health/merge", { method: "POST", body: { sourceMediaId, targetMediaId } }),
     removeHealthEntry: (mediaId) => request(`/api/v1/library/health/entries/${id(mediaId)}`, { method: "DELETE" }),
+    // The file watch ("file-checks-v1")
+    serverFileChecks: (options = {}) => request("/api/v1/server/file-checks", options),
+    saveServerFileChecks: (body) => request("/api/v1/server/file-checks", { method: "PUT", body }),
+    fileProblems: (parameters = { ignored: false, offset: 0, limit: 100 }, options = {}) =>
+      request(`/api/v1/library/health/files?${new URLSearchParams(parameters)}`, options),
+    recheckFile: (mediaId) => request(`/api/v1/library/health/files/${id(mediaId)}/recheck`, { method: "POST" }),
+    ignoreFileProblem: (mediaId, ignored = true) =>
+      request(`/api/v1/library/health/files/${id(mediaId)}/ignore`, { method: ignored ? "POST" : "DELETE" }),
+    drives: (options = {}) => request("/api/v1/library/health/drives", options),
+    refreshDrives: () => request("/api/v1/library/health/drives/refresh", { method: "POST" }),
     activePlayers: (currentDeviceId) => request(`/api/v1/devices/players${currentDeviceId ? `?currentDeviceId=${encodeURIComponent(currentDeviceId)}` : ""}`),
     playerStatus: (deviceId) => request(`/api/v1/devices/players/${id(deviceId)}/status`),
     sendPlayerCommand: (deviceId, body) => request(`/api/v1/devices/players/${id(deviceId)}/commands`, { method: "POST", body }),

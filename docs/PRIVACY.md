@@ -14,7 +14,9 @@ the server that you, or the person who invited you, run, and on your own devices
 The server stores what it needs to run your library: the profiles and their names, pictures and
 PINs (only as salted hashes), the devices that are signed in, what each profile watched and how
 far, favorites, watchlists, collections and settings, and the details and pictures of your titles.
-Your media files are only read, never changed or uploaded anywhere. The person who runs the
+Your media files are only read, never changed or uploaded anywhere. When the owner turns on the file
+watch, the server also keeps a checksum of every file and what it found in it, so it can tell
+when a file is damaged. The person who runs the
 server can see and delete this data; ask them if you want your profile removed.
 
 ## What stays on your device

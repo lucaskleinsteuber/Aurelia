@@ -12,6 +12,7 @@ public sealed partial class LibraryScanWorker(
     ILogger<LibraryScanWorker> logger,
     ScrubPreviewService? scrubPreviews = null,
     SegmentDetectionService? segmentDetection = null,
+    FileChecks.FileCheckService? fileChecks = null,
     Automation.NewTitleAnnouncer? newTitles = null) : BackgroundService
 {
     internal static readonly TimeSpan IdleFallback = TimeSpan.FromSeconds(30);
@@ -385,6 +386,7 @@ public sealed partial class LibraryScanWorker(
         await PruneOldScansAsync(database, library.Id, scan.Id, cancellationToken);
         scrubPreviews?.NotifyScanCompleted();
         segmentDetection?.NotifyScanCompleted();
+        fileChecks?.NotifyScanCompleted();
         var provider = metadataSettings.Load();
         if (provider.Enabled && provider.Token is not null
             && !await database.MetadataJobs.AnyAsync(

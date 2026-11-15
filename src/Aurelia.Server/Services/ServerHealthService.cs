@@ -15,7 +15,9 @@ public sealed class ServerHealthService(
     ServerDiagnosticsStore diagnostics,
     DatabaseBackupService backupService,
     ServerConfigurationStore? configuration = null,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    FileChecks.FileCheckService? fileChecks = null,
+    FileChecks.DriveHealthService? drives = null)
 {
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
 
@@ -108,7 +110,9 @@ public sealed class ServerHealthService(
             lastScan,
             backgroundJobs,
             recentDiagnostics,
-            backupSummary);
+            backupSummary,
+            fileChecks is null ? 0 : await fileChecks.ProblemCountAsync(token),
+            drives?.WarningCount ?? 0);
     }
 
     internal static string SanitizeCode(string code)

@@ -64,6 +64,13 @@ These rules apply to every task in this repository.
   model is downloaded once when the owner asks for it and kept in the server's data folder
   (`SpeechModels`), with its size shown and removable. Linux and Docker use the distribution's
   whisper.cpp; the Mac app ships its own MIT-licensed build.
+- File watch (owner, 15.11.2026): the server may read every media file in full in the
+  background (off until the owner turns it on), keep its SHA-256 and a short finding without
+  paths in the database (`MediaFileChecks`), and let ffmpeg read every packet or decode the file
+  to `-f null` like the other analysis: no shell, low priority, one conversion place, pausing
+  while anyone watches, never keeping an unused computer awake. Drive health is read from what
+  the system already keeps (UDisks2 over the system bus, `diskutil`), never by waking a drive or
+  running anything as root. The media file is only read.
 - Missing or offline media must retain identity, metadata, favorites, progress,
   and collection membership unless an administrator explicitly removes it.
 - Aurelia Classic, its app, database,

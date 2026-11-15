@@ -23,6 +23,8 @@ import { createImportPreview } from "./import-preview.js";
 import { cropPhoto } from "./photo-crop.js";
 import { serverSegmentsSection, SEGMENTS_FEATURE } from "./segments-view.js";
 import { serverSpeechSection } from "./speech-view.js";
+import { supportsFileChecks } from "./file-checks.js";
+import { renderDrives, renderFileProblems, serverFileChecksSection } from "./file-checks-view.js";
 import { supportsSecurity } from "./security.js";
 import { remoteUnlockPanel, securitySection } from "./security-view.js";
 import { supportsAutomation } from "./automation.js";
@@ -737,6 +739,8 @@ export function createSettings(app) {
 
       permissions.owner && state.server?.capabilities?.includes("server-speech-v1") ? serverSpeechSection({ api, section }) : null,
 
+      permissions.owner && supportsFileChecks(state.server) ? serverFileChecksSection({ api, section, row, toggle }) : null,
+
       transcoding ? videoConversionSection(transcodingSummary(transcoding), transcoding.hint) : section("Live Conversion", "tv", "Live decoding, remuxing and streaming for browser playback.",
         row("Status", value(state.server?.capabilities?.includes("live-conversion-v1") ? "Active" : "Not available")),
         row("Active Live Conversions", value(health?.activeLiveConversions != null ? `${health.activeLiveConversions}` : "0"))),
@@ -1098,7 +1102,9 @@ export function createSettings(app) {
       { id: "duplicates", label: "Duplicates" },
       { id: "offline", label: "Offline Titles" },
       { id: "unmatched", label: "Unmatched Metadata" },
+      ...(supportsFileChecks(state.server) ? [{ id: "files", label: "File Problems" }, { id: "drives", label: "Drives" }] : []),
     ];
+    let problemsAside = false;
 
     function renderTabs() {
       clear(tabContainer);
@@ -1200,6 +1206,21 @@ export function createSettings(app) {
                   }
                 }
               }, "Remove…")));
+          }
+        } catch (e) {
+          clear(contentContainer);
+          contentContainer.append(h("p", { class: "error-text" }, e.message));
+        }
+      } else if (activeTab === "files" || activeTab === "drives") {
+        try {
+          if (activeTab === "files") {
+            const rerender = (aside) => { problemsAside = aside; renderContent(); };
+            await renderFileProblems({
+              api, container: contentContainer, app, ignored: problemsAside, rerender,
+              onEdit: (problem) => { dialog.remove(); editors.editMetadata({ id: problem.mediaId, kind: problem.kind, title: problem.title }); },
+            });
+          } else {
+            await renderDrives({ api, container: contentContainer, app });
           }
         } catch (e) {
           clear(contentContainer);

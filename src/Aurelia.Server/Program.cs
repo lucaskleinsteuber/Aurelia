@@ -199,6 +199,14 @@ if (!builder.Environment.IsEnvironment("Testing"))
 builder.Services.AddSingleton<SegmentDetectionService>();
 // Compares episodes' sound for intros and credits in the background; tests drive it explicitly.
 if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<SegmentDetectionService>());
+builder.Services.AddSingleton<Aurelia.Server.Services.FileChecks.FileCheckService>();
+builder.Services.AddSingleton<Aurelia.Server.Services.FileChecks.DriveHealthService>();
+// Reads every file and asks the drives in the background; tests drive both explicitly.
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddHostedService(services => services.GetRequiredService<Aurelia.Server.Services.FileChecks.FileCheckService>());
+    builder.Services.AddHostedService(services => services.GetRequiredService<Aurelia.Server.Services.FileChecks.DriveHealthService>());
+}
 builder.Services.AddSingleton<ServerSleepSignal>();
 builder.Services.AddSingleton<ServerUseClock>();
 builder.Services.AddSingleton<ServerWorkSignal>();
@@ -547,6 +555,7 @@ app.MapLiveConversion();
 app.MapHls();
 app.MapScrubPreviews();
 app.MapMediaSegments();
+app.MapFileChecks();
 app.MapRemotePlayback();
 app.MapSubtitleDownloads();
 app.MapSpeechSubtitles();

@@ -20,6 +20,8 @@ A webhook is an address that receives a signed JSON `POST` for each event it is 
 | `playback.stopped` | The player closes before the end. |
 | `playback.finished` | The title was watched to its end or its credits. |
 | `library.title_added` | A new movie or show arrives (once TMDB found it, or after ten minutes with the file's name). A scan that adds more than 20 at once sends one event with only `count`. |
+| `library.file_damaged` | The file watch (server 2.19.0) finds a file that is damaged, unreadable or changed by itself. It carries the title like `library.title_added`. |
+| `server.drive_failing` | A drive with a storage location reports that it is failing or wearing out (sent once when its state turns to a warning). |
 | `server.started` | Aurelia Server started, for example after waking. |
 | `server.stopping` | Aurelia Server is stopping, sleeping or turning off. |
 | `test` | Send Test in the settings. |

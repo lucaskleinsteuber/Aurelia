@@ -68,6 +68,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public DbSet<LibraryStateMutation> LibraryStateMutations => Set<LibraryStateMutation>();
     public DbSet<SceneNote> SceneNotes => Set<SceneNote>();
     public DbSet<MediaSegment> MediaSegments => Set<MediaSegment>();
+    public DbSet<MediaFileCheck> MediaFileChecks => Set<MediaFileCheck>();
     public DbSet<MediaKeywords> MediaKeywords => Set<MediaKeywords>();
 
     public DbSet<MediaMetadata> MediaMetadata => Set<MediaMetadata>();
@@ -392,6 +393,19 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.HasOne(segment => segment.MediaItem).WithOne().HasForeignKey<MediaSegment>(segment => segment.MediaItemId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+        modelBuilder.Entity<MediaFileCheck>().HasQueryFilter(check => AccessUserId == null || AccessWholeCatalog
+            || MediaItems.Any(media => media.Id == check.MediaItemId));
+        modelBuilder.Entity<MediaFileCheck>(entity =>
+        {
+            entity.HasKey(check => check.MediaItemId);
+            entity.Property(check => check.Depth).HasConversion<string>().HasMaxLength(16);
+            entity.Property(check => check.State).HasConversion<string>().HasMaxLength(24);
+            entity.Property(check => check.Detail).HasMaxLength(1024);
+            entity.Property(check => check.Sha256).HasMaxLength(32);
+            entity.HasIndex(check => check.State);
+            entity.HasOne(check => check.MediaItem).WithOne().HasForeignKey<MediaFileCheck>(check => check.MediaItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
         // History belongs to its profile and, like progress, only shows titles the profile may see,
         // so a page's total matches the entries it can list.
         modelBuilder.Entity<WatchEvent>().HasQueryFilter(watch => AccessUserId == null
@@ -409,6 +423,9 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             value => value.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(value.Value) : null);
         modelBuilder.Entity<MediaSegment>().Property(segment => segment.UpdatedAt).HasConversion(dateTimeOffsetConverter);
         modelBuilder.Entity<MediaSegment>().Property(segment => segment.AnalyzedFileModifiedAt).HasConversion(nullableDateTimeOffsetConverter);
+        modelBuilder.Entity<MediaFileCheck>().Property(check => check.FileModifiedAt).HasConversion(dateTimeOffsetConverter);
+        modelBuilder.Entity<MediaFileCheck>().Property(check => check.CheckedAt).HasConversion(dateTimeOffsetConverter);
+        modelBuilder.Entity<MediaFileCheck>().Property(check => check.VerifiedAt).HasConversion(dateTimeOffsetConverter);
         modelBuilder.Entity<ScreenTimeDay>().Property(day => day.LimitReachedAt).HasConversion(nullableDateTimeOffsetConverter);
         modelBuilder.Entity<ScreenTimeDay>().Property(day => day.LastReportAt).HasConversion(nullableDateTimeOffsetConverter);
         modelBuilder.Entity<WishRecord>(entity =>

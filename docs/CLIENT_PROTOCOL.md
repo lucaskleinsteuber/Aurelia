@@ -607,6 +607,39 @@ Both changes refuse a title whose file is still available (`409 source_available
 scan would bring it back. Removing such a title is `DELETE /api/v1/media/{id}`, which needs the
 server password and keeps the file out of later scans. Paths are never returned, only file names.
 
+## File watch
+
+`file-checks-v1` (server 2.19.0). The server reads every file of the library in the background,
+holding one conversion place and waiting while anyone watches, and keeps its SHA-256 and a short
+finding in the database. Media files are only read. Each new file version (size and modification
+time) is examined once at the chosen depth: `read` (every byte, finds unreadable places),
+`container` (also ffmpeg reads every packet, finds cut-off and damaged files) or `decode` (also
+decodes picture and sound). Every `recheckDays` days (`0`, `30`, `90`, `180`) the checksum is read
+again; a different checksum with the same size and date is `changedUnexpectedly` (bit rot). It is
+off until the owner turns it on.
+
+- `GET /api/v1/server/file-checks` and `PUT` with `{ enabled, depth?, recheckDays? }` (owner):
+  `enabled`, `depth`, `recheckDays`, `canInspect` (ffmpeg is there for `container` and `decode`),
+  `totalCount`, `checkedCount`, `pendingCount`, `problemCount`, `running`, `pausedForPlayback`,
+  `currentTitle`, `currentStep`, `currentFraction`, `estimatedSecondsRemaining`, `lastCheckedAt`.
+  Other rhythms are `400 invalid_recheck_days`.
+- `GET /api/v1/library/health/files?ignored=false&offset=0&limit=50` (administrators): files
+  whose current version has a finding other than `ok`: `mediaId`, `title`, `kind`, `fileName`,
+  `libraryName`, `state` (`notice`, `damaged`, `unreadable`, `changedUnexpectedly`),
+  `errorCount`, `problemAtSeconds`, `durationSeconds`, `detail` (never a path), `depth`,
+  `checkedAt`, `ignored`. Unreadable, silently changed and damaged files come first.
+- `POST /api/v1/library/health/files/{id}/recheck` forgets the finding and checksum and examines
+  the file again soon; the file becomes the new reference. `POST …/{id}/ignore` sets a problem
+  aside, `DELETE …/{id}/ignore` brings it back; both are `204`, `404 problem_not_found` without
+  a problem.
+- `GET /api/v1/library/health/drives` returns `{ drives, checkedAt }`, asked at most every six
+  hours; `POST …/drives/refresh` asks now. Each drive has `name`, `libraries` (storage location
+  names), `state` (`good`, `warning`, `failing`, `unknown`), `temperatureCelsius`,
+  `powerOnHours`, `badSectors` and `detail`. Linux reads UDisks2 over the system bus, a Mac
+  `diskutil`; network shares, USB cases without SMART and Docker are `unknown`.
+
+`GET /api/v1/server/health` adds `fileProblemCount` and `driveWarningCount`.
+
 ## Security
 
 Every client sends `X-Aurelia-Installation: <uuid>` (created once and kept) and

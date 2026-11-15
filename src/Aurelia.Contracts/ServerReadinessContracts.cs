@@ -47,7 +47,9 @@ public sealed record ServerHealthResponse(
     ServerHealthScanSummary? LastScan,
     ServerHealthBackgroundJobs BackgroundJobs,
     IReadOnlyList<ServerHealthEvent> RecentIssues,
-    ServerHealthBackupSummary? Backup = null);
+    ServerHealthBackupSummary? Backup = null,
+    int FileProblemCount = 0,
+    int DriveWarningCount = 0);
 
 public sealed record ServerHealthBackupSummary(
     bool Enabled,

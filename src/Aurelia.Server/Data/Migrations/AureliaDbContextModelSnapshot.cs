@@ -1161,6 +1161,60 @@ namespace Aurelia.Server.Data.Migrations
                     b.ToTable("MediaExclusions");
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.MediaFileCheck", b =>
+                {
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CheckedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Depth")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Detail")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("DurationMilliseconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ErrorCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("FileModifiedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("FileSize")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Ignored")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("ProblemAtMilliseconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("Sha256")
+                        .HasMaxLength(32)
+                        .HasColumnType("BLOB");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("VerifiedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("MediaItemId");
+
+                    b.HasIndex("State");
+
+                    b.ToTable("MediaFileChecks");
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.MediaItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2568,6 +2622,17 @@ namespace Aurelia.Server.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("LibraryRoot");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.MediaFileCheck", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.MediaItem", "MediaItem")
+                        .WithOne()
+                        .HasForeignKey("Aurelia.Server.Data.MediaFileCheck", "MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.MediaItem", b =>

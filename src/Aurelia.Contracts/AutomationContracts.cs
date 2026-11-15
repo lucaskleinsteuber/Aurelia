@@ -23,6 +23,8 @@ public static class AutomationEvents
     public const string PlaybackStopped = "playback.stopped";
     public const string PlaybackFinished = "playback.finished";
     public const string TitleAdded = "library.title_added";
+    public const string FileDamaged = "library.file_damaged";
+    public const string DriveFailing = "server.drive_failing";
     public const string ServerStarted = "server.started";
     public const string ServerStopping = "server.stopping";
     public const string Test = "test";
@@ -35,6 +37,8 @@ public static class AutomationEvents
         new AutomationEventDescription(PlaybackStopped, "Playback Stops", "The player closes before the end."),
         new AutomationEventDescription(PlaybackFinished, "Playback Ends", "A title was watched to its end or its credits."),
         new AutomationEventDescription(TitleAdded, "New Title", "A new movie or show arrives in the library."),
+        new AutomationEventDescription(FileDamaged, "Damaged File", "The file watch finds a file that is damaged, unreadable or changed by itself."),
+        new AutomationEventDescription(DriveFailing, "Drive Warning", "A drive with a storage location reports that it is failing or wearing out."),
         new AutomationEventDescription(ServerStarted, "Server Starts", "Aurelia Server started, for example after waking."),
         new AutomationEventDescription(ServerStopping, "Server Stops", "Aurelia Server is stopping, sleeping or turning off."),
     });

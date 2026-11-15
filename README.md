@@ -72,6 +72,8 @@ home network; details and artwork from [TMDB](https://www.themoviedb.org) are op
 **A server that gets out of the way**
 - Sleeps when nobody watches and wakes by Wake-on-LAN when you open an app.
 - Server Health and Library Health show free space, warnings, duplicates and missing titles.
+- A file watch reads every file in the background and finds damaged, cut-off and silently
+  changed files (bit rot) before movie night, and shows how the drives are doing.
 - Daily database backups and checks; updates from the app or with one command.
 
 **Private by design**
