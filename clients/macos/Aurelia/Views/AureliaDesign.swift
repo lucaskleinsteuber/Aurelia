@@ -689,39 +689,20 @@ struct MediaArtworkPlaceholder: View {
   }
 }
 
-/// Content that glides up into place when it first appears, like hero titles in Apple's apps.
-/// `order` staggers related elements by a few hundredths of a second.
+/// Content that fades in when it first appears. It used to glide up on a staggered spring and
+/// the hero artwork settled from a zoom for 1.1 s; each frame of that updated the whole window
+/// and made opening a page stutter, so a page now arrives with one short fade.
+/// `order` is kept for the call sites; it no longer delays anything.
 struct AureliaRiseIn: ViewModifier {
   let order: Int
-  @Environment(\.aureliaReduceMotion) private var reduceMotion
   @State private var shown = false
 
   func body(content: Content) -> some View {
     content
       .opacity(shown ? 1 : 0)
-      .offset(y: shown || reduceMotion ? 0 : 14)
       .onAppear {
         guard !shown else { return }
-        withAnimation(
-          reduceMotion
-            ? .easeOut(duration: 0.18)
-            : .spring(response: 0.5, dampingFraction: 0.9).delay(0.045 * Double(order))
-        ) { shown = true }
-      }
-  }
-}
-
-/// Hero artwork that settles from a slight zoom when it first appears.
-struct AureliaHeroSettle: ViewModifier {
-  @Environment(\.aureliaReduceMotion) private var reduceMotion
-  @State private var settled = false
-
-  func body(content: Content) -> some View {
-    content
-      .scaleEffect(settled || reduceMotion ? 1 : 1.045)
-      .onAppear {
-        guard !settled else { return }
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 1.1)) { settled = true }
+        withAnimation(.easeOut(duration: 0.15)) { shown = true }
       }
   }
 }
@@ -741,7 +722,6 @@ extension View {
     modifier(AureliaAnimated(animation: animation, value: value))
   }
   func aureliaRiseIn(_ order: Int = 0) -> some View { modifier(AureliaRiseIn(order: order)) }
-  func aureliaHeroSettle() -> some View { modifier(AureliaHeroSettle()) }
   func aureliaListMotion<ID: Equatable>(_ ids: ID) -> some View {
     modifier(AureliaListMotion(ids: ids))
   }

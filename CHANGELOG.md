@@ -50,6 +50,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Fixed
 
+- Mac: opening a title and switching pages no longer stutter. Every animation frame redrew the whole window, and a page opened with a spring, a zoom of the hero artwork and content gliding in at once; a short fade now does it, with about a third of the work (measured with the same clicks: 2.6 s of main-thread work before, 1.0 s after). The Play button no longer waits for the list of Play On devices.
 - Linux: 4K titles play at their full frame rate. Turning each picture into the screen's size took longer than a frame lasts, so only every second picture was shown (12.8 of 24 a second on a six-core laptop); pictures are now scaled the fast way (23.6).
 - Mac and Linux: Play on a title's page opens the player at once, as on iPhone and Apple TV. It asked the server again for the plan the page already showed and waited for the answer first.
 - Server: a server with power saving sleeps or turns off again when unused. Looking for credits in a title's pictures stopped itself after two seconds and began again without end on slower computers, which kept the computer busy and never finished; it now reads each stretch once.

@@ -362,16 +362,18 @@ struct LibraryShellView: View {
   /// position and artwork exactly where they were.
   private var content: some View {
     ZStack {
-      // Switching pages in the sidebar cross-fades instead of cutting.
+      // Switching pages in the sidebar cross-fades briefly instead of cutting.
       browsePage
         .id(destination)
         .transition(.opacity)
         .opacity(selection == nil ? 1 : 0)
         .allowsHitTesting(selection == nil)
         .accessibilityHidden(selection != nil)
-      // A detail page rises gently into place; going back fades it away over the page. The pages
-      // it was opened from stay alive underneath, hidden, so Back returns to them exactly where
-      // they were scrolled, as the browsing page does.
+      // A detail page fades in briefly; going back fades it away over the page. The pages it was
+      // opened from stay alive underneath, hidden, so Back returns to them exactly where they were
+      // scrolled, as the browsing page does. Every animation frame updates this whole window, so
+      // a spring or a zoom here made opening a title stutter (measured 14.11.2026: the same clicks
+      // cost 2.6 s of main-thread work with them and 1.0 s with a short fade).
       let pages = selection.map { backStack + [$0] } ?? []
       ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
         let isTop = index == pages.count - 1
@@ -380,21 +382,12 @@ struct LibraryShellView: View {
           .opacity(isTop ? 1 : 0)
           .allowsHitTesting(isTop)
           .accessibilityHidden(!isTop)
-          .transition(
-            reduceMotion
-              ? .opacity
-              : .asymmetric(
-                insertion: .opacity.combined(with: .scale(scale: 0.985)),
-                removal: .opacity.combined(with: .scale(scale: 1.01)))
-          )
+          .transition(.opacity)
           .zIndex(Double(index + 1))
       }
     }
-    .animation(
-      reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.4, dampingFraction: 0.86),
-      value: selection
-    )
-    .animation(.easeInOut(duration: reduceMotion ? 0.12 : 0.22), value: destination)
+    .animation(.easeOut(duration: reduceMotion ? 0.1 : 0.15), value: selection)
+    .animation(.easeOut(duration: reduceMotion ? 0.1 : 0.15), value: destination)
     .onChange(of: selection) { _, value in
       if value == nil { backStack.removeAll() }
       if value == nil, destination == .home { Task { await model.refreshHome() } }
@@ -533,8 +526,10 @@ private struct HomePage: View {
           ForEach(model.home?.becauseYouWatched ?? []) { rail in
             posterRow("Because You Watched \(rail.sourceTitle)", items: rail.suggestions.map(\.item))
           }
-          ForEach(genreRows) { row in
-            posterRow(row.title, items: row.items, tourTarget: row.id == genreRows.first?.id)
+          // Computed once per drawing: each pass goes through the whole catalog.
+          let rows = genreRows
+          ForEach(rows) { row in
+            posterRow(row.title, items: row.items, tourTarget: row.id == rows.first?.id)
           }
           posterRow("Favorites", items: model.home?.favorites ?? [])
           collectionRow(model.home?.collections ?? [])
@@ -671,7 +666,6 @@ private struct HomeHero: View {
         contentMode: .fill,
         placeholderSymbolSize: 64
       )
-      .aureliaHeroSettle()
       .backgroundExtensionEffect()
       LinearGradient(
         stops: [
@@ -1337,7 +1331,6 @@ private struct CollectionDetailView: View {
         contentMode: .fill
       )
       .backgroundExtensionEffect()
-      .aureliaHeroSettle()
 
       LinearGradient(
         stops: [

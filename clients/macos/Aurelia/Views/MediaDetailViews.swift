@@ -247,8 +247,9 @@ struct MediaDetailView: View {
       async let loadedPlan = model.optionalPlaybackPlan(mediaId: mediaId)
       let loadedDetail = try await model.catalogDetail(id: mediaId)
       guard loadGeneration == request, model.profile == profile, !Task.isCancelled else { return }
-      // Seasons, cast and information glide in under the hero that is already shown.
-      withAnimation(reduceMotion ? nil : .easeOut(duration: 0.32)) { detail = loadedDetail }
+      // Seasons, cast and information appear at once under the hero that is already shown:
+      // animating their arrival laid out the whole page again in every frame.
+      detail = loadedDetail
       if !loadedDetail.seasons.contains(where: { $0.number == selectedSeason }) {
         selectedSeason = loadedDetail.seasons.first?.number
       }
@@ -257,8 +258,12 @@ struct MediaDetailView: View {
         guard loadGeneration == request, model.profile == profile, !Task.isCancelled else { return }
         apply(plan, to: loadedDetail)
       }
-      remoteDevices = await model.activeRemotePlayers()
+      // Play is ready with the details and the plan; the Play On devices only fill their menu
+      // and must not keep the button at "Loading…" for another request.
       isLoadingPlaybackPlan = false
+      let devices = await model.activeRemotePlayers()
+      guard loadGeneration == request, model.profile == profile, !Task.isCancelled else { return }
+      remoteDevices = devices
     } catch {
       guard loadGeneration == request, model.profile == profile, !Task.isCancelled else { return }
       isLoadingPlaybackPlan = false
@@ -733,7 +738,6 @@ private struct DetailHero: View {
         contentMode: .fill,
         placeholderSymbolSize: 64
       )
-      .aureliaHeroSettle()
       .backgroundExtensionEffect()
       LinearGradient(
         stops: [
