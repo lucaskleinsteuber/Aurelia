@@ -352,7 +352,7 @@ private struct ServerSecurityEditor: View {
     _settings = State(initialValue: configuration.stored)
   }
   var body: some View {
-    GroupBox("Sign-In & Streaming Limits") {
+    AureliaSettingsSection("Sign-In & Streaming Limits", symbol: "gauge.with.dots.needle.50percent", description: "How many attempts and streams the server allows, so one device can't slow it down for everyone.") {
       VStack(alignment: .leading, spacing: 12) {
         Stepper(
           "Keep new devices signed in for \(settings.deviceSessionDays) days",
@@ -406,7 +406,7 @@ private struct ServerLinuxNetworkBox: View {
   let configuration: ServerConfigurationResponse
 
   var body: some View {
-    GroupBox("Network") {
+    AureliaSettingsSection("Network", symbol: "network", description: "Which networks may reach the server and how it shows up in your home network.") {
       VStack(alignment: .leading, spacing: 10) {
         LabeledContent(
           "Home network access", value: configuration.active.lanAccessEnabled ? "On" : "Off")

@@ -133,11 +133,12 @@ struct ServerProfileEditor: View {
         }.keyboardShortcut(.cancelAction).disabled(working)
           .accessibilityIdentifier("profile-editor-cancel")
         Button(working ? "Saving…" : (creating ? "Create Profile" : "Save")) { save() }
-          .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+          .buttonStyle(AureliaPrimaryActionButtonStyle()).keyboardShortcut(.defaultAction)
           .disabled(!canSave).accessibilityIdentifier("profile-editor-save")
       }.padding(20).accessibilityElement(children: .contain)
     }.frame(minWidth: 560, idealWidth: 620, minHeight: 600, idealHeight: 700)
       .frame(width: 620, height: 700)
+      .aureliaSettingRows()
       .background(AureliaBackdrop())
       .interactiveDismissDisabled(working)
       .accessibilityElement(children: .contain)
@@ -164,7 +165,7 @@ struct ServerProfileEditor: View {
   }
 
   private var profileSection: some View {
-    GroupBox("Profile") {
+    AureliaSettingsSection("Profile", symbol: "person.fill") {
       VStack(alignment: .leading, spacing: 12) {
         if creating || model.supportsProfilePersonalization {
           TextField("Profile name", text: $name).textFieldStyle(.roundedBorder)
@@ -190,7 +191,7 @@ struct ServerProfileEditor: View {
   }
 
   private var pictureSection: some View {
-    GroupBox("Picture") {
+    AureliaSettingsSection("Picture", symbol: "photo") {
       ProfilePicturePicker(
         id: existing?.id, name: name, pictureRevision: snapshot?.user.pictureRevision ?? 0,
         key: $pictureKey, photo: $photo
@@ -200,10 +201,9 @@ struct ServerProfileEditor: View {
   }
 
   private var childSection: some View {
-    GroupBox("Children's Profile") {
+    AureliaSettingsSection("Children's Profile", symbol: "figure.and.child.holdinghands", description: "Limits what this profile may watch, by age rating.") {
       VStack(alignment: .leading, spacing: 12) {
         Toggle("Children's Profile", isOn: $isChild)
-          .toggleStyle(.switch)
           .accessibilityIdentifier("profile-editor-child")
         if isChild {
           Text("A children's profile can watch the whole library, limited by its age.")
@@ -278,7 +278,7 @@ struct ServerProfileEditor: View {
   }
 
   private var protectionSection: some View {
-    GroupBox("PIN Protection") {
+    AureliaSettingsSection("PIN Protection", symbol: "lock.fill", description: "A PIN keeps others from opening this profile.") {
       VStack(alignment: .leading, spacing: 12) {
         Toggle("Require a Profile PIN", isOn: $pinProtected)
           .disabled(role.canManageLibraries).accessibilityIdentifier(
@@ -312,7 +312,7 @@ struct ServerProfileEditor: View {
   }
 
   private var contentSection: some View {
-    GroupBox("Content Access") {
+    AureliaSettingsSection("Content Access", symbol: "eye", description: "Which titles this profile can see.") {
       VStack(alignment: .leading, spacing: 12) {
         Picker(
           "Can watch",

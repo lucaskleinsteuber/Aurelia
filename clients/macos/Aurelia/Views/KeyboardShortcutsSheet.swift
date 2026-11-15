@@ -31,8 +31,7 @@ struct KeyboardShortcutsSheet: View {
       Divider()
       HStack {
         Spacer()
-        Button("Done") { dismiss() }
-          .keyboardShortcut(.defaultAction)
+        AureliaSheetDoneButton { dismiss() }
       }
       .padding(.horizontal, AureliaDesign.pagePadding)
       .padding(.vertical, 14)

@@ -352,6 +352,8 @@ struct StorageLocationList: View {
             Image(systemName: "minus.circle.fill")
           }
           .buttonStyle(AureliaPressableButtonStyle())
+          .help("Remove This Folder")
+          .accessibilityLabel("Remove \(location.suggestedName)")
         }
         .padding(14)
         .background(

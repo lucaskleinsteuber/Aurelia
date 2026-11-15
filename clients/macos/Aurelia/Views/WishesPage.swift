@@ -31,6 +31,8 @@ struct WishesPage: View {
   @State private var providerEnabled = true
   @State private var bannerMessage: String?
   @State private var errorMessage: String?
+  /// A wish waiting for "Withdraw" or "Delete" to be confirmed.
+  @State private var deletingWish: WishSummary?
   @State private var alreadyInLibraryConflict: WishAlreadyInLibraryProblem?
 
   // Search & request composer
@@ -76,6 +78,15 @@ struct WishesPage: View {
     .sheet(item: $decliningWish) { wish in
       declineSheet(for: wish)
     }
+    .confirmationDialog(
+      "Remove the wish for \(deletingWish?.title ?? "this title")?",
+      isPresented: Binding(get: { deletingWish != nil }, set: { if !$0 { deletingWish = nil } }),
+      titleVisibility: .visible, presenting: deletingWish
+    ) { wish in
+      Button("Remove Wish", role: .destructive) { Task { await deleteWish(wish.id) } }
+    } message: { _ in
+      Text("It disappears for everyone, together with its Me Too votes.")
+    }
     .accessibilityIdentifier("wishes-page")
   }
 
@@ -120,7 +131,7 @@ struct WishesPage: View {
             Text("Search")
           }
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(AureliaPrimaryActionButtonStyle())
         .disabled(isSearching || searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         .accessibilityIdentifier("wishes-search-button")
 
@@ -184,7 +195,7 @@ struct WishesPage: View {
         Button("Add Wish") {
           Task { await submitManualWish() }
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(AureliaPrimaryActionButtonStyle())
         .disabled(
           submittingKey == "manual"
             || manualTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -262,7 +273,7 @@ struct WishesPage: View {
         }
       } else if hit.alreadyWished, let existingId = hit.existingWishId {
         if hit.supportedByCaller {
-          badgePill("Me Too · On", tint: .accentColor)
+          badgePill("You Want This Too", tint: .accentColor)
         } else {
           Button("Me Too") {
             Task { await toggleSupport(wishID: existingId, supported: true) }
@@ -273,7 +284,7 @@ struct WishesPage: View {
         Button("Wish") {
           Task { await submitSearchWish(hit) }
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(AureliaPrimaryActionButtonStyle(compact: true))
         .disabled(submittingKey == hit.id)
       }
     }
@@ -294,7 +305,7 @@ struct WishesPage: View {
           onOpenMedia(conflict.mediaId)
           alreadyInLibraryConflict = nil
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(AureliaPrimaryActionButtonStyle())
       }
       .padding(14)
       .background(Color.green.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -422,7 +433,7 @@ struct WishesPage: View {
           }
 
           if wish.state == .fulfilled {
-            Text("Your wish is here!")
+            Text("It's in the library now.")
               .font(.callout.weight(.semibold))
               .foregroundStyle(.green)
           }
@@ -443,10 +454,20 @@ struct WishesPage: View {
 
       HStack(spacing: 10) {
         if wish.canSupport {
-          Button(wish.supportedByCaller ? "Me Too · On" : "Me Too") {
+          Button {
             Task { await toggleSupport(wishID: wish.id, supported: !wish.supportedByCaller) }
+          } label: {
+            if wish.supportedByCaller {
+              Label("Me Too", systemImage: "checkmark")
+            } else {
+              Text("Me Too")
+            }
           }
           .buttonStyle(.bordered)
+          .help(
+            wish.supportedByCaller
+              ? "You want this too. Click to take it back."
+              : "Tell the owner you want this too.")
           .disabled(isBusy)
         }
 
@@ -454,13 +475,11 @@ struct WishesPage: View {
           Button("Open in Library") {
             onOpenMedia(mediaId)
           }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(AureliaPrimaryActionButtonStyle(compact: true))
         }
 
         if wish.state == .open, isOwner {
-          Button("Withdraw") {
-            Task { await deleteWish(wish.id) }
-          }
+          Button("Withdraw…") { deletingWish = wish }
           .buttonStyle(.bordered)
           .disabled(isBusy)
         }
@@ -510,7 +529,7 @@ struct WishesPage: View {
       Button("Mark Added") {
         Task { await setWishState(wish.id, state: .fulfilled, resolutionNote: nil, mediaId: nil) }
       }
-      .buttonStyle(.borderedProminent)
+      .buttonStyle(AureliaPrimaryActionButtonStyle(compact: true))
       .disabled(isBusy)
 
       Button("Decline…") {
@@ -527,9 +546,7 @@ struct WishesPage: View {
       .disabled(isBusy)
     }
 
-    Button("Delete", role: .destructive) {
-      Task { await deleteWish(wish.id) }
-    }
+    Button("Delete…", role: .destructive) { deletingWish = wish }
     .buttonStyle(.bordered)
     .disabled(isBusy)
   }
@@ -544,6 +561,7 @@ struct WishesPage: View {
       HStack {
         Spacer()
         Button("Cancel") { decliningWish = nil }
+          .keyboardShortcut(.cancelAction)
         Button("Decline") {
           let note = declineNote.trimmingCharacters(in: .whitespacesAndNewlines)
           decliningWish = nil
@@ -555,7 +573,8 @@ struct WishesPage: View {
               mediaId: nil)
           }
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(AureliaPrimaryActionButtonStyle())
+        .keyboardShortcut(.defaultAction)
       }
     }
     .padding(22)

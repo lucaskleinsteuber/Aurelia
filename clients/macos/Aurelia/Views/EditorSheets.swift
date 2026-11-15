@@ -92,7 +92,15 @@ struct MetadataMatchSheet: View {
       Divider()
       HStack {
         if providerMediaId != nil {
-          Button("Remove Match", role: .destructive) { Task { await removeMatch() } }
+          Button("Remove Match…", role: .destructive) {
+            guard
+              AureliaConfirm.ask(
+                "Remove the Match?",
+                "The title loses its TMDB information and artwork until it is matched again.",
+                action: "Remove Match")
+            else { return }
+            Task { await removeMatch() }
+          }
         }
         Spacer()
         Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -482,6 +490,8 @@ struct CollectionEditorSheet: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(index == 0)
+                .help("Move Up")
+                .accessibilityLabel("Move Up")
                 Button {
                   moveMember(index, by: 1)
                 } label: {
@@ -489,6 +499,8 @@ struct CollectionEditorSheet: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(index == members.count - 1)
+                .help("Move Down")
+                .accessibilityLabel("Move Down")
                 Button {
                   members.remove(at: index)
                 } label: {
@@ -496,6 +508,8 @@ struct CollectionEditorSheet: View {
                     .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.borderless)
+                .help("Remove from Collection")
+                .accessibilityLabel("Remove from Collection")
               }
             }
             .onMove { from, to in
@@ -533,7 +547,7 @@ struct CollectionEditorSheet: View {
                   .foregroundStyle(selected ? Color.accentColor : .secondary)
                 Text(item.title)
                 Spacer()
-                Text(item.kind == .movie ? "Movie" : "TV Show")
+                Text(item.kind.displayName)
                   .font(.caption)
                   .foregroundStyle(.secondary)
               }
@@ -951,7 +965,7 @@ struct MetadataReviewQueueSheet: View {
       Divider()
       HStack {
         Spacer()
-        Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+        AureliaSheetDoneButton { dismiss() }
       }.padding(16)
     }
     .frame(width: 720, height: 640)

@@ -29,8 +29,7 @@ struct MediaManagerView: View {
           .font(.caption)
           .foregroundStyle(.secondary)
         Spacer()
-        Button("Done") { dismiss() }
-          .keyboardShortcut(.defaultAction)
+        AureliaSheetDoneButton { dismiss() }
       }
       .padding(.horizontal, AureliaDesign.pagePadding)
       .padding(.vertical, 16)
@@ -327,6 +326,7 @@ private struct LibraryLocationRow: View {
   @EnvironmentObject private var model: AppModel
   let library: LibrarySummary
   let canEdit: Bool
+  @State private var confirmingRemoval = false
 
   var body: some View {
     HStack(spacing: 12) {
@@ -343,7 +343,7 @@ private struct LibraryLocationRow: View {
         }
       }
       Spacer()
-      Text(library.availability.rawValue.capitalized)
+      Text(ReadableState.text(library.availability.rawValue))
         .font(.caption).foregroundStyle(.secondary)
       if canEdit {
         if library.importPreviewRequired == true {
@@ -368,7 +368,7 @@ private struct LibraryLocationRow: View {
           .frame(minHeight: AureliaDesign.minimumControlSize)
           .disabled(library.importPreviewRequired == true)
         Button(role: .destructive) {
-          Task { await model.removeLibrary(id: library.id) }
+          confirmingRemoval = true
         } label: {
           Image(systemName: "trash")
             .frame(
@@ -376,9 +376,22 @@ private struct LibraryLocationRow: View {
         }
         .buttonStyle(AureliaPressableButtonStyle())
         .accessibilityLabel("Remove \(library.name)")
+        .help("Remove This Storage Location…")
       }
     }
     .padding(10)
+    // The same question Settings › Library asks: removing resets this location's library.
+    .confirmationDialog(
+      "Remove \(library.name)?", isPresented: $confirmingRemoval, titleVisibility: .visible
+    ) {
+      Button("Remove from Aurelia", role: .destructive) {
+        Task { await model.removeLibrary(id: library.id) }
+      }
+    } message: {
+      Text(
+        "Its titles leave the library, with their favorites, progress and history for every profile. Your media files are never deleted or changed."
+      )
+    }
   }
 
   private var availabilitySymbol: String {
@@ -411,7 +424,7 @@ private struct ScanStatusRow: View {
         }
         Text(
           model.scanStatusUnavailable.contains(scan.id)
-            ? "Status unavailable" : scan.state.rawValue.capitalized
+            ? "Status unavailable" : ReadableState.text(scan.state.rawValue)
         )
         .font(.caption.weight(.semibold))
         if scan.state == .queued || scan.state == .running || scan.state == .waitingForStorage {

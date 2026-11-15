@@ -107,6 +107,17 @@ enum CatalogPlaybackLogic {
     item.poster ?? item.backdrop
   }
 
+  /// "Show · S4 · E3" above an episode's title on a card; nil for anything else.
+  static func episodeEyebrow(for item: CatalogItemSummary) -> String? {
+    guard item.kind == .episode else { return nil }
+    let parts = [
+      item.parentTitle,
+      item.seasonNumber.map { $0 == 0 ? "Special" : "S\($0)" },
+      item.episodeNumber.map { "E\($0)" },
+    ].compactMap { $0 }.filter { !$0.isEmpty }
+    return parts.isEmpty ? nil : parts.joined(separator: " · ")
+  }
+
   static func subtitle(for item: CatalogItemSummary) -> String? {
     guard item.kind == .episode else { return nil }
     let parts = [
@@ -254,4 +265,59 @@ struct PlaybackUpNext: Equatable {
   let seconds: Int
   /// The card appeared with the credits: its second button keeps watching them.
   var duringCredits = false
+}
+
+/// Server warnings in plain words instead of the server's codes (Settings › Server).
+enum ServerIssueText {
+  static func title(for code: String) -> String {
+    switch code {
+    case "authentication_rejected": "A device's sign-in was refused (expired or signed out)"
+    case "access_rejected": "A profile tried something it isn't allowed to"
+    case "network_access_rejected": "A device outside the allowed networks was turned away"
+    case "request_rate_limited", "rate_limited": "A device sent too many requests and was slowed down"
+    case "device_pairing_rate_limited": "Too many wrong device codes; pairing was slowed down"
+    case "request_rejected", "request_body_rejected": "The server refused a request it couldn't read"
+    case "request_too_large": "A request was too large and was refused"
+    case "request_failed": "A request failed on the server"
+    case "host_rejected", "host_operation_rejected": "The server refused an address it doesn't answer to"
+    case "integration_key_rejected": "A Smart Home key was refused"
+    case "backup_attempt_failed": "An automatic backup failed"
+    case "conversion_failed": "Converting a title while it played failed"
+    case "subtitle_conversion_failed": "A subtitle couldn't be converted"
+    case "media_probe_failed": "A media file couldn't be read"
+    case "metadata_authentication_failed": "TMDB refused the token"
+    case "metadata_job_failed", "metadata_provider_failed": "Looking up movie and show information failed"
+    case "subtitle_account_rejected": "OpenSubtitles refused the account"
+    case "passkey_failed": "A Face ID or Touch ID approval failed"
+    case "server_storage_operation_failed": "Changing a storage location failed"
+    case "invalid_server_data": "The server found data it couldn't read"
+    case "diagnostics_history_unavailable", "session_activity_storage_unavailable":
+      "The server couldn't save part of its own records"
+    default:
+      code.replacingOccurrences(of: "_", with: " ").prefix(1).uppercased()
+        + code.replacingOccurrences(of: "_", with: " ").dropFirst()
+    }
+  }
+}
+
+/// A server state such as "waitingForStorage" as words: "Waiting for storage".
+enum ReadableState {
+  static func text(_ raw: String) -> String {
+    var words: [String] = []
+    var current = ""
+    for character in raw.replacingOccurrences(of: "_", with: " ") {
+      if character.isUppercase, !current.isEmpty {
+        words.append(current)
+        current = String(character).lowercased()
+      } else if character == " " {
+        if !current.isEmpty { words.append(current) }
+        current = ""
+      } else {
+        current.append(character)
+      }
+    }
+    if !current.isEmpty { words.append(current) }
+    let sentence = words.joined(separator: " ").lowercased()
+    return sentence.prefix(1).uppercased() + sentence.dropFirst()
+  }
 }

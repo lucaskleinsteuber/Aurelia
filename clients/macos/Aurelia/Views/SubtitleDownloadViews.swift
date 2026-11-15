@@ -50,16 +50,19 @@ struct SubtitleDownloadSettingsSection: View {
         "Create a free account on opensubtitles.com, then add an API consumer under your profile to get a key."
       )
       .font(.caption).foregroundStyle(.secondary)
-      Button("Turn On Subtitle Downloads") {
+      Button(working ? "Turning On…" : "Turn On Subtitle Downloads") {
+        // The key stays in the field until the server took it, so a failure needs no retyping.
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        apiKey = ""
         Task {
-          await save(
+          if await save(
             UpdateSubtitleProviderRequest(
               enabled: true, languages: Self.defaultLanguages, automatic: false, apiKey: key))
+          {
+            apiKey = ""
+          }
         }
       }
-      .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+      .disabled(working || apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
       .accessibilityIdentifier("subtitles-enable")
     }
   }
@@ -116,7 +119,13 @@ struct SubtitleDownloadSettingsSection: View {
       Divider()
       account(status)
       Divider()
-      Button("Remove API Key", role: .destructive) {
+      Button("Remove API Key…", role: .destructive) {
+        guard
+          AureliaConfirm.ask(
+            "Remove the OpenSubtitles Key?",
+            "Subtitle downloads stop until you add a key again. Subtitles already downloaded stay.",
+            action: "Remove Key")
+        else { return }
         Task { await run { try await $0.removeSubtitleKey() } }
       }
       .accessibilityIdentifier("subtitles-remove-key")
@@ -146,10 +155,11 @@ struct SubtitleDownloadSettingsSection: View {
             var update = request(status)
             update.accountName = accountName.trimmingCharacters(in: .whitespaces)
             update.accountPassword = accountPassword
-            accountPassword = ""
-            Task { await save(update) }
+            Task { if await save(update) { accountPassword = "" } }
           }
-          .disabled(accountName.trimmingCharacters(in: .whitespaces).isEmpty || accountPassword.isEmpty)
+          .disabled(
+            working || accountName.trimmingCharacters(in: .whitespaces).isEmpty
+              || accountPassword.isEmpty)
         }
       }
     }
@@ -176,23 +186,29 @@ struct SubtitleDownloadSettingsSection: View {
     status = try? await APIClient(profile: profile).subtitleProviderStatus()
   }
 
-  private func save(_ request: UpdateSubtitleProviderRequest) async {
+  @discardableResult
+  private func save(_ request: UpdateSubtitleProviderRequest) async -> Bool {
     await run { try await $0.configureSubtitles(request) }
   }
 
+  /// True when the server accepted the change.
+  @discardableResult
   private func run(_ action: @escaping @MainActor (APIClient) async throws -> SubtitleProviderStatus)
-    async
+    async -> Bool
   {
-    guard let profile = model.profile else { return }
+    guard let profile = model.profile else { return false }
     working = true
     defer { working = false }
     do {
       let client = APIClient(profile: profile)
       status = try await model.currentAdministration { try await action(client) }
       errorText = nil
+      return true
     } catch is CancellationError {
+      return false
     } catch {
       errorText = error.localizedDescription
+      return false
     }
   }
 }

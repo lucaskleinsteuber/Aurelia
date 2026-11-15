@@ -427,6 +427,7 @@ struct PlayerView: View {
           }
           .buttonStyle(PlayerPressButtonStyle(reduceMotion: reduceMotion))
           .accessibilityLabel(controller.isPlaying ? "Pause" : "Play")
+          .help(controller.isPlaying ? "Pause (Space)" : "Play (Space)")
           .accessibilityIdentifier("player-play-pause")
           .focused($focusedControl, equals: "play")
           seekButton(forward: true)
@@ -503,7 +504,8 @@ struct PlayerView: View {
           ? [PlayerMenuOption(title: "No audio tracks available", enabled: false)]
           : controller.audioTracks.map { track in
             PlayerMenuOption(
-              title: track.title, selected: controller.selectedAudioTrackID == track.id
+              title: PlaybackTrackNames.menuTitle(for: track, in: controller.audioTracks),
+              selected: controller.selectedAudioTrackID == track.id
             ) {
               controller.selectAudioTrack(track.id)
               revealControls()
@@ -567,6 +569,7 @@ struct PlayerView: View {
         PlayerControlLabel { Image(systemName: "bookmark") }
       }
       .buttonStyle(.plain).accessibilityLabel("Scene Notes")
+      .help("Scene Notes")
       .accessibilityIdentifier("player-notes")
       .focused($focusedControl, equals: "notes")
       .popover(isPresented: $notesPresented, arrowEdge: .bottom) {
@@ -599,7 +602,8 @@ struct PlayerView: View {
         ? [PlayerMenuOption(title: "No subtitles available", enabled: false)]
         : controller.subtitleTracks.map { track in
           PlayerMenuOption(
-            title: track.title, selected: controller.selectedSubtitleTrackID == track.id
+            title: PlaybackTrackNames.menuTitle(for: track, in: controller.subtitleTracks),
+            selected: controller.selectedSubtitleTrackID == track.id
           ) {
             controller.selectSubtitleTrack(track.id)
             revealControls()
@@ -736,6 +740,7 @@ struct PlayerView: View {
       }
       .buttonStyle(.plain)
       .accessibilityLabel(controller.isMuted ? "Unmute" : "Mute")
+      .help(controller.isMuted ? "Unmute" : "Mute")
       .focused($focusedControl, equals: "mute")
 
       Slider(
@@ -780,6 +785,7 @@ struct PlayerView: View {
           isPictureInPicture ? "Exit Picture in Picture" : "Enter Picture in Picture"
         )
         .accessibilityIdentifier("player-picture-in-picture")
+        .help(isPictureInPicture ? "Exit Picture in Picture" : "Picture in Picture")
         .focused($focusedControl, equals: "pip")
       }
 
@@ -813,6 +819,7 @@ struct PlayerView: View {
       .buttonStyle(.plain)
       .accessibilityLabel(isNativeFullScreen ? "Exit Full Screen" : "Enter Full Screen")
       .accessibilityIdentifier("player-fullscreen")
+      .help(isNativeFullScreen ? "Exit Full Screen" : "Full Screen")
       .focused($focusedControl, equals: "fullscreen")
     }
     .padding(7)
@@ -868,6 +875,7 @@ struct PlayerView: View {
     }
     .buttonStyle(PlayerPressButtonStyle(reduceMotion: reduceMotion))
     .accessibilityLabel("\(forward ? "Forward" : "Back") \(interval) Seconds")
+    .help("\(forward ? "Forward" : "Back") \(interval) Seconds (\(forward ? "→" : "←"))")
     .focused($focusedControl, equals: forward ? "forward" : "backward")
   }
 

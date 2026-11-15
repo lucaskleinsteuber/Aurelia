@@ -53,7 +53,7 @@ struct MediaActionsModifier: ViewModifier {
       )
     }
     .alert(
-      "Library Action Failed",
+      "Something Went Wrong",
       isPresented: Binding(
         get: { error != nil || watchActions.errorMessage != nil },
         set: {

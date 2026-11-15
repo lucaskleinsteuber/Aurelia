@@ -149,7 +149,7 @@ final class LibraryBrowseUITests: XCTestCase {
     XCTAssertTrue(movie.waitForExistence(timeout: 5))
     movie.rightClick()
     let download = app.menuItems["Download"]
-    let remove = app.menuItems["Remove Download"]
+    let remove = app.menuItems["Remove Download…"]
     XCTAssertTrue(download.waitForExistence(timeout: 5) || remove.exists, app.debugDescription)
     screenshot(app, "Download Menu Entry")
     app.typeKey(.escape, modifierFlags: [])

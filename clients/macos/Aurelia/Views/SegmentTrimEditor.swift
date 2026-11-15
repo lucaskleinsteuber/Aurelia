@@ -70,6 +70,8 @@ final class SegmentTrimPlayer: ObservableObject {
   private let mediaId: UUID
   private var relay: LoopbackStreamRelay?
   private var ticket: UUID?
+  /// Set by close(); a load still on its way then stops instead of playing.
+  private var closed = false
   /// Playing stops here and returns to `loopStart`, so the selection plays as a loop.
   private var stopAt: Int64?
   private var loopStart: Int64 = 0
@@ -85,11 +87,14 @@ final class SegmentTrimPlayer: ObservableObject {
     do {
       let source = try await api.createPlayback(mediaId: mediaId)
       ticket = source.id
+      // Closed while the ticket was made: release it instead of starting to play.
+      if Task.isCancelled || closed { close(); return }
       let relay = try LoopbackStreamRelay(
         sourceURL: try api.streamURL(path: source.streamPath),
         publicKeyFingerprint: profile.publicKeyFingerprint, authorizationToken: profile.token)
       self.relay = relay
       let local = try await relay.start()
+      if Task.isCancelled || closed { close(); return }
       engine.onUpdate = { [weak self] in self?.update() }
       engine.onEnded = { [weak self] in self?.isPlaying = false }
       engine.onError = { [weak self] _ in self?.failed = true }
@@ -100,6 +105,7 @@ final class SegmentTrimPlayer: ObservableObject {
       for _ in 0..<100 where engine.durationMilliseconds <= 0 {
         try await Task.sleep(for: .milliseconds(100))
       }
+      if Task.isCancelled || closed { close(); return }
       engine.pause()
       if !engine.opensAtStartPosition { engine.seek(to: milliseconds) }
       duration = engine.durationMilliseconds
@@ -107,6 +113,8 @@ final class SegmentTrimPlayer: ObservableObject {
       ready = duration > 0
       failed = duration <= 0
     } catch {
+      // Nothing may keep playing or hold a ticket after a failure or a close during loading.
+      close()
       failed = true
     }
   }
@@ -131,6 +139,7 @@ final class SegmentTrimPlayer: ObservableObject {
   }
 
   func close() {
+    closed = true
     engine.onUpdate = nil
     engine.onEnded = nil
     engine.onError = nil

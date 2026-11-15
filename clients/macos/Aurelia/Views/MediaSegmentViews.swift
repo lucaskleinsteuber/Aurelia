@@ -245,6 +245,8 @@ struct ServerMediaSegmentsEditor: View {
   @State private var series: [MediaSegmentSeriesStatus] = []
   @State private var showsSeries = false
   @State private var working = false
+  /// Restarts the view's refresh after an action, so it ends when the page closes.
+  @State private var refreshRound = 0
   @State private var message: String?
 
   var body: some View {
@@ -310,7 +312,7 @@ struct ServerMediaSegmentsEditor: View {
         .accessibilityIdentifier("server-media-segments")
       }
     }
-    .task(id: model.administrationGeneration) { await refreshWhileWorking() }
+    .task(id: "\(model.administrationGeneration)-\(refreshRound)") { await refreshWhileWorking() }
   }
 
   @ViewBuilder
@@ -458,7 +460,9 @@ struct ServerMediaSegmentsEditor: View {
       defer { working = false }
       do {
         stored = try await model.currentAdministration { try await scope.request(action) }
-        await refreshWhileWorking()
+        // The section stays usable while the server examines episodes for hours; the view's own
+        // task follows the progress and stops when Settings closes.
+        refreshRound += 1
       } catch {
         message = scope.message(for: error)
       }

@@ -141,7 +141,7 @@ struct SpotlightTourOverlay: View {
           .keyboardShortcut(.cancelAction)
           .accessibilityIdentifier("tour-skip")
         Button(index == stops.count - 1 ? "Done" : "Next") { advance() }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(AureliaPrimaryActionButtonStyle())
           .keyboardShortcut(.defaultAction)
           .accessibilityIdentifier("tour-next")
       }

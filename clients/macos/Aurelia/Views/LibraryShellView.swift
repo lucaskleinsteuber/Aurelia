@@ -411,7 +411,16 @@ struct LibraryShellView: View {
           .transition(.opacity)
           .zIndex(Double(index + 1))
       }
+      if selection != nil {
+        // ⌘[ goes back from a title, collection or person, as in Safari and Finder.
+        Button("Back") { goBack() }
+          .keyboardShortcut("[", modifiers: .command)
+          .opacity(0)
+          .frame(width: 0, height: 0)
+          .accessibilityHidden(true)
+      }
     }
+    .onExitCommand { if selection != nil { goBack() } }
     .animation(.easeOut(duration: reduceMotion ? 0.1 : 0.15), value: selection)
     .animation(.easeOut(duration: reduceMotion ? 0.1 : 0.15), value: destination)
     .onChange(of: selection) { _, value in
@@ -453,6 +462,16 @@ struct LibraryShellView: View {
           onBack: { goBack() },
           onSelect: { open(.media($0)) },
           onOpenCollection: { open(.collection($0)) })
+      } else {
+        // Removed on another device meanwhile: say so instead of an empty page without Back.
+        ContentUnavailableView {
+          Label("Collection Unavailable", systemImage: "square.stack.3d.up.slash")
+        } description: {
+          Text("This collection was removed or is no longer shared with this profile.")
+        } actions: {
+          Button("Back") { goBack() }.buttonStyle(.bordered)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
     case .person(let person):
       PersonDetailView(
@@ -533,7 +552,9 @@ private struct HomePage: View {
         } else {
           EmptyLibraryState(
             title: "Your Library Is Ready",
-            message: "Add a folder or drive to begin building your private library.",
+            message: model.canManageMedia
+              ? "Add a folder or drive to begin building your private library."
+              : "There's nothing here yet. Ask the owner to add movies and shows.",
             action: model.canManageMedia ? { model.showMediaManager() } : nil
           )
         }
@@ -545,7 +566,17 @@ private struct HomePage: View {
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 34) {
           if let recommendation = model.home?.recommendation {
-            HomeHero(item: recommendation) { onSelect(recommendation.id) }
+            HomeHero(item: recommendation) {
+              // "Continue" continues: a started movie or episode plays on from where it stopped,
+              // as in Continue Watching; anything else opens its page.
+              if recommendation.progressFraction != nil, recommendation.kind != .series,
+                recommendation.isPlayable
+              {
+                model.startPlayback(item: recommendation, intent: .resume)
+              } else {
+                onSelect(recommendation.id)
+              }
+            }
           }
           if model.supportsMonthlyWrapped, WrappedStory.monthIsNew() {
             MonthlyWrappedButton().padding(.horizontal, AureliaDesign.pagePadding)
@@ -553,8 +584,7 @@ private struct HomePage: View {
           if model.supportsMovieNight { MovieNightHomeStrip() }
           landscapeRow(
             "Continue Watching",
-            items: model.home?.continueWatching ?? [],
-            eyebrow: "Continue Watching")
+            items: model.home?.continueWatching ?? [])
           ForEach(model.home?.becauseYouWatched ?? []) { rail in
             posterRow("Because You Watched \(rail.sourceTitle)", items: rail.suggestions.map(\.item))
           }
@@ -595,8 +625,7 @@ private struct HomePage: View {
   @ViewBuilder
   private func landscapeRow(
     _ title: String,
-    items: [CatalogItemSummary],
-    eyebrow: String
+    items: [CatalogItemSummary]
   ) -> some View {
     if !items.isEmpty {
       VStack(alignment: .leading, spacing: 14) {
@@ -610,7 +639,8 @@ private struct HomePage: View {
             Button {
               model.startPlayback(item: item, intent: .resume)
             } label: {
-              LandscapeMediaCard(item: item, eyebrow: eyebrow)
+              // The heading already says Continue Watching; the card says which show and episode.
+              LandscapeMediaCard(item: item, eyebrow: CatalogPlaybackLogic.episodeEyebrow(for: item))
             }
             .buttonStyle(AureliaCardButtonStyle())
             .disabled(!item.isPlayable)
@@ -684,6 +714,11 @@ private struct HomeHero: View {
   let item: CatalogItemSummary
   let action: () -> Void
 
+  /// Same rule as the action at Home: a started movie or episode plays on.
+  private var continues: Bool {
+    item.progressFraction != nil && item.kind != .series && item.isPlayable
+  }
+
   var body: some View {
     heroContent
       // The hero leads to its detail page; prepare it while Home is shown.
@@ -752,8 +787,8 @@ private struct HomeHero: View {
 
         Button(action: action) {
           Label(
-            item.progressFraction == nil ? "Open" : "Continue",
-            systemImage: item.progressFraction == nil ? "arrow.right" : "play.fill"
+            continues ? "Continue" : "Open",
+            systemImage: continues ? "play.fill" : "arrow.right"
           )
           .font(.headline)
           .padding(.horizontal, 5)

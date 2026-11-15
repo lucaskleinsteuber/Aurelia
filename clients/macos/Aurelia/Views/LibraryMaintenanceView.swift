@@ -50,8 +50,7 @@ struct LibraryHealthView: View {
         Label("Library Health & Maintenance", systemImage: "stethoscope")
           .font(.title2.bold())
         Spacer()
-        Button("Done") { dismiss() }
-          .keyboardShortcut(.defaultAction)
+        AureliaSheetDoneButton { dismiss() }
       }
       .padding(20)
 
@@ -552,14 +551,19 @@ struct LibraryResetSheet: View {
         Text(
           result.state == "completed"
             ? "Reset complete. Your video files were not changed."
-            : "Catalog removed. Waiting for managed artwork cleanup…"
-        ).foregroundStyle(result.state == "completed" ? .green : .orange)
+            : working
+              ? "Catalog removed. Waiting for the server to clean up its artwork…"
+              : "Catalog removed. The server finishes cleaning up its artwork later; your video files were not changed."
+        ).foregroundStyle(.secondary)
+        if let serverError = result.error { ErrorBanner(message: serverError, inline: true) }
       }
-      if let error { Text(error).foregroundStyle(.orange).textSelection(.enabled) }
+      if let error { ErrorBanner(message: error, inline: true) }
       HStack {
         if working { ProgressView().controlSize(.small) }
         Spacer()
-        Button(result?.state == "completed" ? "Done" : "Cancel") { dismiss() }.disabled(working)
+        Button(result == nil ? "Cancel" : "Done") { dismiss() }
+          .keyboardShortcut(.cancelAction)
+          .disabled(working)
         if result == nil {
           Button(
             preview == nil ? "Review Reset" : "Reset Selected Libraries…",
@@ -633,7 +637,11 @@ struct LibraryResetSheet: View {
       }
       guard model.isCurrentAdministration(generation) else { return }
       result = accepted
-      while let current = result, current.state != "completed" {
+      // The catalog is gone once the reset is accepted; artwork cleanup can take a while or stop
+      // with a server error. Wait up to two minutes and never longer than the server is working.
+      var checks = 0
+      while let current = result, current.state != "completed", current.error == nil, checks < 24 {
+        checks += 1
         try await Task.sleep(for: .seconds(5))
         guard model.isCurrentAdministration(generation) else { return }
         let updated = try await model.currentAdministration {

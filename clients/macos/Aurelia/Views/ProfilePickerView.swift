@@ -102,7 +102,8 @@ struct ProfilePickerView: View {
             }
             .frame(height: 44, alignment: .top)
             if profile.needsPinSetup {
-              Text("Set up PIN").font(.caption).foregroundStyle(.secondary)
+              // Not a button: the owner sets the PIN in Settings › Profiles and Devices.
+              Text("Needs a PIN from the owner").font(.caption).foregroundStyle(.secondary)
             }
             // Screen time closes a children's profile until its wake time.
             if let asleep {
@@ -257,7 +258,7 @@ struct ProfilePickerView: View {
             confirmation = ""
           }
         }
-      }.buttonStyle(.borderedProminent).disabled(
+      }.buttonStyle(AureliaPrimaryActionButtonStyle()).disabled(
         password.isEmpty || !ProfilePIN.isValid(pin) || pin != confirmation
           || model.isSelectingProfile)
     }.frame(maxWidth: 440)
@@ -480,7 +481,7 @@ struct ChangeProfilePINView: View {
   private var mandatory: Bool { model.profile?.user?.role.canManageLibraries == true }
 
   var body: some View {
-    GroupBox("Profile PIN") {
+    AureliaSettingsSection("Profile PIN", symbol: "lock.fill") {
       VStack(alignment: .leading, spacing: 12) {
         if protected { SecureField("Current PIN", text: $current) }
         SecureField("New PIN (4–8 digits)", text: $new)

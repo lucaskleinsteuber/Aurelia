@@ -87,7 +87,7 @@ struct SceneNotesPopover: View {
         Button("Cancel") { notes.cancelDraft() }
         Spacer()
         Button("Save") { Task { await notes.save() } }
-          .buttonStyle(.borderedProminent).disabled(notes.isSaving)
+          .buttonStyle(AureliaPrimaryActionButtonStyle(compact: true)).disabled(notes.isSaving)
           .accessibilityIdentifier("scene-note-save")
       }
     }

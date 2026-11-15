@@ -784,7 +784,7 @@ private struct ServerVideoPicker: View {
         Text("Only files in this title's server storage are available.").font(.caption)
           .foregroundStyle(.secondary)
         Spacer()
-        Button("Cancel") { dismiss() }
+        Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
       }
     }.padding(24).frame(width: 650, height: 550).background(AureliaBackdrop())
       .task(id: path) {

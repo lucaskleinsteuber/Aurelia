@@ -182,7 +182,7 @@ final class AureliaUITests: XCTestCase {
     XCTAssertFalse(app.buttons["Disconnect This Mac"].exists)
     // The restored server is managed under Settings › Server again.
     app.buttons["Server"].click()
-    XCTAssertTrue(app.buttons["Restart Server"].waitForExistence(timeout: 8))
+    XCTAssertTrue(app.buttons["Restart Server…"].waitForExistence(timeout: 8))
     assertNoUnexpectedDialog(in: app)
   }
 
@@ -393,7 +393,7 @@ final class AureliaUITests: XCTestCase {
         "Missing advanced section: \(section)")
     }
     XCTAssertFalse(app.buttons["Try Network Settings (60-second rollback)"].isEnabled)
-    XCTAssertFalse(app.buttons["Restart Server"].isEnabled)
+    XCTAssertFalse(app.buttons["Restart Server…"].isEnabled)
     let screenshot = XCTAttachment(screenshot: app.screenshot())
     screenshot.name = "Server settings - synthetic owner, no native host"
     screenshot.lifetime = .keepAlways

@@ -89,6 +89,13 @@ struct AppSettingsView: View {
     _selectedCategory = State(initialValue: initialCategory ?? .general)
   }
 
+  @State private var savingToken = false
+
+  /// A metadata job already queued or running: Enrich would only start another.
+  private var metadataJobRunning: Bool {
+    model.metadataJob?.state == .queued || model.metadataJob?.state == .running
+  }
+
   var body: some View {
     HStack(spacing: 0) {
       sidebar
@@ -157,7 +164,7 @@ struct AppSettingsView: View {
       }
     } message: {
       Text(
-        "Only Aurelia database entries are removed. Your media files are never deleted or changed.")
+        "Its titles leave the library, with their favorites, progress and history for every profile. Your media files are never deleted or changed.")
     }
     .confirmationDialog(
       "Stop hosting on this Mac?",
@@ -306,18 +313,15 @@ struct AppSettingsView: View {
           }
 
           if selectedCategory != .updates, let error = model.administrationErrorMessage {
-            Text(error)
-              .foregroundStyle(.orange)
-              .frame(maxWidth: .infinity, alignment: .leading)
+            ErrorBanner(message: error, inline: true)
           }
           if selectedCategory != .updates, let error = model.errorMessage {
-            Text(error)
-              .foregroundStyle(.orange)
-              .frame(maxWidth: .infinity, alignment: .leading)
+            ErrorBanner(message: error, inline: true)
           }
         }
         .padding(26)
         .frame(maxWidth: .infinity, alignment: .topLeading)
+        .aureliaSettingRows()
       }
       .id(selectedCategory)
       .transition(.opacity.combined(with: .offset(y: 10)))
@@ -579,7 +583,6 @@ struct AppSettingsView: View {
           }
         }
       }
-      .toggleStyle(.switch)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
@@ -588,17 +591,14 @@ struct AppSettingsView: View {
     AureliaSettingsSection(
       "Sidebar Navigation",
       symbol: "sidebar.left",
-      description: "Rearrange sections, hide items, and configure your default startup screen."
+      description: "Choose which pages the sidebar shows and in which order."
     ) {
       HStack {
-        Text("Modular sidebar controls and custom order are available in Sidebar settings.")
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
         Spacer()
-        Button("Configure Sidebar…") {
+        Button("Customize Sidebar…") {
           selectedCategory = .sidebar
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(.bordered)
         .accessibilityIdentifier("interface-configure-sidebar-button")
       }
     }
@@ -639,19 +639,19 @@ struct AppSettingsView: View {
         Divider()
 
         VStack(alignment: .leading, spacing: 2) {
-          HStack {
-            Toggle("Let the Server Rest When Unused", isOn: $restsWhenUnused)
-              .accessibilityIdentifier("interface-rest")
-            Spacer()
+          Toggle("Let the Server Rest When Unused", isOn: $restsWhenUnused)
+            .accessibilityIdentifier("interface-rest")
+          LabeledContent("After") {
             Picker("After", selection: $restMinutes) {
               ForEach(AureliaRest.minuteChoices, id: \.self) { minutes in
                 Text("\(minutes) minutes").tag(minutes)
               }
             }
             .labelsHidden()
-            .frame(width: 130)
-            .disabled(!restsWhenUnused)
+            .frame(width: 170)
           }
+          .padding(.top, 6)
+          .disabled(!restsWhenUnused)
           Text(
             "When Aurelia is not used for this long, it disconnects so a server that saves power can sleep. Working in other apps does not count as using Aurelia."
           )
@@ -659,15 +659,7 @@ struct AppSettingsView: View {
           .foregroundStyle(.secondary)
           .frame(maxWidth: .infinity, alignment: .leading)
         }
-
-        Divider()
-
-        LabeledContent("Appearance", value: "Dark Cinema")
-        LabeledContent("Reduced Motion", value: "Follows System Settings")
-        LabeledContent("Reduced Transparency", value: "Follows System Settings")
-        LabeledContent("Increased Contrast", value: "Follows System Settings")
       }
-      .toggleStyle(.switch)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
@@ -716,7 +708,6 @@ struct AppSettingsView: View {
         }
         .disabled(!playbackPreferences.preferences.cinemaMode)
       }
-      .toggleStyle(.switch)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
@@ -728,8 +719,12 @@ struct AppSettingsView: View {
       description: "Starting position, auto-play, and audio comfort for media playback on this Mac."
     ) {
       VStack(alignment: .leading, spacing: 14) {
-        Toggle("Automatic Resume", isOn: $playbackPreferences.preferences.automaticResume)
-          .accessibilityIdentifier("playback-automatic-resume")
+        VStack(alignment: .leading, spacing: 2) {
+          Toggle("Automatic Resume", isOn: $playbackPreferences.preferences.automaticResume)
+            .accessibilityIdentifier("playback-automatic-resume")
+          Text("Play continues where you stopped instead of asking whether to start over.")
+          .font(.caption).foregroundStyle(.secondary)
+        }
 
         if model.supportsAdaptiveStreaming {
           VStack(alignment: .leading, spacing: 2) {
@@ -748,11 +743,15 @@ struct AppSettingsView: View {
           }
         }
 
-        Toggle(
-          "Automatically Play Next Episode",
-          isOn: $playbackPreferences.preferences.automaticallyPlayNextEpisode
-        )
-        .accessibilityIdentifier("playback-auto-next")
+        VStack(alignment: .leading, spacing: 2) {
+          Toggle(
+            "Automatically Play Next Episode",
+            isOn: $playbackPreferences.preferences.automaticallyPlayNextEpisode
+          )
+          .accessibilityIdentifier("playback-auto-next")
+          Text("When an episode ends, the next one starts after the countdown below.")
+          .font(.caption).foregroundStyle(.secondary)
+        }
 
         LabeledContent("Up Next Countdown Duration") {
           Picker(
@@ -824,14 +823,21 @@ struct AppSettingsView: View {
           .frame(width: 140)
           .accessibilityIdentifier("playback-resume-threshold")
         }
+        Text("A title stopped within this time starts from the beginning next time.")
+          .font(.caption).foregroundStyle(.secondary)
+          .padding(.top, -12)
 
         Divider()
 
-        Toggle(
-          "Prevent Sleep During Playback",
-          isOn: $playbackPreferences.preferences.preventSleepDuringPlayback
-        )
-        .accessibilityIdentifier("playback-prevent-sleep")
+        VStack(alignment: .leading, spacing: 2) {
+          Toggle(
+            "Prevent Sleep During Playback",
+            isOn: $playbackPreferences.preferences.preventSleepDuringPlayback
+          )
+          .accessibilityIdentifier("playback-prevent-sleep")
+          Text("Keeps this Mac and its display awake while a title plays.")
+          .font(.caption).foregroundStyle(.secondary)
+        }
 
         VStack(alignment: .leading, spacing: 2) {
           Toggle(
@@ -858,20 +864,29 @@ struct AppSettingsView: View {
           .font(.caption).foregroundStyle(.secondary)
         }
 
-        VStack(alignment: .leading, spacing: 2) {
-          Picker("Dialogue Boost", selection: $playbackPreferences.preferences.dialogueBoost) {
-            ForEach(DialogueBoost.allCases, id: \.self) { Text($0.title).tag($0) }
-          }.accessibilityIdentifier("playback-dialogue-boost")
-          Picker("Volume Leveling", selection: $playbackPreferences.preferences.volumeLeveling) {
-            ForEach(VolumeLeveling.allCases, id: \.self) { Text($0.title).tag($0) }
-          }.accessibilityIdentifier("playback-volume-leveling")
+        VStack(alignment: .leading, spacing: 8) {
+          LabeledContent("Dialogue Boost") {
+            Picker("Dialogue Boost", selection: $playbackPreferences.preferences.dialogueBoost) {
+              ForEach(DialogueBoost.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .labelsHidden()
+            .frame(width: 170)
+            .accessibilityIdentifier("playback-dialogue-boost")
+          }
+          LabeledContent("Volume Leveling") {
+            Picker("Volume Leveling", selection: $playbackPreferences.preferences.volumeLeveling) {
+              ForEach(VolumeLeveling.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .labelsHidden()
+            .frame(width: 170)
+            .accessibilityIdentifier("playback-volume-leveling")
+          }
           Text(
-            "Emphasize speech and reduce differences between quiet and loud passages. Sleep applies stronger volume leveling."
+            "Dialogue Boost makes speech clearer; Volume Leveling evens out quiet and loud passages, and Sleep evens them out more for late nights."
           )
           .font(.caption).foregroundStyle(.secondary)
         }
       }
-      .toggleStyle(.switch)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
@@ -1073,6 +1088,8 @@ struct AppSettingsView: View {
             } label: {
               Image(systemName: "trash")
             }
+            .help("Remove This Storage Location…")
+            .accessibilityLabel("Remove \(library.name)")
           }
           if library.id != model.libraries.last?.id { Divider() }
         }
@@ -1113,7 +1130,6 @@ struct AppSettingsView: View {
         .font(.caption)
         .foregroundStyle(.secondary)
       }
-      .toggleStyle(.switch)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
@@ -1132,8 +1148,10 @@ struct AppSettingsView: View {
         if model.profile?.user?.role != .owner {
           Text("An owner manages the metadata provider and its credentials.")
             .font(.caption).foregroundStyle(.secondary)
-          Button("Enrich Shared Libraries") { Task { await model.enrichLibrary() } }
-            .disabled(model.libraries.isEmpty)
+          Button(metadataJobRunning ? "Enriching…" : "Enrich Shared Libraries") {
+            Task { await model.enrichLibrary() }
+          }
+          .disabled(model.libraries.isEmpty || metadataJobRunning)
           Button("Review Queue") { showingReviewQueue = true }
         } else if model.metadataProvider?.hasToken == true {
           LabeledContent(
@@ -1146,11 +1164,20 @@ struct AppSettingsView: View {
             Text(status.attribution).font(.caption2).foregroundStyle(.secondary)
           }
           HStack {
-            Button("Enrich Library") { Task { await model.enrichLibrary() } }
-              .accessibilityIdentifier("metadata-enrich")
+            Button(metadataJobRunning ? "Enriching…" : "Enrich Library") {
+              Task { await model.enrichLibrary() }
+            }
+            .disabled(metadataJobRunning)
+            .accessibilityIdentifier("metadata-enrich")
             Button("Review Queue") { showingReviewQueue = true }
             Button("Remove Unused Artwork") { Task { await model.pruneArtwork() } }
-            Button("Remove TMDB Token", role: .destructive) {
+            Button("Remove TMDB Token…", role: .destructive) {
+              guard
+                AureliaConfirm.ask(
+                  "Remove the TMDB Token?",
+                  "New titles get no posters or descriptions until you add a token again. What's already there stays.",
+                  action: "Remove Token")
+              else { return }
               Task { await model.disableMetadata() }
             }
             .accessibilityIdentifier("metadata-remove-token")
@@ -1182,12 +1209,17 @@ struct AppSettingsView: View {
           SecureField("TMDB API Read Access Token", text: $tmdbToken)
             .textFieldStyle(.roundedBorder)
             .accessibilityIdentifier("tmdb-token")
-          Button("Enable TMDB") {
+          Button(savingToken ? "Enabling…" : "Enable TMDB") {
+            // The token stays in the field until the server took it, so a failure needs no retyping.
             let token = tmdbToken
-            tmdbToken = ""
-            Task { await model.configureMetadata(token: token) }
+            savingToken = true
+            Task {
+              await model.configureMetadata(token: token)
+              if model.metadataProvider?.hasToken == true { tmdbToken = "" }
+              savingToken = false
+            }
           }
-          .disabled(tmdbToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+          .disabled(savingToken || tmdbToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -1283,7 +1315,7 @@ struct AppSettingsView: View {
           }
         } else if case .available(let release) = updater.state {
           Button("Install \(release.version) and Restart") { updater.startInstall(release) }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(AureliaPrimaryActionButtonStyle())
             .accessibilityIdentifier("updates-install")
         }
 
@@ -1304,7 +1336,6 @@ struct AppSettingsView: View {
         .disabled(updater.isBusy)
         .accessibilityIdentifier("updates-check")
       }
-      .toggleStyle(.switch)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -1431,37 +1462,18 @@ struct AppSettingsView: View {
 // MARK: - Sidebar Customizer
 
 struct SidebarCustomizerView: View {
-  @AppStorage(GeneralPreferenceKeys.defaultStartScreen) private var defaultStartScreen =
-    StartScreenPreference.lastScreen.rawValue
   @AppStorage(GeneralPreferenceKeys.sidebarVisibilityRevision) private var visibilityRevision = 0
   @State private var items: [LibraryDestination] = SidebarPreferences.loadOrder()
   @State private var dragged: LibraryDestination?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 20) {
+      // The start screen is chosen once, in General › Interface & Display.
       AureliaSettingsSection(
-        "Startup Screen",
-        symbol: "arrow.right.circle.fill",
-        description:
-          "Choose which section Aurelia opens automatically when starting the application."
-      ) {
-        LabeledContent("Default Start Screen") {
-          Picker("Default Start Screen", selection: $defaultStartScreen) {
-            ForEach(StartScreenPreference.allCases) { screen in
-              Text(screen.label).tag(screen.rawValue)
-            }
-          }
-          .labelsHidden()
-          .frame(width: 180)
-          .accessibilityIdentifier("sidebar-start-screen")
-        }
-      }
-
-      AureliaSettingsSection(
-        "Modular Sidebar Navigation",
+        "Sidebar Items",
         symbol: "sidebar.left",
         description:
-          "Customize which items appear in the sidebar and arrange them in any order you prefer. Drag an item by its handle to move it, or toggle it off to hide it."
+          "Choose which pages appear in the sidebar and in which order. Drag an item by its handle to move it, or switch it off to hide it."
       ) {
         VStack(spacing: 8) {
           ForEach(Array(items.enumerated()), id: \.element) { index, item in

@@ -40,12 +40,15 @@ struct ServerPowerEditor: View {
               .fixedSize(horizontal: false, vertical: true)
             if draft.mode != "off" {
               Divider()
-              Picker("After", selection: binding(\.idleMinutes)) {
-                ForEach(idleChoices(including: draft.idleMinutes), id: \.self) { minutes in
-                  Text(Self.label(minutes)).tag(minutes)
+              LabeledContent("After") {
+                Picker("After", selection: binding(\.idleMinutes)) {
+                  ForEach(idleChoices(including: draft.idleMinutes), id: \.self) { minutes in
+                    Text(Self.label(minutes)).tag(minutes)
+                  }
                 }
+                .labelsHidden()
+                .frame(width: 170)
               }
-              .frame(maxWidth: 320)
               Text(
                 "Without anyone watching, browsing or changing settings on any device. An app that is only open doesn't count, and nothing happens while a title plays."
               )
@@ -80,12 +83,19 @@ struct ServerPowerEditor: View {
                 .fixedSize(horizontal: false, vertical: true)
               }
             }
-            HStack {
-              Button("Save") { save() }
-                .disabled(draft == stored || !isValid(draft))
+            if let message { ErrorBanner(message: message, inline: true) }
+            HStack(spacing: 12) {
+              // The server applies these together, so they wait for Save (unlike this Mac's own
+              // settings, which apply at once).
+              Text(draft == stored ? "Saved on the server." : "Changes apply on the server when you save.")
+                .font(.caption).foregroundStyle(.secondary)
+              Spacer()
               if working { ProgressView().controlSize(.small) }
+              Button("Save") { save() }
+                .buttonStyle(AureliaPrimaryActionButtonStyle())
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(draft == stored || !isValid(draft))
             }
-            if let message { Text(message).font(.caption).foregroundStyle(.orange) }
           }
           .frame(maxWidth: .infinity, alignment: .leading).disabled(working)
         }
@@ -387,7 +397,15 @@ struct ServerScrubPreviewsEditor: View {
               Button("Save Scrub Preview Settings") { save() }
                 .disabled(!hasChanges(draft: draft, stored: stored))
                 .accessibilityIdentifier("server-scrub-previews-save")
-              Button("Delete All Previews", role: .destructive) { deleteAll() }
+              Button("Delete All Previews…", role: .destructive) {
+                guard
+                  AureliaConfirm.ask(
+                    "Delete All Scrub Previews?",
+                    "The server makes them again in the background, which takes a while for a large library.",
+                    action: "Delete Previews")
+                else { return }
+                deleteAll()
+              }
                 .disabled(stored.storedTitleCount == 0 && stored.storedBytes == 0)
                 .accessibilityIdentifier("server-scrub-previews-delete")
               if working { ProgressView().controlSize(.small) }

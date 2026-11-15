@@ -281,7 +281,7 @@ struct SecurityLogSheet: View {
       if let error { Text(error).font(.caption).foregroundStyle(.red) }
       HStack {
         Spacer()
-        Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+        AureliaSheetDoneButton { dismiss() }
       }
     }
     .padding(20)
@@ -417,8 +417,9 @@ struct SecurityAlertBanner: View {
           HStack {
             Spacer()
             Button("Deny") { Task { await center.decide(request, approve: false) } }
+            // No Return shortcut: this banner sits over the window, and a stray Return must never
+            // start approving another device's management unlock.
             Button("Confirm with Touch ID") { Task { await center.decide(request, approve: true) } }
-              .keyboardShortcut(.defaultAction)
           }
         }
       }

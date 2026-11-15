@@ -29,7 +29,7 @@ struct WatchTogetherPopover: View {
             working = false
           }
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(AureliaPrimaryActionButtonStyle())
         .disabled(working)
         .accessibilityIdentifier("watch-together-start")
       }

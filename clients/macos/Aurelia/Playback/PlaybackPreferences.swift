@@ -22,6 +22,42 @@ struct PlaybackTrack: Identifiable, Equatable, Sendable {
   }
 }
 
+/// Track names as the player's menus show them. VLC names tracks like "Track 1 - [English]";
+/// the menus show "English", "Commentary (English)", and number tracks that would read the same
+/// ("English", "English (2)"). The track's own title stays as it is for saved preferences.
+enum PlaybackTrackNames {
+  static func menuTitle(for track: PlaybackTrack, in tracks: [PlaybackTrack]) -> String {
+    let names = tracks.map { plain($0.title) }
+    guard let position = tracks.firstIndex(where: { $0.id == track.id }) else {
+      return plain(track.title)
+    }
+    let name = names[position]
+    let earlier = names[..<position].filter { $0.caseInsensitiveCompare(name) == .orderedSame }.count
+    return earlier == 0 ? name : "\(name) (\(earlier + 1))"
+  }
+
+  static func plain(_ title: String) -> String {
+    var value = title.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let prefix = value.range(of: #"^Track \d+\s*-\s*"#, options: .regularExpression) {
+      value.removeSubrange(prefix)
+    }
+    if let tag = value.range(of: #"\[[^\]]+\]$"#, options: .regularExpression) {
+      let language = String(value[tag].dropFirst().dropLast())
+        .trimmingCharacters(in: .whitespaces)
+      var rest = String(value[..<tag.lowerBound]).trimmingCharacters(in: .whitespaces)
+      if rest.hasSuffix("-") { rest = String(rest.dropLast()).trimmingCharacters(in: .whitespaces) }
+      if rest.isEmpty {
+        value = language
+      } else if language.isEmpty || rest.localizedCaseInsensitiveContains(language) {
+        value = rest
+      } else {
+        value = "\(rest) (\(language))"
+      }
+    }
+    return value.isEmpty ? title : value
+  }
+}
+
 /// The default languages of Settings › Playback, matched against VLC's "[eng]" track tags.
 enum PlaybackLanguage {
   static let choices = ["en", "de", "fr", "es", "it", "ja"]

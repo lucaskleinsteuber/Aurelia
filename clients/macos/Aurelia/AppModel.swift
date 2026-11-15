@@ -1390,13 +1390,15 @@ final class AppModel: ObservableObject {
         return try await client.resetLibrary(preview: preview)
       }
       guard isCurrent(generation), isCurrentAdministration(administration) else { return }
-      guard result.state == "completed" else {
-        throw APIClientError.serverRejected(
-          code: "cleanup_pending",
-          message: result.error ?? "The library reset is awaiting artwork cleanup.")
-      }
+      // The location is gone once the reset ran; artwork the server still has to clean up is its
+      // own business and doesn't make the removal look failed (it keeps the location listed).
       libraries.removeAll { $0.id == id }
       try await refresh()
+      if result.state != "completed" {
+        administrationErrorMessage =
+          "The storage location was removed. The server finishes cleaning up its artwork later"
+          + (result.error.map { ": \($0)" } ?? ".")
+      }
     } catch {
       if isCurrent(generation), isCurrentAdministration(administration) {
         reportAdministrationFailure(error)
@@ -2548,7 +2550,12 @@ final class AppModel: ObservableObject {
         collectionId: collectionId, mediaId: mediaId, seasonNumber: seasonNumber)
       guard isCurrent(generation) else { return }
       try await refresh()
-    } catch {}
+    } catch {
+      // Shown in the library's error banner instead of the click silently doing nothing.
+      if isCurrent(generation), !(error is CancellationError) {
+        errorMessage = "Couldn't add it to the collection. \(error.localizedDescription)"
+      }
+    }
   }
 
   func removeMediaFromCollection(collectionId: UUID, mediaId: UUID, seasonNumber: Int? = nil)
@@ -2561,7 +2568,11 @@ final class AppModel: ObservableObject {
         collectionId: collectionId, mediaId: mediaId, seasonNumber: seasonNumber)
       guard isCurrent(generation) else { return }
       try await refresh()
-    } catch {}
+    } catch {
+      if isCurrent(generation), !(error is CancellationError) {
+        errorMessage = "Couldn't remove it from the collection. \(error.localizedDescription)"
+      }
+    }
   }
 
   func createCollectionFromFranchise(_ franchiseId: String) async throws -> CollectionSummary {

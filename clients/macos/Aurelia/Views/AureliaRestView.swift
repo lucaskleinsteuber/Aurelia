@@ -27,7 +27,7 @@ struct AureliaRestView: View {
             Text("Aurelia Is Resting")
               .font(.title2.weight(.semibold))
             Text(
-              "Nothing played and no one used Aurelia for \(AureliaRest.minutes()) minutes, so it let go of \(serverName ?? "your server"). The server can save power now."
+              "Nothing played and no one used this Mac's Aurelia for \(AureliaRest.minutes()) minutes, so it disconnected from \(serverName.map { "the server “\($0)”" } ?? "your server"). The server can save power now."
             )
             .font(.callout)
             .foregroundStyle(.secondary)

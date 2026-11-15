@@ -5,10 +5,12 @@ enum AureliaDesign {
   static let canvasRGB = (red: UInt8(32), green: UInt8(35), blue: UInt8(38))
   static let pagePadding: CGFloat = 32
   static let homeRailLeadingInset: CGFloat = 32
-  static let detailRailLeadingInset: CGFloat = 48
+  // Detail sections line up with the hero title and About/Information (the page padding).
+  static let detailRailLeadingInset: CGFloat = pagePadding
   static let sectionSpacing: CGFloat = 30
   static let rowSpacing: CGFloat = 20
   static let cardRadius: CGFloat = 18
+  static let smallRadius: CGFloat = 8
   static let compactRadius: CGFloat = 12
   static let heroRadius: CGFloat = 24
   static let sidebarWidth: CGFloat = 236
@@ -404,6 +406,43 @@ struct AureliaSectionHeading: View {
   }
 }
 
+/// Settings rows read the same on every page: the label (and its explanation below it) on the
+/// left, the switch on the right, as on the server pages. Set once for all of Settings.
+struct AureliaSettingToggleStyle: ToggleStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    HStack(alignment: .center, spacing: 16) {
+      configuration.label
+        .frame(maxWidth: .infinity, alignment: .leading)
+      Toggle("", isOn: configuration.$isOn)
+        .labelsHidden()
+        .toggleStyle(.switch)
+    }
+    .accessibilityRepresentation {
+      Toggle(isOn: configuration.$isOn) { configuration.label }
+        .toggleStyle(.switch)
+    }
+  }
+}
+
+/// A labeled value or menu in Settings: the label on the left, the control on the right.
+struct AureliaSettingLabeledContentStyle: LabeledContentStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    HStack(alignment: .firstTextBaseline, spacing: 16) {
+      configuration.label
+        .frame(maxWidth: .infinity, alignment: .leading)
+      configuration.content
+    }
+  }
+}
+
+extension View {
+  /// The shared row layout for Settings and its sheets.
+  func aureliaSettingRows() -> some View {
+    toggleStyle(AureliaSettingToggleStyle())
+      .labeledContentStyle(AureliaSettingLabeledContentStyle())
+  }
+}
+
 struct AureliaSettingsSection<Content: View>: View {
   let title: String
   let symbol: String?
@@ -588,15 +627,19 @@ struct AureliaIconMenu<Content: View>: View {
   }
 }
 
+/// The one main button of a page, sheet or row: white on the dark canvas. `compact` fits a row of
+/// a list (wishes, notes) next to regular buttons.
 struct AureliaPrimaryActionButtonStyle: ButtonStyle {
+  var compact = false
   @Environment(\.isEnabled) private var isEnabled
   @Environment(\.aureliaReduceMotion) private var reduceMotion
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
+      .font(compact ? .callout.weight(.semibold) : nil)
       .foregroundStyle(.black.opacity(isEnabled ? 0.94 : 0.42))
-      .padding(.horizontal, 18)
-      .frame(minHeight: AureliaDesign.minimumControlSize)
+      .padding(.horizontal, compact ? 12 : 18)
+      .frame(minHeight: compact ? 28 : AureliaDesign.minimumControlSize)
       .background(.white.opacity(isEnabled ? 0.96 : 0.38), in: Capsule())
       .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
       .animation(reduceMotion ? nil : AureliaMotion.press, value: configuration.isPressed)
@@ -856,7 +899,7 @@ struct MediaPosterCard: View {
   private var secondaryLine: String {
     if let message = MediaAvailabilityPresentation.message(for: item) { return message }
     if let year = item.year { return String(year) }
-    return item.kind == .movie ? "Movie" : "TV Show"
+    return item.kind.displayName
   }
 }
 
@@ -887,7 +930,7 @@ struct LandscapeMediaCard: View {
           .font(.headline)
           .foregroundStyle(.white)
           .lineLimit(1)
-        Text(item.year.map(String.init) ?? (item.kind == .movie ? "Movie" : "TV Show"))
+        Text(item.year.map(String.init) ?? item.kind.displayName)
           .font(.caption)
           .foregroundStyle(.white.opacity(0.68))
       }
@@ -990,33 +1033,76 @@ enum MediaWatchPresentation {
   }
 }
 
+/// A short question before an action that can't be undone with one click. Modal, so it also works
+/// from menus and sheets.
+@MainActor
+enum AureliaConfirm {
+  static func ask(_ title: String, _ message: String, action: String) -> Bool {
+    let alert = NSAlert()
+    alert.messageText = title
+    alert.informativeText = message
+    alert.addButton(withTitle: action).hasDestructiveAction = true
+    alert.addButton(withTitle: "Cancel")
+    return alert.runModal() == .alertFirstButtonReturn
+  }
+}
+
+/// Done in a sheet that only shows things: Return and Escape both close it, as every sheet does.
+struct AureliaSheetDoneButton: View {
+  var title = "Done"
+  let action: () -> Void
+
+  var body: some View {
+    Button(title, action: action)
+      .keyboardShortcut(.defaultAction)
+      .background {
+        Button("Close", action: action)
+          .keyboardShortcut(.cancelAction)
+          .opacity(0)
+          .allowsHitTesting(false)
+          .accessibilityHidden(true)
+      }
+  }
+}
+
+/// The one way Aurelia shows a problem: an orange sign, what went wrong and, where it helps, Try
+/// Again. Floating over a page by default; `inline` places it in a settings section or a sheet.
 struct ErrorBanner: View {
   let message: String
   var retry: (() -> Void)?
   var retryLabel = "Try Again"
   var retryDisabled = false
+  var inline = false
 
   var body: some View {
-    HStack(spacing: 12) {
+    let banner = HStack(spacing: 12) {
       Image(systemName: "exclamationmark.triangle.fill")
         .foregroundStyle(.orange)
       Text(message)
         .font(.callout)
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
       if let retry {
         Button(retryLabel, action: retry)
           .disabled(retryDisabled)
       }
     }
-    .padding(14)
-    .frame(maxWidth: 760)
+    .padding(inline ? 12 : 14)
     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius))
     .overlay {
       RoundedRectangle(cornerRadius: AureliaDesign.compactRadius)
         .stroke(AureliaDesign.hairline, lineWidth: 1)
     }
-    .shadow(color: .black.opacity(0.25), radius: 14, y: 7)
-    .padding(.horizontal, AureliaDesign.pagePadding)
-    .padding(.bottom, 18)
+    .accessibilityElement(children: .combine)
+    if inline {
+      banner.frame(maxWidth: .infinity, alignment: .leading)
+    } else {
+      banner
+        .frame(maxWidth: 760)
+        .shadow(color: .black.opacity(0.25), radius: 14, y: 7)
+        .padding(.horizontal, AureliaDesign.pagePadding)
+        .padding(.bottom, 18)
+    }
   }
 }

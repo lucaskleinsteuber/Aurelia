@@ -188,7 +188,7 @@ private struct MacLicenseSheet: View {
       }
       HStack {
         Spacer()
-        Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+        AureliaSheetDoneButton { dismiss() }
       }
     }
     .padding(22)

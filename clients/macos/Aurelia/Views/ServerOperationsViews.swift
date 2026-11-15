@@ -59,7 +59,7 @@ struct ServerNetworkEditor: View {
       initialValue: (configuration.stored.allowedNetworks ?? []).joined(separator: "\n"))
   }
   var body: some View {
-    GroupBox("Network") {
+    AureliaSettingsSection("Network", symbol: "network", description: "Which networks may reach the server and how it shows up in your home network.") {
       VStack(alignment: .leading, spacing: 12) {
         LabeledContent("Active name", value: configuration.active.serverName)
         LabeledContent("Connected address", value: model.profile?.baseURL.absoluteString ?? "—")
@@ -291,7 +291,6 @@ struct ServerHostingEditor: View {
         }.disabled(working || !available)
         if let message { Text(message).font(.caption).textSelection(.enabled) }
       }
-      .toggleStyle(.switch)
       .frame(maxWidth: .infinity, alignment: .leading)
     }.task(id: model.administrationGeneration) {
       let scope = ServerAdministrationScope(
@@ -355,7 +354,7 @@ struct ServerLibraryJobsEditor: View {
     _settings = State(initialValue: configuration.stored)
   }
   var body: some View {
-    GroupBox("Library Maintenance") {
+    AureliaSettingsSection("Library Maintenance", symbol: "wrench.and.screwdriver", description: "When the server checks the library and tidies up, and how much work it may queue.") {
       VStack(alignment: .leading, spacing: 12) {
         Toggle("Notice new and removed files automatically", isOn: $settings.monitoringEnabled)
         Stepper(
@@ -408,7 +407,7 @@ struct ServerLibraryJobsEditor: View {
         if let jobs {
           ForEach(jobs.scans.prefix(12)) { scan in
             HStack {
-              Text("Scan · \(scan.state.rawValue) · \(scan.filesDiscovered) files").font(.caption)
+              Text("Scan · \(ReadableState.text(scan.state.rawValue)) · \(scan.filesDiscovered) files").font(.caption)
               Spacer()
               if [.queued, .running, .waitingForStorage].contains(scan.state) {
                 Button("Cancel") {
@@ -432,7 +431,7 @@ struct ServerLibraryJobsEditor: View {
           ForEach(jobs.metadata.prefix(12)) { job in
             HStack {
               VStack(alignment: .leading, spacing: 3) {
-                Text("Metadata · \(job.state.rawValue) · \(job.itemsProcessed)/\(job.itemsTotal)")
+                Text("Metadata · \(ReadableState.text(job.state.rawValue)) · \(job.itemsProcessed)/\(job.itemsTotal)")
                   .font(.caption)
                 if let status = job.waitingStatus() {
                   Text(status).font(.caption).foregroundStyle(.secondary)
@@ -533,7 +532,7 @@ struct ServerBackupsEditor: View {
     _settings = State(initialValue: configuration.stored)
   }
   var body: some View {
-    GroupBox("Backup Details") {
+    AureliaSettingsSection("Backup Details", symbol: "externaldrive", description: "Encrypted backups you keep yourself, and restoring from one.") {
       VStack(alignment: .leading, spacing: 12) {
         Stepper(
           "Automatic backup every \(settings.backupIntervalHours) hours",
@@ -684,7 +683,7 @@ struct ServerDiagnosticsEditor: View {
     _settings = State(initialValue: configuration.stored)
   }
   var body: some View {
-    GroupBox("Diagnostics") {
+    AureliaSettingsSection("Diagnostics", symbol: "stethoscope", description: "A report of the server's state, for when something goes wrong.") {
       VStack(alignment: .leading, spacing: 12) {
         Stepper(
           "Retain events for \(settings.eventRetentionDays) days",

@@ -19,6 +19,7 @@ struct MediaDetailView: View {
   @State private var playbackTask: Task<Void, Never>?
   @State private var usedPreparedDetail = false
   @State private var remoteDevices: [RemotePlayerDevice] = []
+  @State private var isSavingFranchise = false
   @Environment(\.aureliaReduceMotion) private var reduceMotion
   @StateObject private var watchActions = MediaWatchActionController()
 
@@ -46,6 +47,7 @@ struct MediaDetailView: View {
         LazyVStack(alignment: .leading, spacing: 38) {
           DetailHero(
             detail: detail,
+            seasonNumber: activeSeason(detail)?.number,
             playLabel: DetailPlaybackPresentation.label(detail: detail, plan: shownPlan),
             playTarget: primaryTarget(detail),
             isPlayLoading: isLoadingPlaybackPlan || isStartingPlayback,
@@ -105,11 +107,24 @@ struct MediaDetailView: View {
         }
         .padding(.bottom, 48)
       } else if let errorMessage {
-        ContentUnavailableView(
-          "Media Unavailable",
-          systemImage: "exclamationmark.triangle",
-          description: Text(errorMessage)
-        )
+        ContentUnavailableView {
+          Label("Media Unavailable", systemImage: "exclamationmark.triangle")
+        } description: {
+          Text(errorMessage)
+        } actions: {
+          // The page's own Back only appears after scrolling, which this page can't.
+          HStack(spacing: 12) {
+            Button("Back", action: onBack)
+              .buttonStyle(.bordered)
+              .keyboardShortcut(.cancelAction)
+            Button("Try Again") {
+              self.errorMessage = nil
+              Task { await load() }
+            }
+            .buttonStyle(AureliaPrimaryActionButtonStyle())
+            .keyboardShortcut(.defaultAction)
+          }
+        }
         .frame(maxWidth: .infinity, minHeight: 420)
         .padding(AureliaDesign.pagePadding)
       } else {
@@ -119,8 +134,7 @@ struct MediaDetailView: View {
             colors: [.clear, AureliaDesign.canvas],
             startPoint: .top,
             endPoint: .bottom)
-          ProgressView("Loading details…")
-            .controlSize(.large)
+          AureliaDelayedProgress()
         }
         .frame(height: 500)
       }
@@ -165,7 +179,7 @@ struct MediaDetailView: View {
       )
     }
     .alert(
-      "Library Action Failed",
+      "Something Went Wrong",
       isPresented: Binding(
         get: { detail != nil && (errorMessage != nil || watchActions.errorMessage != nil) },
         set: {
@@ -383,12 +397,21 @@ struct MediaDetailView: View {
             .foregroundStyle(.secondary)
         }
         Spacer()
-        Button("Save as Collection") {
+        Button(isSavingFranchise ? "Saving…" : "Save as Collection") {
+          // One collection per click: the button stays off until the server answered.
+          isSavingFranchise = true
           Task {
-            _ = try? await model.createCollectionFromFranchise(franchise.id.uuidString)
+            defer { isSavingFranchise = false }
+            do {
+              _ = try await model.createCollectionFromFranchise(franchise.id.uuidString)
+            } catch is CancellationError {
+            } catch {
+              errorMessage = "Couldn't save the collection. \(error.localizedDescription)"
+            }
           }
         }
         .buttonStyle(.bordered)
+        .disabled(isSavingFranchise)
         .accessibilityIdentifier("save-franchise-collection")
       }
       .padding(.horizontal, AureliaDesign.detailRailLeadingInset)
@@ -423,7 +446,7 @@ struct MediaDetailView: View {
                 selectedSeason = season.number
               }
             } label: {
-              if season.number == selectedSeason {
+              if season.number == activeSeason(detail)?.number {
                 Label(seasonTitle(season.number), systemImage: "checkmark")
               } else {
                 Text(seasonTitle(season.number))
@@ -477,7 +500,7 @@ struct MediaDetailView: View {
             Label("Watched", systemImage: "checkmark.circle.fill")
               .font(.caption).foregroundStyle(.secondary)
           }
-          Text("\(season.episodes.count) episodes")
+          Text(season.episodes.count == 1 ? "1 episode" : "\(season.episodes.count) episodes")
             .font(.callout)
             .foregroundStyle(.secondary)
             .contentTransition(.numericText())
@@ -713,6 +736,8 @@ enum MediaInformationPresentation {
 
 private struct DetailHero: View {
   let detail: CatalogDetailPresentation
+  /// The season shown below, which "Mark Season as Watched" in More Actions acts on.
+  let seasonNumber: Int?
   let playLabel: String
   let playTarget: CatalogItemSummary?
   let isPlayLoading: Bool
@@ -901,7 +926,7 @@ private struct DetailHero: View {
               MediaContextMenuItems(
                 item: detail.item, controller: watchActions, onEdit: onEdit,
                 onRemove: onRemove, metadataReady: metadataReady,
-                seasonNumber: detail.seasons.first?.number)
+                seasonNumber: seasonNumber)
               if let onMatch {
                 Button("Find Metadata Match…", systemImage: "magnifyingglass", action: onMatch)
                   .disabled(!metadataReady)

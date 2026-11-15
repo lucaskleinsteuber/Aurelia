@@ -11,10 +11,9 @@ struct ScreenTimeSection: View {
   @State private var granting = false
 
   var body: some View {
-    GroupBox("Screen Time") {
+    AureliaSettingsSection("Screen Time", symbol: "hourglass", description: "Bedtimes and daily limits for this profile.") {
       VStack(alignment: .leading, spacing: 12) {
         Toggle("Screen Time", isOn: $rules.enabled)
-          .toggleStyle(.switch)
           .accessibilityIdentifier("profile-editor-screen-time")
         Text(
           "A bedtime and a daily limit. The next episode does not start, and a good-night screen shows instead."

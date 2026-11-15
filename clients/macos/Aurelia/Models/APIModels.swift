@@ -336,6 +336,17 @@ enum MediaKind: String, Codable, Sendable {
   case episode
   case extra
   case trailer
+
+  /// The kind as people say it, for a card without a year. An extra is never called a TV show.
+  var displayName: String {
+    switch self {
+    case .movie: "Movie"
+    case .series: "TV Show"
+    case .episode: "Episode"
+    case .extra: "Extra"
+    case .trailer: "Trailer"
+    }
+  }
 }
 
 enum ArtworkKind: String, Codable, Sendable {

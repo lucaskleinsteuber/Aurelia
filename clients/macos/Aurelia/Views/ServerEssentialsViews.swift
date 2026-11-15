@@ -12,6 +12,7 @@ struct ServerSummaryCard: View {
   let refreshing: Bool
   let refresh: () -> Void
   @State private var restarting = false
+  @State private var confirmingRestart = false
   @State private var restartTask: Task<Void, Never>?
   @State private var message: String?
 
@@ -81,9 +82,16 @@ struct ServerSummaryCard: View {
             .font(.caption).foregroundStyle(.secondary)
           Spacer()
           Button("Refresh") { refresh() }.disabled(refreshing)
-          Button(restarting ? "Restarting…" : "Restart Server") { restart() }
+          Button(restarting ? "Restarting…" : "Restart Server…") { confirmingRestart = true }
             .disabled(restarting || !canRestart)
             .accessibilityIdentifier("server-restart")
+        }
+        .confirmationDialog(
+          "Restart the Server?", isPresented: $confirmingRestart, titleVisibility: .visible
+        ) {
+          Button("Restart Server", role: .destructive) { restart() }
+        } message: {
+          Text("Everything playing on any device stops for a moment, and apps reconnect by themselves.")
         }
         if let message {
           Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
@@ -193,7 +201,6 @@ struct ServerEssentialsEditor: View {
           Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
         }
       }
-      .toggleStyle(.switch)
       .disabled(working)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -340,7 +347,7 @@ struct ServerDetailsBox: View {
   let status: ServerStatusSummary
 
   var body: some View {
-    GroupBox("Server Details") {
+    AureliaSettingsSection("Server Details", symbol: "info.circle", description: "Version and technical details of this server.") {
       VStack(alignment: .leading, spacing: 10) {
         LabeledContent("State", value: (status.readiness?.state ?? status.state).capitalized)
         if let readiness = status.readiness {
@@ -415,8 +422,9 @@ struct ServerHealthCard: View {
                 )
                 .foregroundStyle(issue.severity == "error" ? .red : .orange)
                 .font(.caption)
-                Text(issue.code)
-                  .font(.caption.monospaced())
+                Text(ServerIssueText.title(for: issue.code))
+                  .font(.caption)
+                  .help(issue.code)
                 Spacer()
                 Text(ServerDateText.display(issue.at))
                   .font(.caption2)

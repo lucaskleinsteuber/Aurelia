@@ -234,9 +234,16 @@ struct ServerAutomationSection: View {
         Button("Deliveries…") { deliveriesFor = webhook }
         Button("Edit…") { editing = WebhookEditorTarget(webhook: webhook) }
         Button("New Secret…") {
-          Task {
-            if let result = await run({ try await $0.rotateWebhookSecret(id: webhook.id) }) {
-              shownSecret = ShownSecret(secret: result.secret, webhook: webhook)
+          confirmation = Confirmation(
+            title: "Give “\(webhook.name)” a New Secret?",
+            message:
+              "The old secret stops working at once: a receiver that checks the signature rejects events until you enter the new one there.",
+            action: "New Secret"
+          ) {
+            Task {
+              if let result = await run({ try await $0.rotateWebhookSecret(id: webhook.id) }) {
+                shownSecret = ShownSecret(secret: result.secret, webhook: webhook)
+              }
             }
           }
         }
@@ -514,7 +521,7 @@ struct AutomationSecretSheet: View {
           .font(.caption).foregroundStyle(.secondary)
         CopyableText(text: AutomationText.homeAssistantExample(webhookID: AutomationText.splitHomeAssistantURL(webhook.url).webhookID))
       }
-      HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+      HStack { Spacer(); AureliaSheetDoneButton { dismiss() } }
     }
     .padding(20)
     .frame(width: 560)
@@ -532,7 +539,7 @@ struct AutomationValueSheet: View {
       Text(title).font(.title2.bold())
       Text(explanation).fixedSize(horizontal: false, vertical: true)
       CopyableText(text: value)
-      HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+      HStack { Spacer(); AureliaSheetDoneButton { dismiss() } }
     }
     .padding(20)
     .frame(width: 520)
@@ -568,6 +575,7 @@ struct IntegrationTokenSheet: View {
   @State private var name = "Home Assistant"
   @State private var scopes: Set<String> = ["status"]
   @State private var problem: String?
+  @State private var creating = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -590,8 +598,11 @@ struct IntegrationTokenSheet: View {
       HStack {
         Spacer()
         Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-        Button("Create Key") {
+        Button(creating ? "Creating…" : "Create Key") {
+          // One key per click: a second click would replace the first key's one-time value.
+          creating = true
           Task {
+            defer { creating = false }
             do {
               let result = try await client.createIntegrationToken(
                 name: name.trimmingCharacters(in: .whitespaces), scopes: AutomationText.scopes.map(\.id).filter(scopes.contains))
@@ -601,8 +612,9 @@ struct IntegrationTokenSheet: View {
             }
           }
         }
+        .buttonStyle(AureliaPrimaryActionButtonStyle())
         .keyboardShortcut(.defaultAction)
-        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || scopes.isEmpty)
+        .disabled(creating || name.trimmingCharacters(in: .whitespaces).isEmpty || scopes.isEmpty)
       }
     }
     .padding(20)
@@ -641,7 +653,7 @@ struct AutomationDeliveriesSheet: View {
       }
       .frame(minHeight: 260)
       if let problem { Text(problem).foregroundStyle(.orange) }
-      HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+      HStack { Spacer(); AureliaSheetDoneButton { dismiss() } }
     }
     .padding(20)
     .frame(width: 560, height: 480)

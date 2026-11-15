@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Downloads: titles kept on this Mac to watch without the server, and the ones loading now.
@@ -414,7 +415,15 @@ struct DownloadMenuItems: View {
           downloads.cancel(item.id)
         }
       } else if downloads.isDownloaded(item.id) {
-        Button("Remove Download", systemImage: "trash") { downloads.remove(item.id) }
+        Button("Remove Download…", systemImage: "trash") {
+          // Asked as on the Downloads page; a menu can't hold a dialog, so this one is modal.
+          let alert = NSAlert()
+          alert.messageText = "Remove \(item.title)?"
+          alert.informativeText = "The copy on this Mac is deleted. The title stays on the server."
+          alert.addButton(withTitle: "Remove Download").hasDestructiveAction = true
+          alert.addButton(withTitle: "Cancel")
+          if alert.runModal() == .alertFirstButtonReturn { downloads.remove(item.id) }
+        }
       } else {
         Button("Download", systemImage: "arrow.down.circle") { model.download(item) }
           .disabled(!item.isPlayable)
