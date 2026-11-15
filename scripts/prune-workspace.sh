@@ -1,7 +1,7 @@
 #!/bin/sh
 # Removes old generated output so the Local workspace does not grow without bound.
 # Build and test scripts call this before they write anything new. It keeps:
-#   - the newest numbered Mac builds ("Build <n>" for Apple silicon, "Build <n> x64" for Intel) and the newest tvOS, Linux server and Linux app build
+#   - the newest numbered Mac builds ("Build <n>" for Apple silicon, "Build <n> x64" for Intel) and the newest tvOS, iOS, iPad, Linux server and Linux app build
 #     (AURELIA_KEEP_BUILDS, default 1 each); every release is on GitHub;
 #   - .NET configurations/frameworks/RIDs used in the last seven days, for incremental builds;
 #     shared restore files at the project level stay. Older whole units are pruned only while
@@ -172,16 +172,16 @@ if real_directory "$build"; then
     ls "$build" | grep -E '^Build [0-9]+$' | sort -k2 -n -r | remove_all_but "$keep_builds" "$build"
     ls "$build" | grep -E '^Build [0-9]+ x64$' | sort -k2 -n -r | remove_all_but "$keep_builds" "$build"
   fi
-  for platform in tvOS Linux LinuxApp; do
+  for platform in tvOS iOS iPad Linux LinuxApp; do
     if real_directory "$build/$platform" && simple_names "$build/$platform"; then
       ls -t "$build/$platform" | remove_all_but "$keep_builds" "$build/$platform"
     fi
   done
   if "$dry_run"; then
-    find "$build" -mindepth 1 -maxdepth 1 ! -name 'Build [0-9]*' ! -name tvOS ! -name Linux ! -name LinuxApp \
+    find "$build" -mindepth 1 -maxdepth 1 ! -name 'Build [0-9]*' ! -name tvOS ! -name iOS ! -name iPad ! -name Linux ! -name LinuxApp \
       ! -name bin ! -name obj ! -type l -mtime +1 -print
   else
-    find "$build" -mindepth 1 -maxdepth 1 ! -name 'Build [0-9]*' ! -name tvOS ! -name Linux ! -name LinuxApp \
+    find "$build" -mindepth 1 -maxdepth 1 ! -name 'Build [0-9]*' ! -name tvOS ! -name iOS ! -name iPad ! -name Linux ! -name LinuxApp \
       ! -name bin ! -name obj ! -type l -mtime +1 -exec rm -rf -- {} +
   fi
   prune_dotnet

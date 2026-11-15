@@ -92,12 +92,8 @@ answers, the Apple TV connects by itself.
 
 ## Keeping it running
 
-A free Apple ID signs apps for seven days; after that the app no longer opens until it is signed
-again. Either build and install again every week, or let the Mac do it: run
-`zsh scripts/refresh-signing.sh --install` once and, after each install,
-`zsh scripts/refresh-signing.sh --adopt-tv`. A small daily job then re-signs and reinstalls the
-same version before it expires, as long as the Mac and the Apple TV are on the same network.
-With a paid Apple Developer account the signature lasts a year.
+A free Apple ID signs apps for seven days; after that the app no longer opens until you build and
+install it again. With a paid Apple Developer account the signature lasts a year.
 
 ## Smart Home
 

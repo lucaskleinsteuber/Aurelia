@@ -80,8 +80,8 @@ Mac app brings its own.
 ## Apple devices
 
 **The Apple TV, iPhone or iPad app stopped opening after a week.** Apps installed with a free
-Apple ID are signed for seven days. Install them again, or let the Mac re-sign them every day with
-`scripts/refresh-signing.sh`, see [Apple TV](APPLE_TV.md#keeping-it-running).
+Apple ID are signed for seven days. Build and install them again, see
+[Apple TV](APPLE_TV.md#keeping-it-running).
 
 **The Mac app does not open on another Mac.** The published Mac download only runs on Macs
 registered to the developer's account. Build it yourself with a free Apple ID, see

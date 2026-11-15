@@ -108,8 +108,8 @@ These rules apply to every task in this repository.
   `scripts/prune-workspace.sh`, which keeps the newest build per platform, ten
   test results and 30 days of logs; new scripts that write there should call it
   too. Builds are not kept as archives: a published Mac or server version is
-  deleted locally by `scripts/publish-release.sh`, and an installed tvOS or iOS
-  build folder is deleted after `refresh-signing.sh --adopt-tv` or `--adopt-iphone`.
+  deleted locally by `scripts/publish-release.sh`, and only the newest tvOS, iOS and
+  iPad build folder is kept.
 - Runnable Mac test products must be staged under a unique
   `~/Library/Caches/Aurelia/TestRuns/<run-id>` directory. Pre-install smoke
   candidates use a unique `/private/tmp/Aurelia/<run-id>` directory. Launch the
@@ -239,12 +239,10 @@ These rules apply to every task in this repository.
 - Do not leave old, previous, duplicate, renamed, or backup Aurelia app bundles
   in `/Applications`. After an update, only the intended current
   `/Applications/Aurelia.app` may remain.
-- Local builds use free 7-day development profiles. The per-user job from
-  `scripts/refresh-signing.sh` re-signs the installed Mac, Apple TV, iPhone and iPad
-  apps before their profiles expire, keeping their versions. After installing an
-  Apple TV build, run `zsh scripts/refresh-signing.sh --adopt-tv`, and after an
-  iPhone build `--adopt-iphone` (iPad: `--adopt-ipad`, built into `Local/Build/iPad`), so the job re-signs that build; after changing
-  the script, run `--install` again.
+- Local builds use free 7-day development profiles. There is no re-signing job
+  (owner's decision, 15.11.2026: every client gets a new version at least weekly,
+  and the daily job mostly sent failure notifications); an app whose profile
+  expired is installed again from a new build. Do not add one back.
 - Do not create local app-bundle backups in `/Applications` or elsewhere as part
   of the release workflow. Git/GitHub history, tags, commits, and published
   builds are the rollback mechanism.

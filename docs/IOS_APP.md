@@ -161,11 +161,7 @@ Builds the app signed for development and installs it on a paired iPhone or iPad
 cable or over Wi-Fi; `xcrun devicectl list devices` shows the identifier. The device needs
 Developer Mode (Settings › Privacy & Security) and must have been paired with this Mac in Xcode
 once. Reinstalling replaces only the app, so its server connection and settings stay. A free
-development profile expires after seven days. After installing, run
-`zsh scripts/refresh-signing.sh --adopt-iphone` so the signing refresh job re-signs and
-reinstalls that build before it expires (the iPhone has to be on the same network then); the
-build folder is removed because the job keeps its own copy. An iPad gets its own build folder
-(`AURELIA_IOS_BUILD_ROOT=Local/Build/iPad/<version>-<build>`) and `--adopt-ipad`.
+development profile expires after seven days; install a new build before then.
 
 The player works by touch: tap the picture to show or hide the controls, and drag along the
 timeline (or tap a place on it) to jump there. The buttons at the top choose the speed, the
