@@ -14,6 +14,22 @@ struct ServerInfoResponse: Codable, Equatable, Sendable {
   /// From server 2.10.0: "macApp" or "linuxApp" when the Aurelia app hosts it on a desktop or
   /// laptop, "linuxServer" or "server" otherwise.
   var hosting: String? = nil
+  /// From server 2.18.0: where a server that moved to another computer went. It still answers at
+  /// its old address so devices can follow it.
+  var moved: ServerMoveTarget? = nil
+}
+
+/// Where a moved server went. Only HTTPS addresses of the same server are followed, and each one
+/// must still prove the same identity and key before Aurelia switches to it.
+struct ServerMoveTarget: Codable, Equatable, Sendable {
+  let serverId: UUID
+  let name: String
+  let addresses: [URL]
+
+  func followable(for serverId: UUID, tried: Set<URL>) -> [URL] {
+    guard self.serverId == serverId else { return [] }
+    return addresses.filter { $0.scheme?.lowercased() == "https" && $0.host != nil && !tried.contains($0) }
+  }
 }
 
 struct RedeemPairingCodeRequest: Encodable, Sendable {

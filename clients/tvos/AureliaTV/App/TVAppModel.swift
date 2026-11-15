@@ -437,6 +437,13 @@ final class TVAppModel: ObservableObject {
   func handleSessionFailure(_ failure: Error) {
     guard let core = failure as? TVCoreError else { return }
     if core.code == "invalid_profile_pin" || core.code == "invalid_pin_format" { return }
+    // The server moved to another computer: find it at its new address and keep the pairing.
+    if core.code == "server_moved" {
+      retireWork()
+      error = nil
+      Task { await reconnect() }
+      return
+    }
     if core == .identityMismatch {
       retireWork()
       clearPersonalState()
@@ -537,12 +544,23 @@ final class TVAppModel: ObservableObject {
       let discovered = browser.servers.filter { $0.serverID == saved.serverID }
         .flatMap { [$0.baseURL] + $0.alternativeURLs }
       var tried: Set<URL> = []
-      for address in [saved.baseURL] + discovered where tried.insert(address).inserted {
+      var queue = [saved.baseURL] + discovered
+      var index = 0
+      while index < queue.count {
+        let address = queue[index]
+        index += 1
+        guard tried.insert(address).inserted else { continue }
         do {
           let candidate = try await TVAPIClient.inspect(
             baseURL: address, transport: environment.transport)
           guard current(run) else { throw CancellationError() }
           try candidate.validate(against: saved)
+          // A server that moved still answers here; follow it to its new computer.
+          if let moved = candidate.info.moved {
+            queue += moved.followable(for: saved.serverID, tried: tried)
+            lastFailure = URLError(.cannotConnectToHost)
+            continue
+          }
           return candidate
         } catch {
           guard current(run) else { throw CancellationError() }

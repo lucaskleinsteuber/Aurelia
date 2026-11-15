@@ -3900,6 +3900,10 @@ final class AppModel: ObservableObject {
   /// off, so the banner says that plainly and Try Again wakes it, instead of the system's
   /// "Could not connect to the server."
   func failureMessage(_ error: Error) -> String {
+    if ServerReconnectPolicy.isMoved(error), operatingMode != .host {
+      let name = (deviceConnection ?? profile)?.name ?? "The server"
+      return "\(name) moved to another computer. Aurelia is connecting to it there."
+    }
     guard ServerReconnectPolicy.isConnectivityFailure(error), operatingMode != .host else {
       return error.localizedDescription
     }
@@ -3912,7 +3916,8 @@ final class AppModel: ObservableObject {
 
   private func beginReconnectIfNeeded(after error: Error) {
     guard operatingMode != .host, !hasPendingNetworkConfirmation, !isResting,
-      offlineMode == nil, ServerReconnectPolicy.isConnectivityFailure(error),
+      offlineMode == nil,
+      ServerReconnectPolicy.isConnectivityFailure(error) || ServerReconnectPolicy.isMoved(error),
       reconnectTask == nil, let current = profile
     else { return }
     let generation = connectionGeneration

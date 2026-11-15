@@ -16,6 +16,11 @@ enum ServerReconnectPolicy {
     .contains(error.code)
   }
 
+  /// The server answered that it moved to another computer; Aurelia looks for it there.
+  static func isMoved(_ error: Error) -> Bool {
+    (error as? APIClientError)?.problemCode == "server_moved"
+  }
+
   static func validate(_ inspected: InspectedServer, for stored: StoredServerProfile) throws {
     guard inspected.info.serverId == stored.serverId,
       inspected.publicKeyFingerprint.caseInsensitiveCompare(stored.publicKeyFingerprint)
@@ -84,14 +89,25 @@ final class ServerReconnectCoordinator {
       let discovered = browser.servers.filter { $0.serverId == stored.serverId }.flatMap(
         \.addresses)
       var seen = Set<URL>()
-      let addresses = ([stored.baseURL] + discovered).filter { seen.insert($0).inserted }.prefix(16)
+      var addresses = Array(
+        ([stored.baseURL] + discovered).filter { seen.insert($0).inserted }.prefix(16))
       var selected: InspectedServer?
-      for address in addresses {
+      var index = 0
+      while index < addresses.count {
+        let address = addresses[index]
+        index += 1
         do {
           let result = try await inspect(address)
           try Task.checkCancellation()
           guard generation == run else { throw CancellationError() }
           try ServerReconnectPolicy.validate(result, for: stored)
+          // A server that moved still answers at its old address: follow it to the new one.
+          if let moved = result.info.moved {
+            let next = moved.followable(for: stored.serverId, tried: seen)
+            seen.formUnion(next)
+            addresses += next
+            continue
+          }
           selected = selected ?? result
         } catch {
           try Task.checkCancellation()

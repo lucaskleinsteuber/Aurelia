@@ -71,6 +71,41 @@ struct ServerDiscoveryTests {
     #expect(browser.stops == 2)
   }
 
+  @Test func aMovedServerIsFollowedToItsNewComputer() async throws {
+    let stored = profile()
+    let newAddress = URL(string: "https://minipc.local:43111")!
+    var inspectedAddresses: [URL] = []
+    let coordinator = ServerReconnectCoordinator(
+      browser: SyntheticDiscovery(servers: []),
+      inspect: { url in
+        inspectedAddresses.append(url)
+        var result = inspected(stored, at: url)
+        if url == stored.baseURL {
+          // The old computer still answers, with the same identity, and says where it went.
+          var info = result.info
+          info.moved = ServerMoveTarget(
+            serverId: stored.serverId, name: stored.name, addresses: [newAddress, stored.baseURL])
+          result = InspectedServer(
+            baseURL: url, info: info, publicKeyFingerprint: result.publicKeyFingerprint)
+        }
+        return result
+      }, delay: { _ in })
+    let result = try await coordinator.reconnect(stored)
+    #expect(result.baseURL == newAddress)
+    #expect(inspectedAddresses == [stored.baseURL, newAddress])
+  }
+
+  @Test func aMoveNamingAnotherServerOrPlainHTTPIsNotFollowed() {
+    let id = UUID()
+    let target = ServerMoveTarget(
+      serverId: id, name: "Home",
+      addresses: [URL(string: "http://minipc.local:8080")!, URL(string: "https://minipc.local")!])
+    #expect(target.followable(for: id, tried: []) == [URL(string: "https://minipc.local")!])
+    #expect(target.followable(for: UUID(), tried: []).isEmpty)
+    #expect(ServerReconnectPolicy.isMoved(
+      APIClientError.httpFailure(status: 409, retryAfter: nil, code: "server_moved", message: nil)))
+  }
+
   @Test func reconnectingWakesTheSleepingServerBeforeEachAttempt() async throws {
     let stored = profile()
     var wakes: [UUID] = []

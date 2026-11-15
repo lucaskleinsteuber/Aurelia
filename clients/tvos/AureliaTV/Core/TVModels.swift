@@ -152,6 +152,24 @@ struct TVServerInfo: Codable, Equatable, Sendable {
   /// From server 2.10.0: "macApp" or "linuxApp" when the Aurelia app hosts it on a desktop or
   /// laptop, which its owner starts; "linuxServer" or "server" otherwise.
   var hosting: String? = nil
+  /// From server 2.18.0: where a server that moved to another computer went. It still answers at
+  /// its old address so devices can follow it.
+  var moved: TVServerMoveTarget? = nil
+}
+
+/// Where a moved server went. Only addresses of the same server are followed, and each one must
+/// still prove the same identity and key before the device switches to it.
+struct TVServerMoveTarget: Codable, Equatable, Sendable {
+  let serverId: UUID
+  let name: String
+  let addresses: [URL]
+
+  /// The new addresses to try for `serverID`, leaving out ones already tried; none when the move
+  /// names another server.
+  func followable(for serverID: UUID, tried: Set<URL>) -> [URL] {
+    guard serverId == serverID else { return [] }
+    return addresses.filter { TVServerAddress.isValid($0) && !tried.contains($0) }
+  }
 }
 
 struct TVInspectedServer: Equatable, Sendable {
