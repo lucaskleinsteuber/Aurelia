@@ -900,6 +900,7 @@ private struct IOSServerFolderBrowser: View {
 private struct IOSAdminImportPreviewView: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let library: IOSLibrarySummary
   @State private var summary: IOSImportPreviewSummary?
   @State private var items: [IOSImportPreviewItem] = []
@@ -924,6 +925,15 @@ private struct IOSAdminImportPreviewView: View {
   }
   private var isFirstImport: Bool { library.importPreviewRequired == true }
 
+  private var filterPicker: some View {
+    Picker("Show", selection: $filter) {
+      Text("All").tag("all")
+      Text("Review").accessibilityLabel("Needs Review").tag("pending")
+      Text("Ignored").tag("ignored")
+      Text("Errors").tag("error")
+    }
+  }
+
   var body: some View {
     List {
       Section {
@@ -943,13 +953,11 @@ private struct IOSAdminImportPreviewView: View {
             Text("Fix the errors first: they would import wrongly.").font(.caption).foregroundStyle(
               .orange)
           }
-          Picker("Show", selection: $filter) {
-            Text("All").tag("all")
-            Text("Needs Review").tag("pending")
-            Text("Ignored").tag("ignored")
-            Text("Errors").tag("error")
+          if dynamicTypeSize.isAccessibilitySize {
+            filterPicker.pickerStyle(.menu)
+          } else {
+            filterPicker.pickerStyle(.segmented)
           }
-          .pickerStyle(.segmented)
         } else if loading {
           ProgressView("Reading file names and folders…")
         }
