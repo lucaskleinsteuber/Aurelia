@@ -38,7 +38,7 @@ internal static class FakeLibrary
             position > 0 ? new PlaybackProgressResponse(id, position, 3_600_000, false, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 1) : null,
             DateTimeOffset.UtcNow.AddDays(-2), kind == MediaKind.Episode ? "Cobalt Station" : null, season, episode, parent, state);
 
-    public static FakeServer Create(bool watchlist = true, bool pictures = true, bool wishes = false)
+    public static FakeServer Create(bool watchlist = true, bool pictures = true, bool wishes = false, bool people = false)
     {
         artworkCount = 0;
         var series = Item(SeriesId, MediaKind.Series, "Cobalt Station", 2024, ["Science Fiction", "Drama"]);
@@ -79,6 +79,7 @@ internal static class FakeLibrary
             caps.Add("\"artwork-variants-v1\"");
         }
         if (wishes) caps.Add("\"wishes-v1\"");
+        if (people) caps.Add("\"people-v1\"");
         var capabilities = string.Join(",", caps);
         var server = new FakeServer()
             .Answer("GET", "/api/v1/server/info", $$"""
@@ -169,6 +170,19 @@ internal static class FakeLibrary
                 .Answer("DELETE", $"/api/v1/wishes/{sampleWish.Id}", "{}")
                 .Answer("POST", "/api/v1/wishes/seen", "{}")
                 .Image("/api/v1/wishes/poster", pictures ? Picture(2) : [1, 2, 3, 4]);
+        }
+        if (people)
+        {
+            server
+                .Answer("GET", "/api/v1/people", Json(new PeoplePageResponse(
+                    [
+                        new PersonSummary("Ada Lovelace", "tmdb:person:17", null, 2, "Acting"),
+                        new PersonSummary("Grace Hopper", "tmdb:person:18", null, 1, "Director"),
+                    ], 2, 0, 60)))
+                .Answer("GET", "/api/v1/catalog/person", Json(new PersonDetailResponse("Ada Lovelace", "Captain Rhea", null, [series, movieA])))
+                .Answer("GET", "/api/v1/people/profile", Json(new PersonProfileResponse(
+                    new PersonAbout("An invented actor who plays invented captains.", "1970-05-01", null, "Invented Town", "Acting", "tmdb", "17"),
+                    [new WishSearchHit("tmdb", "200", MediaKind.Movie, "Distant Shore", 2018, "An invented film.", "/shore.jpg", null, false, null, false, null, false)])));
         }
         return server;
     }

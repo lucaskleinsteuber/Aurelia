@@ -333,7 +333,7 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
     public void ReloadSidebar()
     {
         if (context is null) return;
-        BuildSidebar(context.Store.Preferences.Sidebar(), context.Store.Client.SupportsWatchlist, context.Store.Client.SupportsWishes, context.Store.WishBadgeCount);
+        BuildSidebar(context.Store.Preferences.Sidebar(), context.Store.Client.SupportsWatchlist, context.Store.Client.SupportsWishes, context.Store.WishBadgeCount, context.Store.Client.SupportsPeople);
         ShowCurrentPage();
     }
 
@@ -380,10 +380,12 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
     {
         if (context is null) return;
         details.Clear();
-        if (Destination is not (LibraryDestination.Library or LibraryDestination.Movies or LibraryDestination.TvShows or LibraryDestination.RecentlyAdded))
+        // People has its own search, as on the Mac; every other page without one switches to Library.
+        if (Destination is not (LibraryDestination.Library or LibraryDestination.Movies or LibraryDestination.TvShows or LibraryDestination.RecentlyAdded or LibraryDestination.People))
             Destination = LibraryDestination.Library;
         ShowCurrentPage();
         if (CurrentPage is BrowsePage browse) Avalonia.Threading.Dispatcher.UIThread.Post(browse.FocusSearch);
+        if (CurrentPage is PeopleBrowsePage people) Avalonia.Threading.Dispatcher.UIThread.Post(people.FocusSearch);
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
@@ -430,7 +432,7 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
         if (store is not null)
         {
             store.PropertyChanged += OnStoreChanged;
-            BuildSidebar(store.Preferences.Sidebar(), store.Client.SupportsWatchlist, store.Client.SupportsWishes, store.WishBadgeCount);
+            BuildSidebar(store.Preferences.Sidebar(), store.Client.SupportsWatchlist, store.Client.SupportsWishes, store.WishBadgeCount, store.Client.SupportsPeople);
             RestoreDestination(store);
         }
         ShowCurrentPage();
@@ -442,7 +444,7 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
         if (e.PropertyName == nameof(LibraryStore.Error)) UpdateError();
         if (e.PropertyName is nameof(LibraryStore.WishBadgeCount) or nameof(LibraryStore.WishSummary) && context is { } open)
         {
-            BuildSidebar(open.Store.Preferences.Sidebar(), open.Store.Client.SupportsWatchlist, open.Store.Client.SupportsWishes, open.Store.WishBadgeCount);
+            BuildSidebar(open.Store.Preferences.Sidebar(), open.Store.Client.SupportsWatchlist, open.Store.Client.SupportsWishes, open.Store.WishBadgeCount, open.Store.Client.SupportsPeople);
         }
     }
 
@@ -471,16 +473,17 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
         };
         if (target == LibraryDestination.Watchlist && !store.Client.SupportsWatchlist) target = LibraryDestination.Home;
         if (target == LibraryDestination.Wishes && !store.Client.SupportsWishes) target = LibraryDestination.Home;
+        if (target == LibraryDestination.People && !store.Client.SupportsPeople) target = LibraryDestination.Home;
         restoring = true;
         Destination = SidebarItems.Any(item => item.Destination == target) ? target : SidebarItems.Count > 0 ? SidebarItems[0].Destination : LibraryDestination.Library;
         restoring = false;
     }
 
-    private void BuildSidebar(SidebarLayout layout, bool supportsWatchlist, bool supportsWishes = false, int wishBadgeCount = 0)
+    private void BuildSidebar(SidebarLayout layout, bool supportsWatchlist, bool supportsWishes = false, int wishBadgeCount = 0, bool supportsPeople = false)
     {
         var selected = SidebarList.SelectedItem as SidebarItem;
         restoring = true;
-        SidebarList.ItemsSource = layout.VisibleItems(supportsWatchlist, supportsWishes)
+        SidebarList.ItemsSource = layout.VisibleItems(supportsWatchlist, supportsWishes, supportsPeople)
             .Select(destination => new SidebarItem(
                 destination,
                 destination.Title(),
@@ -530,6 +533,7 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
             LibraryDestination.Collections => new CollectionsPage(context!),
             LibraryDestination.Watchlist => new WatchlistPage(context!),
             LibraryDestination.Wishes => new WishesPage(context!),
+            LibraryDestination.People => new PeopleBrowsePage(context!),
             LibraryDestination.History => new HistoryPage(context!),
             LibraryDestination.Downloads => new DownloadsPage(context!),
             _ => new StatisticsPage(context!),

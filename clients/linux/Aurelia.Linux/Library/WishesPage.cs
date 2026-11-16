@@ -826,7 +826,7 @@ public sealed class WishesPage : LibraryPageBase, IDisposable
     }
 
     /// <summary>Loads a proxied wish poster only after the row nears the visible viewport.</summary>
-    private sealed class LazyWishPoster : Border, IDisposable
+    internal sealed class LazyWishPoster : Border, IDisposable
     {
         private readonly LibraryStore store;
         private readonly string? posterPath;

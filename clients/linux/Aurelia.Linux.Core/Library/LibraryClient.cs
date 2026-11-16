@@ -41,6 +41,9 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
 
     public bool SupportsWishes => Supports(ServerFeatures.Wishes);
 
+    /// <summary>People in the sidebar and a person's life and other titles from TMDB.</summary>
+    public bool SupportsPeople => Supports(ServerFeatures.People);
+
     public Task<HomeResponse> HomeAsync(CancellationToken cancellation) => Get<HomeResponse>("/api/v1/home", cancellation);
 
     /// <summary>
@@ -75,6 +78,18 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
         var query = "name=" + Uri.EscapeDataString(name) + (personKey is { Length: > 0 } key ? "&personKey=" + Uri.EscapeDataString(key) : "");
         return Get<PersonDetailResponse>("/api/v1/catalog/person?" + query, cancellation);
     }
+
+    /// <summary>People in the library's credits, those in the most titles first ("people-v1").</summary>
+    public Task<PeoplePageResponse> PeopleAsync(string? query, int offset, int limit, CancellationToken cancellation)
+    {
+        var path = FormattableString.Invariant($"/api/v1/people?offset={offset}&limit={limit}");
+        if (!string.IsNullOrWhiteSpace(query)) path += "&query=" + Uri.EscapeDataString(query.Trim());
+        return Get<PeoplePageResponse>(path, cancellation);
+    }
+
+    /// <summary>A person's life and the titles TMDB knows them for; empty without TMDB.</summary>
+    public Task<PersonProfileResponse> PersonProfileAsync(string personKey, CancellationToken cancellation) =>
+        Get<PersonProfileResponse>("/api/v1/people/profile?key=" + Uri.EscapeDataString(personKey), cancellation);
 
     public Task<IReadOnlyList<CollectionSummary>> CollectionsAsync(CancellationToken cancellation) =>
         Get<IReadOnlyList<CollectionSummary>>("/api/v1/catalog/collections?offset=0&limit=200", cancellation);

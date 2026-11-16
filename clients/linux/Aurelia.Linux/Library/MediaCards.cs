@@ -184,7 +184,14 @@ internal static class MediaCards
     };
 
     /// <summary>A person from the cast or crew: a round photo with name and role.</summary>
-    public static Button Person(LibraryContext context, CreditSummary credit, string role)
+    public static Button Person(LibraryContext context, CreditSummary credit, string role) =>
+        Person(context, credit.Name, credit.PersonKey, credit.Profile, role);
+
+    /// <summary>A person in People: the round photo, the name and how many titles.</summary>
+    public static Button Person(LibraryContext context, PersonSummary person) =>
+        Person(context, person.Name, person.PersonKey, person.Profile, PeoplePresentation.Role(person));
+
+    private static Button Person(LibraryContext context, string name, string? personKey, ArtworkSummary? profile, string role)
     {
         var photo = new Border
         {
@@ -192,8 +199,8 @@ internal static class MediaCards
             Height = 112,
             CornerRadius = new CornerRadius(56),
             ClipToBounds = true,
-            Child = credit.Profile is not null
-                ? new ArtworkImage(context.Store, credit.Profile, 112)
+            Child = profile is not null
+                ? new ArtworkImage(context.Store, profile, 112)
                 : new PersonPlaceholder(112),
         };
         var card = Card(new StackPanel
@@ -203,11 +210,11 @@ internal static class MediaCards
             Children =
             {
                 photo.Also(p => p.HorizontalAlignment = HorizontalAlignment.Center),
-                new TextBlock { Text = credit.Name, FontWeight = FontWeight.SemiBold, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxLines = 2 },
+                new TextBlock { Text = name, FontWeight = FontWeight.SemiBold, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxLines = 2 },
                 new TextBlock { Text = role, Classes = { "subdued" }, FontSize = 12, TextAlignment = TextAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis },
             },
-        }, credit.Name);
-        card.Click += (_, _) => context.OpenPerson(credit.Name, credit.PersonKey);
+        }, name);
+        card.Click += (_, _) => context.OpenPerson(name, personKey);
         return card;
     }
 

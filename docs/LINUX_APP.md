@@ -164,6 +164,11 @@ its detail, playback plan and hero still. The profile-local cache holds at most 
 30 seconds, with two preparations at once; leaving or removing the card cancels its work. It opens
 no ticket or video stream. Ctrl+F opens the library search, Alt+Left goes back.
 
+**People** (with a server that has `people-v1`) lists everyone TMDB identified in the library,
+those in the most titles first, with a search (Ctrl+F there searches people). A person's page shows
+the library's titles first and adds, when TMDB is on, life dates, biography and a Known For row
+with Wish or Me Too; `Core/Library/PeoplePresentation.cs` holds the words.
+
 **Movie Night** on Home covers the window while everyone at home swipes the same posters (drag, the
 buttons or the arrow keys; phones join from their own Aurelia or a browser), and the first title
 every voter likes shows as a ticket with Play. Statistics plays the year as **Wrapped** slides

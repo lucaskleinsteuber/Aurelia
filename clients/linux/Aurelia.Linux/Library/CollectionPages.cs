@@ -4,6 +4,7 @@ using Aurelia.Linux.Controls;
 using Aurelia.Linux.Core.Api;
 using Aurelia.Linux.Core.Library;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -107,20 +108,37 @@ public sealed class WatchlistPage : LibraryPageBase
     }
 }
 
-/// <summary>A person from the cast or crew with every title of theirs in the library.</summary>
+/// <summary>
+/// A person from the cast or crew with every title of theirs in the library, and, from TMDB
+/// ("people-v1"), their life and the titles they are known for that the library doesn't have.
+/// </summary>
 public sealed class PersonPage : LibraryPageBase
 {
     private readonly string name;
     private readonly string? personKey;
     private PersonDetailResponse? person;
+    private PersonProfileResponse? profile;
     private string? error;
+    private string? wishMessage;
+    private bool biographyOpen;
+    private bool wishing;
 
     public PersonPage(LibraryContext context, string name, string? personKey) : base(context)
     {
         this.name = name;
         this.personKey = personKey;
-        AttachedToVisualTree += async (_, _) => await LoadAsync();
+        AttachedToVisualTree += async (_, _) =>
+        {
+            // The life never holds up the library's titles; each shows when it arrives.
+            var life = LoadProfileAsync();
+            await LoadAsync();
+            await life;
+        };
     }
+
+    internal PersonProfileResponse? Profile => profile;
+
+    private bool HasProfile => Context.Store.Client.SupportsPeople && PeoplePresentation.HasProfile(personKey);
 
     private async Task LoadAsync()
     {
@@ -137,38 +155,159 @@ public sealed class PersonPage : LibraryPageBase
         Rebuild();
     }
 
+    private async Task LoadProfileAsync()
+    {
+        if (!HasProfile || personKey is null) return;
+        try
+        {
+            profile = await Context.Store.Client.PersonProfileAsync(personKey, CancellationToken.None);
+            Rebuild();
+        }
+        catch (AureliaApiException failure)
+        {
+            // Without TMDB, or while it is away, the page shows the library's titles only.
+            if (failure.IsAuthenticationFailure) Context.Store.Report(failure);
+        }
+    }
+
     protected override Control Build()
     {
-        var photo = person?.Profile is { } profile
-            ? new Border { Width = 84, Height = 84, CornerRadius = new CornerRadius(42), ClipToBounds = true, Child = new ArtworkImage(Context.Store, profile, 84) }
+        var photo = person?.Profile is { } picture
+            ? new Border { Width = 84, Height = 84, CornerRadius = new CornerRadius(42), ClipToBounds = true, Child = new ArtworkImage(Context.Store, picture, 84) }
             : (Control)new PersonPlaceholder(84);
         var count = person?.Items.Count ?? 0;
-        var page = new StackPanel { Spacing = 24, Margin = new Thickness(0, 64, 0, 48) };
-        page.Children.Add(DetailChrome.BackButton(Context, Inset()));
-        page.Children.Add(new StackPanel
+        var heading = new StackPanel
         {
-            Orientation = Orientation.Horizontal,
-            Spacing = 18,
-            Margin = Inset(),
+            VerticalAlignment = VerticalAlignment.Center,
+            Spacing = 4,
             Children =
             {
-                photo,
-                new StackPanel
-                {
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Spacing = 4,
-                    Children =
-                    {
-                        new TextBlock { Text = person?.Subtitle ?? "", Classes = { "subdued" } },
-                        PageTitle(person?.Name ?? name),
-                        new TextBlock { Text = person is null ? "" : count == 1 ? "1 title in your library" : $"{count} titles in your library", Classes = { "subdued" } },
-                    },
-                },
+                new TextBlock { Text = person?.Subtitle ?? "", Classes = { "subdued" } },
+                PageTitle(person?.Name ?? name),
             },
-        });
+        };
+        if (PeoplePresentation.Life(profile?.About, DateOnly.FromDateTime(DateTime.Now)) is { } life)
+            heading.Children.Add(new TextBlock { Text = life, Classes = { "subdued" } });
+        heading.Children.Add(new TextBlock { Text = person is null ? "" : count == 1 ? "1 title in your library" : $"{count} titles in your library", Classes = { "subdued" } });
+        var page = new StackPanel { Spacing = 24, Margin = new Thickness(0, 64, 0, 48) };
+        page.Children.Add(DetailChrome.BackButton(Context, Inset()));
+        page.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 18, Margin = Inset(), Children = { photo, heading } });
+        if (profile?.About?.Biography is { Length: > 0 } biography) page.Children.Add(Biography(biography.Trim()));
         if (error is not null) page.Children.Add(EmptyState("Not Found", error));
-        else if (person is not null) page.Children.Add(Grid(person.Items, item => MediaCards.Poster(Context, item, Context.Store.Preferences.PosterWidth)));
+        else if (person is not null)
+        {
+            var titles = Grid(person.Items, item => MediaCards.Poster(Context, item, Context.Store.Preferences.PosterWidth));
+            page.Children.Add(HasProfile && person.Items.Count > 0 ? Section("In Your Library", titles, person.Items.Count) : titles);
+        }
+        if (profile?.KnownFor is { Count: > 0 } knownFor)
+        {
+            var section = Section("Known For", Shelf("Known For", knownFor, KnownForCard), knownFor.Count);
+            if (wishMessage is not null) section.Children.Insert(1, new TextBlock { Text = wishMessage, Classes = { "subdued" }, Margin = Inset(), TextWrapping = TextWrapping.Wrap });
+            page.Children.Add(section);
+        }
         return page;
+    }
+
+    private StackPanel Biography(string biography)
+    {
+        var text = new TextBlock
+        {
+            Text = biography,
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 760,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Classes = { "subdued" },
+            MaxLines = biographyOpen ? 0 : 4,
+            TextTrimming = biographyOpen ? TextTrimming.None : TextTrimming.WordEllipsis,
+        };
+        var foot = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        if (biography.Length > 320)
+        {
+            var more = new Button { Content = biographyOpen ? "Less" : "More", Classes = { "link" } };
+            more.Click += (_, _) =>
+            {
+                biographyOpen = !biographyOpen;
+                Rebuild();
+            };
+            foot.Children.Add(more);
+        }
+        foot.Children.Add(new TextBlock { Text = "From TMDB", Classes = { "subdued" }, FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
+        return new StackPanel { Spacing = 8, Margin = Inset(), Children = { SectionTitle("Biography"), text, foot } };
+    }
+
+    private Control KnownForCard(WishSearchHit hit)
+    {
+        var details = string.Join(" · ", new[] { hit.Year?.ToString(CultureInfo.InvariantCulture), hit.Kind == MediaKind.Series ? "TV Show" : "Movie" }.Where(part => part is not null));
+        var card = new StackPanel
+        {
+            Width = 140,
+            Spacing = 6,
+            Children =
+            {
+                new WishesPage.LazyWishPoster(Context.Store, hit.PosterPath, hit.Kind, 140, 210, _ => null, (_, _) => { }),
+                new TextBlock { Text = hit.Title, FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis },
+                new TextBlock { Text = details, Classes = { "subdued" }, FontSize = 12 },
+            },
+        };
+        AutomationProperties.SetName(card, hit.Title);
+        if (!Context.Store.Client.SupportsWishes) return card;
+        if (hit.AlreadyWished && hit.SupportedByCaller)
+        {
+            card.Children.Add(new TextBlock { Text = "✓ Wished", Classes = { "subdued" }, FontSize = 12, FontWeight = FontWeight.SemiBold });
+            return card;
+        }
+        var wish = new Button { Content = hit.AlreadyWished ? "Me Too" : "Wish", Classes = { "chip" }, IsEnabled = !wishing, HorizontalAlignment = HorizontalAlignment.Left };
+        AutomationProperties.SetName(wish, $"{(hit.AlreadyWished ? "Me Too" : "Wish")} {hit.Title}");
+        wish.Click += async (_, _) => await WishAsync(hit);
+        card.Children.Add(wish);
+        return card;
+    }
+
+    /// <summary>Wishes the title, or adds this profile to someone else's wish for it.</summary>
+    internal async Task WishAsync(WishSearchHit hit)
+    {
+        var client = Context.Store.Client;
+        wishing = true;
+        wishMessage = null;
+        Rebuild();
+        try
+        {
+            var wishId = hit.ExistingWishId;
+            if (hit.AlreadyWished && hit.ExistingWishId is { } existing)
+            {
+                await client.SetWishSupportAsync(existing, true, CancellationToken.None);
+            }
+            else
+            {
+                var outcome = await client.CreateWishAsync(new CreateWishRequest(hit.Kind, hit.Title, hit.Year, hit.Provider, hit.ProviderMediaId, hit.Overview, hit.PosterPath, null), CancellationToken.None);
+                if (outcome.Status == CreateWishStatus.AlreadyInLibrary)
+                {
+                    wishMessage = outcome.Existing?.Message ?? "This title is already in the library.";
+                    return;
+                }
+                wishId = outcome.Wish?.Id ?? wishId;
+            }
+            if (profile is { } current)
+            {
+                profile = current with
+                {
+                    KnownFor = [.. current.KnownFor.Select(item => item.ProviderMediaId == hit.ProviderMediaId && item.Kind == hit.Kind
+                        ? item with { AlreadyWished = true, SupportedByCaller = true, ExistingWishId = wishId }
+                        : item)],
+                };
+            }
+            await Context.Store.RefreshWishSummaryAsync(notify: false);
+        }
+        catch (AureliaApiException failure)
+        {
+            wishMessage = failure.Message;
+            if (failure.IsAuthenticationFailure) Context.Store.Report(failure);
+        }
+        finally
+        {
+            wishing = false;
+            Rebuild();
+        }
     }
 }
 
