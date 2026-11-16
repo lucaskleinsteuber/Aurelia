@@ -548,7 +548,13 @@ private struct HomePage: View {
       model.home?.continueWatching.isEmpty != false
     {
       Group {
-        if model.visibleErrorMessage != nil || model.isRecoveringLocalHost {
+        if !model.libraryLoaded, model.visibleErrorMessage == nil, !model.isRecoveringLocalHost {
+          // Still loading after a start or sign-in: a ring after a moment, never the empty
+          // library's "add a folder", which flashed before the titles arrived.
+          AureliaDelayedProgress()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityLabel("Loading Library")
+        } else if model.visibleErrorMessage != nil || model.isRecoveringLocalHost {
           ContentUnavailableView(
             model.isRecoveringLocalHost ? "Starting Local Server" : "Server Unavailable",
             systemImage: "server.rack",
@@ -1982,13 +1988,25 @@ private struct PersonDetailView: View {
     .aureliaOverlayScrollbars()
     .aureliaCompactHeader(title: detail?.name ?? person.name, threshold: 200, onBack: onBack)
     .task(id: PersonLoadKey(person: person, retryRevision: retryRevision)) {
-      isLoading = true
+      // A person seen a moment ago shows at once; the server is asked again behind it.
+      if let remembered = model.rememberedPersonDetail(person) {
+        detail = remembered
+        isLoading = false
+      } else {
+        detail = nil
+        isLoading = true
+      }
       errorMessage = nil
       do {
-        detail = try await model.personDetail(person)
+        let loaded = try await model.personDetail(person)
+        guard !Task.isCancelled else { return }
+        detail = loaded
         isLoading = false
       } catch {
-        if !(error is CancellationError) {
+        // Clicking on before the answer cancels the request, which can arrive as a URL error;
+        // that is not a problem to show, even for a moment.
+        if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+        if detail == nil {
           errorMessage = error.localizedDescription
           isLoading = false
         }

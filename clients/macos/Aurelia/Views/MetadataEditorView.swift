@@ -100,6 +100,11 @@ struct MetadataEditorSheet: View {
   @State private var cropTarget: CropTarget?
   @State private var matchMetadata: MediaMetadataSummary?
   @State private var matchConfirmation = false
+  // A series lists everyone who ever worked on it (Better Call Saul: about 600). The editor shows
+  // the first 50 and finds anyone by name; each row loads its photo only when it is built (audit M1).
+  @State private var peopleShown = MetadataEditorSheet.peoplePage
+  @State private var personQuery = ""
+  static let peoplePage = 50
   init(
     metadata: MediaMetadataSummary, onSaved: @escaping () async -> Void,
     previewDocument: MediaEditorDocument? = nil
@@ -341,6 +346,19 @@ struct MetadataEditorSheet: View {
         .font(.callout).foregroundStyle(.secondary)
     }.textFieldStyle(.roundedBorder)
   }
+  /// The people the editor lists now: those matching the search, or the first `peopleShown`.
+  private var shownPeople: [(offset: Int, element: EditorCredit)] {
+    let all = Array(draft.values.credits.enumerated())
+    let query = personQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard query.isEmpty else {
+      return all.filter { entry in
+        [entry.element.name, entry.element.character ?? "", entry.element.job ?? ""]
+          .contains { $0.localizedCaseInsensitiveContains(query) }
+      }
+    }
+    return Array(all.prefix(peopleShown))
+  }
+
   private var people: some View {
     VStack(alignment: .leading, spacing: 16) {
       HStack {
@@ -350,9 +368,16 @@ struct MetadataEditorSheet: View {
         Button("Add Person", systemImage: "plus") {
           draft.values.credits.append(EditorCredit(id: UUID(), name: "", department: "Acting"))
           draft.overrides.insert("credits")
+          personQuery = ""
+          peopleShown = max(peopleShown, draft.values.credits.count)
         }
       }
-      ForEach(Array(draft.values.credits.enumerated()), id: \.element.id) { index, person in
+      if draft.values.credits.count > Self.peoplePage {
+        TextField("Find a Person", text: $personQuery, prompt: Text("Find a person by name or role"))
+          .textFieldStyle(.roundedBorder)
+          .accessibilityIdentifier("metadata-person-search")
+      }
+      ForEach(shownPeople, id: \.element.id) { index, person in
         HStack(alignment: .top, spacing: 16) {
           VStack(spacing: 12) {
             EditorImagePreview(
@@ -412,6 +437,15 @@ struct MetadataEditorSheet: View {
       if draft.values.credits.isEmpty {
         Text("No cast or crew. Add a person to begin.").foregroundStyle(.secondary).padding(
           .vertical, 30)
+      } else if !personQuery.isEmpty, shownPeople.isEmpty {
+        Text("Nobody matches “\(personQuery)”.").foregroundStyle(.secondary)
+      } else if personQuery.isEmpty, draft.values.credits.count > peopleShown {
+        let rest = draft.values.credits.count - peopleShown
+        HStack(spacing: 12) {
+          Button("Show \(min(rest, Self.peoplePage)) More") { peopleShown += Self.peoplePage }
+          Button("Show All \(draft.values.credits.count)") { peopleShown = draft.values.credits.count }
+          Text("\(rest) more not shown").font(.callout).foregroundStyle(.secondary)
+        }
       }
     }
   }

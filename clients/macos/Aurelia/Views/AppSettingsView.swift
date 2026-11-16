@@ -327,13 +327,13 @@ struct AppSettingsView: View {
         .aureliaSettingRows()
       }
       .id(selectedCategory)
-      .transition(.opacity.combined(with: .offset(y: 10)))
+      // Another category shows at once; it no longer springs in (audit M3).
+      .transition(.identity)
       .scrollContentBackground(.hidden)
       .onChange(of: selectedCategory) {
         proxy.scrollTo("settings-top", anchor: .top)
       }
     }
-    .aureliaAnimation(AureliaMotion.page, value: selectedCategory)
     .aureliaAnimation(AureliaMotion.standard, value: searchText.isEmpty)
   }
 

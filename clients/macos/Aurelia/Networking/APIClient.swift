@@ -874,8 +874,12 @@ struct APIClient: Sendable {
   {
     let generationQuery =
       try generation.map { "&" + (try Self.query(name: "generation", value: $0)) } ?? ""
+    // The first request after loading everything starts at the newest change (server 2.21.0) instead
+    // of paging through the whole kept history, which reloaded the library once per page. Older
+    // servers ignore it and page as before.
+    let startQuery = cursor == 0 && generation == nil ? "&latest=true" : ""
     let data = try await perform(
-      path: "/api/v1/sync/changes?after=\(cursor)&waitSeconds=\(waitSeconds)\(generationQuery)",
+      path: "/api/v1/sync/changes?after=\(cursor)&waitSeconds=\(waitSeconds)\(generationQuery)\(startQuery)",
       method: "GET",
       timeout: TimeInterval(max(waitSeconds + 5, 15)))
     return try Self.decode(SyncChangesResponse.self, from: data)

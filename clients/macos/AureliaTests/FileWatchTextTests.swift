@@ -55,7 +55,10 @@ final class FileWatchTextTests: XCTestCase {
   }
 
   func testSavingLeavesOutWhatStaysTheSame() throws {
-    let body = try JSONEncoder().encode(UpdateFileCheckSettingsRequest(enabled: true, recheckDays: 30))
+    // Sorted keys: JSONEncoder's order of keys is not fixed, so the text alone was a flaky check.
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .sortedKeys
+    let body = try encoder.encode(UpdateFileCheckSettingsRequest(enabled: true, recheckDays: 30))
     XCTAssertEqual(String(decoding: body, as: UTF8.self), #"{"enabled":true,"recheckDays":30}"#)
   }
 }

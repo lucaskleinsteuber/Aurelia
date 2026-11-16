@@ -107,6 +107,9 @@ final class AppModel: ObservableObject {
   @Published private(set) var series: [SeriesSummary] = []
   @Published private(set) var catalogItems: [CatalogItemSummary] = []
   @Published private(set) var home: HomeResponse?
+  /// Whether this profile's library arrived at least once. Until then an empty catalog means
+  /// "still loading", not "add a storage location", which flashed on every start.
+  @Published private(set) var libraryLoaded = false
   @Published private(set) var collections: [CollectionSummary] = []
   @Published private(set) var watchlistItems: [CatalogItemSummary] = []
   @Published private(set) var watchlistIds: Set<UUID> = []
@@ -601,6 +604,8 @@ final class AppModel: ObservableObject {
     }
 
     #if DEBUG
+      // UI test fixtures set their library directly; it counts as loaded.
+      if Self.uiTestMode != nil { libraryLoaded = true }
       if Self.uiTestMode == "profile-management" {
         operatingMode = .client
         let device = Self.previewOwnerProfile
@@ -1820,8 +1825,14 @@ final class AppModel: ObservableObject {
     async let loadedCatalog = catalogClient.catalogItems()
     async let loadedHome = homeRefresher.load(request: homeRequest, profile: profile)
     async let loadedCollections = catalogClient.collections()
+    // Home answers long before every catalog page has arrived; on the first load it shows at once
+    // while the rest loads, instead of waiting for the whole library.
+    let earlyHome = try await loadedHome
+    if home == nil, let earlyHome, isCurrent(generation), homeRefresher.isCurrent(homeRequest) {
+      home = earlyHome
+    }
     let (newMovies, newSeries, newCatalog, newHome, newCollections) = try await (
-      loadedMovies, loadedSeries, loadedCatalog, loadedHome, loadedCollections
+      loadedMovies, loadedSeries, loadedCatalog, earlyHome, loadedCollections
     )
     guard isCurrent(generation)
     else { return }
@@ -1837,6 +1848,7 @@ final class AppModel: ObservableObject {
     libraryCapabilities = Set(info.capabilities ?? [])
     collections = newCollections
     home = newHome
+    libraryLoaded = true
     prefetchArtwork()
     if (info.capabilities ?? []).contains("watchlist-people-v1"),
       let loadedWatchlist = try? await client.watchlist(), isCurrent(generation)
@@ -2343,10 +2355,32 @@ final class AppModel: ObservableObject {
 
   func personDetail(_ selection: PersonSelection) async throws -> PersonDetailResponse {
     guard let profile else { throw APIClientError.invalidResponse }
-    return try await currentConnection {
+    let detail = try await currentConnection {
       try await APIClient(profile: profile).personDetail(
         name: selection.name, personKey: selection.personKey)
     }
+    rememberPersonDetail(detail, for: selection)
+    return detail
+  }
+
+  /// The last people opened, for two minutes, so clicking back and forth between them is instant.
+  private var personDetails: [String: (detail: PersonDetailResponse, at: Date)] = [:]
+
+  func rememberedPersonDetail(_ selection: PersonSelection) -> PersonDetailResponse? {
+    guard let entry = personDetails[Self.personKey(selection)], Date().timeIntervalSince(entry.at) < 120
+    else { return nil }
+    return entry.detail
+  }
+
+  private func rememberPersonDetail(_ detail: PersonDetailResponse, for selection: PersonSelection) {
+    if personDetails.count >= 40, let oldest = personDetails.min(by: { $0.value.at < $1.value.at })?.key {
+      personDetails.removeValue(forKey: oldest)
+    }
+    personDetails[Self.personKey(selection)] = (detail, Date())
+  }
+
+  private static func personKey(_ selection: PersonSelection) -> String {
+    selection.personKey ?? "name:\(selection.name.lowercased())"
   }
 
   func saveMetadata(id: UUID, request: UpdateMediaMetadataRequest) async throws
@@ -3529,6 +3563,7 @@ final class AppModel: ObservableObject {
   }
 
   private func clearPersonalViewState() {
+    personDetails.removeAll()
     browseWarmup?.cancel()
     browseWarmup = nil
     browseResults.removeAll()
@@ -3539,6 +3574,7 @@ final class AppModel: ObservableObject {
     series = []
     catalogItems = []
     home = nil
+    libraryLoaded = false
     collections = []
     watchlistItems = []
     watchlistIds = []
@@ -3641,6 +3677,7 @@ final class AppModel: ObservableObject {
     series = []
     catalogItems = []
     home = nil
+    libraryLoaded = false
     collections = []
     watchlistItems = []
     watchlistIds = []

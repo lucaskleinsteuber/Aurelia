@@ -81,6 +81,9 @@ struct RootView: View {
       // Moving between starting, choosing a profile and the library fades instead of cutting.
       .id(phase)
       .transition(.opacity)
+      // Under Settings the library isn't drawn: its hero and blurred sidebar no longer redraw
+      // with every frame of Settings (audit M3). It keeps its state and shows again at once.
+      .opacity(model.isSettingsPresented && model.playback == nil && model.offlineMode == nil ? 0 : 1)
       .accessibilityHidden(
         model.playback != nil || model.isSettingsPresented || model.movieNightLaunch != nil
           || model.wrappedLaunch != nil)
@@ -93,12 +96,10 @@ struct RootView: View {
       }
 
       if model.isSettingsPresented, model.offlineMode == nil {
-        // Fading and a short slide only: scaling the whole window of text and controls made
-        // macOS redraw every frame and stutter.
+        // Settings appear at once, as System Settings does. Building the whole window of text and
+        // controls while it faded and slid made every frame redraw and stutter (audit M3).
         AppSettingsView(initialCategory: model.requestedSettingsCategory)
-          .transition(
-            reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 10))
-          )
+          .transition(.identity)
           // Opened while a title plays (⌘, or the menu), Settings cover the player too; Done or
           // Esc returns to it. Below the player they were invisible until it closed.
           .zIndex(model.playback == nil ? 5 : 11)
@@ -136,7 +137,7 @@ struct RootView: View {
     .aureliaFullWindowCanvas()
     .aureliaRemoveEmptyWindowToolbar()
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.playback)
-    .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: model.isSettingsPresented)
+    .animation(nil, value: model.isSettingsPresented)
     .onChange(of: model.isSettingsPresented) { _, presented in
       if !presented, model.playback != nil {
         NotificationCenter.default.post(name: .aureliaPlayerReclaimKeyboard, object: nil)
