@@ -202,7 +202,10 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
     /// <summary>GET /api/v1/sync/changes: waits up to <paramref name="waitSeconds"/> for the library to change after the cursor.</summary>
     public Task<SyncChangesResponse> ChangesAsync(long after, int waitSeconds, string? generation, CancellationToken cancellation)
     {
-        var path = $"/api/v1/sync/changes?after={after}&waitSeconds={waitSeconds}" + (generation is { Length: > 0 } g ? "&generation=" + Uri.EscapeDataString(g) : "");
+        // The first request after loading everything starts at the newest change (server 2.21.0)
+        // instead of paging through the whole kept history; older servers ignore it.
+        var path = $"/api/v1/sync/changes?after={after}&waitSeconds={waitSeconds}" + (generation is { Length: > 0 } g ? "&generation=" + Uri.EscapeDataString(g) : "")
+            + (after == 0 && generation is not { Length: > 0 } ? "&latest=true" : "");
         return Get<SyncChangesResponse>(path, cancellation, TimeSpan.FromSeconds(waitSeconds + 5));
     }
 
