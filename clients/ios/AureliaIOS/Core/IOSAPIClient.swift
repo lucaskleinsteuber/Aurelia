@@ -490,6 +490,9 @@ struct IOSAPIClient: Sendable {
       URLQueryItem(name: "waitSeconds", value: "15"),
     ]
     if let generation { values.append(URLQueryItem(name: "generation", value: generation)) }
+    // The first request after loading everything starts at the newest change (server 2.21.0)
+    // instead of paging through the whole kept history; older servers ignore it.
+    if cursor == 0 && generation == nil { values.append(URLQueryItem(name: "latest", value: "true")) }
     let data = try await send("/api/v1/sync/changes", query: values)
     let response = try Self.decode(IOSSyncChanges.self, data: data)
     guard response.cursor >= 0 else { throw IOSCoreError.invalidResponse }
