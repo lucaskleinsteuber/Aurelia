@@ -207,7 +207,12 @@ beginners. Delegate like that.
   question first), build it with `scripts/build-linux-app.sh` (packages made on Linux by
   `scripts/package-linux-app.sh`) and install each verified test build on the owner's
   CachyOS laptop (`Local/LinuxLaptop/ssh_config`) with `scripts/install-linux-app.sh`
-  without asking; installing replaces only the package. Synthetic data only, no real
+  without asking; installing replaces only the package. The laptop is not always on (owner,
+  16.11.2026): check first whether it answers (ssh with a short `ConnectTimeout`). When it is
+  off, make the packages on the owner's Linux server (`Local/LinuxServer/ssh_config`, Ubuntu
+  with Docker) in a throwaway container at low priority, without touching the Aurelia server
+  running there; if that is not possible, ask the owner to switch the laptop on. Never keep the
+  laptop awake or change its power settings. Synthetic data only, no real
   playback in tests. Hosting and network-trial tests use isolated server processes and temporary
   state; never start a second host over the installed server or use personal libraries for them.
   Publish its deb, rpm, Arch and Flatpak packages with `scripts/publish-release.sh --linux-app`
