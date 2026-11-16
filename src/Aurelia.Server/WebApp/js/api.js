@@ -292,6 +292,9 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     wishSearch: (query, kind, options = {}) =>
       request(`/api/v1/wishes/search?${new URLSearchParams(kind ? { query, kind } : { query })}`, options),
     createWish: (body, options = {}) => request("/api/v1/wishes", { ...options, method: "POST", body }),
+    // People ("people-v1", server 2.22.0): the library's people, and a person's life from TMDB.
+    people: (parameters = {}, options = {}) => request(`/api/v1/people?${new URLSearchParams(parameters)}`, options),
+    personProfile: (key, options = {}) => request(`/api/v1/people/profile?${new URLSearchParams({ key })}`, options),
     deleteWish: (wishId, options = {}) => request(`/api/v1/wishes/${id(wishId)}`, { ...options, method: "DELETE" }),
     setWishSupport: (wishId, supported, options = {}) => request(`/api/v1/wishes/${id(wishId)}/support`, { ...options, method: "PUT", body: { supported } }),
     updateWishState: (wishId, body, options = {}) => request(`/api/v1/wishes/${id(wishId)}/state`, { ...options, method: "PUT", body }),

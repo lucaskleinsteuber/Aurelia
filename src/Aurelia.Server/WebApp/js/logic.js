@@ -861,6 +861,7 @@ export function parseRoute(pathname = "/", search = "") {
   if (parts.length === 1 && parts[0] === "statistics") return { name: "statistics" };
   if (parts.length === 1 && parts[0] === "movie-night") return { name: "movie-night" };
   if (parts.length === 1 && parts[0] === "wishes") return { name: "wishes" };
+  if (parts.length === 1 && parts[0] === "people") return { name: "people", query: query.get("q") ?? "" };
   if (parts.length === 1 && parts[0] === "welcome") return { name: "welcome" };
   if (parts.length === 1 && parts[0] === "search") return { name: "search", query: query.get("q") ?? "" };
   if (parts[0] === "settings" && parts.length <= 2) {
@@ -897,6 +898,8 @@ export function routePath(route) {
       return "/movie-night";
     case "wishes":
       return "/wishes";
+    case "people":
+      return route.query ? `/people?q=${encodeURIComponent(route.query)}` : "/people";
     case "welcome":
       return "/welcome";
     case "person": {
@@ -1366,6 +1369,44 @@ export function people(credits) {
     });
   }
   return cards.sort((left, right) => (left.order - right.order) || (left.index - right.index)).map(({ index, ...card }) => card);
+}
+
+/** People ("people-v1", server 2.22.0): the library's people and a person's life from TMDB. */
+export const PEOPLE_FEATURE = "people-v1";
+
+/**
+ * A person's life in one line, in the Mac app's words: "Born May 1, 1970 (age 56) in Invented
+ * Town", or both dates for someone who died. TMDB writes dates as YYYY-MM-DD; anything else is
+ * left out.
+ */
+export function personLife(about, today = new Date()) {
+  if (!about) return "";
+  const day = (text) => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text ?? "");
+    if (!match) return null;
+    const [year, month, date] = match.slice(1).map(Number);
+    return month >= 1 && month <= 12 && date >= 1 && date <= 31 ? { year, month, date } : null;
+  };
+  const format = ({ year, month, date }) => new Date(Date.UTC(year, month - 1, date))
+    .toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  const age = (from, to) => Math.max(0, to.year - from.year - (to.month < from.month || (to.month === from.month && to.date < from.date) ? 1 : 0));
+  const born = day(about.birthday);
+  const died = day(about.deathday);
+  const place = String(about.placeOfBirth ?? "").trim();
+  if (born && died) return `${format(born)} – ${format(died)} (aged ${age(born, died)})${place ? ` · ${place}` : ""}`;
+  if (born) {
+    const now = { year: today.getFullYear(), month: today.getMonth() + 1, date: today.getDate() };
+    return `Born ${format(born)} (age ${age(born, now)})${place ? ` in ${place}` : ""}`;
+  }
+  if (died) return `Died ${format(died)}`;
+  return place ? `Born in ${place}` : "";
+}
+
+/** "3 titles", or "Director · 1 title" for someone behind the camera. */
+export function personRole(person) {
+  const count = Number(person?.titleCount) || 0;
+  const titles = `${count} ${count === 1 ? "title" : "titles"}`;
+  return person?.department && person.department !== "Acting" ? `${person.department} · ${titles}` : titles;
 }
 
 export function personHref(person) {

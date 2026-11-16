@@ -97,6 +97,7 @@ const PATHS = {
   minus: ["M5 12h14", "stroke"],
   info: ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v5.5M12 7.8h.01", "stroke"],
   refresh: ["M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v3.7h-3.7", "stroke"],
+  cards: ["M4 7.8l8.5-2.3 3 11.1-8.5 2.3zM14.2 5.6l5.5 1.5-2.6 9.6", "stroke"],
 };
 
 export function icon(name, { size = 20, label } = {}) {

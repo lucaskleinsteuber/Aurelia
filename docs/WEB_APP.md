@@ -213,6 +213,10 @@ pages.
 
 A title's page shows seasons as a row of episodes, trailers and extras, cast and crew (each
 person opens a page with their titles in the library) and its information, like on the Mac.
+With a server that has `people-v1`, People in the sidebar (`/people?q=`) lists everyone TMDB
+identified, those in the most titles first, with a search, and a person's page adds their life
+dates, biography and a Known For row with Wish or Me Too; the library's titles show first and
+the rest follows when TMDB answers.
 Title cards, Continue Watching and episodes share one context menu: Play (from the
 beginning), Resume, Go to Series, watched or unwatched (a whole season or show asks first and
 names the number of episodes), Favorites, Watchlist, Add to Collection, Remove from Continue

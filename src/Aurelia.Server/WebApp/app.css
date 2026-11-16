@@ -2254,3 +2254,41 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .move-owner { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--hairline); text-align: left; }
 .move-section { display: flex; flex-direction: column; gap: 8px; }
 @media (prefers-reduced-motion: reduce) { .move-progress.indeterminate .move-progress-fill { animation: none; width: 100%; opacity: 0.5; } }
+
+/* MARK: People ("people-v1") */
+
+.people-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  gap: 26px 18px;
+  padding: 0 var(--gutter);
+}
+.people-grid .person { width: auto; min-width: 0; }
+.people-grid .person-photo { width: min(112px, 100%); height: auto; aspect-ratio: 1; }
+.people-grid .person-role { -webkit-line-clamp: 1; }
+.people-page .catalog-footer { padding: 18px var(--gutter) 0; }
+.person-life { font-size: 14px; }
+.person-about-host:empty, .known-for-host:empty { display: none; }
+.person-about { padding: 0 var(--gutter); margin-bottom: 30px; max-width: calc(760px + 2 * var(--gutter)); }
+.person-about h2, .person-titles h2 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
+.person-bio {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.person-bio.open { display: block; -webkit-line-clamp: unset; overflow: visible; }
+.person-about .text-button { padding-left: 0; margin-top: 4px; }
+.person-source { margin: 6px 0 0; }
+.person-titles > .section-header { padding: 0 var(--gutter); margin-bottom: 12px; }
+.known-for { margin-top: 34px; }
+.known-for > .section-header { padding: 0 var(--gutter); }
+.known-card { width: clamp(118px, 26vw, 150px); }
+.known-card .card-title, .known-card .card-subtitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.known-action { margin-top: 8px; min-height: 30px; display: flex; align-items: center; }
+.known-action .secondary-button.small { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; font-size: 13px; }
+.badge.wished { gap: 4px; display: inline-flex; padding: 0 9px; height: 26px; background: var(--surface); color: var(--muted); font-size: 12px; }

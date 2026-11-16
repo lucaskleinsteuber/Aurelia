@@ -11,7 +11,7 @@ import { createMovieNightView } from "./movie-night-view.js";
 import { createWishesView } from "./wishes-view.js";
 import { supportsSecurity } from "./security.js";
 import { createSecurityAlerts } from "./security-view.js";
-import { formatWishNotification, supportsWishes, wishBadgeCount } from "./wishes.js";
+import { describeWishError, formatWishNotification, supportsWishes, wishBadgeCount, wishPosterUrl } from "./wishes.js";
 import { openWrapped, readyMonth, readyMonths, wrappedYears, monthIsNew, MONTHS } from "./wrapped.js";
 import { Player } from "./player.js";
 import { clockTime, closedLabel } from "./screen-time.js";
@@ -45,6 +45,7 @@ const cached = {
   playbackPlan: (id) => remembered("plan", id, () => api.playbackPlan(id)),
   watchlist: () => remembered("watchlist", "", () => api.watchlist()),
   person: (who) => remembered("person", JSON.stringify(who), () => api.person(who)),
+  personProfile: (key) => remembered("profile", key, () => api.personProfile(key)),
 };
 const root = document.getElementById("app");
 
@@ -901,7 +902,7 @@ function saveSidebarLayout(layout) {
 document.documentElement.style.setProperty("--sidebar", `${sidebarLayout().width}px`);
 
 const SIDEBAR_SYMBOLS = { home: "home", search: "search", library: "library", watchlist: "bookmark", recent: "clock", shows: "tv", movies: "film",
-  collections: "collections", wishes: "gift", history: "history", statistics: "chart", "movie-night": "people" };
+  collections: "collections", people: "people", wishes: "gift", history: "history", statistics: "chart", "movie-night": "cards" };
 
 /**
  * The Mac app's sidebar (audit D1): Search and Home, the library's sections in the order chosen in
@@ -913,6 +914,8 @@ function shell(content) {
   const general = loadGeneral();
   const places = [["search", "Search", "/search"], ["home", "Home", "/"], ...general.sectionOrder.map((name) => [name, labels[name], `/${name}`])]
     .filter(([name]) => sidebarShows(name, general));
+  // People ("people-v1"): everyone in the library's credits, with search.
+  if (supportsPeople(state.server)) places.push(["people", "People", "/people"]);
   const hasWishes = supportsWishes(state.server);
   if (hasWishes) places.push(["wishes", "Wishes", "/wishes"]);
   const yours = [["history", "History", "/history"], ["statistics", "Statistics", "/statistics"], ["movie-night", "Movie Night", "/movie-night"]];
@@ -1112,7 +1115,7 @@ async function renderRoute({ quiet = false, restoreScroll = false, resetScroll =
   isRenderingRoute = false;
   if (route.name === "home" && !quiet && logic.tourPending(safeStorage())) setTimeout(() => startTour(), 600);
   // The tab's title is set only for the page that is really shown (audit L13).
-  const label = { home: "Home", library: "Library", watchlist: "Watchlist", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", history: "Watch History", statistics: "Statistics", settings: "Settings", "movie-night": "Movie Night", wishes: "Wishes" }[route.name];
+  const label = { home: "Home", library: "Library", watchlist: "Watchlist", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", history: "Watch History", statistics: "Statistics", settings: "Settings", "movie-night": "Movie Night", wishes: "Wishes", people: "People" }[route.name];
   const named = content.dataset?.pageTitle ?? label;
   if (named) document.title = `${named} · Aurelia`;
 }
@@ -1225,6 +1228,8 @@ function screenFor(route, token) {
       return watchlistScreen();
     case "person":
       return personScreen(route);
+    case "people":
+      return peopleScreen(route);
     case "settings":
       return settingsScreen(route);
     case "search":
@@ -1741,10 +1746,44 @@ async function watchlistScreen() {
     h("div", { class: "poster-grid" }, shown.map((item, index) => posterCard(item, index))));
 }
 
+function supportsPeople(server) {
+  return Boolean(server?.capabilities?.includes(logic.PEOPLE_FEATURE));
+}
+
 async function personScreen(route) {
+  // A person's life comes from TMDB beside the library's titles; it never holds the page up.
+  const profileRead = route.personKey && supportsPeople(state.server)
+    ? cached.personProfile(route.personKey).catch(() => null)
+    : null;
   const detail = await cached.person({ name: route.personName, key: route.personKey });
   const items = detail?.items ?? [];
   const name = detail?.name ?? route.personName ?? "Person";
+  // Kept from a moment ago or quick to answer: built in at once, so nothing moves afterwards.
+  const early = profileRead ? await Promise.race([profileRead, new Promise((resolve) => setTimeout(resolve, 250))]) : null;
+  const life = h("div", { class: "person-life muted" });
+  const about = h("div", { class: "person-about-host" });
+  const knownFor = h("div", { class: "known-for-host" });
+  const fill = (profile) => {
+    clear(life);
+    clear(about);
+    clear(knownFor);
+    const line = logic.personLife(profile?.about);
+    life.append(line);
+    life.hidden = !line;
+    const section = personAbout(profile?.about);
+    if (section) about.append(section);
+    const hits = profile?.knownFor ?? [];
+    if (hits.length) {
+      knownFor.append(h("section", { class: "detail-section known-for" },
+        h("div", { class: "section-header" }, h("h2", {}, "Known For"), h("span", { class: "count" }, String(hits.length))),
+        hrail(hits.map((hit) => knownForCard(hit)), { label: "Known For", className: "known-for-track" })));
+    }
+  };
+  fill(early ?? null);
+  if (profileRead && early === undefined) {
+    void profileRead.then((profile) => { if (life.isConnected && profile) fill(profile); });
+  }
+  const titles = h("div", { class: "muted" }, `${items.length} ${items.length === 1 ? "title" : "titles"} in your library`);
   return h("div", { class: "library person-page page-enter", dataset: { pageTitle: name } },
     h("div", { class: "person-header" },
       h("button", { class: "player-round glass", "aria-label": "Back", onclick: () => history.length > 1 ? history.back() : navigate({ name: "home" }) }, icon("back", { size: 20 })),
@@ -1754,10 +1793,145 @@ async function personScreen(route) {
       h("div", { class: "person-heading" },
         h("div", { class: "eyebrow" }, detail?.subtitle ?? "Cast & Crew"),
         h("h1", {}, name),
-        h("div", { class: "muted" }, `${items.length} ${items.length === 1 ? "title" : "titles"} in your library`))),
-    items.length
-      ? h("div", { class: "poster-grid" }, items.map((item, index) => posterCard(item, index)))
-      : emptyState("search", "No Titles Found", "No accessible movies or TV shows in this library match this person."));
+        life,
+        titles)),
+    about,
+    h("section", { class: "person-titles" },
+      profileRead ? h("div", { class: "section-header" }, h("h2", {}, "In Your Library")) : null,
+      items.length
+        ? h("div", { class: "poster-grid" }, items.map((item, index) => posterCard(item, index)))
+        : emptyState("search", "No Titles Found", "No accessible movies or TV shows in this library match this person.")),
+    knownFor);
+}
+
+/** The biography, four lines first with More for the rest. */
+function personAbout(about) {
+  const biography = about?.biography?.trim();
+  if (!biography) return null;
+  const text = h("p", { class: "person-bio" }, biography);
+  const long = biography.length > 360;
+  const more = long ? h("button", { class: "text-button", "aria-expanded": "false" }, "More") : null;
+  more?.addEventListener("click", () => {
+    const open = text.classList.toggle("open");
+    more.textContent = open ? "Less" : "More";
+    more.setAttribute("aria-expanded", String(open));
+  });
+  return h("section", { class: "person-about" }, h("h2", {}, "Biography"), text, more,
+    h("p", { class: "person-source muted small" }, "From TMDB"));
+}
+
+/** A title TMDB knows this person for that the library doesn't have, with Wish or Me Too. */
+function knownForCard(hit) {
+  const poster = wishPosterUrl(hit.posterPath, 342);
+  const action = h("div", { class: "known-action" });
+  const draw = () => {
+    clear(action);
+    if (!supportsWishes(state.server)) return;
+    if (hit.alreadyWished && hit.supportedByCaller) {
+      action.append(h("span", { class: "badge wished" }, icon("check", { size: 13 }), "Wished"));
+    } else if (hit.alreadyWished && hit.existingWishId) {
+      action.append(h("button", { class: "secondary-button small", onclick: () => void wish(() => api.setWishSupport(hit.existingWishId, true)) }, "Me Too"));
+    } else {
+      action.append(h("button", { class: "secondary-button small", onclick: () => void wish(async () => {
+        const created = await api.createWish({ kind: hit.kind, title: hit.title, year: hit.year ?? null, provider: hit.provider,
+          providerMediaId: hit.providerMediaId, overview: hit.overview ?? null, posterPath: hit.posterPath ?? null, note: null });
+        hit = { ...hit, existingWishId: created?.wish?.id ?? hit.existingWishId };
+      }) }, icon("gift", { size: 14 }), "Wish"));
+    }
+  };
+  const wish = async (work) => {
+    for (const button of action.querySelectorAll?.("button") ?? []) button.disabled = true;
+    try {
+      await work();
+      hit = { ...hit, alreadyWished: true, supportedByCaller: true };
+      toast(`Wished for “${hit.title}”.`);
+      refreshWishSummary();
+    } catch (error) {
+      if (!handleError(error)) toast(describeWishError(error).message);
+    }
+    draw();
+  };
+  draw();
+  return h("div", { class: "poster-card known-card", role: "listitem" },
+    h("div", { class: "poster-frame" },
+      poster ? h("img", { class: "poster-art img-fade", src: poster, alt: "", loading: "lazy", decoding: "async",
+        onload: (event) => event.target.classList.add("loaded"), onerror: (event) => event.target.classList.add("artwork-missing") }) : null,
+      poster ? null : h("div", { class: "poster-fallback" }, hit.title)),
+    h("div", { class: "card-title" }, hit.title),
+    h("div", { class: "card-subtitle" }, [hit.year, hit.kind === "series" ? "TV Show" : "Movie"].filter(Boolean).join(" · ")),
+    action);
+}
+
+// MARK: People
+
+const PEOPLE_PAGE = 60;
+
+/** Everyone in the library's credits, those in the most titles first, with search ("people-v1"). */
+async function peopleScreen(route) {
+  let query = route.query?.trim() ?? "";
+  const input = h("input", { class: "search-field", type: "search", value: route.query ?? "", placeholder: "Find a Person", "aria-label": "Find a Person", maxlength: "128", autocomplete: "off", enterkeyhint: "search" });
+  const grid = h("div", { class: "people-grid", role: "list", "aria-label": "People" });
+  const count = h("span", { class: "count" });
+  const message = h("p", { class: "muted", role: "status", "aria-live": "polite" });
+  const more = h("button", { class: "secondary-button", hidden: true }, "Load More");
+  let offset = 0;
+  let generation = 0;
+  let request = null;
+  let debounce;
+  const show = (page, restart) => {
+    const items = Array.isArray(page?.items) ? page.items : [];
+    const total = Number.isSafeInteger(page?.total) ? page.total : items.length;
+    if (restart) clear(grid);
+    grid.append(...items.map(personCard));
+    offset = (restart ? 0 : offset) + items.length;
+    count.textContent = String(total);
+    more.hidden = !items.length || offset >= total;
+    message.textContent = offset ? "" : query
+      ? `No one in your library matches “${query}”.`
+      : "People appear here once TMDB has identified the titles in your library.";
+  };
+  async function load(restart) {
+    const mine = ++generation;
+    request?.abort();
+    request = new AbortController();
+    more.disabled = true;
+    try {
+      const page = await api.people({ query, offset: restart ? 0 : offset, limit: PEOPLE_PAGE }, { signal: request.signal });
+      if (mine !== generation || !grid.isConnected) return;
+      show(page, restart);
+    } catch (error) {
+      if (mine !== generation || error?.name === "AbortError" || handleError(error)) return;
+      message.textContent = error?.message || "People couldn’t be loaded.";
+    } finally {
+      if (mine === generation) more.disabled = false;
+    }
+  }
+  more.addEventListener("click", () => void load(false));
+  input.addEventListener("input", () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      if (!input.isConnected) return;
+      query = input.value.trim();
+      state.route = { name: "people", ...(query ? { query } : {}) };
+      history.replaceState(null, "", logic.routePath(state.route));
+      void load(true);
+    }, 250);
+  });
+  // The first page comes with the screen, so it never shows empty; a failure shows the usual error page.
+  show(await api.people({ query, offset: 0, limit: PEOPLE_PAGE }), true);
+  return h("div", { class: "library people-page page-enter", dataset: { pageTitle: "People" } },
+    h("div", { class: "page-header" }, h("h1", {}, "People"), count),
+    h("div", { class: "search-bar" }, icon("search"), input),
+    grid,
+    h("div", { class: "catalog-footer" }, message, more));
+}
+
+function personCard(person) {
+  const role = logic.personRole(person);
+  return h("a", { class: "person card-hover", role: "listitem", href: logic.personHref({ name: person.name, id: person.personKey }), "data-route": true },
+    h("div", { class: "person-photo" }, artwork(person.profile, 320, "person-art", ""), person.profile ? null : h("span", { class: "person-initial" }, logic.initial(person.name))),
+    h("div", { class: "person-name" }, person.name),
+    h("div", { class: "person-role" }, role));
 }
 
 // MARK: Watch History
