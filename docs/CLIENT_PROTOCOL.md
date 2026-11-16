@@ -718,6 +718,27 @@ signatures and retries: [AUTOMATION.md](AUTOMATION.md).
 
 Servers with capability `wishes-v1` let household profiles request movies and TV series not yet in the library (`GET/POST /api/v1/wishes`, `GET /api/v1/wishes/summary`, `GET /api/v1/wishes/search`, `PUT /api/v1/wishes/{id}/support`, `PUT /api/v1/wishes/{id}/state`, `DELETE /api/v1/wishes/{id}`, `POST /api/v1/wishes/seen`, `GET /api/v1/wishes/poster`). See [Family Wishes](WISHES.md) for age-limit visibility, duplicate `"Me Too"` merging, `409 already_in_library` conflicts, and server-proxied TMDB poster caching.
 
+## People
+
+Since server 2.22.0, capability `people-v1` adds People to every app except Apple TV.
+
+- `GET /api/v1/people?query=&offset=&limit=` (up to 120 per page) lists the people TMDB identified
+  in the credits of the movies and shows this profile may see, those in the most titles first and
+  then by name: `{ items: [{ name, personKey, profile, titleCount, department }], total, offset,
+  limit }`. `query` finds them by name. Credits typed by hand have no `personKey` and are left out.
+  `department` is `Acting` for anyone who acts in one of them, otherwise their most frequent job.
+- `GET /api/v1/people/profile?key=tmdb:person:{id}` answers `{ about, knownFor }`. `about` has
+  `biography`, `birthday` and `deathday` (`YYYY-MM-DD`), `placeOfBirth`, `knownForDepartment`,
+  `provider` and `providerPersonId`; it is `null` without TMDB, for a key that is not a TMDB person
+  and while TMDB can't be reached and nothing was kept. `knownFor` lists up to 20 titles the person
+  is known for that the library doesn't have, as wish search hits (`WishSearchHit`, see Family
+  Wishes) with `alreadyWished`, `existingWishId` and `supportedByCaller`, so an app offers Wish or
+  Me Too as in Wishes. The server reads the person from TMDB (`person/{id}` with
+  `combined_credits`, in the metadata language) when the page first opens, waits at most eight
+  seconds, and keeps the answer for 30 days.
+- The person page itself stays `GET /api/v1/catalog/person`; an app shows the library's titles
+  first and adds the profile when it arrives.
+
 ## Sleep timer end signal
 
 When a player's sleep timer expires, `POST /api/v1/playback/sleep-timer-ended` notifies the server and returns `{ powerMode, afterSleepTimer, minutes }`. Clients with **Show Good Night When the Sleep Timer Ends** enabled (off by default) reuse the Good-Night screen without profile locking or wake-time text and auto-close after five minutes; see [Screen time](SCREEN_TIME.md#good-night-after-the-sleep-timer).

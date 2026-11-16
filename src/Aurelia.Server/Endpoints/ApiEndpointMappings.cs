@@ -86,6 +86,11 @@ public static class ApiEndpointMappings
         catalog.MapGet("/collections", ListCollectionsAsync);
         catalog.MapGet("/franchises", ListFranchisesAsync);
 
+        // People ("people-v1"): the library's people with search, and a person's life from TMDB.
+        var people = api.MapGroup("/people").RequireAuthorization();
+        people.MapGet(string.Empty, ListPeopleAsync);
+        people.MapGet("/profile", GetPersonProfileAsync);
+
         var collections = api.MapGroup("/collections").RequireAuthorization();
         collections.MapGet(string.Empty, ListCollectionsAsync);
         collections.MapPost(string.Empty, CreateCollectionAsync);
@@ -943,6 +948,12 @@ public static class ApiEndpointMappings
 
     private static Task<IResult> SetWatchlistAsync(HttpContext context, Guid mediaId, SetWatchlistRequest request, WatchlistService watchlist, CancellationToken cancellationToken) =>
         ExecuteAsync(() => watchlist.SetAsync(context.User.RequireUserId(), mediaId, request.IsWatchlisted, cancellationToken));
+
+    private static Task<IResult> ListPeopleAsync(string? query, int? offset, int? limit, PeopleService people, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => people.ListAsync(query, offset ?? 0, limit ?? 60, cancellationToken));
+
+    private static Task<IResult> GetPersonProfileAsync(HttpContext context, string? key, PeopleService people, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => people.ProfileAsync(context.User.RequireUserId(), key ?? string.Empty, cancellationToken));
 
     private static Task<IResult> GetCatalogPersonAsync(HttpContext context, string? name, string? key, PresentationService presentation, SyncChangeService changes, CancellationToken cancellationToken) =>
         ExecuteRevisionedAsync(context, changes, () => presentation.PersonAsync(context.User.RequireUserId(), name, key, cancellationToken));

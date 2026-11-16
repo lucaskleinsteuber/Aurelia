@@ -1123,6 +1123,8 @@ namespace Aurelia.Server.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ProviderPersonId");
+
                     b.HasIndex("MediaItemId", "SortOrder");
 
                     b.ToTable("MediaCredits");
@@ -1756,6 +1758,62 @@ namespace Aurelia.Server.Data.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("PairingCodes");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.PersonProfile", b =>
+                {
+                    b.Property<string>("Provider")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderPersonId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Biography")
+                        .HasMaxLength(8192)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Birthday")
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreditsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Deathday")
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("FetchedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("KnownForDepartment")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PlaceOfBirth")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProfilePath")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Provider", "ProviderPersonId");
+
+                    b.ToTable("PersonProfiles");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.PlaybackProgress", b =>

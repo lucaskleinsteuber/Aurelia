@@ -45,7 +45,39 @@ public interface ITmdbClient
         string providerId,
         CancellationToken cancellationToken) =>
         Task.FromResult<TmdbCollectionDetail?>(null);
+
+    /// <summary>A person's life and the titles they are known for ("people-v1"); null when TMDB doesn't know them.</summary>
+    Task<TmdbPerson?> GetPersonAsync(
+        string token,
+        string language,
+        string personId,
+        CancellationToken cancellationToken) =>
+        Task.FromResult<TmdbPerson?>(null);
 }
+
+public sealed record TmdbPerson(
+    string Id,
+    string Name,
+    string? Biography,
+    string? Birthday,
+    string? Deathday,
+    string? PlaceOfBirth,
+    string? KnownForDepartment,
+    string? ProfilePath,
+    IReadOnlyList<TmdbPersonCredit> Credits);
+
+/// <param name="MediaType">"movie" or "tv".</param>
+/// <param name="Role">The character played, or the job.</param>
+public sealed record TmdbPersonCredit(
+    string MediaType,
+    string ProviderMediaId,
+    string Title,
+    int? Year,
+    string? Overview,
+    string? PosterPath,
+    string? Role,
+    int VoteCount,
+    double Popularity);
 
 public sealed record TmdbShowShape(int? Seasons, int? Episodes);
 public sealed record TmdbCollectionDetail(string ProviderId, string Name, string? Overview, string? PosterPath, string? BackdropPath);
@@ -214,6 +246,78 @@ public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : 
             GetNullableInt(episode, "runtime"),
             GetNullableDouble(episode, "vote_average"),
             GetString(episode, "still_path"))).ToList();
+    }
+
+    public async Task<TmdbPerson?> GetPersonAsync(
+        string token,
+        string language,
+        string personId,
+        CancellationToken cancellationToken)
+    {
+        if (!int.TryParse(personId, NumberStyles.None, CultureInfo.InvariantCulture, out _)) return null;
+        using var response = await SendAsync(token,
+            $"person/{personId}?language={Uri.EscapeDataString(language)}&append_to_response=combined_credits", cancellationToken, allowNotFound: true);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+        await EnsureSuccessAsync(response, cancellationToken);
+        using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        var root = document.RootElement;
+        var credits = new List<TmdbPersonCredit>();
+        var seen = new Dictionary<string, int>(StringComparer.Ordinal);
+        if (root.TryGetProperty("combined_credits", out var combined) && combined.ValueKind == JsonValueKind.Object)
+        {
+            // Acting first, then crew; a title with several roles is listed once with all of them.
+            foreach (var (list, roleName) in new[] { ("cast", "character"), ("crew", "job") })
+            {
+                if (!combined.TryGetProperty(list, out var entries) || entries.ValueKind != JsonValueKind.Array) continue;
+                foreach (var entry in entries.EnumerateArray())
+                {
+                    if (entry.TryGetProperty("adult", out var adult) && adult.ValueKind == JsonValueKind.True) continue;
+                    var mediaType = GetString(entry, "media_type");
+                    if (mediaType is not ("movie" or "tv") || PersonId(entry) is not { } mediaId) continue;
+                    var title = GetString(entry, mediaType == "movie" ? "title" : "name");
+                    if (string.IsNullOrWhiteSpace(title)) continue;
+                    var role = GetString(entry, roleName);
+                    var key = $"{mediaType}:{mediaId}";
+                    if (seen.TryGetValue(key, out var index))
+                    {
+                        var existing = credits[index];
+                        if (!string.IsNullOrWhiteSpace(role) && existing.Role?.Contains(role, StringComparison.Ordinal) != true)
+                            credits[index] = existing with { Role = string.IsNullOrWhiteSpace(existing.Role) ? role : $"{existing.Role}, {role}" };
+                        continue;
+                    }
+                    seen[key] = credits.Count;
+                    credits.Add(new TmdbPersonCredit(
+                        mediaType, mediaId, title,
+                        ParseYear(GetString(entry, mediaType == "movie" ? "release_date" : "first_air_date")),
+                        GetString(entry, "overview"),
+                        GetString(entry, "poster_path"),
+                        string.IsNullOrWhiteSpace(role) ? null : role,
+                        entry.TryGetProperty("vote_count", out var votes) && votes.TryGetInt32(out var count) ? count : 0,
+                        entry.TryGetProperty("popularity", out var popularity) && popularity.TryGetDouble(out var value) ? value : 0));
+                }
+            }
+        }
+        var biography = GetString(root, "biography");
+        // A biography TMDB has only in English stands in for one missing in the server's language.
+        if (string.IsNullOrWhiteSpace(biography) && !string.Equals(language, "en-US", StringComparison.OrdinalIgnoreCase))
+        {
+            using var english = await SendAsync(token, $"person/{personId}?language=en-US", cancellationToken, allowNotFound: true);
+            if (english.IsSuccessStatusCode)
+            {
+                using var englishDocument = await JsonDocument.ParseAsync(await english.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+                biography = GetString(englishDocument.RootElement, "biography");
+            }
+        }
+        return new TmdbPerson(
+            personId,
+            GetString(root, "name") ?? "Unknown",
+            string.IsNullOrWhiteSpace(biography) ? null : biography.Trim(),
+            GetString(root, "birthday"),
+            GetString(root, "deathday"),
+            GetString(root, "place_of_birth"),
+            GetString(root, "known_for_department"),
+            GetString(root, "profile_path"),
+            credits.OrderByDescending(credit => credit.VoteCount).ThenByDescending(credit => credit.Popularity).Take(60).ToList());
     }
 
     public async Task<TmdbCollectionDetail?> GetCollectionAsync(

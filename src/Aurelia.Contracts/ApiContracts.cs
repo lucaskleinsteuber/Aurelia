@@ -576,6 +576,49 @@ public sealed record PersonDetailResponse(
     ArtworkSummary? Profile,
     IReadOnlyList<CatalogItemSummary> Items);
 
+/// <summary>
+/// A person's life from TMDB and what they are known for ("people-v1",
+/// `GET /api/v1/people/profile?key=tmdb:person:{id}`); read apart from the person's titles, so a
+/// slow TMDB never holds the page up.
+/// </summary>
+/// <param name="About">Null without TMDB, for someone TMDB doesn't know, or while TMDB can't be reached.</param>
+/// <param name="KnownFor">
+/// Titles the library doesn't have, most known first, in the form of a wish search so an app can
+/// wish for them.
+/// </param>
+public sealed record PersonProfileResponse(
+    PersonAbout? About,
+    IReadOnlyList<WishSearchHit> KnownFor);
+
+/// <param name="Birthday">"1956-07-09", or null when unknown.</param>
+/// <param name="Deathday">"2021-03-01", or null for someone alive or unknown.</param>
+/// <param name="KnownForDepartment">TMDB's department, such as "Acting" or "Directing".</param>
+public sealed record PersonAbout(
+    string? Biography,
+    string? Birthday,
+    string? Deathday,
+    string? PlaceOfBirth,
+    string? KnownForDepartment,
+    string Provider,
+    string ProviderPersonId);
+
+/// <summary>Someone in the library's credits ("people-v1").</summary>
+/// <param name="PersonKey">"tmdb:person:17419", the key the person page is opened with.</param>
+/// <param name="TitleCount">How many movies and shows of the library they are in.</param>
+/// <param name="Department">"Acting", or their main job such as "Director".</param>
+public sealed record PersonSummary(
+    string Name,
+    string PersonKey,
+    ArtworkSummary? Profile,
+    int TitleCount,
+    string? Department);
+
+public sealed record PeoplePageResponse(
+    IReadOnlyList<PersonSummary> Items,
+    int Total,
+    int Offset,
+    int Limit);
+
 public sealed record CatalogItemSummary(
     Guid Id,
     MediaKind Kind,

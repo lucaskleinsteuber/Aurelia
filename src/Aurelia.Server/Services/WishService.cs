@@ -114,6 +114,57 @@ public sealed class WishService(
         return new WishSearchResponse(mapped, true);
     }
 
+    /// <summary>
+    /// TMDB titles in the form of a wish search ("people-v1"): whether the library has each and
+    /// whether someone wished for it, as the caller may see it. Movies and shows may be mixed.
+    /// </summary>
+    public async Task<IReadOnlyList<WishSearchHit>> DescribeAsync(
+        Guid callerId,
+        IReadOnlyList<WishCandidate> candidates,
+        CancellationToken cancellationToken)
+    {
+        if (candidates.Count == 0) return [];
+        var caller = await RequireUserAsync(callerId, cancellationToken);
+        posterCache.AllowRecent(candidates.Select(candidate => candidate.PosterPath));
+        var providerIds = candidates.Select(candidate => candidate.ProviderMediaId).Distinct(StringComparer.Ordinal).ToList();
+        var library = await (
+            from meta in database.MediaMetadata.AsNoTracking()
+            join media in database.MediaItems.AsNoTracking() on meta.MediaItemId equals media.Id
+            where media.ParentId == null
+                && (media.Kind == MediaKind.Movie || media.Kind == MediaKind.Series)
+                && meta.Provider == "tmdb"
+                && meta.ProviderMediaId != null
+                && providerIds.Contains(meta.ProviderMediaId)
+            select new { media.Kind, ProviderId = meta.ProviderMediaId!, media.Id })
+            .ToListAsync(cancellationToken);
+        var inLibrary = library.GroupBy(item => (item.Kind, item.ProviderId))
+            .ToDictionary(group => group.Key, group => group.First().Id);
+        var wishes = await database.Wishes.AsNoTracking()
+            .Include(wish => wish.Supports)
+            .Where(wish => wish.State == WishState.Open
+                && wish.Provider == "tmdb"
+                && wish.ProviderMediaId != null
+                && providerIds.Contains(wish.ProviderMediaId))
+            .ToListAsync(cancellationToken);
+        var wished = wishes.Where(wish => CanViewWish(wish, caller))
+            .GroupBy(wish => (wish.Kind, wish.ProviderMediaId!))
+            .ToDictionary(group => group.Key, group => group.First());
+        return candidates.Select(candidate =>
+        {
+            inLibrary.TryGetValue((candidate.Kind, candidate.ProviderMediaId), out var mediaId);
+            wished.TryGetValue((candidate.Kind, candidate.ProviderMediaId), out var wish);
+            var poster = WishPosterCache.IsSafePosterPath(candidate.PosterPath) ? candidate.PosterPath : null;
+            return new WishSearchHit(
+                "tmdb", candidate.ProviderMediaId, candidate.Kind, candidate.Title, candidate.Year,
+                TrimOrNull(candidate.Overview, 4096), poster, WishPosterCache.BuildPosterUrl(poster),
+                AlreadyInLibrary: mediaId != Guid.Empty,
+                ExistingMediaId: mediaId != Guid.Empty ? mediaId : null,
+                AlreadyWished: wish is not null,
+                ExistingWishId: wish?.Id,
+                SupportedByCaller: wish is not null && (wish.UserId == callerId || wish.Supports.Any(support => support.UserId == callerId)));
+        }).ToList();
+    }
+
     public async Task<WishListResponse> ListAsync(Guid callerId, WishState? filterState, CancellationToken cancellationToken)
     {
         var caller = await RequireUserAsync(callerId, cancellationToken);
@@ -722,3 +773,6 @@ public sealed class WishService(
         return builder.ToString().Trim();
     }
 }
+
+/// <summary>A TMDB title to describe as a wish search hit.</summary>
+public sealed record WishCandidate(MediaKind Kind, string ProviderMediaId, string Title, int? Year, string? Overview, string? PosterPath);

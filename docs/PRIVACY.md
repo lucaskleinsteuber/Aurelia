@@ -33,6 +33,8 @@ or signing out removes them.
   local network. Apple devices ask for permission to use the local network for this.
 - **TMDB.** Only if the server's owner turns it on, the server sends the titles and years of
   your movies and series to The Movie Database (TMDB) to find their details, cast and pictures.
+  When someone opens a person's page, the server also asks TMDB for that person by TMDB's number,
+  and keeps the answer (life dates, biography, other titles) for 30 days.
   This product uses the TMDB API but is not endorsed or certified by TMDB. TMDB's own privacy
   policy applies: https://www.themoviedb.org/privacy-policy
 - **OpenSubtitles.** Only if the server's owner sets it up, the server searches OpenSubtitles for

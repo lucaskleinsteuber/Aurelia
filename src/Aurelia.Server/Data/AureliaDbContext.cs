@@ -76,6 +76,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     private DbSet<MediaItemPlacement> MediaItemPlacements => Set<MediaItemPlacement>();
     private DbSet<MediaItemRating> MediaItemRatings => Set<MediaItemRating>();
     public DbSet<MediaCredit> MediaCredits => Set<MediaCredit>();
+    public DbSet<PersonProfile> PersonProfiles => Set<PersonProfile>();
     public DbSet<ArtworkAsset> ArtworkAssets => Set<ArtworkAsset>();
     public DbSet<MetadataReview> MetadataReviews => Set<MetadataReview>();
     public DbSet<MetadataJob> MetadataJobs => Set<MetadataJob>();
@@ -882,8 +883,27 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.Property(credit => credit.Character).HasMaxLength(512);
             entity.Property(credit => credit.ProfilePath).HasMaxLength(512);
             entity.HasIndex(credit => new { credit.MediaItemId, credit.SortOrder });
+            // A person's page and the People list look credits up by person (people-v1).
+            entity.HasIndex(credit => credit.ProviderPersonId);
             entity.HasOne(credit => credit.Metadata).WithMany(metadata => metadata.Credits)
                 .HasForeignKey(credit => credit.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PersonProfile>(entity =>
+        {
+            entity.HasKey(profile => new { profile.Provider, profile.ProviderPersonId });
+            entity.Property(profile => profile.Provider).HasMaxLength(16);
+            entity.Property(profile => profile.ProviderPersonId).HasMaxLength(64);
+            entity.Property(profile => profile.Language).HasMaxLength(16).IsRequired();
+            entity.Property(profile => profile.Name).HasMaxLength(256).IsRequired();
+            entity.Property(profile => profile.Biography).HasMaxLength(8192);
+            entity.Property(profile => profile.Birthday).HasMaxLength(10);
+            entity.Property(profile => profile.Deathday).HasMaxLength(10);
+            entity.Property(profile => profile.PlaceOfBirth).HasMaxLength(256);
+            entity.Property(profile => profile.KnownForDepartment).HasMaxLength(64);
+            entity.Property(profile => profile.ProfilePath).HasMaxLength(512);
+            entity.Property(profile => profile.CreditsJson).IsRequired();
+            entity.Property(profile => profile.FetchedAt).HasConversion(dateTimeOffsetConverter);
         });
 
         modelBuilder.Entity<ArtworkAsset>(entity =>

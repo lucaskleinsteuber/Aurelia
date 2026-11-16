@@ -10,7 +10,7 @@ public static class ServerFeatures
         "library-state-v1", "server-readiness-v1", "device-authorization-v1", "artwork-variants-v1",
         "catalog-pages-500-v1", PreviewStreams, WebApp, ProfilePersonalization, AgeLimits,
         WebPairingCode, CinemaTrailers, MovieNight, YearWrapped, MonthlyWrapped, MediaSegments, ServerSpeech, Suggestions,
-        ScreenTime, Wishes, Security, ServerPerformance, Automation, FileChecks,
+        ScreenTime, Wishes, Security, ServerPerformance, Automation, FileChecks, People,
     });
 
     /// <summary>
@@ -80,6 +80,13 @@ public static class ServerFeatures
     /// since server 2.19.0).
     /// </summary>
     public const string FileChecks = "file-checks-v1";
+
+    /// <summary>
+    /// People ("people-v1", since server 2.22.0): `GET /api/v1/people` lists the people of the
+    /// library with search, and a person's page adds their life and biography from TMDB and the
+    /// titles they are known for that the library doesn't have, each ready to wish for.
+    /// </summary>
+    public const string People = "people-v1";
 
     /// <summary>Family wishlist ("wishes-v1", docs/WISHES.md).</summary>
     public const string Wishes = "wishes-v1";
