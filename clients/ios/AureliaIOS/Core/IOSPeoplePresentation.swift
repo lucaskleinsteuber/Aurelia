@@ -20,7 +20,9 @@ enum IOSPeoplePresentation {
 
   /// "Born May 1, 1970 (age 56) in Invented Town", or both dates for someone who died. TMDB writes
   /// dates as YYYY-MM-DD; anything else is left out.
-  static func life(_ about: IOSPersonAbout?, today: Date = Date(), calendar: Calendar = .current) -> String? {
+  static func life(_ about: IOSPersonAbout?, today: Date = Date(), calendar: Calendar = .current)
+    -> String?
+  {
     guard let about else { return nil }
     let born = day(about.birthday)
     let died = day(about.deathday)
@@ -42,7 +44,8 @@ enum IOSPeoplePresentation {
   /// A Known For title after this profile wished for it.
   static func wished(_ hit: IOSWishSearchHit, wishId: UUID?) -> IOSWishSearchHit {
     IOSWishSearchHit(
-      provider: hit.provider, providerMediaId: hit.providerMediaId, kind: hit.kind, title: hit.title,
+      provider: hit.provider, providerMediaId: hit.providerMediaId, kind: hit.kind,
+      title: hit.title,
       year: hit.year, overview: hit.overview, posterPath: hit.posterPath, posterUrl: hit.posterUrl,
       alreadyInLibrary: hit.alreadyInLibrary, existingMediaId: hit.existingMediaId,
       alreadyWished: true, existingWishId: wishId ?? hit.existingWishId, supportedByCaller: true)
@@ -51,7 +54,9 @@ enum IOSPeoplePresentation {
   private static func day(_ text: String?) -> DateComponents? {
     guard let text, text.count == 10 else { return nil }
     let parts = text.split(separator: "-").compactMap { Int($0) }
-    guard parts.count == 3, (1...12).contains(parts[1]), (1...31).contains(parts[2]) else { return nil }
+    guard parts.count == 3, (1...12).contains(parts[1]), (1...31).contains(parts[2]) else {
+      return nil
+    }
     return DateComponents(year: parts[0], month: parts[1], day: parts[2])
   }
 

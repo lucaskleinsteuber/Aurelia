@@ -167,7 +167,8 @@ struct ActivityStatisticsView: View {
     .padding(14)
     .background(
       AureliaDesign.surface,
-      in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
+      in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
+    )
     .overlay {
       RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
         .stroke(AureliaDesign.hairline, lineWidth: 1)
@@ -280,7 +281,8 @@ struct ActivityStatisticsView: View {
                 .foregroundStyle(Color(wrappedHex: 0xFFD84D))
               VStack(alignment: .leading, spacing: 2) {
                 Text("Play your \(String(year)) Wrapped").font(.headline)
-                Text("Your year in slides, with commentary nobody asked for.").font(.callout).opacity(0.85)
+                Text("Your year in slides, with commentary nobody asked for.").font(.callout)
+                  .opacity(0.85)
               }
               Spacer()
               Image(systemName: "play.fill")
@@ -289,7 +291,8 @@ struct ActivityStatisticsView: View {
             .padding(14)
             .background(
               Color(wrappedHex: 0x6A4CFF),
-              in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
+              in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
+            )
             .contentShape(
               RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
           }

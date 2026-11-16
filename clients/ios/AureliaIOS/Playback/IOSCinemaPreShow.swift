@@ -315,7 +315,8 @@ final class IOSCinemaSound {
     stop()
     let samples = IOSCinemaSynth.samples(notes)
     guard !samples.isEmpty,
-      let format = AVAudioFormat(standardFormatWithSampleRate: IOSCinemaSynth.sampleRate, channels: 1),
+      let format = AVAudioFormat(
+        standardFormatWithSampleRate: IOSCinemaSynth.sampleRate, channels: 1),
       let buffer = AVAudioPCMBuffer(
         pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
       let channel = buffer.floatChannelData?[0]
@@ -349,14 +350,17 @@ enum IOSCinemaTunes {
   private static func bells(_ notes: [(Double, Int)], length: Double = 0.4, level: Double = 0.4)
     -> [IOSCinemaNote]
   {
-    notes.map { IOSCinemaNote(time: $0.0, frequency: hertz($0.1), length: length, voice: .bell, level: level) }
+    notes.map {
+      IOSCinemaNote(time: $0.0, frequency: hertz($0.1), length: length, voice: .bell, level: level)
+    }
   }
 
   /// The ad's tune, its notes moved to where their pictures are in the slower ad.
   static func notes(for ad: IOSCinemaAd) -> [IOSCinemaNote] {
     scriptNotes(for: ad).map {
       IOSCinemaNote(
-        time: $0.time * IOSCinemaAd.pace, frequency: $0.frequency, length: $0.length, voice: $0.voice,
+        time: $0.time * IOSCinemaAd.pace, frequency: $0.frequency, length: $0.length,
+        voice: $0.voice,
         level: $0.level)
     }
   }
@@ -370,11 +374,15 @@ enum IOSCinemaTunes {
           IOSCinemaNote(time: $0 + 0.55, frequency: 180, length: 0.04, voice: .pop, level: 0.5)
         }
         + bells([(5.2, 103)], length: 0.3, level: 0.25)
-        + [(6.5, 60), (7.0, 67), (7.5, 64), (8.0, 67), (9.0, 65), (9.5, 69), (10.0, 67), (10.5, 72)]
+        + [
+          (6.5, 60), (7.0, 67), (7.5, 64), (8.0, 67), (9.0, 65), (9.5, 69), (10.0, 67), (10.5, 72),
+        ]
         .map {
-          IOSCinemaNote(time: $0.0, frequency: hertz($0.1 - 12), length: 0.3, voice: .pluck, level: 0.35)
+          IOSCinemaNote(
+            time: $0.0, frequency: hertz($0.1 - 12), length: 0.3, voice: .pluck, level: 0.35)
         }
-        + bells([(11.0, 79), (11.15, 81), (11.3, 83), (11.5, 84), (11.5, 88), (11.5, 91)], level: 0.35)
+        + bells(
+          [(11.0, 79), (11.15, 81), (11.3, 83), (11.5, 84), (11.5, 88), (11.5, 91)], level: 0.35)
     case .popcorn:
       var noise = IOSCinemaSynth.Noise(seed: 0xC0FFEE)
       let pops = IOSCinemaPopcorn.kernels.map {
@@ -389,10 +397,13 @@ enum IOSCinemaTunes {
     case .phones:
       let buzzes = IOSCinemaPhones.notifications.flatMap { message in
         [0, 0.45].map {
-          IOSCinemaNote(time: message.time + $0, frequency: 150, length: 0.3, voice: .buzz, level: 0.3)
+          IOSCinemaNote(
+            time: message.time + $0, frequency: 150, length: 0.3, voice: .buzz, level: 0.3)
         }
       }
-      return buzzes + [IOSCinemaNote(time: 8.0, frequency: 90, length: 0.02, voice: .pop, level: 0.4)]
+      return buzzes + [
+        IOSCinemaNote(time: 8.0, frequency: 90, length: 0.02, voice: .pop, level: 0.4)
+      ]
         + bells([(8.7, 84), (9.0, 79), (9.3, 76), (9.8, 72)], length: 0.6, level: 0.3)
     }
   }

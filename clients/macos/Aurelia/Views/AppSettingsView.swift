@@ -65,7 +65,8 @@ struct AppSettingsView: View {
   @AppStorage(AureliaRest.minutesKey) private var restMinutes = AureliaRest.defaultMinutes
   @AppStorage(AppUpdatePreferences.automaticChecksKey) private var automaticUpdateChecks = true
   @AppStorage(AppUpdatePreferences.betaUpdatesKey) private var betaUpdates = false
-  @AppStorage(DownloadQualityPreference.key) private var downloadQuality = DownloadQualityPreference.ask
+  @AppStorage(DownloadQualityPreference.key) private var downloadQuality = DownloadQualityPreference
+    .ask
 
   // Navigation & Search State
   @State private var selectedCategory: SettingsCategory
@@ -167,7 +168,8 @@ struct AppSettingsView: View {
       }
     } message: {
       Text(
-        "Its titles leave the library, with their favorites, progress and history for every profile. Your media files are never deleted or changed.")
+        "Its titles leave the library, with their favorites, progress and history for every profile. Your media files are never deleted or changed."
+      )
     }
     .confirmationDialog(
       "Stop hosting on this Mac?",
@@ -287,7 +289,8 @@ struct AppSettingsView: View {
     case .power:
       return model.profile?.user?.role == .owner
     case .smartHome:
-      return model.profile?.user?.role == .owner && model.libraryCapabilities.contains("automation-v1")
+      return model.profile?.user?.role == .owner
+        && model.libraryCapabilities.contains("automation-v1")
     }
   }
 
@@ -405,7 +408,9 @@ struct AppSettingsView: View {
 
       var foundAny = false
 
-      if queryMatches(query, "start screen poster rows hero motion interface display wish wishes notifications") {
+      if queryMatches(
+        query, "start screen poster rows hero motion interface display wish wishes notifications")
+      {
         interfaceDisplaySection
         let _ = { foundAny = true }()
       }
@@ -427,12 +432,16 @@ struct AppSettingsView: View {
         let _ = { foundAny = true }()
       }
       if model.profile?.user?.role == .owner
-        && queryMatches(query, "power sleep shut down turn off wake lan unused idle energy awake hours server")
+        && queryMatches(
+          query, "power sleep shut down turn off wake lan unused idle energy awake hours server")
       {
         ServerManagementView(.power)
         let _ = { foundAny = true }()
       }
-      if queryMatches(query, "resume next countdown threshold auto night mode sleep good night timer skip intro credits") {
+      if queryMatches(
+        query,
+        "resume next countdown threshold auto night mode sleep good night timer skip intro credits")
+      {
         playbackBehaviorSection
         let _ = { foundAny = true }()
       }
@@ -726,13 +735,15 @@ struct AppSettingsView: View {
           Toggle("Automatic Resume", isOn: $playbackPreferences.preferences.automaticResume)
             .accessibilityIdentifier("playback-automatic-resume")
           Text("Play continues where you stopped instead of asking whether to start over.")
-          .font(.caption).foregroundStyle(.secondary)
+            .font(.caption).foregroundStyle(.secondary)
         }
 
         if model.supportsAdaptiveStreaming {
           VStack(alignment: .leading, spacing: 2) {
             LabeledContent("Streaming Quality") {
-              Picker("Streaming Quality", selection: $playbackPreferences.preferences.streamingQuality) {
+              Picker(
+                "Streaming Quality", selection: $playbackPreferences.preferences.streamingQuality
+              ) {
                 ForEach(StreamingQuality.allCases) { quality in Text(quality.title).tag(quality) }
               }
               .labelsHidden()
@@ -750,7 +761,9 @@ struct AppSettingsView: View {
           VStack(alignment: .leading, spacing: 2) {
             LabeledContent("Download Quality") {
               Picker("Download Quality", selection: $downloadQuality) {
-                ForEach(DownloadQualityPreference.choices, id: \.id) { choice in Text(choice.title).tag(choice.id) }
+                ForEach(DownloadQualityPreference.choices, id: \.id) { choice in
+                  Text(choice.title).tag(choice.id)
+                }
               }
               .labelsHidden()
               .frame(width: 180)
@@ -770,7 +783,7 @@ struct AppSettingsView: View {
           )
           .accessibilityIdentifier("playback-auto-next")
           Text("When an episode ends, the next one starts after the countdown below.")
-          .font(.caption).foregroundStyle(.secondary)
+            .font(.caption).foregroundStyle(.secondary)
         }
 
         LabeledContent("Up Next Countdown Duration") {
@@ -856,7 +869,7 @@ struct AppSettingsView: View {
           )
           .accessibilityIdentifier("playback-prevent-sleep")
           Text("Keeps this Mac and its display awake while a title plays.")
-          .font(.caption).foregroundStyle(.secondary)
+            .font(.caption).foregroundStyle(.secondary)
         }
 
         VStack(alignment: .leading, spacing: 2) {
@@ -1243,7 +1256,8 @@ struct AppSettingsView: View {
               savingToken = false
             }
           }
-          .disabled(savingToken || tmdbToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+          .disabled(
+            savingToken || tmdbToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -1542,7 +1556,8 @@ struct SidebarCustomizerView: View {
             .padding(.horizontal, 10)
             .background(AureliaDesign.raisedSurface.opacity(isItemVisible(item) ? 1.0 : 0.5))
             .clipShape(
-              RoundedRectangle(cornerRadius: AureliaDesign.smallRadius, style: .continuous))
+              RoundedRectangle(cornerRadius: AureliaDesign.smallRadius, style: .continuous)
+            )
             .opacity(dragged == item ? 0.55 : 1)
             .onDrop(
               of: [.text],

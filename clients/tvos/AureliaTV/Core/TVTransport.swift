@@ -36,7 +36,8 @@ struct TVURLSessionTransport: TVHTTPTransport {
           delegateQueue: nil), delegate: delegate)
       ownsSession = true
     case .pinned(let fingerprint):
-      lease = pool.lease(host: host, fingerprint: fingerprint, lane: TVConnectionLane(path: url.path))
+      lease = pool.lease(
+        host: host, fingerprint: fingerprint, lane: TVConnectionLane(path: url.path))
       ownsSession = false
     }
     defer { if ownsSession { lease.session.invalidateAndCancel() } }

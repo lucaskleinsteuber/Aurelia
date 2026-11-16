@@ -84,7 +84,8 @@ enum IOSWakeOnLan {
           var raw = pointer.pointee.sin_addr
           _ = inet_ntop(AF_INET, &raw, &text, socklen_t(INET_ADDRSTRLEN))
         }
-        let value = String(decoding: text.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        let value = String(
+          decoding: text.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
         if isIPv4(value), !addresses.contains(value) { addresses.append(value) }
       }
       current = entry.pointee.ai_next

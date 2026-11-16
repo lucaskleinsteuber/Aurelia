@@ -246,7 +246,9 @@ final class IOSPlaybackController: ObservableObject {
     guard IOSAutomationPlaybackState.shouldReport(last: last, next: state) else { return }
     reportedAutomation = (id, state)
     let seconds = Double(max(0, position)) / 1_000
-    Task { [api] in try? await api.reportPlaybackState(ticket: id, state: state, positionSeconds: seconds) }
+    Task { [api] in
+      try? await api.reportPlaybackState(ticket: id, state: state, positionSeconds: seconds)
+    }
   }
 
   /// `revealControls: false` skips while the controls stay hidden, like the
@@ -851,7 +853,8 @@ final class IOSPlaybackController: ObservableObject {
       engine.applyPreferences(playing)
       engine.playbackRate = desiredRate
       engine.load(
-        url: playing.streamingQuality.playbackURL(for: localURL), resumeAt: resumeAt ?? resumePosition,
+        url: playing.streamingQuality.playbackURL(for: localURL),
+        resumeAt: resumeAt ?? resumePosition,
         paused: !wantsPlayback)
       if !showsGoodNight { runtime.setIdleTimerDisabled(true) }
       if let error = engine.audioProcessingError {
@@ -959,7 +962,8 @@ final class IOSPlaybackController: ObservableObject {
       dismissed: upNextDismissed || finished, creditsStart: credits)
     let duringCredits =
       shown
-      && IOSPlayerPolicy.showsForCredits(position: position, duration: duration, creditsStart: credits)
+      && IOSPlayerPolicy.showsForCredits(
+        position: position, duration: duration, creditsStart: credits)
     // The countdown starts where the card appeared: at the credits, or later when the viewer
     // moved into them.
     if duringCredits {
@@ -1029,7 +1033,11 @@ final class IOSPlaybackController: ObservableObject {
           guard let self else { return }
           await self.refreshScreenTime()
           guard !self.closed else { return }
-          if self.screenTime?.noMoreTitles == true { self.showGoodNight() } else { self.continueAfterEnd() }
+          if self.screenTime?.noMoreTitles == true {
+            self.showGoodNight()
+          } else {
+            self.continueAfterEnd()
+          }
         }
         return
       }
@@ -1385,6 +1393,7 @@ extension IOSPlaybackController: IOSWatchTogetherPlayer {
   func watchSeek(to milliseconds: Int64) {
     guard canSeek, !closed else { return }
     watchdog.noteSeek(at: ProcessInfo.processInfo.systemUptime)
-    engine.seek(to: IOSPlayerPolicy.seekPosition(current: 0, offset: milliseconds, duration: duration))
+    engine.seek(
+      to: IOSPlayerPolicy.seekPosition(current: 0, offset: milliseconds, duration: duration))
   }
 }

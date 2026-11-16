@@ -192,7 +192,9 @@ struct LibraryShellView: View {
     }
     .onChange(of: model.requestedDestination) { _, target in
       guard let target else { return }
-      if (target == .wishes && !model.supportsWishes) || (target == .people && !model.supportsPeople) {
+      if (target == .wishes && !model.supportsWishes)
+        || (target == .people && !model.supportsPeople)
+      {
         model.requestedDestination = nil
         return
       }
@@ -395,14 +397,16 @@ struct LibraryShellView: View {
       // Switching pages in the sidebar cross-fades briefly instead of cutting. The page stays as it
       // is while only the shell changes (a title opens above it, the sidebar is dragged); it still
       // follows the library and its settings itself.
-      StablePage(key: BrowsePageKey(destination: destination, findRequest: findRequest)) { browsePage }
-        .equatable()
-        .environment(\.aureliaBrowsePageCovered, selection != nil)
-        .id(destination)
-        .transition(.opacity)
-        .opacity(selection == nil ? 1 : 0)
-        .allowsHitTesting(selection == nil)
-        .accessibilityHidden(selection != nil)
+      StablePage(key: BrowsePageKey(destination: destination, findRequest: findRequest)) {
+        browsePage
+      }
+      .equatable()
+      .environment(\.aureliaBrowsePageCovered, selection != nil)
+      .id(destination)
+      .transition(.opacity)
+      .opacity(selection == nil ? 1 : 0)
+      .allowsHitTesting(selection == nil)
+      .accessibilityHidden(selection != nil)
       // A detail page fades in briefly; going back fades it away over the page. The pages it was
       // opened from stay alive underneath, hidden, so Back returns to them exactly where they were
       // scrolled, as the browsing page does. Every animation frame updates this whole window, so
@@ -603,7 +607,8 @@ private struct HomePage: View {
             "Continue Watching",
             items: model.home?.continueWatching ?? [])
           ForEach(model.home?.becauseYouWatched ?? []) { rail in
-            posterRow("Because You Watched \(rail.sourceTitle)", items: rail.suggestions.map(\.item))
+            posterRow(
+              "Because You Watched \(rail.sourceTitle)", items: rail.suggestions.map(\.item))
           }
           // Computed once per drawing: each pass goes through the whole catalog.
           let rows = genreRows
@@ -657,7 +662,8 @@ private struct HomePage: View {
               model.startPlayback(item: item, intent: .resume)
             } label: {
               // The heading already says Continue Watching; the card says which show and episode.
-              LandscapeMediaCard(item: item, eyebrow: CatalogPlaybackLogic.episodeEyebrow(for: item))
+              LandscapeMediaCard(
+                item: item, eyebrow: CatalogPlaybackLogic.episodeEyebrow(for: item))
             }
             .buttonStyle(AureliaCardButtonStyle())
             .disabled(!item.isPlayable)
@@ -1259,7 +1265,8 @@ private struct CollectionCard: View {
         if let providerBadge = BoxSetLogic.providerLabel(collection.provider) {
           Label(
             providerBadge,
-            systemImage: collection.provider == "universe" ? "sparkles.square.filled.on.square" : "film.stack"
+            systemImage: collection.provider == "universe"
+              ? "sparkles.square.filled.on.square" : "film.stack"
           )
           .font(.caption2.weight(.bold))
           .padding(.horizontal, 8)
@@ -1405,8 +1412,10 @@ private struct CollectionDetailView: View {
       return parts.joined(separator: "  ·  ")
     }()
     let playable = BoxSetLogic.playableItems(from: members)
-    let statsText = detail.map(BoxSetLogic.statsLine(for:)) ?? BoxSetLogic.cardSubtitle(for: summary)
-    let totalItems = detail?.itemCount ?? (summary.itemCount > 0 ? summary.itemCount : summary.totalCount)
+    let statsText =
+      detail.map(BoxSetLogic.statsLine(for:)) ?? BoxSetLogic.cardSubtitle(for: summary)
+    let totalItems =
+      detail?.itemCount ?? (summary.itemCount > 0 ? summary.itemCount : summary.totalCount)
     let watchedItems = detail?.watchedCount ?? summary.watchedCount
 
     return ZStack(alignment: .bottomLeading) {
@@ -1716,7 +1725,8 @@ private struct CollectionDetailView: View {
     .padding(14)
     .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
     .overlay {
-      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius).stroke(AureliaDesign.hairline, lineWidth: 1)
+      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius).stroke(
+        AureliaDesign.hairline, lineWidth: 1)
     }
 
     if canReorder {
@@ -1799,8 +1809,11 @@ private struct CollectionDetailView: View {
     isUpdatingOrder = true
     defer { isUpdatingOrder = false }
     do {
-      let inputs = reordered.map { CollectionMemberInput(mediaId: $0.mediaId, seasonNumber: $0.seasonNumber) }
-      detail = try await model.updateCollectionOrder(id: collection.id, members: inputs, sortMode: "custom")
+      let inputs = reordered.map {
+        CollectionMemberInput(mediaId: $0.mediaId, seasonNumber: $0.seasonNumber)
+      }
+      detail = try await model.updateCollectionOrder(
+        id: collection.id, members: inputs, sortMode: "custom")
     } catch {
       errorMessage = error.localizedDescription
     }
@@ -1940,7 +1953,9 @@ private struct PersonDetailView: View {
 
   /// Only a person TMDB identified has a life to show.
   private var profileKey: String? {
-    guard model.supportsPeople, let key = person.personKey, key.hasPrefix("tmdb:person:") else { return nil }
+    guard model.supportsPeople, let key = person.personKey, key.hasPrefix("tmdb:person:") else {
+      return nil
+    }
     return key
   }
 
@@ -1948,7 +1963,8 @@ private struct PersonDetailView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 28) {
         header
-        if let biography = profile?.about?.biography?.trimmingCharacters(in: .whitespacesAndNewlines),
+        if let biography = profile?.about?.biography?.trimmingCharacters(
+          in: .whitespacesAndNewlines),
           !biography.isEmpty
         {
           biographySection(biography)
@@ -1988,7 +2004,11 @@ private struct PersonDetailView: View {
       } catch {
         // Clicking on before the answer cancels the request, which can arrive as a URL error;
         // that is not a problem to show, even for a moment.
-        if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+        if Task.isCancelled || error is CancellationError
+          || (error as? URLError)?.code == .cancelled
+        {
+          return
+        }
         if detail == nil {
           errorMessage = error.localizedDescription
           isLoading = false
@@ -2135,10 +2155,13 @@ private struct PersonDetailView: View {
       Text(hit.title)
         .font(.callout.weight(.semibold))
         .lineLimit(1)
-      Text([hit.year.map(String.init), WishPresentation.kindLabel(hit.kind)].compactMap { $0 }.joined(separator: " · "))
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
+      Text(
+        [hit.year.map(String.init), WishPresentation.kindLabel(hit.kind)].compactMap { $0 }.joined(
+          separator: " · ")
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .lineLimit(1)
       if model.supportsWishes {
         wishControl(hit)
           .padding(.top, 2)

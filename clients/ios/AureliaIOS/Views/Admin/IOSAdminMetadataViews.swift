@@ -44,7 +44,8 @@ private struct IOSAdminMetadataContent: View {
       IOSAdminPageHeader(
         page: .metadata,
         text:
-          "Posters, descriptions, cast and ratings come from TMDB, subtitles from OpenSubtitles. Aurelia finds them by the file and folder names.")
+          "Posters, descriptions, cast and ratings come from TMDB, subtitles from OpenSubtitles. Aurelia finds them by the file and folder names."
+      )
       if let provider = overview.provider {
         Section {
           if provider.hasToken {
@@ -55,22 +56,27 @@ private struct IOSAdminMetadataContent: View {
                   let language = provider.language
                   Task {
                     await admin.perform {
-                      _ = try await $0.saveMetadataProvider(enabled: enabled, token: nil, language: language)
+                      _ = try await $0.saveMetadataProvider(
+                        enabled: enabled, token: nil, language: language)
                     }
                   }
                 })
             ) {
               IOSAdminToggleLabel(
-                "Look Up Movie and TV Information", "New titles get posters and descriptions by themselves.")
+                "Look Up Movie and TV Information",
+                "New titles get posters and descriptions by themselves.")
             }
             LabeledContent(
               "Artwork",
-              value: "\(IOSAdminText.bytes(provider.artworkBytes)) of \(IOSAdminText.bytes(provider.artworkLimitBytes))")
+              value:
+                "\(IOSAdminText.bytes(provider.artworkBytes)) of \(IOSAdminText.bytes(provider.artworkLimitBytes))"
+            )
             if owner {
               Button("Remove TMDB Key…", role: .destructive) {
                 confirmation = IOSAdminConfirmation(
                   title: "Remove the TMDB key?",
-                  message: "Information already found stays. New titles get no information until you add a key.",
+                  message:
+                    "Information already found stays. New titles get no information until you add a key.",
                   action: "Remove"
                 ) {
                   Task { await admin.perform { _ = try await $0.removeMetadataToken() } }
@@ -88,9 +94,13 @@ private struct IOSAdminMetadataContent: View {
               let value = token.trimmingCharacters(in: .whitespacesAndNewlines)
               let language = provider.language
               Task {
-                if await admin.perform("Checking the key…", {
-                  _ = try await $0.saveMetadataProvider(enabled: true, token: value, language: language)
-                }) {
+                if await admin.perform(
+                  "Checking the key…",
+                  {
+                    _ = try await $0.saveMetadataProvider(
+                      enabled: true, token: value, language: language)
+                  })
+                {
                   token = ""
                 }
               }
@@ -126,7 +136,8 @@ private struct IOSAdminMetadataContent: View {
           if owner {
             IOSAdminActionButton(
               "Refresh All Information", systemImage: "arrow.triangle.2.circlepath",
-              detail: "Looks up every title again, for example after changing the language. Takes a while.",
+              detail:
+                "Looks up every title again, for example after changing the language. Takes a while.",
               doneText: "Started"
             ) { _ = try await $0.startMetadataJob(fullRefresh: true) }
           }
@@ -137,7 +148,8 @@ private struct IOSAdminMetadataContent: View {
           LabeledContent {
             Text("\(overview.reviews.count)")
           } label: {
-            IOSAdminToggleLabel("Review Matches", "Titles where Aurelia wasn’t sure it found the right one.")
+            IOSAdminToggleLabel(
+              "Review Matches", "Titles where Aurelia wasn’t sure it found the right one.")
           }
         }
       } header: {
@@ -153,7 +165,8 @@ private struct IOSAdminMetadataContent: View {
             LabeledContent {
               Text(subtitles.hasApiKey ? (subtitles.enabled ? "On" : "Off") : "Not Set Up")
             } label: {
-              IOSAdminToggleLabel("OpenSubtitles", "Downloads subtitles in your languages when a title has none.")
+              IOSAdminToggleLabel(
+                "OpenSubtitles", "Downloads subtitles in your languages when a title has none.")
             }
           }
         } header: {
@@ -192,7 +205,9 @@ private struct IOSAdminMetadataReviewsView: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
 
   var body: some View {
-    IOSAdminLoader { try await $0.metadataReviews() } content: { reviews, reload in
+    IOSAdminLoader {
+      try await $0.metadataReviews()
+    } content: { reviews, reload in
       List {
         if reviews.isEmpty {
           Text("Nothing to review").foregroundStyle(.secondary)
@@ -202,15 +217,23 @@ private struct IOSAdminMetadataReviewsView: View {
             ForEach(review.candidates) { candidate in
               Button {
                 let (media, choice) = (review.mediaId, candidate)
-                Task { await admin.perform("Saving…") { try await $0.selectMetadataMatch(mediaId: media, candidate: choice) } }
+                Task {
+                  await admin.perform("Saving…") {
+                    try await $0.selectMetadataMatch(mediaId: media, candidate: choice)
+                  }
+                }
               } label: {
                 VStack(alignment: .leading, spacing: 2) {
-                  Text([candidate.title, candidate.year.map(String.init)].compactMap { $0 }.joined(separator: " · "))
-                    .foregroundStyle(.primary)
+                  Text(
+                    [candidate.title, candidate.year.map(String.init)].compactMap { $0 }.joined(
+                      separator: " · ")
+                  )
+                  .foregroundStyle(.primary)
                   if let overview = candidate.overview {
                     Text(overview).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                   }
-                  Text("\(Int(candidate.confidence * 100)) % match").font(.caption2).foregroundStyle(.secondary)
+                  Text("\(Int(candidate.confidence * 100)) % match").font(.caption2)
+                    .foregroundStyle(.secondary)
                 }
               }
             }

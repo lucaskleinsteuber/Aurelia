@@ -125,34 +125,34 @@ struct IOSLibraryGrid: View {
         .accessibilityLabel("Filter & Sort").accessibilityIdentifier("browse-filters")
       }
     }
-      .onAppear { restore() }
-      .task(id: key) {
-        let request = key
-        if let previous = lastKey, previous != request, previous.query == request.query,
-          previous.search == request.search, previous.session == request.session
-        {
-          // Only the library revision changed: update the shown titles in place.
-          lastKey = request
-          if let api = model.client {
-            await listing.refresh(api: api, onFailure: model.handleSessionFailure)
-          }
-          return
+    .onAppear { restore() }
+    .task(id: key) {
+      let request = key
+      if let previous = lastKey, previous != request, previous.query == request.query,
+        previous.search == request.search, previous.session == request.session
+      {
+        // Only the library revision changed: update the shown titles in place.
+        lastKey = request
+        if let api = model.client {
+          await listing.refresh(api: api, onFailure: model.handleSessionFailure)
         }
-        if lastKey != request {
-          // Configuring an unchanged query keeps titles that Home already preloaded.
-          listing.configure(query: query, search: search, profileID: model.session?.user.id)
-          lastKey = request
-          save()
-          if !search.isEmpty {
-            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
-          }
-        }
-        guard !Task.isCancelled, listing.items.isEmpty, let api = model.client else { return }
-        await listing.loadNext(api: api, onFailure: model.handleSessionFailure)
-        if !Task.isCancelled { answeredSearch = request.search }
+        return
       }
-      .sheet(isPresented: $filters) { IOSBrowseFilters(query: $query, section: listing.section) }
-      .modifier(IOSLibraryActionPresentation(actions: actions))
+      if lastKey != request {
+        // Configuring an unchanged query keeps titles that Home already preloaded.
+        listing.configure(query: query, search: search, profileID: model.session?.user.id)
+        lastKey = request
+        save()
+        if !search.isEmpty {
+          do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+        }
+      }
+      guard !Task.isCancelled, listing.items.isEmpty, let api = model.client else { return }
+      await listing.loadNext(api: api, onFailure: model.handleSessionFailure)
+      if !Task.isCancelled { answeredSearch = request.search }
+    }
+    .sheet(isPresented: $filters) { IOSBrowseFilters(query: $query, section: listing.section) }
+    .modifier(IOSLibraryActionPresentation(actions: actions))
   }
   private func restore() {
     guard let connection = model.connection, let session = model.session else { return }
@@ -250,4 +250,3 @@ private struct IOSSearchField: ViewModifier {
     }
   }
 }
-

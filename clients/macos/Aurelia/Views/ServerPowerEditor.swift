@@ -35,9 +35,11 @@ struct ServerPowerEditor: View {
             }
             .pickerStyle(.radioGroup)
             .accessibilityIdentifier("server-power-mode")
-            Text(Self.explanation(draft.mode, hostedByApp: draft.hostedByApp, hostName: draft.hostName))
-              .font(.caption).foregroundStyle(.secondary)
-              .fixedSize(horizontal: false, vertical: true)
+            Text(
+              Self.explanation(draft.mode, hostedByApp: draft.hostedByApp, hostName: draft.hostName)
+            )
+            .font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
             if draft.mode != "off" {
               Divider()
               LabeledContent("After") {
@@ -87,8 +89,11 @@ struct ServerPowerEditor: View {
             HStack(spacing: 12) {
               // The server applies these together, so they wait for Save (unlike this Mac's own
               // settings, which apply at once).
-              Text(draft == stored ? "Saved on the server." : "Changes apply on the server when you save.")
-                .font(.caption).foregroundStyle(.secondary)
+              Text(
+                draft == stored
+                  ? "Saved on the server." : "Changes apply on the server when you save."
+              )
+              .font(.caption).foregroundStyle(.secondary)
               Spacer()
               if working { ProgressView().controlSize(.small) }
               Button("Save") { save() }
@@ -233,7 +238,9 @@ struct ServerPowerEditor: View {
     }
   }
 
-  static func explanation(_ mode: String, hostedByApp: Bool = false, hostName: String = "the server computer")
+  static func explanation(
+    _ mode: String, hostedByApp: Bool = false, hostName: String = "the server computer"
+  )
     -> String
   {
     switch (mode, hostedByApp) {
@@ -405,8 +412,8 @@ struct ServerScrubPreviewsEditor: View {
                 else { return }
                 deleteAll()
               }
-                .disabled(stored.storedTitleCount == 0 && stored.storedBytes == 0)
-                .accessibilityIdentifier("server-scrub-previews-delete")
+              .disabled(stored.storedTitleCount == 0 && stored.storedBytes == 0)
+              .accessibilityIdentifier("server-scrub-previews-delete")
               if working { ProgressView().controlSize(.small) }
             }
             if let message { ErrorBanner(message: message, inline: true) }

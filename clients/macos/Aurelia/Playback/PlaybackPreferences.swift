@@ -32,7 +32,8 @@ enum PlaybackTrackNames {
       return plain(track.title)
     }
     let name = names[position]
-    let earlier = names[..<position].filter { $0.caseInsensitiveCompare(name) == .orderedSame }.count
+    let earlier = names[..<position].filter { $0.caseInsensitiveCompare(name) == .orderedSame }
+      .count
     return earlier == 0 ? name : "\(name) (\(earlier + 1))"
   }
 
@@ -261,8 +262,10 @@ extension PlaybackPreferences {
       cinemaAds: try container.decodeIfPresent(Bool.self, forKey: .cinemaAds) ?? true,
       cinemaTrailers: try container.decodeIfPresent(Int.self, forKey: .cinemaTrailers) ?? 2)
     streamingQuality =
-      (try? container.decodeIfPresent(StreamingQuality.self, forKey: .streamingQuality)) ?? .original
-    let automatic = try container.decodeIfPresent(Bool.self, forKey: .skipIntrosAutomatically) ?? false
+      (try? container.decodeIfPresent(StreamingQuality.self, forKey: .streamingQuality))
+      ?? .original
+    let automatic =
+      try container.decodeIfPresent(Bool.self, forKey: .skipIntrosAutomatically) ?? false
     introSkipping =
       (try? container.decodeIfPresent(IntroSkipping.self, forKey: .introSkipping))
       ?? (automatic ? .automatic : .button)

@@ -166,8 +166,10 @@ private struct OfflineProfileChooser: View {
       .overlay { Capsule().strokeBorder(.white.opacity(0.16)) }
       TimelineView(.periodic(from: .now, by: 1)) { context in
         if let until = model.offlinePINLockedUntil, until > context.date {
-          Text("Too many wrong PINs. Try again in \(Int(until.timeIntervalSince(context.date).rounded(.up))) s.")
-            .font(.callout).foregroundStyle(.orange)
+          Text(
+            "Too many wrong PINs. Try again in \(Int(until.timeIntervalSince(context.date).rounded(.up))) s."
+          )
+          .font(.callout).foregroundStyle(.orange)
         } else if let error {
           Text(error).font(.callout).foregroundStyle(.orange)
         }
@@ -255,9 +257,13 @@ private struct OfflineLibraryView: View {
                 alignment: .leading, spacing: 24
               ) {
                 ForEach(layout.movies) { title in
-                  Button { detail = title } label: { OfflinePosterCard(title: title) }
-                    .buttonStyle(AureliaCardButtonStyle())
-                    .contextMenu { menu(title) }
+                  Button {
+                    detail = title
+                  } label: {
+                    OfflinePosterCard(title: title)
+                  }
+                  .buttonStyle(AureliaCardButtonStyle())
+                  .contextMenu { menu(title) }
                 }
               }
             }
@@ -328,9 +334,13 @@ private struct OfflineLibraryView: View {
   private func rail(_ titles: [OfflineTitle], title: String) -> some View {
     AureliaHorizontalRail(cardWidth: 300, itemCount: titles.count, title: title) {
       ForEach(titles) { entry in
-        Button { detail = entry } label: { OfflineLandscapeCard(title: entry) }
-          .buttonStyle(AureliaCardButtonStyle())
-          .contextMenu { menu(entry) }
+        Button {
+          detail = entry
+        } label: {
+          OfflineLandscapeCard(title: entry)
+        }
+        .buttonStyle(AureliaCardButtonStyle())
+        .contextMenu { menu(entry) }
       }
     }
   }
@@ -433,7 +443,8 @@ private struct OfflinePosterCard: View {
     }
     .scaleEffect(hovering && !reduceMotion ? 1.035 : 1)
     .animation(
-      reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.78), value: hovering)
+      reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.78), value: hovering
+    )
     .onHover { hovering = $0 }
   }
 }
@@ -469,7 +480,8 @@ private struct OfflineLandscapeCard: View {
     }
     .scaleEffect(hovering && !reduceMotion ? 1.03 : 1)
     .animation(
-      reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.78), value: hovering)
+      reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.78), value: hovering
+    )
     .onHover { hovering = $0 }
   }
 }

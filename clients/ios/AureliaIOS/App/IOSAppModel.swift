@@ -246,7 +246,9 @@ final class IOSAppModel: ObservableObject {
         guard candidate.info.isSetup else {
           throw IOSCoreError.server(
             status: 409, code: "setup_required",
-            message: "Set up this server in Aurelia on the Mac or Linux computer that runs it first.", retryAfter: nil)
+            message:
+              "Set up this server in Aurelia on the Mac or Linux computer that runs it first.",
+            retryAfter: nil)
         }
         inspected = candidate
         phase = .trust
@@ -676,7 +678,9 @@ final class IOSAppModel: ObservableObject {
     if result.managementSetupRequired {
       throw IOSCoreError.server(
         status: 409, code: "setup_required",
-        message: "Finish profile setup in Aurelia on the Mac or Linux computer that runs the server.", retryAfter: nil)
+        message:
+          "Finish profile setup in Aurelia on the Mac or Linux computer that runs the server.",
+        retryAfter: nil)
     }
     profiles = result.profiles
     error = nil
@@ -686,7 +690,8 @@ final class IOSAppModel: ObservableObject {
 
   private func validate(_ capabilities: IOSCapabilities) throws {
     try IOSProtocolVersion.check(capabilities.formatVersion)
-    guard Set(["device-authorization-v1", "library-state-v1"]).isSubset(
+    guard
+      Set(["device-authorization-v1", "library-state-v1"]).isSubset(
         of: Set(capabilities.capabilities ?? []))
     else { throw IOSCoreError.unsupportedServer }
   }
@@ -931,9 +936,10 @@ final class IOSAppModel: ObservableObject {
         let fulfilled = try? await api.wishes(state: .fulfilled, offset: 0, limit: 5),
         !Task.isCancelled
       {
-        latestWish = fulfilled.wishes.first {
-          $0.userId == self.session?.user.id || $0.seenByWisherAt == nil
-        } ?? fulfilled.wishes.first
+        latestWish =
+          fulfilled.wishes.first {
+            $0.userId == self.session?.user.id || $0.seenByWisherAt == nil
+          } ?? fulfilled.wishes.first
       } else if baseEvent.kind == .newWishes,
         let opened = try? await api.wishes(state: .open, offset: 0, limit: 5),
         !Task.isCancelled
@@ -1209,7 +1215,8 @@ final class IOSAppModel: ObservableObject {
   /// Downloads every episode of a season that isn't on this device yet, one after another.
   func download(episodes: [IOSCatalogItem]) {
     let wanted = episodes.filter {
-      IOSOfflineRules.canDownload($0) && offline.title($0.id) == nil && offline.pending($0.id) == nil
+      IOSOfflineRules.canDownload($0) && offline.title($0.id) == nil
+        && offline.pending($0.id) == nil
     }
     guard !wanted.isEmpty else { return }
     chooseQuality(for: wanted)
@@ -1219,7 +1226,8 @@ final class IOSAppModel: ObservableObject {
   private func chooseQuality(for items: [IOSCatalogItem]) {
     guard let client, let first = items.first else { return }
     let preference =
-      UserDefaults.standard.string(forKey: IOSDownloadQualityPreference.key) ?? IOSDownloadQualityPreference.ask
+      UserDefaults.standard.string(forKey: IOSDownloadQualityPreference.key)
+      ?? IOSDownloadQualityPreference.ask
     guard supportsConvertedDownloads, preference != IOSDownloadQualityPreference.original else {
       startDownloads(items, quality: nil)
       return
@@ -1229,8 +1237,10 @@ final class IOSAppModel: ObservableObject {
       guard self.session?.sessionId == client.session?.sessionId else { return }
       switch IOSDownloadQualityPreference.resolve(preference, options: options) {
       case .original: startDownloads(items, quality: nil)
-      case .ask: if let options { downloadChoice = IOSPendingDownloadChoice(items: items, options: options) }
-      case .converted(let quality): startDownloads(items, quality: quality, audio: options?.audioTrack, options: options)
+      case .ask:
+        if let options { downloadChoice = IOSPendingDownloadChoice(items: items, options: options) }
+      case .converted(let quality):
+        startDownloads(items, quality: quality, audio: options?.audioTrack, options: options)
       }
     }
   }
@@ -1238,7 +1248,8 @@ final class IOSAppModel: ObservableObject {
   /// Starts the downloads in one quality; nil keeps the original files. Each further episode
   /// takes the same quality, or its own original when that quality would not be smaller.
   func startDownloads(
-    _ items: [IOSCatalogItem], quality: String?, audio: Int? = nil, options: IOSDownloadOptions? = nil
+    _ items: [IOSCatalogItem], quality: String?, audio: Int? = nil,
+    options: IOSDownloadOptions? = nil
   ) {
     guard let client, let first = items.first else { return }
     Task {

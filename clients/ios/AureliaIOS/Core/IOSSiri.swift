@@ -12,7 +12,8 @@ struct IOSSiriKeyStore {
     query[kSecReturnData as String] = true
     query[kSecMatchLimit as String] = kSecMatchLimitOne
     var result: CFTypeRef?
-    guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data,
+    guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+      let data = result as? Data,
       let key = String(data: data, encoding: .utf8), IOSSiriKeyStore.isKey(key)
     else { return nil }
     return key
@@ -34,7 +35,8 @@ struct IOSSiriKeyStore {
   }
 
   static func isKey(_ text: String) -> Bool {
-    text.hasPrefix("aur_it_") && (40...128).contains(text.utf8.count) && !text.contains(where: \.isWhitespace)
+    text.hasPrefix("aur_it_") && (40...128).contains(text.utf8.count)
+      && !text.contains(where: \.isWhitespace)
   }
 
   private static func query(_ server: UUID) -> [String: Any] {
@@ -89,14 +91,19 @@ struct IOSIntegrationClient: Sendable {
   var transport: any IOSHTTPTransport = IOSURLSessionTransport()
 
   func status() async throws -> IOSIntegrationStatus { try await get("/api/v1/integration/status") }
-  func players() async throws -> [IOSIntegrationPlayer] { try await get("/api/v1/integration/players") }
+  func players() async throws -> [IOSIntegrationPlayer] {
+    try await get("/api/v1/integration/players")
+  }
   func search(_ text: String) async throws -> [IOSIntegrationTitle] {
     try await get("/api/v1/integration/search", query: [URLQueryItem(name: "query", value: text)])
   }
   func episode(of series: UUID, season: Int, episode: Int) async throws -> IOSIntegrationTitle {
     try await get(
       "/api/v1/integration/titles/\(series.uuidString.lowercased())/episode",
-      query: [URLQueryItem(name: "season", value: String(season)), URLQueryItem(name: "episode", value: String(episode))])
+      query: [
+        URLQueryItem(name: "season", value: String(season)),
+        URLQueryItem(name: "episode", value: String(episode)),
+      ])
   }
   func next(in title: UUID) async throws -> IOSIntegrationTitle {
     try await get("/api/v1/integration/titles/\(title.uuidString.lowercased())/next")
@@ -113,7 +120,8 @@ struct IOSIntegrationClient: Sendable {
   func powerNow(_ action: String) async throws -> String {
     struct Body: Encodable { let action: String }
     struct Answer: Decodable { let message: String }
-    let data = try await send("/api/v1/integration/power", method: "POST", body: JSONEncoder().encode(Body(action: action)))
+    let data = try await send(
+      "/api/v1/integration/power", method: "POST", body: JSONEncoder().encode(Body(action: action)))
     return try JSONDecoder().decode(Answer.self, from: data).message
   }
 
@@ -122,14 +130,18 @@ struct IOSIntegrationClient: Sendable {
     (try? await send("/api/v1/health", method: "GET", authorized: false)) != nil
   }
 
-  private func get<Value: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> Value {
+  private func get<Value: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws
+    -> Value
+  {
     try JSONDecoder().decode(Value.self, from: await send(path, method: "GET", query: query))
   }
 
   private func send(
-    _ path: String, method: String, query: [URLQueryItem] = [], body: Data? = nil, authorized: Bool = true
+    _ path: String, method: String, query: [URLQueryItem] = [], body: Data? = nil,
+    authorized: Bool = true
   ) async throws -> Data {
-    guard var components = URLComponents(url: connection.baseURL, resolvingAgainstBaseURL: false) else {
+    guard var components = URLComponents(url: connection.baseURL, resolvingAgainstBaseURL: false)
+    else {
       throw IOSCoreError.invalidAddress
     }
     components.path = path
@@ -174,7 +186,8 @@ enum IOSTitleRequest {
     for pattern in patterns {
       guard let regex = try? NSRegularExpression(pattern: pattern),
         let match = regex.firstMatch(in: spoken, range: NSRange(spoken.startIndex..., in: spoken)),
-        let whole = Range(match.range, in: spoken), let first = Range(match.range(at: 1), in: spoken),
+        let whole = Range(match.range, in: spoken),
+        let first = Range(match.range(at: 1), in: spoken),
         let second = Range(match.range(at: 2), in: spoken)
       else { continue }
       var title = spoken
@@ -186,7 +199,8 @@ enum IOSTitleRequest {
 
   /// The best of several found titles: an exact name first, then a show when an episode was asked.
   static func best(_ titles: [IOSIntegrationTitle], for request: Parsed) -> IOSIntegrationTitle? {
-    let wanted = request.title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+    let wanted = request.title.folding(
+      options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
     let exact = titles.filter {
       $0.title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) == wanted
     }
@@ -196,7 +210,9 @@ enum IOSTitleRequest {
   }
 
   /// The device to play on: the one named, else an Apple TV, else the only other player.
-  static func player(_ players: [IOSIntegrationPlayer], named name: String?) -> IOSIntegrationPlayer? {
+  static func player(_ players: [IOSIntegrationPlayer], named name: String?)
+    -> IOSIntegrationPlayer?
+  {
     if let name = name?.trimmingCharacters(in: .whitespaces), !name.isEmpty {
       return players.first { $0.deviceName.localizedCaseInsensitiveContains(name) }
     }

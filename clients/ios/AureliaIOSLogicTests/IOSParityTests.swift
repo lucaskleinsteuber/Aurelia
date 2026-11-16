@@ -5,9 +5,12 @@ import Testing
 @Suite("iPhone and iPad catch-up: chapters, notes, photo, Movie Night, collections")
 struct IOSParityTests {
   private let chapters = [
-    IOSPlaybackChapter(index: 0, title: "Opening", timeOffsetMilliseconds: 0, durationMilliseconds: 60_000),
-    IOSPlaybackChapter(index: 1, title: "Middle", timeOffsetMilliseconds: 600_000, durationMilliseconds: 60_000),
-    IOSPlaybackChapter(index: 2, title: "End", timeOffsetMilliseconds: 1_200_000, durationMilliseconds: 60_000),
+    IOSPlaybackChapter(
+      index: 0, title: "Opening", timeOffsetMilliseconds: 0, durationMilliseconds: 60_000),
+    IOSPlaybackChapter(
+      index: 1, title: "Middle", timeOffsetMilliseconds: 600_000, durationMilliseconds: 60_000),
+    IOSPlaybackChapter(
+      index: 2, title: "End", timeOffsetMilliseconds: 1_200_000, durationMilliseconds: 60_000),
   ]
 
   @Test func theCurrentChapterIsTheLastOneThatBegan() {
@@ -46,10 +49,12 @@ struct IOSParityTests {
     let whole = IOSPhotoCrop.rect(imageSize: size, side: 300, zoom: 1, offset: .zero)
     #expect(whole.width == 3_000 && whole.height == 3_000)
     #expect(whole.minX == 500 && whole.minY == 0)
-    let zoomed = IOSPhotoCrop.rect(imageSize: size, side: 300, zoom: 2, offset: CGSize(width: 10_000, height: 0))
+    let zoomed = IOSPhotoCrop.rect(
+      imageSize: size, side: 300, zoom: 2, offset: CGSize(width: 10_000, height: 0))
     #expect(zoomed.width == 1_500)
     #expect(zoomed.minX == 0)
-    let clamped = IOSPhotoCrop.clamped(offset: CGSize(width: 900, height: 900), imageSize: size, side: 300, zoom: 1)
+    let clamped = IOSPhotoCrop.clamped(
+      offset: CGSize(width: 900, height: 900), imageSize: size, side: 300, zoom: 1)
     #expect(clamped.width == 50 && clamped.height == 0)
   }
 
@@ -68,21 +73,29 @@ struct IOSParityTests {
     let encoded = try JSONEncoder().encode(program)
     let json = try #require(String(data: encoded, encoding: .utf8))
     #expect(json.contains("\"era\":\"2010s\""))
-    #expect(IOSMovieNightProgram(kinds: "all", genre: nil, era: "any", length: "any").summary == "Movies and shows")
+    #expect(
+      IOSMovieNightProgram(kinds: "all", genre: nil, era: "any", length: "any").summary
+        == "Movies and shows")
   }
 
   @Test func onlyOwnAndAdministeredCollectionsCanBeEdited() {
     let me = UUID()
     func collection(shared: Bool, smart: Bool = false, owner: UUID? = nil) -> IOSCollection {
-      var value = IOSCollection(id: UUID(), name: "List", poster: nil, items: [], isSmart: smart, isShared: shared)
+      var value = IOSCollection(
+        id: UUID(), name: "List", poster: nil, items: [], isSmart: smart, isShared: shared)
       value.userId = owner
       return value
     }
-    #expect(IOSCollectionRules.canEdit(collection(shared: false, owner: me), userID: me, role: "user"))
-    #expect(!IOSCollectionRules.canEdit(collection(shared: false, owner: UUID()), userID: me, role: "owner"))
+    #expect(
+      IOSCollectionRules.canEdit(collection(shared: false, owner: me), userID: me, role: "user"))
+    #expect(
+      !IOSCollectionRules.canEdit(
+        collection(shared: false, owner: UUID()), userID: me, role: "owner"))
     #expect(!IOSCollectionRules.canEdit(collection(shared: true), userID: me, role: "user"))
     #expect(IOSCollectionRules.canEdit(collection(shared: true), userID: me, role: "admin"))
-    #expect(!IOSCollectionRules.canEdit(collection(shared: false, smart: true, owner: me), userID: me, role: "owner"))
+    #expect(
+      !IOSCollectionRules.canEdit(
+        collection(shared: false, smart: true, owner: me), userID: me, role: "owner"))
     #expect(IOSCollectionRules.cleanedName("   ") == nil)
     #expect(IOSCollectionRules.cleanedName(" Friday ") == "Friday")
   }

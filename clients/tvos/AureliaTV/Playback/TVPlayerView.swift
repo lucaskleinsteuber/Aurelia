@@ -137,8 +137,11 @@ struct TVPlayerView: View {
       if let item { model.suggestedPlaybackItem = item }
     }
     .onChange(of: controller.showsSkipIntro) { _, shown in
-      if shown, !controller.controlsVisible, controller.trackMenu == nil { focus = .skipIntro }
-      else if !shown, focus == .skipIntro { focus = .surface }
+      if shown, !controller.controlsVisible, controller.trackMenu == nil {
+        focus = .skipIntro
+      } else if !shown, focus == .skipIntro {
+        focus = .surface
+      }
     }
     .onPlayPauseCommand {
       if preShow == nil, !controller.showsGoodNight { controller.togglePlayPause() }
@@ -542,7 +545,9 @@ struct TVPlayerView: View {
           .accessibilityHint("Keeps playing the credits")
           .accessibilityIdentifier("player-suggestion-credits")
         Button("Done") { controller.doneWithSuggestions() }
-          .buttonStyle(TVButtonStyle()).focusEffectDisabled().focused($focus, equals: .suggestionDone)
+          .buttonStyle(TVButtonStyle()).focusEffectDisabled().focused(
+            $focus, equals: .suggestionDone
+          )
           .accessibilityHint("Closes the player")
           .accessibilityIdentifier("player-suggestion-done")
       }
@@ -569,7 +574,9 @@ struct TVPlayerView: View {
         controller.screenTime, name: model.session?.user.shownName ?? "")
     return ZStack {
       RadialGradient(
-        colors: [Color(red: 0.16, green: 0.2, blue: 0.38), Color(red: 0.02, green: 0.02, blue: 0.06)],
+        colors: [
+          Color(red: 0.16, green: 0.2, blue: 0.38), Color(red: 0.02, green: 0.02, blue: 0.06),
+        ],
         center: .init(x: 0.5, y: 0.35), startRadius: 20, endRadius: 600
       )
       .ignoresSafeArea()
@@ -584,7 +591,9 @@ struct TVPlayerView: View {
           Text(words.text).font(.title3).foregroundStyle(.white.opacity(0.75))
         }
         Button("Done") { goodNightDone() }
-          .buttonStyle(TVButtonStyle()).focusEffectDisabled().focused($focus, equals: .goodNightDone)
+          .buttonStyle(TVButtonStyle()).focusEffectDisabled().focused(
+            $focus, equals: .goodNightDone
+          )
           .padding(.top, 8)
           .accessibilityIdentifier("player-good-night-done")
       }
@@ -851,7 +860,8 @@ private struct TVWatchTogetherNotice: View {
 
   var body: some View {
     let text =
-      session.notice ?? (session.state?.isWaiting == true ? "Waiting until everyone is ready…" : nil)
+      session.notice
+      ?? (session.state?.isWaiting == true ? "Waiting until everyone is ready…" : nil)
     VStack {
       if let text {
         Label(text, systemImage: "person.2.fill")

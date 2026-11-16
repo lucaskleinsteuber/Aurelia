@@ -68,7 +68,8 @@ final class PlayerAutoHideUITests: XCTestCase {
     button.hover()
     button.click()
     // Only the offer is checked; no party is started against the synthetic server.
-    XCTAssertTrue(app.buttons["watch-together-start"].waitForExistence(timeout: 5), app.debugDescription)
+    XCTAssertTrue(
+      app.buttons["watch-together-start"].waitForExistence(timeout: 5), app.debugDescription)
     shot(app, "Player - Watch Together")
     app.typeKey(.escape, modifierFlags: [])
     XCTAssertTrue(app.buttons["watch-together-start"].waitForNonExistence(timeout: 5))

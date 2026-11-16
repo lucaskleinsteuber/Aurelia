@@ -139,7 +139,9 @@ struct AureliaTests {
 
   @Test
   func aFinishedMetadataJobSaysItIsDone() throws {
-    func job(_ state: String, matched: Int, review: Int, total: Int = 25) throws -> MetadataJobSummary {
+    func job(_ state: String, matched: Int, review: Int, total: Int = 25) throws
+      -> MetadataJobSummary
+    {
       try JSONDecoder().decode(
         MetadataJobSummary.self,
         from: Data(
@@ -150,9 +152,14 @@ struct AureliaTests {
           """.utf8))
     }
     #expect(try job("running", matched: 3, review: 0).finishedSummary == nil)
-    #expect(try job("completed", matched: 23, review: 2).finishedSummary == "Done · 23 matched, 2 need review")
-    #expect(try job("completed", matched: 0, review: 0).finishedSummary == "Done · 25 titles checked")
-    #expect(try job("cancelled", matched: 1, review: 1).finishedSummary == "Stopped · 1 matched, 1 needs review")
+    #expect(
+      try job("completed", matched: 23, review: 2).finishedSummary
+        == "Done · 23 matched, 2 need review")
+    #expect(
+      try job("completed", matched: 0, review: 0).finishedSummary == "Done · 25 titles checked")
+    #expect(
+      try job("cancelled", matched: 1, review: 1).finishedSummary
+        == "Stopped · 1 matched, 1 needs review")
   }
 
   @Test

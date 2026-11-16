@@ -17,9 +17,10 @@ struct SpeechSubtitleTests {
       words("Guten Abend.", from: 0.2) + words("Heute schauen wir einen Film", from: 1.5)
       + words("und danach gehen wir schlafen.", from: 4.5)
     let cues = SubtitleCueBuilder.cues(from: spoken)
-    #expect(cues.map { $0.lines.joined(separator: " ") } == [
-      "Guten Abend.", "Heute schauen wir einen Film", "und danach gehen wir schlafen.",
-    ])
+    #expect(
+      cues.map { $0.lines.joined(separator: " ") } == [
+        "Guten Abend.", "Heute schauen wir einen Film", "und danach gehen wir schlafen.",
+      ])
     // Never over the next one, and long enough to read.
     for (cue, next) in zip(cues, cues.dropFirst()) { #expect(cue.end < next.start) }
     #expect(cues.allSatisfy { $0.end - $0.start >= 0.79 })
@@ -40,7 +41,8 @@ struct SpeechSubtitleTests {
 
   @Test func linesBreakNearTheMiddlePreferringAfterACommaAndEmptyWordsVanish() {
     #expect(SubtitleCueBuilder.lines("Kurz.") == ["Kurz."])
-    let lines = SubtitleCueBuilder.lines("Wenn du morgen kommst, bringen wir den Kuchen mit nach Hause")
+    let lines = SubtitleCueBuilder.lines(
+      "Wenn du morgen kommst, bringen wir den Kuchen mit nach Hause")
     #expect(lines == ["Wenn du morgen kommst,", "bringen wir den Kuchen mit nach Hause"])
     let cues = SubtitleCueBuilder.cues(from: [
       SpeechWord(text: "  ", start: 0, end: 0.2), SpeechWord(text: "Hallo", start: 1, end: 1.4),
@@ -55,7 +57,8 @@ struct SpeechSubtitleTests {
     ])
     #expect(
       text
-        == "1\n00:00:01,500 --> 00:00:03,250\nEins\nZwei\n\n2\n01:02:05,004 --> 01:02:07,000\nDrei\n")
+        == "1\n00:00:01,500 --> 00:00:03,250\nEins\nZwei\n\n2\n01:02:05,004 --> 01:02:07,000\nDrei\n"
+    )
   }
 
   @Test func soundTrackLanguagesMapToSpeechLocales() {
@@ -65,16 +68,23 @@ struct SpeechSubtitleTests {
     #expect(SpeechLanguages.code(forTrack: "und") == nil)
     #expect(SpeechLanguages.code(forTrack: nil) == nil)
     let supported = ["en-GB", "en-US", "de-AT", "de-DE", "fr-FR"].map(Locale.init(identifier:))
-    #expect(SpeechLanguages.locale(for: "de", among: supported, region: "AT")?.identifier(.bcp47) == "de-AT")
-    #expect(SpeechLanguages.locale(for: "de", among: supported, region: "CH")?.identifier(.bcp47) == "de-DE")
-    #expect(SpeechLanguages.locale(for: "en", among: supported, region: nil)?.identifier(.bcp47) == "en-US")
+    #expect(
+      SpeechLanguages.locale(for: "de", among: supported, region: "AT")?.identifier(.bcp47)
+        == "de-AT")
+    #expect(
+      SpeechLanguages.locale(for: "de", among: supported, region: "CH")?.identifier(.bcp47)
+        == "de-DE")
+    #expect(
+      SpeechLanguages.locale(for: "en", among: supported, region: nil)?.identifier(.bcp47)
+        == "en-US")
     #expect(SpeechLanguages.locale(for: "ja", among: supported) == nil)
     #expect(SpeechLanguages.choices(supported) == ["en", "fr", "de"])
   }
 
   @Test func wordsStartWhereItGetsLoudAfterAPause() {
     // One second of quiet, then speech; the recognizer counts the quiet as part of "Wir".
-    let levels = [Float](repeating: 0.001, count: 150) + [Float](repeating: 0.2, count: 100)
+    let levels =
+      [Float](repeating: 0.001, count: 150) + [Float](repeating: 0.2, count: 100)
       + [Float](repeating: 0.001, count: 50)
     let words = [
       SpeechWord(text: "Tag.", start: 1.6, end: 2.0), SpeechWord(text: "Wir", start: 2.0, end: 3.4),

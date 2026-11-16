@@ -5,7 +5,8 @@ import Testing
 struct IOSPeopleTests {
   private func about(born: String?, died: String? = nil, place: String? = nil) -> IOSPersonAbout {
     IOSPersonAbout(
-      biography: nil, birthday: born, deathday: died, placeOfBirth: place, knownForDepartment: "Acting",
+      biography: nil, birthday: born, deathday: died, placeOfBirth: place,
+      knownForDepartment: "Acting",
       provider: "tmdb", providerPersonId: "17")
   }
 
@@ -17,18 +18,27 @@ struct IOSPeopleTests {
     #expect(
       IOSPeoplePresentation.life(about(born: "1970-05-01", place: "Invented Town"), today: today)
         == "Born May 1, 1970 (age 56) in Invented Town")
-    #expect(IOSPeoplePresentation.life(about(born: "1970-12-24"), today: today) == "Born December 24, 1970 (age 55)")
     #expect(
-      IOSPeoplePresentation.life(about(born: "1931-02-08", died: "1955-09-30", place: "Invented Town"), today: today)
+      IOSPeoplePresentation.life(about(born: "1970-12-24"), today: today)
+        == "Born December 24, 1970 (age 55)")
+    #expect(
+      IOSPeoplePresentation.life(
+        about(born: "1931-02-08", died: "1955-09-30", place: "Invented Town"), today: today)
         == "February 8, 1931 – September 30, 1955 (aged 24) · Invented Town")
-    #expect(IOSPeoplePresentation.life(about(born: nil, died: "2001-03-04"), today: today) == "Died March 4, 2001")
+    #expect(
+      IOSPeoplePresentation.life(about(born: nil, died: "2001-03-04"), today: today)
+        == "Died March 4, 2001")
     #expect(IOSPeoplePresentation.life(about(born: "sometime"), today: today) == nil)
     #expect(IOSPeoplePresentation.life(nil, today: today) == nil)
   }
 
   @Test func aCardSaysTheJobOnlyForPeopleBehindTheCamera() {
-    let actor = IOSPersonSummary(name: "Morgan Vale", personKey: "tmdb:person:17", profile: nil, titleCount: 3, department: "Acting")
-    let director = IOSPersonSummary(name: "Theo Brandt", personKey: "tmdb:person:18", profile: nil, titleCount: 1, department: "Director")
+    let actor = IOSPersonSummary(
+      name: "Morgan Vale", personKey: "tmdb:person:17", profile: nil, titleCount: 3,
+      department: "Acting")
+    let director = IOSPersonSummary(
+      name: "Theo Brandt", personKey: "tmdb:person:18", profile: nil, titleCount: 1,
+      department: "Director")
     #expect(IOSPeoplePresentation.role(actor) == "3 titles")
     #expect(IOSPeoplePresentation.role(director) == "Director · 1 title")
     #expect(IOSPeoplePresentation.hasProfile("tmdb:person:17"))

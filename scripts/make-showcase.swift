@@ -122,7 +122,8 @@ func draw(_ scene: Scene, palette: Palette, size: NSSize, seed: UInt64, varied: 
         path.move(to: NSPoint(x: -20, y: base))
         var x: CGFloat = -20
         while x < size.width + 20 {
-          let y = base + size.height * 0.08 * CGFloat(sin(Double(x / size.width) * 5 + Double(band)))
+          let y =
+            base + size.height * 0.08 * CGFloat(sin(Double(x / size.width) * 5 + Double(band)))
           path.line(to: NSPoint(x: x, y: y))
           x += 10
         }
@@ -241,7 +242,8 @@ func draw(_ scene: Scene, palette: Palette, size: NSSize, seed: UInt64, varied: 
     palette.light.withAlphaComponent(0.55).setStroke()
     ring.stroke()
     let planet = NSBezierPath(
-      ovalIn: NSRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
+      ovalIn: NSRect(
+        x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
     NSGradient(colors: [palette.light, palette.layers[0], palette.layers.last!])!
       .draw(in: planet, angle: -55)
     // The near half of the ring passes in front of the planet.
@@ -284,7 +286,9 @@ func poster(_ title: Title, seed: UInt64) -> Data {
     style.lineBreakMode = .byWordWrapping
     // The longest word must fit on one line, so no word is ever split.
     var fontSize: CGFloat = 92
-    func font(_ size: CGFloat) -> NSFont { NSFont(name: title.font, size: size) ?? .boldSystemFont(ofSize: size) }
+    func font(_ size: CGFloat) -> NSFont {
+      NSFont(name: title.font, size: size) ?? .boldSystemFont(ofSize: size)
+    }
     while fontSize > 40,
       title.name.uppercased().split(separator: " ").contains(where: { word in
         (String(word) as NSString).size(withAttributes: [.font: font(fontSize), .kern: 3]).width
@@ -461,7 +465,9 @@ let titles: [Title] = [
       skyTop: rgb(0x0B1A2B), skyBottom: rgb(0x3E5A73), light: rgb(0xFFE9A8),
       layers: [rgb(0x2C4A63), rgb(0x0B1724)]),
     font: "Georgia-Bold",
-    seasons: [["The Keeper", "Low Tide", "Fog Bell", "The Logbook", "Storm Warning", "First Light"]]),
+    seasons: [
+      ["The Keeper", "Low Tide", "Fog Bell", "The Logbook", "Storm Warning", "First Light"]
+    ]),
   Title(
     id: "a0000000-0000-4000-8000-000000000012", kind: "series", name: "Kitchen at Dawn",
     year: 2023, genres: ["Comedy"],
@@ -492,7 +498,8 @@ let people = [
 ]
 
 guard CommandLine.arguments.count == 2 else {
-  FileHandle.standardError.write("Usage: swift scripts/make-showcase.swift <output folder>\n".data(using: .utf8)!)
+  FileHandle.standardError.write(
+    "Usage: swift scripts/make-showcase.swift <output folder>\n".data(using: .utf8)!)
   exit(2)
 }
 let output = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
@@ -571,7 +578,8 @@ for (index, title) in titles.enumerated() {
           data: picture(
             title, size: NSSize(width: 1280, height: 720),
             seed: seed &+ UInt64(number * 100 + episodeIndex + 1) * 104_729, varied: true))
-        let overviews = title.episodeOverviews.indices.contains(seasonIndex)
+        let overviews =
+          title.episodeOverviews.indices.contains(seasonIndex)
           ? title.episodeOverviews[seasonIndex] : []
         let resume =
           index == 0 && number == 1 && episodeIndex == 4
@@ -592,7 +600,8 @@ for (index, title) in titles.enumerated() {
     (0..<6).map { order in
       [
         "name": people[(index + order) % people.count], "department": "Acting",
-        "job": NSNull(), "character": ["Captain", "Engineer", "Doctor", "Pilot", "Navigator", "Cook"][order],
+        "job": NSNull(),
+        "character": ["Captain", "Engineer", "Doctor", "Pilot", "Navigator", "Cook"][order],
         "order": order, "profile": NSNull(), "id": NSNull(), "personKey": NSNull(),
       ]
     } + [

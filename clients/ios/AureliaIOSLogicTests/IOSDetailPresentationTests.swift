@@ -115,7 +115,6 @@ struct IOSDetailPresentationTests {
     #expect(IOSSearchPresentation.showsEmptyResult(isSearch: false, search: "", answered: nil))
   }
 
-
   @Test func pastMonthsOfWrappedAreListedByYear() {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(identifier: "UTC")!
@@ -123,7 +122,9 @@ struct IOSDetailPresentationTests {
     #expect(IOSWrapped.readyMonths(year: 2026, today: today, calendar: calendar) == Array(1...10))
     #expect(IOSWrapped.readyMonths(year: 2025, today: today, calendar: calendar) == Array(1...12))
     #expect(IOSWrapped.readyMonths(year: 2027, today: today, calendar: calendar).isEmpty)
-    #expect(IOSWrapped.wrappedYears(activityYears: [2024, 2026, 2027], today: today, calendar: calendar) == [2026, 2024])
+    #expect(
+      IOSWrapped.wrappedYears(activityYears: [2024, 2026, 2027], today: today, calendar: calendar)
+        == [2026, 2024])
   }
 
 }

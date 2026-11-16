@@ -65,7 +65,8 @@ struct IOSSettingsPagesTests {
   // MARK: Library words
 
   @Test func aScanSummaryLeavesOutWhatDidNotHappen() throws {
-    let running = try scan(state: "running", discovered: 1240, processed: 530, added: 12, updated: 2)
+    let running = try scan(
+      state: "running", discovered: 1240, processed: 530, added: 12, updated: 2)
     #expect(IOSLibraryAdminText.summary(running) == "530 of 1240 files · 12 new · 2 changed")
     let done = try scan(state: "completed", discovered: 1, processed: 1, added: 0, updated: 0)
     #expect(IOSLibraryAdminText.summary(done) == "1 file")
@@ -76,7 +77,8 @@ struct IOSSettingsPagesTests {
   @Test func aLocationWaitingForReviewSaysSoAndCannotBeScanned() throws {
     let waiting = try library(review: true)
     #expect(IOSLibraryAdminText.isWaitingForReview(waiting))
-    #expect(IOSLibraryAdminText.status(waiting, scanning: false) == "Waiting for your import review")
+    #expect(
+      IOSLibraryAdminText.status(waiting, scanning: false) == "Waiting for your import review")
     let normal = try library(review: false)
     #expect(!IOSLibraryAdminText.isWaitingForReview(normal))
     #expect(IOSLibraryAdminText.status(normal, scanning: true) == "Scanning…")
@@ -180,10 +182,18 @@ private actor IOSSettingsTestTransport: IOSHTTPTransport {
 @Suite("iOS Smart Home")
 struct IOSAutomationTests {
   @Test func thePlayerReportsRealStatesOnce() {
-    #expect(IOSAutomationPlaybackState.state(wantsPlayback: true, isPlaying: true, finished: false) == "playing")
-    #expect(IOSAutomationPlaybackState.state(wantsPlayback: true, isPlaying: false, finished: false) == "buffering")
-    #expect(IOSAutomationPlaybackState.state(wantsPlayback: false, isPlaying: true, finished: false) == "paused")
-    #expect(IOSAutomationPlaybackState.state(wantsPlayback: true, isPlaying: true, finished: true) == "finished")
+    #expect(
+      IOSAutomationPlaybackState.state(wantsPlayback: true, isPlaying: true, finished: false)
+        == "playing")
+    #expect(
+      IOSAutomationPlaybackState.state(wantsPlayback: true, isPlaying: false, finished: false)
+        == "buffering")
+    #expect(
+      IOSAutomationPlaybackState.state(wantsPlayback: false, isPlaying: true, finished: false)
+        == "paused")
+    #expect(
+      IOSAutomationPlaybackState.state(wantsPlayback: true, isPlaying: true, finished: true)
+        == "finished")
     #expect(IOSAutomationPlaybackState.shouldReport(last: nil, next: "playing"))
     #expect(!IOSAutomationPlaybackState.shouldReport(last: "paused", next: "paused"))
     #expect(!IOSAutomationPlaybackState.shouldReport(last: "finished", next: "paused"))
@@ -193,17 +203,25 @@ struct IOSAutomationTests {
     #expect(
       IOSAutomationText.homeAssistantURL(base: "homeassistant.local", webhookID: "aurelia_lights")
         == "http://homeassistant.local:8123/api/webhook/aurelia_lights")
-    #expect(IOSAutomationText.homeAssistantURL(base: "homeassistant.local", webhookID: "no spaces") == nil)
-    #expect(IOSAutomationText.splitHomeAssistantURL("https://ha.example.com/api/webhook/x").webhookID == "x")
-    #expect(IOSAutomationText.host("http://homeassistant.local:8123/api/webhook/secret") == "homeassistant.local:8123")
+    #expect(
+      IOSAutomationText.homeAssistantURL(base: "homeassistant.local", webhookID: "no spaces") == nil
+    )
+    #expect(
+      IOSAutomationText.splitHomeAssistantURL("https://ha.example.com/api/webhook/x").webhookID
+        == "x")
+    #expect(
+      IOSAutomationText.host("http://homeassistant.local:8123/api/webhook/secret")
+        == "homeassistant.local:8123")
   }
 
   @Test func theStateReachesTheServerForThisTicket() async throws {
     let transport = IOSAutomationTestTransport()
     let ticket = UUID(uuidString: "76000000-0000-0000-0000-000000000001")!
     let connection = IOSStoredConnection(
-      serverID: UUID(), name: "Synthetic server", baseURL: URL(string: "https://fixture.invalid:43111")!,
-      fingerprint: String(repeating: "B", count: 64), deviceToken: String(repeating: "D", count: 43), deviceSessionID: UUID())
+      serverID: UUID(), name: "Synthetic server",
+      baseURL: URL(string: "https://fixture.invalid:43111")!,
+      fingerprint: String(repeating: "B", count: 64),
+      deviceToken: String(repeating: "D", count: 43), deviceSessionID: UUID())
     let session = IOSProfileSession(
       user: IOSUser(id: UUID(), username: "Owner", role: "owner"), sessionId: UUID(),
       token: String(repeating: "P", count: 43), expiresAt: "2099-01-01T00:00:00Z")
@@ -212,7 +230,8 @@ struct IOSAutomationTests {
     let request = try #require(await transport.requests.first)
     #expect(request.httpMethod == "POST")
     #expect(request.url?.path == "/api/v1/playback/76000000-0000-0000-0000-000000000001/state")
-    let body = try JSONDecoder().decode([String: IOSJSONValue].self, from: request.httpBody ?? Data())
+    let body = try JSONDecoder().decode(
+      [String: IOSJSONValue].self, from: request.httpBody ?? Data())
     #expect(body["state"] == .string("paused"))
     #expect(body["positionSeconds"] == .number(61.5))
   }
@@ -222,6 +241,7 @@ private actor IOSAutomationTestTransport: IOSHTTPTransport {
   private(set) var requests: [URLRequest] = []
   func execute(_ request: URLRequest, trust: IOSTrustMode) async throws -> IOSHTTPResponse {
     requests.append(request)
-    return IOSHTTPResponse(statusCode: 204, headers: [:], body: Data(), fingerprint: String(repeating: "B", count: 64))
+    return IOSHTTPResponse(
+      statusCode: 204, headers: [:], body: Data(), fingerprint: String(repeating: "B", count: 64))
   }
 }

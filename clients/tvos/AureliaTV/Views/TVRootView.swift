@@ -176,7 +176,9 @@ struct TVSavedServerView: View {
         Image(systemName: "power").font(.system(size: 72, weight: .medium))
           .foregroundStyle(.secondary)
         VStack(spacing: 18) {
-          Text(model.savedServerAppHost.map { "Start Aurelia on Your \($0)" } ?? "The Server Is Off").font(.system(size: 56, weight: .bold))
+          Text(
+            model.savedServerAppHost.map { "Start Aurelia on Your \($0)" } ?? "The Server Is Off"
+          ).font(.system(size: 56, weight: .bold))
           Text(
             model.savedServerAppHost.map {
               "“\(name)” runs inside the Aurelia app on a \($0). Open Aurelia there, or wake the \($0), and this Apple TV connects by itself."
@@ -186,7 +188,7 @@ struct TVSavedServerView: View {
           .font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
           .frame(maxWidth: 1100)
           Text("This Apple TV connects by itself as soon as the server is on.")
-          .font(.title3).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+            .font(.title3).foregroundStyle(.tertiary).multilineTextAlignment(.center)
         }
         ZStack {
           if model.isBusy {

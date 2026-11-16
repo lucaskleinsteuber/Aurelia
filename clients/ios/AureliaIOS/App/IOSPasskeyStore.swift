@@ -25,7 +25,8 @@ struct IOSSecureEnclaveSigner: IOSPasskeySigner {
     var error: Unmanaged<CFError>?
     guard
       let access = SecAccessControlCreateWithFlags(
-        nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, [.privateKeyUsage, .userPresence], &error)
+        nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, [.privateKeyUsage, .userPresence], &error
+      )
     else { throw IOSPasskeyError.unavailable }
     let key = try SecureEnclave.P256.Signing.PrivateKey(accessControl: access)
     return IOSSecureEnclaveSigner(
@@ -71,7 +72,8 @@ enum IOSPasskeyStore {
     query[kSecReturnData as String] = true
     query[kSecMatchLimit as String] = kSecMatchLimitOne
     var result: CFTypeRef?
-    guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data
+    guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+      let data = result as? Data
     else { return nil }
     return try? JSONDecoder().decode(IOSStoredPasskey.self, from: data)
   }

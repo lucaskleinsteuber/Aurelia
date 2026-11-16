@@ -73,7 +73,8 @@ final class APIPlaybackClient: PlaybackClientProtocol {
 
   func reportPlaybackState(ticket: UUID, state: String, positionSeconds: Double) async {
     // Servers before 2.16.0 don't know it; playback never depends on the answer.
-    try? await api.reportPlaybackState(ticket: ticket, state: state, positionSeconds: positionSeconds)
+    try? await api.reportPlaybackState(
+      ticket: ticket, state: state, positionSeconds: positionSeconds)
   }
 
   func sleepTimerEndedStatus() async -> SleepTimerEndedResponse? {
@@ -661,7 +662,9 @@ final class PlaybackController: ObservableObject {
     reportedAutomation = (ticket, state)
     let position = Double(max(0, currentTimeMilliseconds)) / 1_000
     let client = self.client
-    Task { await client.reportPlaybackState(ticket: ticket, state: state, positionSeconds: position) }
+    Task {
+      await client.reportPlaybackState(ticket: ticket, state: state, positionSeconds: position)
+    }
   }
 
   private func applyPausedIntentIfNeeded() {
@@ -1040,7 +1043,8 @@ final class PlaybackController: ObservableObject {
     hasPreparedCurrentItem = true
     engine.trackScope = presentation.trackScope
     (engine as? VLCPlaybackEngine)?.additionalMediaOptions = streamingQuality.vlcOptions
-    engine.load(url: streamingQuality.playbackURL(for: localURL), startAt: resumePositionMilliseconds)
+    engine.load(
+      url: streamingQuality.playbackURL(for: localURL), startAt: resumePositionMilliseconds)
     openedAtResume = engine.opensAtStartPosition && resumePositionMilliseconds > 0
     playbackURL = localURL
     startPreviewRelay(from: sourceURL)
@@ -1261,7 +1265,8 @@ final class PlaybackController: ObservableObject {
     let finished =
       !backwards
       && UpNextPolicy.nextFinishesCurrent(
-        position: currentTimeMilliseconds, duration: durationMilliseconds, upNextShown: upNext != nil,
+        position: currentTimeMilliseconds, duration: durationMilliseconds,
+        upNextShown: upNext != nil,
         creditsStart: preferences.upNextAtCredits ? currentSegments?.creditsStartMilliseconds : nil)
     naturalEndReached = false
     endHandled = true
@@ -1379,7 +1384,8 @@ final class PlaybackController: ObservableObject {
     let duringCredits =
       shown
       && UpNextPolicy.showsForCredits(
-        position: currentTimeMilliseconds, duration: durationMilliseconds, creditsStart: creditsStart)
+        position: currentTimeMilliseconds, duration: durationMilliseconds,
+        creditsStart: creditsStart)
     // The countdown starts where the card appeared: at the credits, or later when the person
     // moved into them.
     if duringCredits {

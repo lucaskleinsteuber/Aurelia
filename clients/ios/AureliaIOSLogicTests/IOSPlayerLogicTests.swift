@@ -259,8 +259,10 @@ struct IOSPlayerLogicTests {
 
   @Test func theLaterPositionWinsAConflict() {
     let now = Date()
-    #expect(IOSProgressConflict.keepsLocal(capturedAt: now, serverUpdatedAt: now.addingTimeInterval(-60)))
-    #expect(!IOSProgressConflict.keepsLocal(capturedAt: now, serverUpdatedAt: now.addingTimeInterval(60)))
+    #expect(
+      IOSProgressConflict.keepsLocal(capturedAt: now, serverUpdatedAt: now.addingTimeInterval(-60)))
+    #expect(
+      !IOSProgressConflict.keepsLocal(capturedAt: now, serverUpdatedAt: now.addingTimeInterval(60)))
     #expect(!IOSProgressConflict.keepsLocal(capturedAt: nil, serverUpdatedAt: now))
   }
 

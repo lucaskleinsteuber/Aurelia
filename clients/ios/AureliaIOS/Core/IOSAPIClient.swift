@@ -314,7 +314,8 @@ struct IOSAPIClient: Sendable {
   func saveFromFranchise(id: UUID) async throws -> IOSCollection {
     try Self.decode(
       IOSCollection.self,
-      data: await send("/api/v1/collections/from-franchise/\(id.uuidString.lowercased())", method: "POST"))
+      data: await send(
+        "/api/v1/collections/from-franchise/\(id.uuidString.lowercased())", method: "POST"))
   }
 
   func createCollection(_ payload: IOSSaveCollection) async throws -> IOSCollection {
@@ -508,7 +509,9 @@ struct IOSAPIClient: Sendable {
     if let generation { values.append(URLQueryItem(name: "generation", value: generation)) }
     // The first request after loading everything starts at the newest change (server 2.21.0)
     // instead of paging through the whole kept history; older servers ignore it.
-    if cursor == 0 && generation == nil { values.append(URLQueryItem(name: "latest", value: "true")) }
+    if cursor == 0 && generation == nil {
+      values.append(URLQueryItem(name: "latest", value: "true"))
+    }
     let data = try await send("/api/v1/sync/changes", query: values)
     let response = try Self.decode(IOSSyncChanges.self, data: data)
     guard response.cursor >= 0 else { throw IOSCoreError.invalidResponse }
@@ -563,7 +566,8 @@ struct IOSAPIClient: Sendable {
     }
     var query = audio.map { [URLQueryItem(name: "audio", value: String($0))] } ?? []
     query.append(URLQueryItem(name: "purpose", value: "download"))
-    var request = try request("\(streamPath)/hls/\(quality)/\(piece)", query: query, authentication: .profile)
+    var request = try request(
+      "\(streamPath)/hls/\(quality)/\(piece)", query: query, authentication: .profile)
     request.setValue("*/*", forHTTPHeaderField: "Accept")
     request.timeoutInterval = 90
     return try await execute(request).body
@@ -602,7 +606,9 @@ struct IOSAPIClient: Sendable {
     return try? JSONDecoder().decode(IOSSleepTimerEndedResponse.self, from: data)
   }
 
-  func wishes(state: IOSWishState? = nil, offset: Int = 0, limit: Int = IOSWishPresentation.pageSize)
+  func wishes(
+    state: IOSWishState? = nil, offset: Int = 0, limit: Int = IOSWishPresentation.pageSize
+  )
     async throws -> IOSWishListResponse
   {
     var query = [
@@ -620,7 +626,8 @@ struct IOSAPIClient: Sendable {
     try await get("/api/v1/wishes/summary")
   }
 
-  func wishSearch(query text: String, kind: IOSMediaKind? = nil) async throws -> IOSWishSearchResponse
+  func wishSearch(query text: String, kind: IOSMediaKind? = nil) async throws
+    -> IOSWishSearchResponse
   {
     var query = [URLQueryItem(name: "query", value: text)]
     if let kind {
@@ -797,7 +804,8 @@ struct IOSAPIClient: Sendable {
     return try request(path, authentication: .profile).url!
   }
 
-  static func isValidArtworkPath(_ path: String, id: UUID) -> (path: String, query: [URLQueryItem])? {
+  static func isValidArtworkPath(_ path: String, id: UUID) -> (path: String, query: [URLQueryItem])?
+  {
     guard path.hasPrefix("/api/v1/artwork/"),
       let components = URLComponents(string: path),
       components.scheme == nil, components.host == nil, components.fragment == nil,
@@ -811,7 +819,8 @@ struct IOSAPIClient: Sendable {
     }
     let prefix = "/api/v1/artwork/collection/"
     if trimmed.hasPrefix(prefix) {
-      let suffix = trimmed.dropFirst(prefix.count).split(separator: "/", omittingEmptySubsequences: false)
+      let suffix = trimmed.dropFirst(prefix.count).split(
+        separator: "/", omittingEmptySubsequences: false)
       guard (1...2).contains(suffix.count), UUID(uuidString: String(suffix[0])) != nil else {
         return nil
       }

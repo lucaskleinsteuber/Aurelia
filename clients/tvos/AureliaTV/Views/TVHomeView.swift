@@ -72,7 +72,8 @@ struct TVHomeView: View {
           ForEach(home.becauseYouWatched ?? []) { rail in
             genreShelf(
               TVHomeGenreRow(
-                genre: "Because You Watched \(rail.sourceTitle)", items: rail.suggestions.map(\.item)))
+                genre: "Because You Watched \(rail.sourceTitle)",
+                items: rail.suggestions.map(\.item)))
           }
           if model.supportsWatchlist && !model.watchlistItems.isEmpty {
             shelf("Watchlist", items: model.watchlistItems, section: .watchlist)
@@ -151,11 +152,14 @@ struct TVHomeView: View {
     )
     .fullScreenCover(item: $movieNight) { launch in
       if let api = model.client {
-        TVMovieNightView(api: api, deviceName: model.deviceName, joining: launch.joining) { mediaID in
+        TVMovieNightView(api: api, deviceName: model.deviceName, joining: launch.joining) {
+          mediaID in
           Task {
             // The match plays the way Home plays anything, once Movie Night has closed.
             try? await Task.sleep(for: .milliseconds(700))
-            if let item = try? await model.client?.summary(id: mediaID) { play(item, viaPlan: true) }
+            if let item = try? await model.client?.summary(id: mediaID) {
+              play(item, viaPlan: true)
+            }
           }
         }
         .environmentObject(model)
@@ -625,9 +629,13 @@ struct TVCollectionView: View {
     case openShow(UUID)
   }
 
-  private var resolvedDetail: TVCollectionDetail { detail ?? TVCollectionDetail(collection: collection) }
+  private var resolvedDetail: TVCollectionDetail {
+    detail ?? TVCollectionDetail(collection: collection)
+  }
   private var members: [TVCollectionMember] { resolvedDetail.resolvedMembers }
-  private var playableItems: [TVCatalogItem] { TVCollectionPresentation.playableItems(in: resolvedDetail) }
+  private var playableItems: [TVCatalogItem] {
+    TVCollectionPresentation.playableItems(in: resolvedDetail)
+  }
   private var selectedSeasonMember: TVCollectionMember? {
     members.first { $0.id == selectedSeasonMemberID && !($0.episodes ?? []).isEmpty }
   }
@@ -705,7 +713,8 @@ struct TVCollectionView: View {
     )
     .alert(
       "Not Available",
-      isPresented: Binding(get: { unavailableItem != nil }, set: { if !$0 { unavailableItem = nil } }),
+      isPresented: Binding(
+        get: { unavailableItem != nil }, set: { if !$0 { unavailableItem = nil } }),
       presenting: unavailableItem
     ) { _ in
       Button("OK", role: .cancel) { unavailableItem = nil }
@@ -858,7 +867,9 @@ struct TVCollectionView: View {
           if let item { TVItemBadges(item: item).padding(10) }
         }
         .overlay(alignment: .bottom) {
-          if let fraction { TVProgressBar(fraction: fraction).padding(.horizontal, 14).padding(.bottom, 14) }
+          if let fraction {
+            TVProgressBar(fraction: fraction).padding(.horizontal, 14).padding(.bottom, 14)
+          }
         }
         .overlay {
           if selected {
@@ -942,7 +953,9 @@ struct TVCollectionView: View {
     Task {
       defer { launching = false }
       let next = try? await api.collectionNext(id: detail.id)
-      guard !Task.isCancelled, model.session?.sessionId == sessionID, playback == nil else { return }
+      guard !Task.isCancelled, model.session?.sessionId == sessionID, playback == nil else {
+        return
+      }
       let fallback = TVCollectionPresentation.playableItems(in: detail).first
       guard let rawTarget = next?.item ?? fallback else { return }
       let target = model.overlay(rawTarget)
@@ -1043,16 +1056,18 @@ private struct TVCollectionEpisodeCard: View {
   private let width: CGFloat = 420
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      TVArtworkView(artwork: episode.backdrop ?? episode.poster, width: 1280, symbol: "play.rectangle")
-        .frame(width: width, height: width * 9 / 16)
-        .overlay(alignment: .topTrailing) { TVItemBadges(item: episode).padding(10) }
-        .overlay(alignment: .bottom) {
-          if let fraction = episode.progressFraction {
-            TVProgressBar(fraction: fraction).padding(.horizontal, 14).padding(.bottom, 14)
-          }
+      TVArtworkView(
+        artwork: episode.backdrop ?? episode.poster, width: 1280, symbol: "play.rectangle"
+      )
+      .frame(width: width, height: width * 9 / 16)
+      .overlay(alignment: .topTrailing) { TVItemBadges(item: episode).padding(10) }
+      .overlay(alignment: .bottom) {
+        if let fraction = episode.progressFraction {
+          TVProgressBar(fraction: fraction).padding(.horizontal, 14).padding(.bottom, 14)
         }
-        .clipShape(RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous))
-        .hoverEffect(.highlight)
+      }
+      .clipShape(RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous))
+      .hoverEffect(.highlight)
       Text("\(episode.episodeLabel ?? "Episode") · \(episode.title)")
         .font(.system(size: 23, weight: .semibold))
         .lineLimit(2)

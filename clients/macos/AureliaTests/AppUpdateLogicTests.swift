@@ -128,7 +128,8 @@ struct AppUpdateLogicTests {
     #expect(await transport.requests.first?.url?.query == "per_page=20")
     try withPreferences { defaults, _ in
       #expect(!AppUpdatePreferences.betaUpdates(in: defaults))
-      AppUpdateCatalogCache.save(result.cache, repository: "owner/repo", beta: true, defaults: defaults)
+      AppUpdateCatalogCache.save(
+        result.cache, repository: "owner/repo", beta: true, defaults: defaults)
       #expect(
         AppUpdateCatalogCache.load(repository: "owner/repo", beta: true, defaults: defaults) != nil)
       // A beta list is not a valid stable answer, so the stable feed keeps nothing.

@@ -286,7 +286,8 @@ private struct IOSPendingDownloadRow: View {
         )
         .font(.caption).foregroundStyle(.secondary)
       } else if entry.state == .waiting {
-        Text("Starts when the download before it is done").font(.caption).foregroundStyle(.secondary)
+        Text("Starts when the download before it is done").font(.caption).foregroundStyle(
+          .secondary)
       } else {
         Label(entry.message ?? "The download stopped.", systemImage: "exclamationmark.circle")
           .font(.caption).foregroundStyle(.orange)

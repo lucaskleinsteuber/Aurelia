@@ -97,7 +97,9 @@ enum TVMovieNightRules {
   static let swipeDistance: Double = 110
 
   /// The vote for a card let go `offset` points to the side, moving at `velocity` points per second.
-  static func choice(offset: Double, velocity: Double = 0, width: Double = 360) -> TVMovieNightChoice? {
+  static func choice(offset: Double, velocity: Double = 0, width: Double = 360)
+    -> TVMovieNightChoice?
+  {
     let limit = min(swipeDistance, max(60, width * 0.3))
     if offset >= limit || (velocity > 600 && offset > 30) { return .like }
     if offset <= -limit || (velocity < -600 && offset < -30) { return .nope }
@@ -184,7 +186,9 @@ final class TVMovieNightSession: ObservableObject {
 
   func join(_ night: TVMovieNightSummary, voting: Bool = true) async {
     let name = deviceName
-    await run { [api] in try await api.joinMovieNight(id: night.id, deviceName: name, voting: voting) }
+    await run { [api] in
+      try await api.joinMovieNight(id: night.id, deviceName: name, voting: voting)
+    }
   }
 
   func settings(kinds: String, genre: String?) async {
@@ -216,7 +220,8 @@ final class TVMovieNightSession: ObservableObject {
         receive(try await api.voteMovieNight(id: id, mediaID: card.mediaId, like: like))
       } catch {
         pending[card.mediaId] = nil
-        errorText = Self.message(error, fallback: "That swipe didn't reach the server. Try it again.")
+        errorText = Self.message(
+          error, fallback: "That swipe didn't reach the server. Try it again.")
       }
     }
   }
@@ -262,7 +267,8 @@ final class TVMovieNightSession: ObservableObject {
         guard let self, let state = self.state else { return }
         do {
           let next = try await self.api.movieNight(
-            id: state.id, after: state.revision, deckVersion: state.deckVersion, waitMilliseconds: 20_000)
+            id: state.id, after: state.revision, deckVersion: state.deckVersion,
+            waitMilliseconds: 20_000)
           failures = 0
           guard !Task.isCancelled else { return }
           self.receive(next)
@@ -288,7 +294,9 @@ final class TVMovieNightSession: ObservableObject {
   }
 
   private static func message(_ error: Error, fallback: String) -> String {
-    if case TVCoreError.server(_, _, let message, _) = error, let message, !message.isEmpty { return message }
+    if case TVCoreError.server(_, _, let message, _) = error, let message, !message.isEmpty {
+      return message
+    }
     return fallback
   }
 }
@@ -307,15 +315,18 @@ extension TVAPIClient: TVMovieNightAPI {
       let deviceName: String
       let isVoting: Bool
     }
-    return try await postWatchTogether("/api/v1/movie-night", Body(deviceName: deviceName, isVoting: voting))
+    return try await postWatchTogether(
+      "/api/v1/movie-night", Body(deviceName: deviceName, isVoting: voting))
   }
 
-  func joinMovieNight(id: UUID, deviceName: String, voting: Bool) async throws -> TVMovieNightState {
+  func joinMovieNight(id: UUID, deviceName: String, voting: Bool) async throws -> TVMovieNightState
+  {
     struct Body: Encodable {
       let deviceName: String
       let isVoting: Bool
     }
-    return try await postWatchTogether(Self.night(id, "/join"), Body(deviceName: deviceName, isVoting: voting))
+    return try await postWatchTogether(
+      Self.night(id, "/join"), Body(deviceName: deviceName, isVoting: voting))
   }
 
   func movieNight(id: UUID, after: Int64?, deckVersion: Int?, waitMilliseconds: Int) async throws
@@ -327,17 +338,21 @@ extension TVAPIClient: TVMovieNightAPI {
         URLQueryItem(name: "after", value: String(after)),
         URLQueryItem(name: "waitMs", value: String(waitMilliseconds)),
       ]
-      if let deckVersion { query.append(URLQueryItem(name: "deckVersion", value: String(deckVersion))) }
+      if let deckVersion {
+        query.append(URLQueryItem(name: "deckVersion", value: String(deckVersion)))
+      }
     }
     return try await getWatchTogether(Self.night(id), query: query)
   }
 
-  func movieNightSettings(id: UUID, kinds: String, genre: String?) async throws -> TVMovieNightState {
+  func movieNightSettings(id: UUID, kinds: String, genre: String?) async throws -> TVMovieNightState
+  {
     struct Body: Encodable {
       let kinds: String
       let genre: String?
     }
-    return try await postWatchTogether(Self.night(id, "/settings"), Body(kinds: kinds, genre: genre))
+    return try await postWatchTogether(
+      Self.night(id, "/settings"), Body(kinds: kinds, genre: genre))
   }
 
   func dealMovieNight(id: UUID) async throws -> TVMovieNightState {

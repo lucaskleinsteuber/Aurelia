@@ -39,7 +39,9 @@ struct DownloadsPage: View {
         if !downloads.active.isEmpty {
           VStack(alignment: .leading, spacing: 14) {
             AureliaSectionHeading(title: "Downloading", count: downloads.active.count)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: 16)], spacing: 16) {
+            LazyVGrid(
+              columns: [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: 16)], spacing: 16
+            ) {
               ForEach(downloads.active.keys.sorted(), id: \.self) { id in
                 ActiveDownloadCard(
                   name: downloads.activeNames[id] ?? "Title", share: downloads.active[id] ?? 0
@@ -53,10 +55,12 @@ struct DownloadsPage: View {
           // Centered in the page, not at the leading edge of the text column above it.
           ContentUnavailableView(
             "No Downloads", systemImage: "arrow.down.circle",
-            description: Text("Choose Download in a movie’s or episode’s menu to keep it on this Mac."))
-            .frame(maxWidth: .infinity, minHeight: 360)
-            .accessibilityIdentifier("downloads-empty")
-            .aureliaRiseIn(1)
+            description: Text(
+              "Choose Download in a movie’s or episode’s menu to keep it on this Mac.")
+          )
+          .frame(maxWidth: .infinity, minHeight: 360)
+          .accessibilityIdentifier("downloads-empty")
+          .aureliaRiseIn(1)
         } else {
           OfflineTitleList()
             .aureliaRiseIn(3)
@@ -99,8 +103,10 @@ private struct DownloadStorageSummary: View {
           Text("used by downloads").foregroundStyle(.secondary)
           Spacer()
           if let free {
-            Text("\(ByteCountFormatter.string(fromByteCount: free, countStyle: .file)) free on this Mac")
-              .font(.callout).foregroundStyle(.secondary).monospacedDigit()
+            Text(
+              "\(ByteCountFormatter.string(fromByteCount: free, countStyle: .file)) free on this Mac"
+            )
+            .font(.callout).foregroundStyle(.secondary).monospacedDigit()
           }
         }
         GeometryReader { geometry in
@@ -119,7 +125,8 @@ private struct DownloadStorageSummary: View {
     .frame(maxWidth: 760, alignment: .leading)
     .background(
       AureliaDesign.surface.opacity(0.7),
-      in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous))
+      in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
+    )
     .overlay {
       RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
         .stroke(AureliaDesign.hairline)
@@ -145,15 +152,18 @@ private struct ActiveDownloadCard: View {
     HStack(spacing: 14) {
       ZStack {
         Circle().stroke(.white.opacity(0.12), lineWidth: 4)
-        Circle().trim(from: 0, to: share).stroke(.tint, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-          .rotationEffect(.degrees(-90))
-          .animation(.easeOut(duration: 0.3), value: share)
+        Circle().trim(from: 0, to: share).stroke(
+          .tint, style: StrokeStyle(lineWidth: 4, lineCap: .round)
+        )
+        .rotationEffect(.degrees(-90))
+        .animation(.easeOut(duration: 0.3), value: share)
         Image(systemName: "arrow.down").font(.system(size: 13, weight: .bold))
       }
       .frame(width: 38, height: 38)
       VStack(alignment: .leading, spacing: 3) {
         Text(name).font(.headline).lineLimit(1)
-        Text("\(Int(share * 100)) % downloaded").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+        Text("\(Int(share * 100)) % downloaded").font(.caption).foregroundStyle(.secondary)
+          .monospacedDigit()
       }
       Spacer(minLength: 8)
       Button("Cancel", action: cancel)
@@ -184,9 +194,15 @@ struct OfflineTitleList: View {
       if !movies.isEmpty {
         VStack(alignment: .leading, spacing: 14) {
           AureliaSectionHeading(title: "Movies", count: movies.count)
-          LazyVGrid(columns: [GridItem(.adaptive(minimum: 154, maximum: 190), spacing: 22, alignment: .top)], alignment: .leading, spacing: 26) {
+          LazyVGrid(
+            columns: [
+              GridItem(.adaptive(minimum: 154, maximum: 190), spacing: 22, alignment: .top)
+            ], alignment: .leading, spacing: 26
+          ) {
             ForEach(movies) { title in
-              Button { model.playOffline(title) } label: {
+              Button {
+                model.playOffline(title)
+              } label: {
                 OfflinePosterCard(title: title, poster: downloads.artwork(title))
               }
               .buttonStyle(AureliaCardButtonStyle())
@@ -200,7 +216,9 @@ struct OfflineTitleList: View {
         VStack(alignment: .leading, spacing: 14) {
           HStack(spacing: 12) {
             Group {
-              if let first = group.episodes.first, let poster = downloads.artwork(first, series: true) {
+              if let first = group.episodes.first,
+                let poster = downloads.artwork(first, series: true)
+              {
                 Image(nsImage: poster).resizable().scaledToFill()
               } else {
                 MediaArtworkPlaceholder(symbol: "tv", symbolSize: 14)
@@ -217,9 +235,15 @@ struct OfflineTitleList: View {
               .font(.caption).foregroundStyle(.secondary)
             }
           }
-          LazyVGrid(columns: [GridItem(.adaptive(minimum: 280, maximum: 360), spacing: 18, alignment: .top)], alignment: .leading, spacing: 20) {
+          LazyVGrid(
+            columns: [
+              GridItem(.adaptive(minimum: 280, maximum: 360), spacing: 18, alignment: .top)
+            ], alignment: .leading, spacing: 20
+          ) {
             ForEach(group.episodes) { title in
-              Button { model.playOffline(title) } label: {
+              Button {
+                model.playOffline(title)
+              } label: {
                 OfflineEpisodeCard(
                   title: title,
                   picture: downloads.artwork(title, backdrop: true) ?? downloads.artwork(title))
@@ -233,7 +257,8 @@ struct OfflineTitleList: View {
       }
     }
     .confirmationDialog(
-      "Remove \(removing?.title ?? "this download")?", isPresented: Binding(
+      "Remove \(removing?.title ?? "this download")?",
+      isPresented: Binding(
         get: { removing != nil }, set: { if !$0 { removing = nil } }), presenting: removing
     ) { title in
       Button("Remove Download", role: .destructive) { downloads.remove(title.id) }
@@ -244,7 +269,9 @@ struct OfflineTitleList: View {
 
   @ViewBuilder
   private func menu(_ title: OfflineTitle) -> some View {
-    Button(OfflineTitlePresentation.playLabel(title), systemImage: "play.fill") { model.playOffline(title) }
+    Button(OfflineTitlePresentation.playLabel(title), systemImage: "play.fill") {
+      model.playOffline(title)
+    }
     Divider()
     Button("Remove Download…", systemImage: "trash", role: .destructive) { removing = title }
   }
@@ -326,7 +353,9 @@ private struct OfflinePosterCard: View {
         .frame(maxWidth: .infinity)
         .aspectRatio(2 / 3, contentMode: .fit)
         .clipped()
-        LinearGradient(colors: [.clear, .black.opacity(hovering ? 0.55 : 0.0)], startPoint: .center, endPoint: .bottom)
+        LinearGradient(
+          colors: [.clear, .black.opacity(hovering ? 0.55 : 0.0)], startPoint: .center,
+          endPoint: .bottom)
         Image(systemName: "play.fill")
           .font(.title3)
           .frame(width: 46, height: 46)
@@ -359,7 +388,8 @@ private struct OfflinePosterCard: View {
       .offset(y: hovering && !reduceMotion ? -4 : 0)
       VStack(alignment: .leading, spacing: 2) {
         Text(title.title).font(.callout.weight(.semibold)).lineLimit(1)
-        Text(OfflineTitlePresentation.details(title)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        Text(OfflineTitlePresentation.details(title)).font(.caption).foregroundStyle(.secondary)
+          .lineLimit(1)
       }
     }
     .contentShape(Rectangle())
@@ -395,7 +425,9 @@ private struct OfflineEpisodeCard: View {
             .foregroundStyle(.white.opacity(0.8))
         }
         Text(title.title).font(.headline).lineLimit(1)
-        Text(OfflineTitlePresentation.details(title)).font(.caption).foregroundStyle(.white.opacity(0.72)).lineLimit(1)
+        Text(OfflineTitlePresentation.details(title)).font(.caption).foregroundStyle(
+          .white.opacity(0.72)
+        ).lineLimit(1)
       }
       .padding(14)
       .padding(.trailing, 44)
@@ -426,7 +458,8 @@ private struct OfflineEpisodeCard: View {
     .contentShape(Rectangle())
     .animation(reduceMotion ? nil : AureliaDesign.responsiveSpring, value: hovering)
     .onHover { hovering = $0 }
-    .accessibilityLabel("\(OfflineTitlePresentation.playLabel(title)) \(title.parentTitle ?? "") \(title.title)")
+    .accessibilityLabel(
+      "\(OfflineTitlePresentation.playLabel(title)) \(title.parentTitle ?? "") \(title.title)")
   }
 }
 

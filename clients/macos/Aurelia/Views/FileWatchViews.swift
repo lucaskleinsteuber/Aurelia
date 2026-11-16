@@ -16,7 +16,9 @@ struct ServerFileWatchEditor: View {
   var body: some View {
     Group {
       if let stored {
-        AureliaSettingsSection("File Watch", symbol: "checkmark.shield", description: Self.description) {
+        AureliaSettingsSection(
+          "File Watch", symbol: "checkmark.shield", description: Self.description
+        ) {
           VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
               Toggle(
@@ -44,7 +46,8 @@ struct ServerFileWatchEditor: View {
               .accessibilityIdentifier("server-file-watch-depth")
               Text(
                 (FileCheckDepth(rawValue: stored.depth)?.detail ?? "")
-                  + (stored.canInspect ? "" : " This server has no FFmpeg, so it can only read every byte.")
+                  + (stored.canInspect
+                    ? "" : " This server has no FFmpeg, so it can only read every byte.")
               )
               .font(.caption).foregroundStyle(.secondary)
               .fixedSize(horizontal: false, vertical: true)
@@ -63,8 +66,10 @@ struct ServerFileWatchEditor: View {
               .pickerStyle(.menu)
               .fixedSize()
               .accessibilityIdentifier("server-file-watch-recheck")
-              Text("Reads every file again in this rhythm and compares it with the first time, to find bit rot.")
-                .font(.caption).foregroundStyle(.secondary)
+              Text(
+                "Reads every file again in this rhythm and compares it with the first time, to find bit rot."
+              )
+              .font(.caption).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 6) {
               if stored.enabled && stored.totalCount > 0 {
@@ -87,7 +92,8 @@ struct ServerFileWatchEditor: View {
         .accessibilityIdentifier("server-file-watch")
       } else if let loadError {
         AureliaSettingsSection("File Watch", symbol: "checkmark.shield") {
-          ErrorBanner(message: loadError, retry: { refreshRound += 1 }, retryDisabled: working, inline: true)
+          ErrorBanner(
+            message: loadError, retry: { refreshRound += 1 }, retryDisabled: working, inline: true)
         }
       }
     }
@@ -97,7 +103,9 @@ struct ServerFileWatchEditor: View {
   /// Loads now, then follows the progress every few seconds while files are still waiting.
   private func refreshWhileWorking() async {
     await load()
-    while !Task.isCancelled, let current = stored, current.enabled, current.pendingCount > 0 || current.running {
+    while !Task.isCancelled, let current = stored, current.enabled,
+      current.pendingCount > 0 || current.running
+    {
       try? await Task.sleep(for: .seconds(5))
       guard !Task.isCancelled else { return }
       await load()
@@ -163,7 +171,8 @@ struct FileProblemsPanel: View {
       .fixedSize()
       .labelsHidden()
       if let error {
-        ErrorBanner(message: error, retry: { Task { await load() } }, retryDisabled: loading, inline: true)
+        ErrorBanner(
+          message: error, retry: { Task { await load() } }, retryDisabled: loading, inline: true)
       }
       if let notice {
         Text(notice).font(.caption).foregroundStyle(.secondary)
@@ -181,7 +190,8 @@ struct FileProblemsPanel: View {
           description: Text(
             showsSetAside
               ? "No problem is set aside."
-              : "No examined file has a problem. Turn on the file watch in the server settings to examine your files.")
+              : "No examined file has a problem. Turn on the file watch in the server settings to examine your files."
+          )
         )
         .frame(maxWidth: .infinity, minHeight: 200)
       } else {
@@ -198,7 +208,8 @@ struct FileProblemsPanel: View {
         .foregroundStyle(problem.state == "notice" ? Color.secondary : Color.orange)
         .frame(width: 22)
       VStack(alignment: .leading, spacing: 3) {
-        Text("\(problem.title) · \(FileWatchText.problemTitle(problem.state))").font(.callout.weight(.semibold))
+        Text("\(problem.title) · \(FileWatchText.problemTitle(problem.state))").font(
+          .callout.weight(.semibold))
         Text(problem.fileName).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
         if let detail = problem.detail {
           Text(detail).font(.caption).fixedSize(horizontal: false, vertical: true)
@@ -215,18 +226,24 @@ struct FileProblemsPanel: View {
             try await $0.recheckFile(mediaId: problem.mediaId)
           }
         }
-          .help("Reads the file again from the start and keeps it as the new reference")
+        .help("Reads the file again from the start and keeps it as the new reference")
         Button(showsSetAside ? "Bring Back" : "Set Aside") {
           let ignored = !showsSetAside
-          act(done: nil) { try await $0.setFileProblemIgnored(mediaId: problem.mediaId, ignored: ignored) }
+          act(done: nil) {
+            try await $0.setFileProblemIgnored(mediaId: problem.mediaId, ignored: ignored)
+          }
         }
-        .help(showsSetAside ? "Shows the problem with the open ones again" : "Keeps the problem out of the count, for a file you know about")
+        .help(
+          showsSetAside
+            ? "Shows the problem with the open ones again"
+            : "Keeps the problem out of the count, for a file you know about")
       }
       .controlSize(.small)
       .disabled(loading)
     }
     .padding(12)
-    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    .background(
+      .quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
   }
 
   private func load() async {
@@ -271,13 +288,16 @@ struct DrivesPanel: View {
       )
       .font(.caption).foregroundStyle(.secondary)
       if let error {
-        ErrorBanner(message: error, retry: { Task { await load(refresh: false) } }, retryDisabled: loading, inline: true)
+        ErrorBanner(
+          message: error, retry: { Task { await load(refresh: false) } }, retryDisabled: loading,
+          inline: true)
       }
       if let answer {
         if answer.drives.isEmpty {
           ContentUnavailableView(
             "No Storage Locations", systemImage: "externaldrive",
-            description: Text("Add a storage location to see its drive here."))
+            description: Text("Add a storage location to see its drive here.")
+          )
           .frame(maxWidth: .infinity, minHeight: 160)
         }
         ForEach(answer.drives) { drive in row(drive) }
@@ -301,23 +321,35 @@ struct DrivesPanel: View {
 
   private func row(_ drive: DriveHealthSummary) -> some View {
     HStack(alignment: .top, spacing: 12) {
-      Image(systemName: drive.state == "failing" || drive.state == "warning" ? "externaldrive.badge.exclamationmark" : "externaldrive")
-        .foregroundStyle(drive.state == "failing" ? Color.red : drive.state == "warning" ? Color.orange : Color.secondary)
-        .frame(width: 22)
+      Image(
+        systemName: drive.state == "failing" || drive.state == "warning"
+          ? "externaldrive.badge.exclamationmark" : "externaldrive"
+      )
+      .foregroundStyle(
+        drive.state == "failing"
+          ? Color.red : drive.state == "warning" ? Color.orange : Color.secondary
+      )
+      .frame(width: 22)
       VStack(alignment: .leading, spacing: 3) {
-        Text("\(drive.name) · \(FileWatchText.driveTitle(drive.state))").font(.callout.weight(.semibold))
+        Text("\(drive.name) · \(FileWatchText.driveTitle(drive.state))").font(
+          .callout.weight(.semibold))
         Text(drive.libraries.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
         if let detail = drive.detail {
-          Text(detail).font(.caption).foregroundStyle(drive.state == "failing" ? Color.red : Color.primary)
-            .fixedSize(horizontal: false, vertical: true)
+          Text(detail).font(.caption).foregroundStyle(
+            drive.state == "failing" ? Color.red : Color.primary
+          )
+          .fixedSize(horizontal: false, vertical: true)
         }
         let facts = FileWatchText.driveFacts(drive)
-        if !facts.isEmpty { Text(facts).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+        if !facts.isEmpty {
+          Text(facts).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        }
       }
       Spacer(minLength: 0)
     }
     .padding(12)
-    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    .background(
+      .quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
   }
 
   private func load(refresh: Bool) async {

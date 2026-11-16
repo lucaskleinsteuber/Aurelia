@@ -41,14 +41,17 @@ struct IOSCoreTests {
     let data = pool.lease(host: "tv.local", fingerprint: "aa")
     let pictures = pool.lease(host: "tv.local", fingerprint: "aa", lane: .artwork)
     #expect(data.session !== pictures.session)
-    #expect(pool.lease(host: "tv.local", fingerprint: "AA", lane: .artwork).session === pictures.session)
+    #expect(
+      pool.lease(host: "tv.local", fingerprint: "AA", lane: .artwork).session === pictures.session)
   }
 
   @Test func aGenericDeviceNameGetsAStableTag() {
     let tag = UUID(uuidString: "AB12CD34-0000-4000-8000-000000000001")!
     #expect(IOSDeviceName.display(systemName: "iPhone", model: "iPhone", tag: tag) == "iPhone AB12")
-    #expect(IOSDeviceName.display(systemName: "Lucas’s iPad", model: "iPad", tag: tag) == "Lucas’s iPad")
-    #expect(IOSDeviceName.display(systemName: "Apple TV", model: "Apple TV", tag: nil) == "Apple TV")
+    #expect(
+      IOSDeviceName.display(systemName: "Lucas’s iPad", model: "iPad", tag: tag) == "Lucas’s iPad")
+    #expect(
+      IOSDeviceName.display(systemName: "Apple TV", model: "Apple TV", tag: nil) == "Apple TV")
   }
 
   @Test func onlyASilentServerCountsAsAsleep() {
@@ -143,8 +146,9 @@ struct IOSCoreTests {
     }
     // A server that is closed to the home network says so, not that its identity changed.
     let closed = IOSCoreFakeTransport(responses: [
-      response(infoJSON.replacingOccurrences(
-        of: "\"lanAccessEnabled\":true", with: "\"lanAccessEnabled\":false"))
+      response(
+        infoJSON.replacingOccurrences(
+          of: "\"lanAccessEnabled\":true", with: "\"lanAccessEnabled\":false"))
     ])
     await #expect(throws: IOSCoreError.lanAccessDisabled) {
       try await IOSAPIClient.inspect(baseURL: Self.baseURL, transport: closed)

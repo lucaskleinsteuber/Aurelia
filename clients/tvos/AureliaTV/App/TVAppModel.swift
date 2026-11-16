@@ -189,7 +189,9 @@ final class TVAppModel: ObservableObject {
         guard candidate.info.isSetup else {
           throw TVCoreError.server(
             status: 409, code: "setup_required",
-            message: "Set up this server in Aurelia on the Mac or Linux computer that runs it first.", retryAfter: nil)
+            message:
+              "Set up this server in Aurelia on the Mac or Linux computer that runs it first.",
+            retryAfter: nil)
         }
         inspected = candidate
         phase = .trust
@@ -586,7 +588,9 @@ final class TVAppModel: ObservableObject {
     if result.managementSetupRequired {
       throw TVCoreError.server(
         status: 409, code: "setup_required",
-        message: "Finish profile setup in Aurelia on the Mac or Linux computer that runs the server.", retryAfter: nil)
+        message:
+          "Finish profile setup in Aurelia on the Mac or Linux computer that runs the server.",
+        retryAfter: nil)
     }
     profiles = result.profiles
     error = nil
@@ -596,7 +600,8 @@ final class TVAppModel: ObservableObject {
 
   private func validate(_ capabilities: TVCapabilities) throws {
     try TVProtocolVersion.check(capabilities.formatVersion)
-    guard Set(["device-authorization-v1", "library-state-v1"]).isSubset(
+    guard
+      Set(["device-authorization-v1", "library-state-v1"]).isSubset(
         of: Set(capabilities.capabilities ?? []))
     else { throw TVCoreError.unsupportedServer }
   }

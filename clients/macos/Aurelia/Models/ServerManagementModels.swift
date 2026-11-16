@@ -226,7 +226,9 @@ struct ServerPowerSettings: Codable, Equatable, Sendable {
   var sleepKind: String? = nil
 
   var hostedByApp: Bool { hosting == "macApp" || hosting == "linuxApp" }
-  var hostName: String { hosting == "linuxApp" ? "the Linux PC" : hosting == "macApp" ? "the Mac" : "the server computer" }
+  var hostName: String {
+    hosting == "linuxApp" ? "the Linux PC" : hosting == "macApp" ? "the Mac" : "the server computer"
+  }
 
   /// Wake When a Device Connects matters only while the computer sleeps or is off, and only on a
   /// card that can wake on a direct packet.
@@ -243,39 +245,72 @@ struct ServerPowerSettings: Codable, Equatable, Sendable {
     func add(_ state: ServerWakeCheckItem.State, _ title: String, _ detail: String) {
       items.append(ServerWakeCheckItem(state: state, title: title, detail: detail))
     }
-    let network = network ?? "", wakeOn = wakeOn ?? "", support = wakeSupport ?? ""
+    let network = network ?? ""
+    let wakeOn = wakeOn ?? ""
+    let support = wakeSupport ?? ""
     switch network {
     case "wired":
-      add(.ok, "Connected by cable", "Wake-on-LAN needs a network cable to the router, and this computer has one.")
+      add(
+        .ok, "Connected by cable",
+        "Wake-on-LAN needs a network cable to the router, and this computer has one.")
     case "wifi":
-      add(.problem, "Connected by Wi-Fi", "Almost no computer wakes over Wi-Fi. Connect it to the router with a network cable.")
+      add(
+        .problem, "Connected by Wi-Fi",
+        "Almost no computer wakes over Wi-Fi. Connect it to the router with a network cable.")
     case "": break
     default:
-      add(.info, "Connection not recognized", "Wake-on-LAN needs a network cable to the router; Aurelia couldn't tell how this computer is connected.")
+      add(
+        .info, "Connection not recognized",
+        "Wake-on-LAN needs a network cable to the router; Aurelia couldn't tell how this computer is connected."
+      )
     }
     if !support.isEmpty && !support.contains("g") {
-      add(.problem, "The network card can't wake the computer", "Choose “Stop Only Aurelia Server” instead, or add a network card or USB network adapter that supports Wake-on-LAN.")
+      add(
+        .problem, "The network card can't wake the computer",
+        "Choose “Stop Only Aurelia Server” instead, or add a network card or USB network adapter that supports Wake-on-LAN."
+      )
     } else if wakeOn.contains("g") {
-      add(.ok, "Wake-on-LAN is on", "The network card wakes the computer when it gets a Wake-on-LAN call.")
+      add(
+        .ok, "Wake-on-LAN is on",
+        "The network card wakes the computer when it gets a Wake-on-LAN call.")
     } else if !wakeOn.isEmpty {
-      add(.warning, "Wake-on-LAN is off right now", "Aurelia switches it on at every start and before powering down. If waking fails, restart the computer once.")
+      add(
+        .warning, "Wake-on-LAN is off right now",
+        "Aurelia switches it on at every start and before powering down. If waking fails, restart the computer once."
+      )
     } else {
-      add(.info, "Network card not checked yet", "The server checks its network card when the computer starts. Restart it once, or update Aurelia Server, to see it here.")
+      add(
+        .info, "Network card not checked yet",
+        "The server checks its network card when the computer starts. Restart it once, or update Aurelia Server, to see it here."
+      )
     }
     if mode == "sleep" {
       switch sleepKind ?? "" {
       case "deep":
-        add(.ok, "Real sleep", "Fans and disks stop, it uses only a few watts, and waking takes about 10 to 20 seconds.")
+        add(
+          .ok, "Real sleep",
+          "Fans and disks stop, it uses only a few watts, and waking takes about 10 to 20 seconds.")
       case "light":
-        add(.warning, "Only light sleep", "This computer offers only a lighter sleep (s2idle). It may use more power, and some network cards can't wake it. Try it once.")
+        add(
+          .warning, "Only light sleep",
+          "This computer offers only a lighter sleep (s2idle). It may use more power, and some network cards can't wake it. Try it once."
+        )
       case "none":
-        add(.problem, "This computer can't sleep", "Choose “Shut Down the Computer” or “Stop Only Aurelia Server” instead.")
+        add(
+          .problem, "This computer can't sleep",
+          "Choose “Shut Down the Computer” or “Stop Only Aurelia Server” instead.")
       default: break
       }
     } else {
-      add(.info, "Waking from off needs the BIOS", "Aurelia can't check this from here. Open the BIOS setup (usually Del or F2 right after switching on), turn on “Wake on LAN”, “Power On By PCI-E” or “Resume by LAN”, and turn off “ErP” or “Deep Sleep”. Starting takes 30 to 60 seconds, because the whole computer starts up; waking from sleep is much faster.")
+      add(
+        .info, "Waking from off needs the BIOS",
+        "Aurelia can't check this from here. Open the BIOS setup (usually Del or F2 right after switching on), turn on “Wake on LAN”, “Power On By PCI-E” or “Resume by LAN”, and turn off “ErP” or “Deep Sleep”. Starting takes 30 to 60 seconds, because the whole computer starts up; waking from sleep is much faster."
+      )
     }
-    add(.info, "Try it once", "Let the server power down, then open Aurelia on a Mac, Linux PC or iPhone: it sends the Wake-on-LAN call and connects once the server is back. If it stays off, its power button starts it as usual.")
+    add(
+      .info, "Try it once",
+      "Let the server power down, then open Aurelia on a Mac, Linux PC or iPhone: it sends the Wake-on-LAN call and connects once the server is back. If it stays off, its power button starts it as usual."
+    )
     return items
   }
 

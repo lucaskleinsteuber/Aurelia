@@ -5,9 +5,12 @@ import Testing
 struct TVScrubAndUpNextTests {
   @Test func suggestionsFollowAMovieOrALastEpisodeWithoutACountdown() throws {
     let duration: Int64 = 6_000_000
-    #expect(!TVPlayerPolicy.wantsSuggestions(position: 2_000_000, duration: duration, hasNext: false))
-    #expect(TVPlayerPolicy.wantsSuggestions(position: 3_000_000, duration: duration, hasNext: false))
-    #expect(!TVPlayerPolicy.wantsSuggestions(position: 5_000_000, duration: duration, hasNext: true))
+    #expect(
+      !TVPlayerPolicy.wantsSuggestions(position: 2_000_000, duration: duration, hasNext: false))
+    #expect(
+      TVPlayerPolicy.wantsSuggestions(position: 3_000_000, duration: duration, hasNext: false))
+    #expect(
+      !TVPlayerPolicy.wantsSuggestions(position: 5_000_000, duration: duration, hasNext: true))
     #expect(
       TVPlayerPolicy.showsSuggestion(
         position: 5_500_000, duration: duration, hasNext: false, hasSuggestion: true,
@@ -119,9 +122,11 @@ struct TVScrubAndUpNextTests {
         position: 2_400_000, duration: 2_700_000, hasNext: true, autoplay: true,
         stopsAtEnd: false, dismissed: false, creditsStart: 2_400_000))
     #expect(
-      TVPlayerPolicy.showsForCredits(position: 2_400_500, duration: 2_700_000, creditsStart: 2_400_000))
+      TVPlayerPolicy.showsForCredits(
+        position: 2_400_500, duration: 2_700_000, creditsStart: 2_400_000))
     #expect(
-      TVPlayerPolicy.upNextSeconds(position: 2_405_000, duration: 2_700_000, creditsAnchor: 2_400_000)
+      TVPlayerPolicy.upNextSeconds(
+        position: 2_405_000, duration: 2_700_000, creditsAnchor: 2_400_000)
         == 15)
     #expect(
       TVPlayerPolicy.nextFinishesCurrent(
@@ -144,7 +149,8 @@ struct TVScrubAndUpNextTests {
     #expect(
       !TVPlayerPolicy.skipsIntroAutomatically(
         setting: .automatic, alreadySkipped: false, movedIntoIntro: true, buttonShown: true))
-    #expect(TVMediaSegments(introStartMilliseconds: 90_000, introEndMilliseconds: 60_000).intro == nil)
+    #expect(
+      TVMediaSegments(introStartMilliseconds: 90_000, introEndMilliseconds: 60_000).intro == nil)
   }
 
   @Test func introAndCreditsChoicesDecodeWithDefaultsFromOlderSettings() throws {

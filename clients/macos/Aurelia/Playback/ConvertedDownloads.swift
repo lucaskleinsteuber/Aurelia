@@ -43,7 +43,8 @@ enum DownloadQualityPreference {
   static let ask = "ask"
   static let original = "original"
   static let choices: [(id: String, title: String)] = [
-    (ask, "Ask Every Time"), (original, "Original"), ("1080p", "1080p"), ("720p", "720p"), ("480p", "480p"),
+    (ask, "Ask Every Time"), (original, "Original"), ("1080p", "1080p"), ("720p", "720p"),
+    ("480p", "480p"),
   ]
   private static let order = ["1080p", "720p", "480p", "360p"]
 
@@ -90,8 +91,11 @@ enum DownloadText {
   static func audio(_ track: DownloadAudioTrack) -> String {
     let name =
       track.title?.isEmpty == false
-      ? track.title! : track.language.flatMap { Locale.current.localizedString(forLanguageCode: $0) } ?? "Track \(track.index)"
-    let layout = track.channels >= 6 ? "\(track.channels - 1).1" : track.channels == 1 ? "Mono" : "Stereo"
+      ? track.title!
+      : track.language.flatMap { Locale.current.localizedString(forLanguageCode: $0) }
+        ?? "Track \(track.index)"
+    let layout =
+      track.channels >= 6 ? "\(track.channels - 1).1" : track.channels == 1 ? "Mono" : "Stereo"
     return "\(name) · \(layout)"
   }
 }
@@ -168,7 +172,9 @@ struct ConvertedFileDownload {
           waited += delay
           try await Task.sleep(for: .seconds(delay))
         } catch let failure as URLError where failure.code != .cancelled {
-          guard let delay = ConvertedDownloadPlan.retryDelay(status: nil, retryAfter: nil, attempt: attempt)
+          guard
+            let delay = ConvertedDownloadPlan.retryDelay(
+              status: nil, retryAfter: nil, attempt: attempt)
           else { throw failure }
           attempt += 1
           try await Task.sleep(for: .seconds(delay))

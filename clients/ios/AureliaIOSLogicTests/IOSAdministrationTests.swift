@@ -27,18 +27,24 @@ struct IOSAdministrationTests {
       [String: String].self, from: requests[1].httpBody ?? Data())
     #expect(confirmation["action"] == "DELETE /api/v1/libraries/\(library.uuidString.lowercased())")
     #expect(confirmation["payloadHash"] == IOSApprovalExecutor.payloadHash(nil))
-    #expect(requests[2].value(forHTTPHeaderField: "X-Aurelia-Approval") == String(repeating: "T", count: 43))
+    #expect(
+      requests[2].value(forHTTPHeaderField: "X-Aurelia-Approval")
+        == String(repeating: "T", count: 43))
     #expect(requests[2].httpMethod == "DELETE")
   }
 
   @Test func approvalCoversQueryAndBody() throws {
-    let url = URL(string: "https://fixture.invalid:43111/api/v1/libraries/folders?path=/Volumes/My%20Drive")!
-    #expect(try IOSApprovalExecutor.action(method: "GET", url: url)
-      == "GET /api/v1/libraries/folders?path=/Volumes/My%20Drive")
-    #expect(IOSApprovalExecutor.payloadHash(Data())
-      == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
-    #expect(IOSApprovalExecutor.payloadHash(Data("{}".utf8))
-      == "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a")
+    let url = URL(
+      string: "https://fixture.invalid:43111/api/v1/libraries/folders?path=/Volumes/My%20Drive")!
+    #expect(
+      try IOSApprovalExecutor.action(method: "GET", url: url)
+        == "GET /api/v1/libraries/folders?path=/Volumes/My%20Drive")
+    #expect(
+      IOSApprovalExecutor.payloadHash(Data())
+        == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+    #expect(
+      IOSApprovalExecutor.payloadHash(Data("{}".utf8))
+        == "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a")
   }
 
   @Test func lockedManagementIsReportedWithoutRetrying() async throws {
@@ -71,7 +77,9 @@ struct IOSAdministrationTests {
     #expect(expiry == IOSServerDate.parse("2099-01-01T00:10:00Z"))
     let request = try #require(await transport.requests.first)
     #expect(request.url?.path == "/api/v1/management/unlock")
-    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer " + String(repeating: "P", count: 43))
+    #expect(
+      request.value(forHTTPHeaderField: "Authorization") == "Bearer "
+        + String(repeating: "P", count: 43))
     await #expect(throws: IOSCoreError.self) {
       _ = try await api(transport).unlockManagement(password: "")
     }
@@ -162,27 +170,45 @@ struct IOSAdministrationTests {
   @Test func theWakeOnLanCheckSaysWhatTheServerFoundAndWhatOnlyATestShows() throws {
     var server = IOSServerPower(
       available: true, mode: "sleep", idleMinutes: 15, awakeFrom: nil, awakeUntil: nil,
-      wakeSupport: "pumbg", hosting: "linuxServer", network: "wired", wakeOn: "g", sleepKind: "deep")
+      wakeSupport: "pumbg", hosting: "linuxServer", network: "wired", wakeOn: "g", sleepKind: "deep"
+    )
     func titles(_ mode: String) -> [String] {
       (IOSPowerRules.wakeCheck(server, mode: mode) ?? []).map { "\($0.state): \($0.title)" }
     }
-    #expect(titles("sleep") == ["ok: Connected by cable", "ok: Wake-on-LAN is on", "ok: Real sleep", "info: Try it once"])
-    #expect(titles("shutdown") == ["ok: Connected by cable", "ok: Wake-on-LAN is on", "info: Waking from off needs the BIOS", "info: Try it once"])
+    #expect(
+      titles("sleep") == [
+        "ok: Connected by cable", "ok: Wake-on-LAN is on", "ok: Real sleep", "info: Try it once",
+      ])
+    #expect(
+      titles("shutdown") == [
+        "ok: Connected by cable", "ok: Wake-on-LAN is on", "info: Waking from off needs the BIOS",
+        "info: Try it once",
+      ])
     #expect(IOSPowerRules.wakeCheck(server, mode: "off") == nil)
     #expect(IOSPowerRules.wakeCheck(server, mode: "stop") == nil)
     server.network = "wifi"
     server.wakeOn = "d"
     server.sleepKind = "light"
-    #expect(titles("sleep") == ["problem: Connected by Wi-Fi", "warning: Wake-on-LAN is off right now", "warning: Only light sleep", "info: Try it once"])
+    #expect(
+      titles("sleep") == [
+        "problem: Connected by Wi-Fi", "warning: Wake-on-LAN is off right now",
+        "warning: Only light sleep", "info: Try it once",
+      ])
     server.wakeSupport = "d"
     server.sleepKind = "none"
-    #expect(Array(titles("sleep")[1...2]) == ["problem: The network card can't wake the computer", "problem: This computer can't sleep"])
+    #expect(
+      Array(titles("sleep")[1...2]) == [
+        "problem: The network card can't wake the computer", "problem: This computer can't sleep",
+      ])
     server.hosting = "macApp"
     #expect(IOSPowerRules.wakeCheck(server, mode: "sleep") == nil)
     let older = try JSONDecoder().decode(
       IOSServerPower.self,
       from: Data(#"{"available":true,"mode":"sleep","idleMinutes":15,"wakeSupport":"pumbg"}"#.utf8))
-    #expect((IOSPowerRules.wakeCheck(older) ?? []).map(\.title) == ["Network card not checked yet", "Try it once"])
+    #expect(
+      (IOSPowerRules.wakeCheck(older) ?? []).map(\.title) == [
+        "Network card not checked yet", "Try it once",
+      ])
   }
 
   @Test func powerPayloadChecksTimesAndAsksOnlyCapableCards() throws {
@@ -229,8 +255,9 @@ struct IOSAdministrationTests {
   }
 
   @Test func permissionsFollowTheServer() {
-    #expect(IOSAdminPermissions(role: "owner", accessMode: "selectedTitles")
-      == .init(role: "owner", accessMode: nil))
+    #expect(
+      IOSAdminPermissions(role: "owner", accessMode: "selectedTitles")
+        == .init(role: "owner", accessMode: nil))
     let owner = IOSAdminPermissions(role: "owner", accessMode: nil)
     #expect(owner.owner && owner.administrator && owner.storage)
     let admin = IOSAdminPermissions(role: "admin", accessMode: "entireLibrary")
@@ -297,7 +324,8 @@ struct IOSAdministrationTests {
           "completedAt":null}
           """.utf8))
     }
-    #expect(try job("completed", matched: 23, review: 2).summary == "Done · 23 matched, 2 need review")
+    #expect(
+      try job("completed", matched: 23, review: 2).summary == "Done · 23 matched, 2 need review")
     #expect(try job("completed").summary == "Done · 25 titles checked")
     #expect(try job("running").summary == "10 of 25 titles checked")
     #expect(try job("running").progress == 0.4)
@@ -313,11 +341,18 @@ struct IOSAdministrationTests {
     }
     let file = item("Show/extra.mkv")
     let folder = item("Show", folder: true)
-    #expect(IOSImportRules.choices(for: [file]).map(\.id) == ["movie", "episode", "extra", "trailer", "ignore"])
-    #expect(IOSImportRules.choices(for: [folder]).map(\.id) == ["movie", "series", "extra", "trailer", "ignore"])
+    #expect(
+      IOSImportRules.choices(for: [file]).map(\.id) == [
+        "movie", "episode", "extra", "trailer", "ignore",
+      ])
+    #expect(
+      IOSImportRules.choices(for: [folder]).map(\.id) == [
+        "movie", "series", "extra", "trailer", "ignore",
+      ])
     #expect(!IOSImportRules.choices(for: [file, item("b.mkv")]).map(\.id).contains("episode"))
 
-    let show = IOSImportPreviewTarget(relativePath: "Show", title: "Show", kind: "series", seasonNumbers: [1])
+    let show = IOSImportPreviewTarget(
+      relativePath: "Show", title: "Show", kind: "series", seasonNumbers: [1])
     var form = IOSImportRules.Form()
     form.choice = "episode"
     #expect(throws: IOSImportRules.Problem.parent) {
@@ -327,11 +362,12 @@ struct IOSAdministrationTests {
     form.season = 2
     form.episode = 5
     let changes = try IOSImportRules.changes(items: [file], form: form, targets: [show])
-    #expect(changes == [
-      IOSImportAssignment(
-        relativePath: "Show/extra.mkv", isDirectory: false, kind: "episode",
-        parentRelativePath: "Show", seasonNumber: 2, episodeNumber: 5)
-    ])
+    #expect(
+      changes == [
+        IOSImportAssignment(
+          relativePath: "Show/extra.mkv", isDirectory: false, kind: "episode",
+          parentRelativePath: "Show", seasonNumber: 2, episodeNumber: 5)
+      ])
     form.episode = 0
     #expect(throws: IOSImportRules.Problem.episodeNumber) {
       _ = try IOSImportRules.changes(items: [file], form: form, targets: [show])
@@ -345,15 +381,19 @@ struct IOSAdministrationTests {
   }
 
   @Test func wakeStatusSaysWhetherWakeServerCanWork() throws {
-    let defaults = try #require(UserDefaults(suiteName: "aurelia.ios.admin.wake.\(UUID().uuidString)"))
+    let defaults = try #require(
+      UserDefaults(suiteName: "aurelia.ios.admin.wake.\(UUID().uuidString)"))
     let server = UUID()
-    #expect(IOSWakeOnLan.status(for: server, defaults: defaults).summary == "Not reported by the server")
+    #expect(
+      IOSWakeOnLan.status(for: server, defaults: defaults).summary == "Not reported by the server")
     let info = IOSServerInfo(
       serverId: server, name: "Synthetic", version: "2.13.0", isSetup: true, lanAccessEnabled: true,
       lanHttpsPort: 43111, publicKeyFingerprint: fingerprint, displayFingerprint: nil,
       capabilities: [], wakeOnLanAddresses: ["02:00:5e:10:00:01"], hosting: "linuxServer")
     IOSWakeOnLan.remember(serverID: server, info: info, hosts: [], defaults: defaults)
-    #expect(IOSWakeOnLan.status(for: server, defaults: defaults).summary == "Connect once to learn its address")
+    #expect(
+      IOSWakeOnLan.status(for: server, defaults: defaults).summary
+        == "Connect once to learn its address")
     IOSWakeOnLan.remember(serverID: server, info: info, hosts: ["192.0.2.10"], defaults: defaults)
     let ready = IOSWakeOnLan.status(for: server, defaults: defaults)
     #expect(ready.canWake)

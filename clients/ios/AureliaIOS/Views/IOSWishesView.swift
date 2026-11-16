@@ -125,7 +125,9 @@ struct IOSWishesView: View {
         composerExpanded.toggle()
         if composerExpanded && !providerEnabled { showManualForm = true }
       } label: {
-        Label(composerExpanded ? "Close" : "Make a Wish", systemImage: composerExpanded ? "xmark" : "plus")
+        Label(
+          composerExpanded ? "Close" : "Make a Wish",
+          systemImage: composerExpanded ? "xmark" : "plus")
       }
       .buttonStyle(IOSButtonStyle(kind: composerExpanded ? .secondary : .primary))
       .accessibilityIdentifier("wishes-toggle-composer")
@@ -297,13 +299,16 @@ struct IOSWishesView: View {
       }
     }
     .padding(10)
-    .background(IOSDesign.canvas.opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .background(
+      IOSDesign.canvas.opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
   }
 
   private var manualComposerCard: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text(providerEnabled ? "Write a Wish Manually" : "TMDB search is off — enter details manually")
-        .font(.subheadline.weight(.semibold))
+      Text(
+        providerEnabled ? "Write a Wish Manually" : "TMDB search is off — enter details manually"
+      )
+      .font(.subheadline.weight(.semibold))
 
       Picker("Type", selection: $manualKind) {
         Text("Movie").tag(IOSMediaKind.movie)
@@ -494,7 +499,8 @@ struct IOSWishesView: View {
                 Text("Link & Complete").font(.caption.weight(.semibold))
               }
               .padding(8)
-              .background(IOSDesign.raised, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+              .background(
+                IOSDesign.raised, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .buttonStyle(.plain)
             .disabled(isBusy)
@@ -852,7 +858,9 @@ struct IOSWishPosterView: View {
         image = cached
         return
       }
-      guard let data = await model.wishPosterBytes.data(posterPath: trimmedPath, width: 342, client: api),
+      guard
+        let data = await model.wishPosterBytes.data(
+          posterPath: trimmedPath, width: 342, client: api),
         !Task.isCancelled
       else { return }
       let decoded = await Task.detached(priority: .utility) {

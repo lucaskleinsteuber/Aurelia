@@ -5,9 +5,12 @@ import Testing
 struct IOSScrubAndUpNextTests {
   @Test func suggestionsFollowAMovieOrALastEpisodeWithoutACountdown() throws {
     let duration: Int64 = 6_000_000
-    #expect(!IOSPlayerPolicy.wantsSuggestions(position: 2_000_000, duration: duration, hasNext: false))
-    #expect(IOSPlayerPolicy.wantsSuggestions(position: 3_000_000, duration: duration, hasNext: false))
-    #expect(!IOSPlayerPolicy.wantsSuggestions(position: 5_000_000, duration: duration, hasNext: true))
+    #expect(
+      !IOSPlayerPolicy.wantsSuggestions(position: 2_000_000, duration: duration, hasNext: false))
+    #expect(
+      IOSPlayerPolicy.wantsSuggestions(position: 3_000_000, duration: duration, hasNext: false))
+    #expect(
+      !IOSPlayerPolicy.wantsSuggestions(position: 5_000_000, duration: duration, hasNext: true))
     #expect(
       IOSPlayerPolicy.showsSuggestion(
         position: 5_500_000, duration: duration, hasNext: false, hasSuggestion: true,
@@ -119,9 +122,11 @@ struct IOSScrubAndUpNextTests {
         position: 2_400_000, duration: 2_700_000, hasNext: true, autoplay: true,
         stopsAtEnd: false, dismissed: false, creditsStart: 2_400_000))
     #expect(
-      IOSPlayerPolicy.showsForCredits(position: 2_400_500, duration: 2_700_000, creditsStart: 2_400_000))
+      IOSPlayerPolicy.showsForCredits(
+        position: 2_400_500, duration: 2_700_000, creditsStart: 2_400_000))
     #expect(
-      IOSPlayerPolicy.upNextSeconds(position: 2_405_000, duration: 2_700_000, creditsAnchor: 2_400_000)
+      IOSPlayerPolicy.upNextSeconds(
+        position: 2_405_000, duration: 2_700_000, creditsAnchor: 2_400_000)
         == 15)
     #expect(
       IOSPlayerPolicy.nextFinishesCurrent(
@@ -144,7 +149,8 @@ struct IOSScrubAndUpNextTests {
     #expect(
       !IOSPlayerPolicy.skipsIntroAutomatically(
         setting: .automatic, alreadySkipped: false, movedIntoIntro: true, buttonShown: true))
-    #expect(IOSMediaSegments(introStartMilliseconds: 90_000, introEndMilliseconds: 60_000).intro == nil)
+    #expect(
+      IOSMediaSegments(introStartMilliseconds: 90_000, introEndMilliseconds: 60_000).intro == nil)
   }
 
   @Test func introAndCreditsChoicesDecodeWithDefaultsFromOlderSettings() throws {
@@ -241,7 +247,8 @@ struct IOSCinemaTests {
       trailer: try item(UUID(), parent: film), title: try item(film, kind: .movie))
     let foreign = IOSCinemaTrailer(
       trailer: try item(UUID(), parent: other), title: try item(other, kind: .movie))
-    let acts = IOSCinemaPlan.acts(ad: .popcorn, trailers: [own, foreign], film: film, title: "Film")
+    let acts = IOSCinemaPlan.acts(
+      ad: .popcorn, trailers: [own, foreign], film: film, title: "Film")
     #expect(acts == [.ad(.popcorn), .trailer(foreign), .feature(title: "Film")])
     #expect(IOSCinemaPlan.acts(ad: nil, trailers: [own], film: film, title: "Film").isEmpty)
     #expect(IOSCinemaPlan.ad(after: nil) == .iceCream)

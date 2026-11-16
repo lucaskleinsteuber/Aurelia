@@ -17,24 +17,25 @@ struct IOSCollectionCard: View {
           artwork: collection.poster ?? collection.backdrop
             ?? collection.items.lazy.compactMap(\.poster).first,
           width: 320,
-          symbol: "rectangle.stack")
-          .aspectRatio(2 / 3, contentMode: .fit)
-          .overlay(alignment: .topLeading) {
-            if let provider = IOSCollectionRules.providerLabel(collection.provider) {
-              badge(provider == "TMDB Collection" ? "TMDB" : provider)
-            } else if collection.isSmart {
-              badge("Smart")
-            }
+          symbol: "rectangle.stack"
+        )
+        .aspectRatio(2 / 3, contentMode: .fit)
+        .overlay(alignment: .topLeading) {
+          if let provider = IOSCollectionRules.providerLabel(collection.provider) {
+            badge(provider == "TMDB Collection" ? "TMDB" : provider)
+          } else if collection.isSmart {
+            badge("Smart")
           }
-          .overlay(alignment: .bottom) {
-            let total =
-              collection.itemCount > 0 ? collection.itemCount : collection.totalCount
-            if total > 0, collection.watchedCount > 0 {
-              IOSProgressBar(fraction: Double(collection.watchedCount) / Double(total))
-                .padding(8)
-            }
+        }
+        .overlay(alignment: .bottom) {
+          let total =
+            collection.itemCount > 0 ? collection.itemCount : collection.totalCount
+          if total > 0, collection.watchedCount > 0 {
+            IOSProgressBar(fraction: Double(collection.watchedCount) / Double(total))
+              .padding(8)
           }
-          .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
       }
       VStack(alignment: .leading, spacing: 1) {
         Text(collection.name).font(.footnote.weight(.semibold)).lineLimit(1)
@@ -114,7 +115,7 @@ struct IOSCollectionsView: View {
   }
 
   private func next(replacing: Bool = false) async {
-    guard (!loading || replacing), (!complete || replacing), let api = model.client else { return }
+    guard !loading || replacing, !complete || replacing, let api = model.client else { return }
     let run = generation
     let session = model.session?.sessionId
     loading = true
@@ -443,24 +444,28 @@ struct IOSCollectionView: View {
         NavigationLink {
           if let item = linkedItem {
             IOSDetailView(
-              id: item.detailID, initial: item, selectedEpisodeID: member.kind == .episode ? item.id : nil)
+              id: item.detailID, initial: item,
+              selectedEpisodeID: member.kind == .episode ? item.id : nil)
           } else {
             IOSDetailView(
               id: member.mediaId,
-              initial: firstEpisode ?? IOSCatalogItem(
-                id: member.mediaId, kind: member.kind, title: member.displayTitle, originalTitle: nil,
-                year: nil, overview: nil, genres: [], poster: nil, backdrop: nil,
-                availability: .available, isFavorite: false, progress: nil, addedAt: "",
-                parentTitle: nil, seasonNumber: member.seasonNumber, episodeNumber: nil,
-                parentId: nil, watchState: nil, libraryAvailability: nil))
+              initial: firstEpisode
+                ?? IOSCatalogItem(
+                  id: member.mediaId, kind: member.kind, title: member.displayTitle,
+                  originalTitle: nil,
+                  year: nil, overview: nil, genres: [], poster: nil, backdrop: nil,
+                  availability: .available, isFavorite: false, progress: nil, addedAt: "",
+                  parentTitle: nil, seasonNumber: member.seasonNumber, episodeNumber: nil,
+                  parentId: nil, watchState: nil, libraryAvailability: nil))
           }
         } label: {
           HStack(spacing: 12) {
             IOSArtworkView(
               artwork: linkedItem?.poster ?? firstEpisode?.poster ?? firstEpisode?.backdrop,
-              width: 320, symbol: member.kind == .movie ? "film" : "tv")
-              .frame(width: 54, height: 81)
-              .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+              width: 320, symbol: member.kind == .movie ? "film" : "tv"
+            )
+            .frame(width: 54, height: 81)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             VStack(alignment: .leading, spacing: 4) {
               Text("\(index + 1). \(member.displayTitle)")
@@ -496,7 +501,8 @@ struct IOSCollectionView: View {
           .accessibilityLabel(expanded ? "Hide Episodes" : "Show Episodes")
         }
 
-        if let playTarget = (member.kind == .movie || member.kind == .episode ? linkedItem : firstEpisode),
+        if let playTarget =
+          (member.kind == .movie || member.kind == .episode ? linkedItem : firstEpisode),
           playTarget.isPlayable
         {
           Button {
@@ -702,8 +708,8 @@ struct IOSCollectionView: View {
   }
 }
 
-private extension IOSCoreError {
-  var isNotFound: Bool {
+extension IOSCoreError {
+  fileprivate var isNotFound: Bool {
     if case .server(let status, _, _, _) = self { return status == 404 }
     return false
   }

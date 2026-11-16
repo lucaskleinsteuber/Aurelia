@@ -116,7 +116,10 @@ struct ServerNetworkEditor: View {
   }
 
   var body: some View {
-    AureliaSettingsSection("Network", symbol: "network", description: "Which networks may reach the server and how it shows up in your home network.") {
+    AureliaSettingsSection(
+      "Network", symbol: "network",
+      description: "Which networks may reach the server and how it shows up in your home network."
+    ) {
       VStack(alignment: .leading, spacing: 12) {
         LabeledContent("Active name", value: configuration.active.serverName)
         LabeledContent("Connected address", value: model.profile?.baseURL.absoluteString ?? "—")
@@ -449,7 +452,11 @@ struct ServerLibraryJobsEditor: View {
     _draft = State(initialValue: ServerSettingsDraft(configuration.stored))
   }
   var body: some View {
-    AureliaSettingsSection("Library Maintenance", symbol: "wrench.and.screwdriver", description: "When the server checks the library and tidies up, and how much work it may queue.") {
+    AureliaSettingsSection(
+      "Library Maintenance", symbol: "wrench.and.screwdriver",
+      description:
+        "When the server checks the library and tidies up, and how much work it may queue."
+    ) {
       VStack(alignment: .leading, spacing: 12) {
         Toggle(
           "Notice new and removed files automatically", isOn: $draft.value.monitoringEnabled)
@@ -510,7 +517,9 @@ struct ServerLibraryJobsEditor: View {
         if let jobs {
           ForEach(jobs.scans.prefix(12)) { scan in
             HStack {
-              Text("Scan · \(ReadableState.text(scan.state.rawValue)) · \(scan.filesDiscovered) files").font(.caption)
+              Text(
+                "Scan · \(ReadableState.text(scan.state.rawValue)) · \(scan.filesDiscovered) files"
+              ).font(.caption)
               Spacer()
               if [.queued, .running, .waitingForStorage].contains(scan.state) {
                 Button("Cancel") {
@@ -534,8 +543,10 @@ struct ServerLibraryJobsEditor: View {
           ForEach(jobs.metadata.prefix(12)) { job in
             HStack {
               VStack(alignment: .leading, spacing: 3) {
-                Text("Metadata · \(ReadableState.text(job.state.rawValue)) · \(job.itemsProcessed)/\(job.itemsTotal)")
-                  .font(.caption)
+                Text(
+                  "Metadata · \(ReadableState.text(job.state.rawValue)) · \(job.itemsProcessed)/\(job.itemsTotal)"
+                )
+                .font(.caption)
                 if let status = job.waitingStatus() {
                   Text(status).font(.caption).foregroundStyle(.secondary)
                     .accessibilityIdentifier("metadata-wait-status")
@@ -642,7 +653,10 @@ struct ServerBackupsEditor: View {
     _draft = State(initialValue: ServerSettingsDraft(configuration.stored))
   }
   var body: some View {
-    AureliaSettingsSection("Backup Details", symbol: "externaldrive", description: "Encrypted backups you keep yourself, and restoring from one.") {
+    AureliaSettingsSection(
+      "Backup Details", symbol: "externaldrive",
+      description: "Encrypted backups you keep yourself, and restoring from one."
+    ) {
       VStack(alignment: .leading, spacing: 12) {
         Stepper(
           "Automatic backup every \(draft.value.backupIntervalHours) hours",
@@ -756,10 +770,10 @@ struct ServerBackupsEditor: View {
         }
       } catch { if let failure = scope.message(for: error) { message = failure } }
     }.onChange(of: model.administrationGeneration) { _, _ in clearSecrets() }
-      .onDisappear {
-        actionTask?.cancel()
-        clearSecrets()
-      }
+    .onDisappear {
+      actionTask?.cancel()
+      clearSecrets()
+    }
   }
   private func run(_ action: @escaping @MainActor (ServerAdministrationScope) async throws -> Void)
   {
@@ -808,7 +822,10 @@ struct ServerDiagnosticsEditor: View {
     _draft = State(initialValue: ServerSettingsDraft(configuration.stored))
   }
   var body: some View {
-    AureliaSettingsSection("Diagnostics", symbol: "stethoscope", description: "A report of the server's state, for when something goes wrong.") {
+    AureliaSettingsSection(
+      "Diagnostics", symbol: "stethoscope",
+      description: "A report of the server's state, for when something goes wrong."
+    ) {
       VStack(alignment: .leading, spacing: 12) {
         Stepper(
           "Retain events for \(draft.value.eventRetentionDays) days",

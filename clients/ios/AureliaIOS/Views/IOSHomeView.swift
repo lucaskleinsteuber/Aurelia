@@ -50,8 +50,10 @@ struct IOSHomeView: View {
         VStack(alignment: .leading, spacing: 2) {
           Text(open.map { "\($0.hostName)'s Movie Night is on" } ?? "Can't decide what to watch?")
             .font(.body.weight(.semibold))
-          Text(open == nil ? "Start a Movie Night and let everyone swipe." : "Join and start swiping.")
-            .font(.caption).foregroundStyle(.secondary)
+          Text(
+            open == nil ? "Start a Movie Night and let everyone swipe." : "Join and start swiping."
+          )
+          .font(.caption).foregroundStyle(.secondary)
         }
         Spacer()
         Image(systemName: "chevron.right").foregroundStyle(.secondary)
@@ -128,7 +130,8 @@ struct IOSHomeView: View {
           ForEach(home.becauseYouWatched ?? []) { rail in
             genreShelf(
               IOSHomeGenreRow(
-                genre: "Because You Watched \(rail.sourceTitle)", items: rail.suggestions.map(\.item)))
+                genre: "Because You Watched \(rail.sourceTitle)",
+                items: rail.suggestions.map(\.item)))
           }
           if model.supportsWatchlist && !model.watchlistItems.isEmpty {
             shelf("Watchlist", items: model.watchlistItems, section: .watchlist)
@@ -226,12 +229,15 @@ struct IOSHomeView: View {
     }
     .fullScreenCover(item: $movieNight) { launch in
       if let api = model.client {
-        IOSMovieNightView(api: api, deviceName: model.deviceName, joining: launch.joining) { mediaID in
+        IOSMovieNightView(api: api, deviceName: model.deviceName, joining: launch.joining) {
+          mediaID in
           Task {
             // The match plays the way Home plays anything, once Movie Night has closed: the plan
             // picks the episode for a show.
             try? await Task.sleep(for: .milliseconds(700))
-            if let item = try? await model.client?.summary(id: mediaID) { play(item, viaPlan: true) }
+            if let item = try? await model.client?.summary(id: mediaID) {
+              play(item, viaPlan: true)
+            }
           }
         }
         .environmentObject(model)

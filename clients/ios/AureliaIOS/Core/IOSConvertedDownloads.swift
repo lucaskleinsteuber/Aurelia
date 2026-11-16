@@ -45,7 +45,8 @@ enum IOSDownloadQualityPreference {
   static let ask = "ask"
   static let original = "original"
   static let choices: [(id: String, title: String)] = [
-    (ask, "Ask Every Time"), (original, "Original"), ("1080p", "1080p"), ("720p", "720p"), ("480p", "480p"),
+    (ask, "Ask Every Time"), (original, "Original"), ("1080p", "1080p"), ("720p", "720p"),
+    ("480p", "480p"),
   ]
   private static let order = ["1080p", "720p", "480p", "360p"]
 
@@ -110,7 +111,8 @@ enum IOSConvertedDownloadPlan {
   /// Only the server's HLS pieces: a quality such as "720p" and its playlist, init or segment.
   static func isValidPiece(quality: String, piece: String) -> Bool {
     quality.range(of: #"^[1-9][0-9]{2,3}p$"#, options: .regularExpression) != nil
-      && piece.range(of: #"^(index\.m3u8|init\.mp4|[0-9]{1,6}\.m4s)$"#, options: .regularExpression) != nil
+      && piece.range(of: #"^(index\.m3u8|init\.mp4|[0-9]{1,6}\.m4s)$"#, options: .regularExpression)
+        != nil
   }
 
   /// How long to wait before asking again, or nil to give up.
@@ -192,7 +194,9 @@ struct IOSConvertedDownloader: Sendable {
           waited += delay
           try await Task.sleep(for: .seconds(delay))
         } catch let failure as URLError where failure.code != .cancelled {
-          guard let delay = IOSConvertedDownloadPlan.retryDelay(status: nil, retryAfter: nil, attempt: attempt)
+          guard
+            let delay = IOSConvertedDownloadPlan.retryDelay(
+              status: nil, retryAfter: nil, attempt: attempt)
           else { throw failure }
           attempt += 1
           try await Task.sleep(for: .seconds(delay))
@@ -205,7 +209,8 @@ struct IOSConvertedDownloader: Sendable {
     guard count > 0 else { throw IOSCoreError.invalidResponse }
     if state.segmentCount != count { state.nextSegment = 0 }
     state.segmentCount = count
-    try IOSConvertedDownloadPlan.prepare(partial, progress: &state, initData: try await fetch("init.mp4"))
+    try IOSConvertedDownloadPlan.prepare(
+      partial, progress: &state, initData: try await fetch("init.mp4"))
     await saved(state)
     let handle = try FileHandle(forWritingTo: partial)
     defer { try? handle.close() }

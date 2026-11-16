@@ -64,9 +64,14 @@ enum IOSWatchTogetherFollower {
   static let driftTolerance: Int64 = 1_500
   static let stillTolerance: Int64 = 500
 
-  enum Step: Equatable { case play, pause, seek(Int64) }
+  enum Step: Equatable {
+    case play, pause
+    case seek(Int64)
+  }
 
-  static func shouldPlay(_ state: IOSWatchPartyState) -> Bool { state.isPlaying && !state.isWaiting }
+  static func shouldPlay(_ state: IOSWatchPartyState) -> Bool {
+    state.isPlaying && !state.isWaiting
+  }
 
   static func position(_ state: IOSWatchPartyState, serverNow: Date) -> Int64 {
     guard shouldPlay(state), let updated = IOSWatchTogetherClock.date(state.updatedAt) else {
@@ -164,7 +169,10 @@ final class IOSWatchTogetherSession: ObservableObject {
   private var reportedReady = false
   private(set) var isChangingTitle = false
 
-  init(api: any IOSWatchTogetherAPI, deviceName: String, now: @escaping @MainActor () -> Date = { Date() }) {
+  init(
+    api: any IOSWatchTogetherAPI, deviceName: String,
+    now: @escaping @MainActor () -> Date = { Date() }
+  ) {
     self.api = api
     self.deviceName = deviceName
     self.now = now
@@ -212,7 +220,9 @@ final class IOSWatchTogetherSession: ObservableObject {
       // The player moved on by itself (Up Next): the party follows.
       if player.watchIsReady || reportedReady {
         reportedReady = false
-        send(IOSWatchPartyCommand(action: "change", positionMilliseconds: 0, mediaId: player.watchMediaID))
+        send(
+          IOSWatchPartyCommand(
+            action: "change", positionMilliseconds: 0, mediaId: player.watchMediaID))
       }
       return
     }
@@ -232,9 +242,12 @@ final class IOSWatchTogetherSession: ObservableObject {
   func userAction(_ action: IOSPlaybackUserAction) {
     guard !applyingRemote, state != nil else { return }
     switch action {
-    case .play(let position): send(IOSWatchPartyCommand(action: "play", positionMilliseconds: position))
-    case .pause(let position): send(IOSWatchPartyCommand(action: "pause", positionMilliseconds: position))
-    case .seek(let position): send(IOSWatchPartyCommand(action: "seek", positionMilliseconds: position))
+    case .play(let position):
+      send(IOSWatchPartyCommand(action: "play", positionMilliseconds: position))
+    case .pause(let position):
+      send(IOSWatchPartyCommand(action: "pause", positionMilliseconds: position))
+    case .seek(let position):
+      send(IOSWatchPartyCommand(action: "seek", positionMilliseconds: position))
     }
   }
 
@@ -261,7 +274,9 @@ final class IOSWatchTogetherSession: ObservableObject {
     }
   }
 
-  private func run(_ action: @escaping @Sendable () async throws -> IOSWatchPartyState) async -> Bool {
+  private func run(_ action: @escaping @Sendable () async throws -> IOSWatchPartyState) async
+    -> Bool
+  {
     do {
       let sent = now()
       let next = try await action()
@@ -313,7 +328,9 @@ final class IOSWatchTogetherSession: ObservableObject {
   }
 
   func receive(_ next: IOSWatchPartyState, sent: Date, own: Bool) {
-    if let measured = IOSWatchTogetherClock.offset(serverTime: next.serverTime, sent: sent, received: now()) {
+    if let measured = IOSWatchTogetherClock.offset(
+      serverTime: next.serverTime, sent: sent, received: now())
+    {
       offset = measured
     }
     if own { ownRevisions.insert(next.revision) }
@@ -376,13 +393,22 @@ extension IOSAPIClient: IOSWatchTogetherAPI {
     }
     return try await postWatchTogether(
       "/api/v1/watch-together",
-      Body(mediaId: mediaID, positionMilliseconds: position, isPlaying: playing, deviceName: deviceName))
+      Body(
+        mediaId: mediaID, positionMilliseconds: position, isPlaying: playing, deviceName: deviceName
+      ))
   }
 
-  func watchParty(id: UUID, after: Int64?, waitMilliseconds: Int) async throws -> IOSWatchPartyState {
+  func watchParty(id: UUID, after: Int64?, waitMilliseconds: Int) async throws -> IOSWatchPartyState
+  {
     let query =
-      after.map { [URLQueryItem(name: "after", value: String($0)), URLQueryItem(name: "waitMs", value: String(waitMilliseconds))] } ?? []
-    return try await getWatchTogether("/api/v1/watch-together/\(id.uuidString.lowercased())", query: query)
+      after.map {
+        [
+          URLQueryItem(name: "after", value: String($0)),
+          URLQueryItem(name: "waitMs", value: String(waitMilliseconds)),
+        ]
+      } ?? []
+    return try await getWatchTogether(
+      "/api/v1/watch-together/\(id.uuidString.lowercased())", query: query)
   }
 
   func sendWatchPartyCommand(id: UUID, _ command: IOSWatchPartyCommand) async throws

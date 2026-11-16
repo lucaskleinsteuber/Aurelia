@@ -113,7 +113,8 @@ struct CinemaPreShowTests {
     var teaser = item("Teaser", kind: .trailer)
     teaser.parentId = film.mediaId
     let fromElsewhere = CinemaTrailer(trailer: teaser, title: item("Heat", kind: .movie))
-    let other = CinemaTrailer(trailer: item("Trailer", kind: .trailer), title: item("Heat", kind: .movie))
+    let other = CinemaTrailer(
+      trailer: item("Trailer", kind: .trailer), title: item("Heat", kind: .movie))
     #expect(
       CinemaPreShowPlan.acts(
         ad: nil, trailers: [own, fromElsewhere, other], film: film.mediaId, title: "Arrival")
@@ -137,8 +138,9 @@ struct CinemaPreShowTests {
   }
 
   @Test func settingsSavedBeforeCinemaModeKeepItOff() throws {
-    var older = try JSONSerialization.jsonObject(
-      with: JSONEncoder().encode(PlaybackPreferences.defaultValue)) as! [String: Any]
+    var older =
+      try JSONSerialization.jsonObject(
+        with: JSONEncoder().encode(PlaybackPreferences.defaultValue)) as! [String: Any]
     for key in ["cinemaMode", "cinemaAds", "cinemaTrailers"] { older[key] = nil }
     let decoded = try JSONDecoder().decode(
       PlaybackPreferences.self, from: JSONSerialization.data(withJSONObject: older))

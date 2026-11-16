@@ -14,7 +14,9 @@ struct IOSPersonDetailView: View {
   @State private var wishing: String?
   @State private var wishMessage: String?
 
-  private var showsProfile: Bool { model.supportsPeople && IOSPeoplePresentation.hasProfile(personKey) }
+  private var showsProfile: Bool {
+    model.supportsPeople && IOSPeoplePresentation.hasProfile(personKey)
+  }
 
   var body: some View {
     ScrollView {
@@ -36,7 +38,8 @@ struct IOSPersonDetailView: View {
           }
           .padding(.horizontal, IOSDesign.margin).padding(.top, 12)
 
-          if let biography = profile?.about?.biography?.trimmingCharacters(in: .whitespacesAndNewlines),
+          if let biography = profile?.about?.biography?.trimmingCharacters(
+            in: .whitespacesAndNewlines),
             !biography.isEmpty
           {
             biographySection(biography)
@@ -44,7 +47,8 @@ struct IOSPersonDetailView: View {
 
           if !person.items.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-              IOSSectionHeader(title: showsProfile ? "In Your Library" : "Appears In", count: person.items.count)
+              IOSSectionHeader(
+                title: showsProfile ? "In Your Library" : "Appears In", count: person.items.count)
               LazyVGrid(columns: IOSDesign.gridColumns, spacing: 20) {
                 ForEach(person.items) { item in
                   NavigationLink {
@@ -122,8 +126,12 @@ struct IOSPersonDetailView: View {
               posterPath: hit.posterPath, kind: hit.kind, width: IOSDesign.posterWidth,
               height: IOSDesign.posterWidth * 1.5)
             Text(hit.title).font(.caption.weight(.semibold)).lineLimit(1)
-            Text([hit.year.map(String.init), hit.kind == .series ? "TV Show" : "Movie"].compactMap { $0 }.joined(separator: " · "))
-              .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            Text(
+              [hit.year.map(String.init), hit.kind == .series ? "TV Show" : "Movie"].compactMap {
+                $0
+              }.joined(separator: " · ")
+            )
+            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             if model.supportsWishes { wishControl(hit) }
           }
           .frame(width: IOSDesign.posterWidth, alignment: .leading)
@@ -136,12 +144,14 @@ struct IOSPersonDetailView: View {
   @ViewBuilder
   private func wishControl(_ hit: IOSWishSearchHit) -> some View {
     if hit.alreadyWished && hit.supportedByCaller {
-      Label("Wished", systemImage: "checkmark").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+      Label("Wished", systemImage: "checkmark").font(.caption.weight(.semibold)).foregroundStyle(
+        .secondary)
     } else {
       Button {
         Task { await wish(hit) }
       } label: {
-        Label(hit.alreadyWished ? "Me Too" : "Wish", systemImage: "gift").font(.caption.weight(.semibold))
+        Label(hit.alreadyWished ? "Me Too" : "Wish", systemImage: "gift").font(
+          .caption.weight(.semibold))
       }
       .buttonStyle(.bordered)
       .controlSize(.small)
@@ -184,7 +194,8 @@ struct IOSPersonDetailView: View {
         switch try await client.createWish(
           IOSCreateWishRequest(
             kind: hit.kind, title: hit.title, year: hit.year, provider: hit.provider,
-            providerMediaId: hit.providerMediaId, overview: hit.overview, posterPath: hit.posterPath,
+            providerMediaId: hit.providerMediaId, overview: hit.overview,
+            posterPath: hit.posterPath,
             note: nil))
         {
         case .created(let created): wishId = created.wish.id
@@ -196,7 +207,9 @@ struct IOSPersonDetailView: View {
       if let current = profile {
         profile = IOSPersonProfile(
           about: current.about,
-          knownFor: current.knownFor.map { $0.id == hit.id ? IOSPeoplePresentation.wished($0, wishId: wishId) : $0 })
+          knownFor: current.knownFor.map {
+            $0.id == hit.id ? IOSPeoplePresentation.wished($0, wishId: wishId) : $0
+          })
       }
       await model.refreshWishSummary(notify: false)
     } catch {

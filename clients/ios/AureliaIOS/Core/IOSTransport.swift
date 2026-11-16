@@ -36,7 +36,8 @@ struct IOSURLSessionTransport: IOSHTTPTransport {
           delegateQueue: nil), delegate: delegate)
       ownsSession = true
     case .pinned(let fingerprint):
-      lease = pool.lease(host: host, fingerprint: fingerprint, lane: IOSConnectionLane(path: url.path))
+      lease = pool.lease(
+        host: host, fingerprint: fingerprint, lane: IOSConnectionLane(path: url.path))
       ownsSession = false
     }
     defer { if ownsSession { lease.session.invalidateAndCancel() } }
@@ -144,7 +145,9 @@ struct IOSLongRunningTransport: IOSHTTPTransport {
     let configuration = IOSPinnedSessionPool.configuration()
     configuration.timeoutIntervalForRequest = 300
     configuration.timeoutIntervalForResource = 3600
-    return (URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil), delegate)
+    return (
+      URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil), delegate
+    )
   }
 
   func execute(_ request: URLRequest, trust: IOSTrustMode) async throws -> IOSHTTPResponse {

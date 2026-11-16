@@ -29,7 +29,9 @@ struct TVCoreTests {
     #expect(TVWrapped.readyMonths(year: 2026, today: today, calendar: calendar) == Array(1...10))
     #expect(TVWrapped.readyMonths(year: 2025, today: today, calendar: calendar) == Array(1...12))
     #expect(TVWrapped.readyMonths(year: 2027, today: today, calendar: calendar).isEmpty)
-    #expect(TVWrapped.wrappedYears(activityYears: [2024, 2026, 2027], today: today, calendar: calendar) == [2026, 2024])
+    #expect(
+      TVWrapped.wrappedYears(activityYears: [2024, 2026, 2027], today: today, calendar: calendar)
+        == [2026, 2024])
   }
 
   @Test func picturesUseTheirOwnConnectionsBesideTheData() {
@@ -39,7 +41,8 @@ struct TVCoreTests {
     let data = pool.lease(host: "tv.local", fingerprint: "aa")
     let pictures = pool.lease(host: "tv.local", fingerprint: "aa", lane: .artwork)
     #expect(data.session !== pictures.session)
-    #expect(pool.lease(host: "tv.local", fingerprint: "AA", lane: .artwork).session === pictures.session)
+    #expect(
+      pool.lease(host: "tv.local", fingerprint: "AA", lane: .artwork).session === pictures.session)
   }
 
   @Test func pinnedSessionsAreReusedPerIdentityAndBounded() {
@@ -57,7 +60,8 @@ struct TVCoreTests {
   @Test func aGenericDeviceNameGetsAStableTag() {
     let tag = UUID(uuidString: "AB12CD34-0000-4000-8000-000000000001")!
     #expect(TVDeviceName.display(systemName: "iPhone", model: "iPhone", tag: tag) == "iPhone AB12")
-    #expect(TVDeviceName.display(systemName: "Lucas’s iPad", model: "iPad", tag: tag) == "Lucas’s iPad")
+    #expect(
+      TVDeviceName.display(systemName: "Lucas’s iPad", model: "iPad", tag: tag) == "Lucas’s iPad")
     #expect(TVDeviceName.display(systemName: "Apple TV", model: "Apple TV", tag: nil) == "Apple TV")
   }
 
@@ -153,8 +157,9 @@ struct TVCoreTests {
     }
     // A server that is closed to the home network says so, not that its identity changed.
     let closed = TVCoreFakeTransport(responses: [
-      response(infoJSON.replacingOccurrences(
-        of: "\"lanAccessEnabled\":true", with: "\"lanAccessEnabled\":false"))
+      response(
+        infoJSON.replacingOccurrences(
+          of: "\"lanAccessEnabled\":true", with: "\"lanAccessEnabled\":false"))
     ])
     await #expect(throws: TVCoreError.lanAccessDisabled) {
       try await TVAPIClient.inspect(baseURL: Self.baseURL, transport: closed)

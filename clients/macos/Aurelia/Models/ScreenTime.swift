@@ -141,11 +141,13 @@ enum ScreenTimeText {
     if status?.reason == .limit {
       return (
         who.isEmpty ? "That's all for today" : "That's all for today, \(who)",
-        opens.isEmpty ? "See you tomorrow." : "See you tomorrow at \(opens).")
+        opens.isEmpty ? "See you tomorrow." : "See you tomorrow at \(opens)."
+      )
     }
     return (
       who.isEmpty ? "Good night" : "Good night, \(who)",
-      opens.isEmpty ? "Sleep well." : "See you at \(opens).")
+      opens.isEmpty ? "Sleep well." : "See you at \(opens)."
+    )
   }
 
   /// Good-night heading and server-power detail when playback stops at a sleep timer.

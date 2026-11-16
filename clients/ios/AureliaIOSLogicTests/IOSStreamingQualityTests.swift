@@ -22,31 +22,41 @@ final class IOSStreamingQualityTests: XCTestCase {
 
   func testSettingsSavedBeforeTheChoiceExistedKeepTheOriginal() throws {
     var preferences = IOSPlaybackPreferences.defaultValue
-    var old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(preferences)) as! [String: Any]
+    var old =
+      try JSONSerialization.jsonObject(with: JSONEncoder().encode(preferences)) as! [String: Any]
     old.removeValue(forKey: "streamingQuality")
     XCTAssertEqual(
-      try JSONDecoder().decode(IOSPlaybackPreferences.self, from: JSONSerialization.data(withJSONObject: old))
-        .streamingQuality, .original)
+      try JSONDecoder().decode(
+        IOSPlaybackPreferences.self, from: JSONSerialization.data(withJSONObject: old)
+      )
+      .streamingQuality, .original)
     preferences.streamingQuality = .automatic
     XCTAssertEqual(
-      try JSONDecoder().decode(IOSPlaybackPreferences.self, from: JSONEncoder().encode(preferences)).streamingQuality,
+      try JSONDecoder().decode(IOSPlaybackPreferences.self, from: JSONEncoder().encode(preferences))
+        .streamingQuality,
       .automatic)
     old["streamingQuality"] = "8k"
     XCTAssertEqual(
-      try JSONDecoder().decode(IOSPlaybackPreferences.self, from: JSONSerialization.data(withJSONObject: old))
-        .streamingQuality, .original)
+      try JSONDecoder().decode(
+        IOSPlaybackPreferences.self, from: JSONSerialization.data(withJSONObject: old)
+      )
+      .streamingQuality, .original)
   }
 
   func testTheRelayPassesOnlyTheServersHLSFiles() throws {
     func request(_ path: String) throws -> IOSRelayRequest {
-      try IOSRelayRequest.parse(Data("GET \(path) HTTP/1.1\r\nHost: 127.0.0.1:50123\r\n\r\n".utf8), secret: "secret")
+      try IOSRelayRequest.parse(
+        Data("GET \(path) HTTP/1.1\r\nHost: 127.0.0.1:50123\r\n\r\n".utf8), secret: "secret")
     }
     XCTAssertEqual(try request("/stream/secret/hls/master.m3u8").hlsPath, "hls/master.m3u8")
-    XCTAssertEqual(try request("/stream/secret/hls/720p/index.m3u8?audio=2").hlsPath, "hls/720p/index.m3u8?audio=2")
+    XCTAssertEqual(
+      try request("/stream/secret/hls/720p/index.m3u8?audio=2").hlsPath,
+      "hls/720p/index.m3u8?audio=2")
     XCTAssertEqual(try request("/stream/secret/hls/1080p/12.m4s").hlsPath, "hls/1080p/12.m4s")
     XCTAssertNil(try request("/stream/secret").hlsPath)
     for refused in [
-      "/stream/other/hls/master.m3u8", "/stream/secret/hls/../../users", "/stream/secret/hls/720p/x.m4s",
+      "/stream/other/hls/master.m3u8", "/stream/secret/hls/../../users",
+      "/stream/secret/hls/720p/x.m4s",
       "/stream/secret/hls/720p/index.m3u8?audio=1&video=copy", "/stream/secret/live",
     ] {
       XCTAssertThrowsError(try request(refused), refused)

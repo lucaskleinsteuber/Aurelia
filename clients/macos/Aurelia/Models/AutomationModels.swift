@@ -112,8 +112,14 @@ struct PowerNowResult: Decodable, Sendable {
 enum AutomationText {
   static let scopes: [(id: String, title: String, detail: String)] = [
     ("status", "Read What Plays", "What is playing where, and whether the server can turn off."),
-    ("power", "Turn the Server Off", "Sleep, turn off or stop the server, for example from a Home Assistant button."),
-    ("playback", "Control Players", "Play, pause or stop on your own devices that have Aurelia open."),
+    (
+      "power", "Turn the Server Off",
+      "Sleep, turn off or stop the server, for example from a Home Assistant button."
+    ),
+    (
+      "playback", "Control Players",
+      "Play, pause or stop on your own devices that have Aurelia open."
+    ),
   ]
 
   static func powerTitle(_ action: String) -> String {
@@ -138,13 +144,16 @@ enum AutomationText {
     while trimmed.hasSuffix("/") { trimmed.removeLast() }
     let id = webhookID.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty, !id.isEmpty,
-      id.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_" })
+      id.unicodeScalars.allSatisfy({
+        CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_"
+      })
     else { return nil }
     // Only a real scheme counts; a computer named "httpbox.lan" still gets one (audit C-X18).
     let lowered = trimmed.lowercased()
     let withScheme =
       lowered.hasPrefix("http://") || lowered.hasPrefix("https://") ? trimmed : "http://" + trimmed
-    guard var components = URLComponents(string: withScheme), let host = components.host, !host.isEmpty
+    guard var components = URLComponents(string: withScheme), let host = components.host,
+      !host.isEmpty
     else { return nil }
     if components.port == nil, components.scheme == "http" { components.port = 8123 }
     components.path = "/api/webhook/" + id
@@ -158,7 +167,9 @@ enum AutomationText {
   }
 
   static func host(_ url: String) -> String {
-    guard let components = URLComponents(string: url), let host = components.host else { return url }
+    guard let components = URLComponents(string: url), let host = components.host else {
+      return url
+    }
     return components.port.map { "\(host):\($0)" } ?? host
   }
 
@@ -167,7 +178,9 @@ enum AutomationText {
     if !webhook.enabled { return (false, "Off") }
     if webhook.pausedReason != nil { return (true, "Paused after failed deliveries") }
     guard let last = webhook.lastDelivery else { return (false, "Nothing sent yet") }
-    if last.state == "succeeded" { return (false, "Last delivery \(last.durationMilliseconds ?? 0) ms") }
+    if last.state == "succeeded" {
+      return (false, "Last delivery \(last.durationMilliseconds ?? 0) ms")
+    }
     return (true, last.error ?? "The last delivery failed")
   }
 

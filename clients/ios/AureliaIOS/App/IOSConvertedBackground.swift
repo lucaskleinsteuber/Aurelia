@@ -24,7 +24,9 @@ final class IOSConvertedBackground {
   private func begin(_ id: UUID, title: String) {
     let identifier = Self.identifier(id)
     if !registered.contains(identifier) {
-      let accepted = BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: .main) {
+      let accepted = BGTaskScheduler.shared.register(
+        forTaskWithIdentifier: identifier, using: .main
+      ) {
         [weak self] task in
         MainActor.assumeIsolated {
           guard let self, let task = task as? BGContinuedProcessingTask else {
@@ -42,7 +44,8 @@ final class IOSConvertedBackground {
       registered.insert(identifier)
     }
     let request = BGContinuedProcessingTaskRequest(
-      identifier: identifier, title: "Downloading \(title)", subtitle: "A smaller copy from your server")
+      identifier: identifier, title: "Downloading \(title)",
+      subtitle: "A smaller copy from your server")
     request.strategy = .fail
     // Without the system's time the download still runs while Aurelia is open.
     try? BGTaskScheduler.shared.submit(request)
@@ -51,7 +54,8 @@ final class IOSConvertedBackground {
   private func progress(_ id: UUID, _ share: Double) {
     guard let task = tasks[id] else { return }
     task.progress.completedUnitCount = Int64(share * 1000)
-    task.updateTitle(task.title, subtitle: "\(Int(share * 100)) % · A smaller copy from your server")
+    task.updateTitle(
+      task.title, subtitle: "\(Int(share * 100)) % · A smaller copy from your server")
   }
 
   private func end(_ id: UUID, success: Bool) {

@@ -97,8 +97,11 @@ struct IOSCollectionEditorView: View {
           } else {
             ForEach(members) { member in
               HStack(spacing: 10) {
-                Image(systemName: member.seasonNumber != nil ? "tv" : member.kind == .movie ? "film" : "tv.fill")
-                  .foregroundStyle(.secondary)
+                Image(
+                  systemName: member.seasonNumber != nil
+                    ? "tv" : member.kind == .movie ? "film" : "tv.fill"
+                )
+                .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 2) {
                   Text(member.title).font(.body).lineLimit(1)
                   if let subtitle = member.subtitle {
@@ -423,7 +426,8 @@ struct IOSCollectionEditorView: View {
             offset: CGSize(
               width: offset.width + dragging.width, height: offset.height + dragging.height),
             imageSize: imageSize, frameSize: frameSize, zoom: liveZoom)
-          let scale = max(frameSize.width / imageSize.width, frameSize.height / imageSize.height)
+          let scale =
+            max(frameSize.width / imageSize.width, frameSize.height / imageSize.height)
             * liveZoom
           ZStack {
             Color.black.ignoresSafeArea()

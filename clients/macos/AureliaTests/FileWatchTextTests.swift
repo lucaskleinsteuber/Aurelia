@@ -6,19 +6,22 @@ import XCTest
 /// The file watch on the Mac ("file-checks-v1"): the words the settings and Library Health show.
 final class FileWatchTextTests: XCTestCase {
   private func settings(
-    enabled: Bool = true, total: Int = 120, pending: Int = 0, problems: Int = 0, paused: Bool = false,
+    enabled: Bool = true, total: Int = 120, pending: Int = 0, problems: Int = 0,
+    paused: Bool = false,
     remaining: Int? = nil
   ) -> FileCheckSettings {
     FileCheckSettings(
       enabled: enabled, depth: "container", recheckDays: 90, canInspect: true, totalCount: total,
-      checkedCount: total - pending, pendingCount: pending, problemCount: problems, running: pending > 0,
+      checkedCount: total - pending, pendingCount: pending, problemCount: problems,
+      running: pending > 0,
       pausedForPlayback: paused, estimatedSecondsRemaining: remaining)
   }
 
   func testTheStatusSaysOffDoneOrHowFarTheWatchIs() {
     XCTAssertEqual(FileWatchText.status(settings(enabled: false, pending: 120)), "Off")
     XCTAssertEqual(FileWatchText.status(settings()), "All 120 files examined")
-    XCTAssertEqual(FileWatchText.status(settings(total: 1, problems: 1)), "All 1 file examined · 1 problem")
+    XCTAssertEqual(
+      FileWatchText.status(settings(total: 1, problems: 1)), "All 1 file examined · 1 problem")
     XCTAssertEqual(
       FileWatchText.status(settings(pending: 80, problems: 2, paused: true, remaining: 12_000)),
       "40 of 120 files · 2 problems · paused while someone watches · About 3 h 20 min left")
@@ -46,7 +49,8 @@ final class FileWatchTextTests: XCTestCase {
       """
     let answer = try JSONDecoder().decode(DriveHealthResponse.self, from: Data(json.utf8))
     XCTAssertEqual(FileWatchText.driveTitle(answer.drives[0].state), "Warning")
-    XCTAssertEqual(FileWatchText.driveFacts(answer.drives[0]), "35 °C · 10,000 hours · 12 bad sectors")
+    XCTAssertEqual(
+      FileWatchText.driveFacts(answer.drives[0]), "35 °C · 10,000 hours · 12 bad sectors")
   }
 
   func testOnlyAServerWithTheWatchOffersItsTabs() {

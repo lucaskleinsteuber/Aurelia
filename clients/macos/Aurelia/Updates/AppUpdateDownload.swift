@@ -157,7 +157,8 @@ struct AppUpdateTransferAccumulator {
     digest.update(data: chunk)
     if let write { try write(chunk) } else { data.append(chunk) }
     if let progress,
-      AppUpdateProgress.shouldReport(received: count, lastReported: reported, expected: expectedBytes)
+      AppUpdateProgress.shouldReport(
+        received: count, lastReported: reported, expected: expectedBytes)
     {
       reported = count
       progress(count, expectedBytes)

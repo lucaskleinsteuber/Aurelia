@@ -9,7 +9,10 @@ enum WatchTogetherFollower {
   /// While paused or waiting, players line up more closely.
   static let stillTolerance: Int64 = 500
 
-  enum Step: Equatable { case play, pause, seek(Int64) }
+  enum Step: Equatable {
+    case play, pause
+    case seek(Int64)
+  }
 
   static func shouldPlay(_ state: WatchPartyState) -> Bool { state.isPlaying && !state.isWaiting }
 
@@ -54,7 +57,8 @@ enum WatchTogetherClock {
       value.replaceSubrange(dot..<end, with: "." + trimmed)
     }
     let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = value.contains(".")
+    formatter.formatOptions =
+      value.contains(".")
       ? [.withInternetDateTime, .withFractionalSeconds] : [.withInternetDateTime]
     return formatter.date(from: value)
   }
@@ -281,7 +285,8 @@ final class WatchTogetherSession: ObservableObject {
   private func titleChanged(_ mediaId: UUID) {
     guard let state, mediaId != state.mediaId, !isChangingTitle else { return }
     reportedReady = false
-    sendCommand(WatchPartyCommandRequest(action: "change", positionMilliseconds: 0, mediaId: mediaId))
+    sendCommand(
+      WatchPartyCommandRequest(action: "change", positionMilliseconds: 0, mediaId: mediaId))
   }
 
   private func sendCommand(_ request: WatchPartyCommandRequest) {

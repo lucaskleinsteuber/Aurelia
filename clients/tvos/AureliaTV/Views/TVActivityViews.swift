@@ -132,9 +132,11 @@ private struct TVHistoryRow: View {
 
   var body: some View {
     HStack(spacing: 24) {
-      TVArtworkView(artwork: item.poster, width: 320, symbol: item.kind == "episode" ? "tv" : "film")
-        .frame(width: 80, height: 120)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+      TVArtworkView(
+        artwork: item.poster, width: 320, symbol: item.kind == "episode" ? "tv" : "film"
+      )
+      .frame(width: 80, height: 120)
+      .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
       VStack(alignment: .leading, spacing: 6) {
         Text(item.title).font(.system(size: 30, weight: .semibold)).lineLimit(1)
         if let eyebrow = item.eyebrow, !eyebrow.isEmpty {
@@ -189,7 +191,8 @@ struct TVStatisticsView: View {
         if let stats {
           HStack(spacing: 24) {
             tile("Total", TVWatchTime.text(hours: stats.totalHoursWatched), symbol: "clock")
-            tile("Last 7 Days", TVWatchTime.text(hours: stats.hoursPast7Days ?? 0), symbol: "calendar")
+            tile(
+              "Last 7 Days", TVWatchTime.text(hours: stats.hoursPast7Days ?? 0), symbol: "calendar")
             tile("Current Streak", days(stats.currentStreakDays ?? 0), symbol: "flame")
             tile(
               "Finished", "\(Int((stats.completionRate ?? 0).rounded())) %",
@@ -261,14 +264,19 @@ struct TVStatisticsView: View {
               wrappedYear = TVWrappedLaunch(year: shown, month: month)
             } label: {
               VStack(alignment: .leading, spacing: 4) {
-                Text(String(TVWrapped.monthName(month).prefix(3))).font(.system(size: 40, weight: .black))
-                Text("\(TVWrapped.monthName(month)) \(String(shown))").font(.system(size: 22, weight: .semibold))
-                  .opacity(0.85)
+                Text(String(TVWrapped.monthName(month).prefix(3))).font(
+                  .system(size: 40, weight: .black))
+                Text("\(TVWrapped.monthName(month)) \(String(shown))").font(
+                  .system(size: 22, weight: .semibold)
+                )
+                .opacity(0.85)
               }
               .foregroundStyle(Color(wrappedHex: 0x22000F))
               .frame(width: 210, alignment: .leading)
               .padding(22)
-              .background(Color(wrappedHex: 0xFF4D88), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+              .background(
+                Color(wrappedHex: 0xFF4D88),
+                in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             }
             .buttonStyle(TVCardButtonStyle())
             .accessibilityLabel("Play \(TVWrapped.monthName(month)) \(String(shown)) Wrapped")
@@ -297,7 +305,8 @@ struct TVStatisticsView: View {
       }
       .foregroundStyle(Color(wrappedHex: 0x22000F))
       .padding(24)
-      .background(Color(wrappedHex: 0xFF4D88), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+      .background(
+        Color(wrappedHex: 0xFF4D88), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
     .buttonStyle(TVCardButtonStyle())
     .accessibilityIdentifier("monthly-wrapped")
@@ -388,21 +397,25 @@ struct TVStatisticsView: View {
                 .foregroundStyle(Color(wrappedHex: 0xFFD84D))
               VStack(alignment: .leading, spacing: 4) {
                 Text("Play your \(String(year)) Wrapped").font(.system(size: 30, weight: .bold))
-                Text("Your year in slides, with commentary nobody asked for.").font(.system(size: 22))
+                Text("Your year in slides, with commentary nobody asked for.").font(
+                  .system(size: 22))
               }
               Spacer()
               Image(systemName: "play.fill")
             }
             .foregroundStyle(.white)
             .padding(24)
-            .background(Color(wrappedHex: 0x6A4CFF), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(
+              Color(wrappedHex: 0x6A4CFF),
+              in: RoundedRectangle(cornerRadius: 22, style: .continuous))
           }
           .buttonStyle(TVCardButtonStyle())
           .accessibilityIdentifier("statistics-wrapped")
         }
         if let review {
           HStack(spacing: 24) {
-            tile("Watch Time", TVWatchTime.text(hours: review.totalHoursWatched ?? 0), symbol: "clock")
+            tile(
+              "Watch Time", TVWatchTime.text(hours: review.totalHoursWatched ?? 0), symbol: "clock")
             tile("Titles", "\(review.titlesWatched ?? 0)", symbol: "film.stack")
             tile("Movies", "\(review.moviesWatched ?? 0)", symbol: "film")
             tile("Episodes", "\(review.episodesWatched ?? 0)", symbol: "tv")
@@ -533,7 +546,10 @@ struct TVWrappedView: View {
       }
       .frame(maxWidth: 1000, alignment: .leading)
       if slide.kind == "summary", let posters = slide.posters, !posters.isEmpty {
-        LazyVGrid(columns: [GridItem(.fixed(200), spacing: 16), GridItem(.fixed(200), spacing: 16)], spacing: 16) {
+        LazyVGrid(
+          columns: [GridItem(.fixed(200), spacing: 16), GridItem(.fixed(200), spacing: 16)],
+          spacing: 16
+        ) {
           ForEach(Array(posters.prefix(4).enumerated()), id: \.offset) { _, poster in
             TVArtworkView(artwork: poster, width: 320)
               .frame(width: 200, height: 300)
@@ -590,7 +606,8 @@ struct TVWrappedView: View {
   private func run() async {
     guard let slides = wrapped?.slides, slides.indices.contains(index) else { return }
     let slide = slides[index]
-    if progress == 0, !reduceMotion, let target = TVWrapped.countTarget(slide.bigNumber), target > 1 {
+    if progress == 0, !reduceMotion, let target = TVWrapped.countTarget(slide.bigNumber), target > 1
+    {
       let start = Date()
       while !Task.isCancelled {
         let fraction = Date().timeIntervalSince(start) / 1.1

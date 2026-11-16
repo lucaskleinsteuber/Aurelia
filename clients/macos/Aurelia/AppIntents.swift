@@ -33,19 +33,24 @@ private enum SiriContext {
 
   static func message(_ error: Error) -> SiriError {
     if let siri = error as? SiriError { return siri }
-    if let failure = error as? APIClientError, let message = failure.problemMessage { return .server(message) }
+    if let failure = error as? APIClientError, let message = failure.problemMessage {
+      return .server(message)
+    }
     return .server("The server isn't answering. It may be off; say “Turn on my Aurelia server”.")
   }
 }
 
 struct WakeServerIntent: AppIntent {
   static let title: LocalizedStringResource = "Turn On Aurelia Server"
-  static let description = IntentDescription("Wakes the Aurelia server with Wake-on-LAN and waits until it answers.")
+  static let description = IntentDescription(
+    "Wakes the Aurelia server with Wake-on-LAN and waits until it answers.")
 
   func perform() async throws -> some IntentResult & ProvidesDialog {
     let profile = try SiriContext.profile()
     guard !WakeOnLan.addresses(for: profile.serverId).isEmpty else {
-      return .result(dialog: "Aurelia doesn't know how to wake this server. Open Aurelia once while the server is on.")
+      return .result(
+        dialog:
+          "Aurelia doesn't know how to wake this server. Open Aurelia once while the server is on.")
     }
     let checker = IntegrationClient(profile: profile, key: "")
     if await checker.answers() { return .result(dialog: "Your Aurelia server is already on.") }
@@ -54,7 +59,10 @@ struct WakeServerIntent: AppIntent {
       try await Task.sleep(for: .seconds(5))
       if await checker.answers() { return .result(dialog: "Your Aurelia server is on.") }
     }
-    return .result(dialog: "I sent the wake signal, but the server hasn't answered yet. It can take up to a minute when it was turned off.")
+    return .result(
+      dialog:
+        "I sent the wake signal, but the server hasn't answered yet. It can take up to a minute when it was turned off."
+    )
   }
 }
 
@@ -79,11 +87,13 @@ struct TurnOffServerIntent: AppIntent {
     let client = try SiriContext.client()
     let status: IntegrationStatus
     do { status = try await client.status() } catch { throw SiriContext.message(error) }
-    let wanted = status.powerActions.contains(action.rawValue) ? action.rawValue : status.powerActions.first
+    let wanted =
+      status.powerActions.contains(action.rawValue) ? action.rawValue : status.powerActions.first
     guard let wanted else { return .result(dialog: "This server can't turn itself off.") }
     let question = wanted == "sleep" ? "Put the server to sleep?" : "Turn the server off?"
     if let watching = status.playing.first {
-      try await requestConfirmation(dialog: "Someone is watching on \(watching.device.name). \(question)")
+      try await requestConfirmation(
+        dialog: "Someone is watching on \(watching.device.name). \(question)")
     } else {
       try await requestConfirmation(dialog: "\(question)")
     }
@@ -99,7 +109,8 @@ struct PlayInAureliaIntent: AppIntent {
   static let title: LocalizedStringResource = "Play in Aurelia"
   static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
   static let description = IntentDescription(
-    "Plays a movie or an episode on the Apple TV or another device that has Aurelia open, for example “Breaking Bad season 3 episode 4”.")
+    "Plays a movie or an episode on the Apple TV or another device that has Aurelia open, for example “Breaking Bad season 3 episode 4”."
+  )
 
   @Parameter(title: "Title", requestValueDialog: "What should I play?") var request: String
   @Parameter(title: "Device") var device: String?
@@ -111,11 +122,13 @@ struct PlayInAureliaIntent: AppIntent {
     do {
       let players = try await client.players()
       guard let player = SiriTitleRequest.player(players, named: device) else {
-        return .result(dialog: players.isEmpty
-          ? "No device has Aurelia open. Open Aurelia on the Apple TV first."
-          : "Say which device: \(players.map(\.deviceName).joined(separator: ", ")).")
+        return .result(
+          dialog: players.isEmpty
+            ? "No device has Aurelia open. Open Aurelia on the Apple TV first."
+            : "Say which device: \(players.map(\.deviceName).joined(separator: ", ")).")
       }
-      guard let title = SiriTitleRequest.best(try await client.search(parsed.title), for: parsed) else {
+      guard let title = SiriTitleRequest.best(try await client.search(parsed.title), for: parsed)
+      else {
         return .result(dialog: "I couldn't find “\(parsed.title)” in your library.")
       }
       let target: IntegrationTitle
@@ -127,7 +140,10 @@ struct PlayInAureliaIntent: AppIntent {
         target = title
       }
       try await client.play(target.id, on: player.deviceId)
-      let what = target.seasonNumber.map { "\(title.title), season \($0), episode \(target.episodeNumber ?? 0)" } ?? target.title
+      let what =
+        target.seasonNumber.map {
+          "\(title.title), season \($0), episode \(target.episodeNumber ?? 0)"
+        } ?? target.title
       return .result(dialog: "Playing \(what) on \(player.deviceName).")
     } catch {
       throw SiriContext.message(error)
@@ -147,7 +163,10 @@ struct WhatsPlayingIntent: AppIntent {
     do { status = try await client.status() } catch { throw SiriContext.message(error) }
     guard !status.playing.isEmpty else { return .result(dialog: "Nothing is playing.") }
     let lines = status.playing.map { entry in
-      let title = entry.media.seriesTitle.map { "\($0), season \(entry.media.season ?? 0), episode \(entry.media.episode ?? 0)" }
+      let title =
+        entry.media.seriesTitle.map {
+          "\($0), season \(entry.media.season ?? 0), episode \(entry.media.episode ?? 0)"
+        }
         ?? entry.media.title
       return "\(title) on \(entry.device.name)\(entry.state == "paused" ? ", paused" : "")"
     }
@@ -159,7 +178,10 @@ struct AureliaShortcuts: AppShortcutsProvider {
   static var appShortcuts: [AppShortcut] {
     AppShortcut(
       intent: WakeServerIntent(),
-      phrases: ["Turn on my \(.applicationName) server", "Wake \(.applicationName)", "Wake my \(.applicationName) server"],
+      phrases: [
+        "Turn on my \(.applicationName) server", "Wake \(.applicationName)",
+        "Wake my \(.applicationName) server",
+      ],
       shortTitle: "Turn On Server", systemImageName: "power")
     AppShortcut(
       intent: TurnOffServerIntent(),
@@ -167,7 +189,10 @@ struct AureliaShortcuts: AppShortcutsProvider {
       shortTitle: "Turn Off Server", systemImageName: "moon")
     AppShortcut(
       intent: PlayInAureliaIntent(),
-      phrases: ["Play in \(.applicationName)", "Play something in \(.applicationName)", "Watch in \(.applicationName)"],
+      phrases: [
+        "Play in \(.applicationName)", "Play something in \(.applicationName)",
+        "Watch in \(.applicationName)",
+      ],
       shortTitle: "Play", systemImageName: "play.fill")
     AppShortcut(
       intent: WhatsPlayingIntent(),

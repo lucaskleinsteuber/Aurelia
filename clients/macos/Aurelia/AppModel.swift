@@ -520,14 +520,18 @@ final class AppModel: ObservableObject {
   /// Keychain entry, preferences and files (its own container and App Group), then opens it again from the
   /// beginning. Only the test edition can do this; the real app, its data and media are never touched.
   func resetTestEditionData() async {
-    guard AppEdition.isTest, Bundle.main.bundleIdentifier == AppEdition.bundleIdentifier else { return }
+    guard AppEdition.isTest, Bundle.main.bundleIdentifier == AppEdition.bundleIdentifier else {
+      return
+    }
     await PlaybackShutdownCoordinator.shared.shutdown()
     hostPollTask?.cancel()
     hostPollTask = nil
     await serverHost.stop()
     for startAtLogin in [false, true] {
-      try? await SMAppService.agent(plistName: AppEdition.agentName(startAtLogin: startAtLogin) + ".plist")
-        .unregister()
+      try? await SMAppService.agent(
+        plistName: AppEdition.agentName(startAtLogin: startAtLogin) + ".plist"
+      )
+      .unregister()
     }
     try? store.delete()
     UserDefaults.standard.removePersistentDomain(forName: AppEdition.bundleIdentifier)
@@ -540,7 +544,9 @@ final class AppModel: ObservableObject {
     folders.append(files.containerURL(forSecurityApplicationGroupIdentifier: AppEdition.appGroup))
     for folder in folders.compactMap({ $0 }) {
       // Only folders inside this test app's own sandbox container or App Group.
-      guard folder.path.contains(AppEdition.bundleIdentifier) || folder.path.contains(AppEdition.appGroup),
+      guard
+        folder.path.contains(AppEdition.bundleIdentifier)
+          || folder.path.contains(AppEdition.appGroup),
         let items = try? files.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
       else { continue }
       for item in items { try? files.removeItem(at: item) }
@@ -1141,7 +1147,8 @@ final class AppModel: ObservableObject {
 
   /// Opening Aurelia starts a server that stopped itself for being unused (Power settings).
   func resumeIdleHost() async {
-    guard operatingMode == .host, let live = try? await serverHost.status(), live.state == .idle else { return }
+    guard operatingMode == .host, let live = try? await serverHost.status(), live.state == .idle
+    else { return }
     do {
       try await serverHost.restart()
       hostSnapshot = NativeHostSnapshot(
@@ -2018,7 +2025,11 @@ final class AppModel: ObservableObject {
   ) async throws {
     let request = beginPlaybackIntent()
     let plan: PlaybackPlanResponse
-    if let known, known.target != nil { plan = known } else { plan = try await playbackPlan(mediaId: mediaId) }
+    if let known, known.target != nil {
+      plan = known
+    } else {
+      plan = try await playbackPlan(mediaId: mediaId)
+    }
     let previous = await previousPlaybackItems(for: plan)
     guard !Task.isCancelled, playbackPlanningGeneration == request else {
       throw CancellationError()
@@ -2370,13 +2381,17 @@ final class AppModel: ObservableObject {
   private var personDetails: [String: (detail: PersonDetailResponse, at: Date)] = [:]
 
   func rememberedPersonDetail(_ selection: PersonSelection) -> PersonDetailResponse? {
-    guard let entry = personDetails[Self.personKey(selection)], Date().timeIntervalSince(entry.at) < 120
+    guard let entry = personDetails[Self.personKey(selection)],
+      Date().timeIntervalSince(entry.at) < 120
     else { return nil }
     return entry.detail
   }
 
-  private func rememberPersonDetail(_ detail: PersonDetailResponse, for selection: PersonSelection) {
-    if personDetails.count >= 40, let oldest = personDetails.min(by: { $0.value.at < $1.value.at })?.key {
+  private func rememberPersonDetail(_ detail: PersonDetailResponse, for selection: PersonSelection)
+  {
+    if personDetails.count >= 40,
+      let oldest = personDetails.min(by: { $0.value.at < $1.value.at })?.key
+    {
       personDetails.removeValue(forKey: oldest)
     }
     personDetails[Self.personKey(selection)] = (detail, Date())
@@ -2391,7 +2406,9 @@ final class AppModel: ObservableObject {
   private var personProfiles: [String: (profile: PersonProfileResponse, at: Date)] = [:]
 
   func rememberedPersonProfile(_ personKey: String) -> PersonProfileResponse? {
-    guard let entry = personProfiles[personKey], Date().timeIntervalSince(entry.at) < 600 else { return nil }
+    guard let entry = personProfiles[personKey], Date().timeIntervalSince(entry.at) < 600 else {
+      return nil
+    }
     return entry.profile
   }
 
@@ -2400,7 +2417,9 @@ final class AppModel: ObservableObject {
     let loaded = try await currentConnection {
       try await APIClient(profile: profile).personProfile(personKey: personKey)
     }
-    if personProfiles.count >= 40, let oldest = personProfiles.min(by: { $0.value.at < $1.value.at })?.key {
+    if personProfiles.count >= 40,
+      let oldest = personProfiles.min(by: { $0.value.at < $1.value.at })?.key
+    {
       personProfiles.removeValue(forKey: oldest)
     }
     personProfiles[personKey] = (loaded, Date())
@@ -2511,7 +2530,9 @@ final class AppModel: ObservableObject {
 
   func collectionNext(id: UUID) async throws -> CollectionNextResponse {
     guard let profile else { throw APIClientError.invalidResponse }
-    return try await currentConnection { try await APIClient(profile: profile).collectionNext(id: id) }
+    return try await currentConnection {
+      try await APIClient(profile: profile).collectionNext(id: id)
+    }
   }
 
   func updateCollectionOrder(
@@ -2542,7 +2563,8 @@ final class AppModel: ObservableObject {
       if let explicitIntent {
         resolvedIntent = explicitIntent
       } else {
-        let canResume = explicitTarget.progress?.isCompleted != true
+        let canResume =
+          explicitTarget.progress?.isCompleted != true
           && explicitTarget.watchState != .completed
           && ((explicitTarget.progress?.positionMilliseconds ?? 0) > 0
             || explicitTarget.watchState == .inProgress)
@@ -2615,7 +2637,8 @@ final class AppModel: ObservableObject {
       } else if let pending {
         var resolvedUploadId = pending.uploadId
         if resolvedUploadId == nil, let bytes = pending.data {
-          resolvedUploadId = try await client.uploadCollectionEditorImage(id: saved.id, png: bytes).id
+          resolvedUploadId = try await client.uploadCollectionEditorImage(id: saved.id, png: bytes)
+            .id
         }
         if let resolvedUploadId {
           _ = try await client.saveCollectionArtwork(
@@ -2918,7 +2941,8 @@ final class AppModel: ObservableObject {
   func download(_ item: CatalogItemSummary) {
     guard let profile, item.kind == .movie || item.kind == .episode, item.isPlayable else { return }
     let preference =
-      UserDefaults.standard.string(forKey: DownloadQualityPreference.key) ?? DownloadQualityPreference.ask
+      UserDefaults.standard.string(forKey: DownloadQualityPreference.key)
+      ?? DownloadQualityPreference.ask
     guard libraryCapabilities.contains(ServerFeatureNames.convertedDownloads),
       preference != DownloadQualityPreference.original
     else {
@@ -2930,7 +2954,8 @@ final class AppModel: ObservableObject {
       guard self.profile?.serverId == profile.serverId else { return }
       switch DownloadQualityPreference.resolve(preference, options: options) {
       case .original: startDownload(item)
-      case .ask: if let options { downloadChoice = PendingDownloadChoice(item: item, options: options) }
+      case .ask:
+        if let options { downloadChoice = PendingDownloadChoice(item: item, options: options) }
       case .converted(let quality):
         startDownload(
           item, quality: quality, audio: options?.audioTrack,
@@ -2940,7 +2965,10 @@ final class AppModel: ObservableObject {
   }
 
   /// Starts a download in the chosen quality; nil keeps the original file.
-  func startDownload(_ item: CatalogItemSummary, quality: String? = nil, audio: Int? = nil, expectedBytes: Int64? = nil) {
+  func startDownload(
+    _ item: CatalogItemSummary, quality: String? = nil, audio: Int? = nil,
+    expectedBytes: Int64? = nil
+  ) {
     guard let profile else { return }
     let subtitle =
       item.kind == .episode
@@ -3132,7 +3160,7 @@ final class AppModel: ObservableObject {
     let loader = artworkLoader
     // Cards ask for 320 or 640 pixels; a 640 picture serves both.
     let width = variants ? 640 : nil
-    artworkPrefetch.forEach { $0.cancel() }
+    for task in artworkPrefetch { task.cancel() }
     // Four quiet workers, each loading every fourth poster.
     artworkPrefetch = (0..<4).map { lane in
       Task(priority: .utility) { @MainActor in
@@ -3386,7 +3414,7 @@ final class AppModel: ObservableObject {
         return false
       }
       clearPersonalViewState()
-    wishPosterCache.clear()
+      wishPosterCache.clear()
       let active = viewingProfile(response, device: device)
       acceptedProfile = active
       rememberForOffline(choice, pin: pin, serverId: device.serverId)
@@ -3508,7 +3536,9 @@ final class AppModel: ObservableObject {
 
   /// This profile's Touch ID key on this Mac, if it has one.
   var storedPasskey: StoredPasskey? {
-    guard SecureEnclavePasskeySigner.isAvailable, let profile, let user = profile.user else { return nil }
+    guard SecureEnclavePasskeySigner.isAvailable, let profile, let user = profile.user else {
+      return nil
+    }
     return PasskeyStore.load(server: profile.serverId, profile: user.id)
   }
 
@@ -3516,7 +3546,9 @@ final class AppModel: ObservableObject {
   /// for the Server Password. Returns whether management is unlocked.
   func unlockManagementInteractively(serverName: String? = nil) async -> Bool {
     if storedPasskey != nil, await unlockManagementWithPasskey() { return true }
-    guard let password = try? AdministrationPasswordPrompt.confirm(serverName: serverName ?? profile?.name ?? "Aurelia")
+    guard
+      let password = try? AdministrationPasswordPrompt.confirm(
+        serverName: serverName ?? profile?.name ?? "Aurelia")
     else { return false }
     return await unlockManagement(password: password)
   }
@@ -3546,7 +3578,9 @@ final class AppModel: ObservableObject {
       await reloadAdministration()
       return true
     } catch {
-      if let failure = error as? APIClientError, failure.problemCode == "passkey_invalid", let user = profile.user {
+      if let failure = error as? APIClientError, failure.problemCode == "passkey_invalid",
+        let user = profile.user
+      {
         // The server no longer knows this key: forget it here too and fall back to the password.
         PasskeyStore.remove(server: profile.serverId, profile: user.id)
       }

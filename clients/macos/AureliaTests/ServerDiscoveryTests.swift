@@ -102,8 +102,10 @@ struct ServerDiscoveryTests {
       addresses: [URL(string: "http://minipc.local:8080")!, URL(string: "https://minipc.local")!])
     #expect(target.followable(for: id, tried: []) == [URL(string: "https://minipc.local")!])
     #expect(target.followable(for: UUID(), tried: []).isEmpty)
-    #expect(ServerReconnectPolicy.isMoved(
-      APIClientError.httpFailure(status: 409, retryAfter: nil, code: "server_moved", message: nil)))
+    #expect(
+      ServerReconnectPolicy.isMoved(
+        APIClientError.httpFailure(status: 409, retryAfter: nil, code: "server_moved", message: nil)
+      ))
   }
 
   @Test func reconnectingWakesTheSleepingServerBeforeEachAttempt() async throws {

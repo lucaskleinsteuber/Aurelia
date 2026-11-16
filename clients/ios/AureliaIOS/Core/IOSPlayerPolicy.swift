@@ -228,13 +228,15 @@ struct IOSRelayRequest: Equatable, Sendable {
   /// with at most a sound track in the query.
   static func isAllowedHLSPath(_ path: String) -> Bool {
     path.range(
-      of: #"^hls/(master\.m3u8|[1-9][0-9]{2,3}p/(index\.m3u8|init\.mp4|[0-9]{1,6}\.m4s))(\?audio=[0-9]{1,4})?$"#,
+      of:
+        #"^hls/(master\.m3u8|[1-9][0-9]{2,3}p/(index\.m3u8|init\.mp4|[0-9]{1,6}\.m4s))(\?audio=[0-9]{1,4})?$"#,
       options: .regularExpression) != nil
   }
 
   /// The server address for an HLS path below the ticket's stream address.
   static func hlsURL(_ path: String, below source: URL) -> URL? {
-    guard isAllowedHLSPath(path), var components = URLComponents(url: source, resolvingAgainstBaseURL: false)
+    guard isAllowedHLSPath(path),
+      var components = URLComponents(url: source, resolvingAgainstBaseURL: false)
     else { return nil }
     let parts = path.split(separator: "?", maxSplits: 1).map(String.init)
     components.percentEncodedPath = components.percentEncodedPath + "/" + parts[0]
@@ -353,7 +355,8 @@ enum IOSSleepTimerWakeRule {
   /// Someone asked for the server: automatic waking counts again.
   static func clear(_ defaults: UserDefaults = .standard) { defaults.removeObject(forKey: key) }
 
-  static func mayWakeAutomatically(_ defaults: UserDefaults = .standard, now: Date = Date()) -> Bool {
+  static func mayWakeAutomatically(_ defaults: UserDefaults = .standard, now: Date = Date()) -> Bool
+  {
     let ended = defaults.double(forKey: key)
     guard ended > 0 else { return true }
     let since = now.timeIntervalSince1970 - ended

@@ -68,7 +68,8 @@ struct IOSWakeOnLanTests {
       hosts: ["10.0.0.20"], defaults: defaults)
     #expect(IOSWakeOnLan.appHost(for: serverID, defaults: defaults) == nil)
     IOSWakeOnLan.remember(
-      serverID: serverID, info: try info(nil, hosting: "macApp"), hosts: ["10.0.0.20"], defaults: defaults)
+      serverID: serverID, info: try info(nil, hosting: "macApp"), hosts: ["10.0.0.20"],
+      defaults: defaults)
     let target = try #require(IOSWakeOnLan.target(for: serverID, defaults: defaults))
     #expect(target.hardwareAddresses.isEmpty, "A desktop or laptop is started by its owner.")
     #expect(IOSWakeOnLan.appHost(for: serverID, defaults: defaults) == "Mac")

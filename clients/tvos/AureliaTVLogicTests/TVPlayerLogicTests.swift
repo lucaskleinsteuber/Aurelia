@@ -266,9 +266,12 @@ struct TVPlayerLogicTests {
 
   @Test func theLaterPositionWinsAConflict() {
     let now = Date()
-    #expect(TVProgressConflict.keepsLocal(capturedAt: now, serverUpdatedAt: now.addingTimeInterval(-60)))
-    #expect(TVProgressConflict.keepsLocal(capturedAt: now, serverUpdatedAt: now.addingTimeInterval(3)))
-    #expect(!TVProgressConflict.keepsLocal(capturedAt: now, serverUpdatedAt: now.addingTimeInterval(60)))
+    #expect(
+      TVProgressConflict.keepsLocal(capturedAt: now, serverUpdatedAt: now.addingTimeInterval(-60)))
+    #expect(
+      TVProgressConflict.keepsLocal(capturedAt: now, serverUpdatedAt: now.addingTimeInterval(3)))
+    #expect(
+      !TVProgressConflict.keepsLocal(capturedAt: now, serverUpdatedAt: now.addingTimeInterval(60)))
     #expect(TVProgressConflict.keepsLocal(capturedAt: now, serverUpdatedAt: nil))
     // A sample from an older build has no time and never overwrites the server.
     #expect(!TVProgressConflict.keepsLocal(capturedAt: nil, serverUpdatedAt: now))

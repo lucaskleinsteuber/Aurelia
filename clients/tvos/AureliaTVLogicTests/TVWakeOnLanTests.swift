@@ -68,7 +68,8 @@ struct TVWakeOnLanTests {
       hosts: ["10.0.0.20"], defaults: defaults)
     #expect(TVWakeOnLan.appHost(for: serverID, defaults: defaults) == nil)
     TVWakeOnLan.remember(
-      serverID: serverID, info: try info(nil, hosting: "macApp"), hosts: ["10.0.0.20"], defaults: defaults)
+      serverID: serverID, info: try info(nil, hosting: "macApp"), hosts: ["10.0.0.20"],
+      defaults: defaults)
     let target = try #require(TVWakeOnLan.target(for: serverID, defaults: defaults))
     #expect(target.hardwareAddresses.isEmpty, "A desktop or laptop is started by its owner.")
     #expect(TVWakeOnLan.appHost(for: serverID, defaults: defaults) == "Mac")

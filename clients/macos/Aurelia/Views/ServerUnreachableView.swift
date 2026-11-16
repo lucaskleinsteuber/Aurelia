@@ -84,8 +84,10 @@ struct ServerUnreachableView: View {
         if model.canOfferOfflineMode {
           VStack(spacing: 8) {
             WatchOfflineButton()
-            Text("Shows only the titles on this Mac, without the server. Progress goes back to it later.")
-              .font(.caption).foregroundStyle(.secondary)
+            Text(
+              "Shows only the titles on this Mac, without the server. Progress goes back to it later."
+            )
+            .font(.caption).foregroundStyle(.secondary)
           }
           .padding(.top, 12)
           .accessibilityIdentifier("server-unreachable-downloads")

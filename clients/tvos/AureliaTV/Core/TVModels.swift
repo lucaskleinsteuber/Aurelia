@@ -55,11 +55,13 @@ enum TVCoreError: LocalizedError, Equatable, Sendable {
     case .identityMismatch:
       "The server identity has changed. Confirm the server on your Mac before reconnecting."
     case .invalidResponse: "The server returned an invalid response."
-    case .invalidRequest: "Aurelia could not send this request. Check what you entered and try again."
+    case .invalidRequest:
+      "Aurelia could not send this request. Check what you entered and try again."
     case .unsupportedServer: "Update Aurelia Server to 1.5.5 or later to connect this Apple TV."
     case .lanAccessDisabled:
       "This server accepts connections only from its own computer. Allow devices on your home network in Aurelia on your Mac."
-    case .outdatedClient: "This server is newer than Aurelia on this Apple TV. Update the app to connect."
+    case .outdatedClient:
+      "This server is newer than Aurelia on this Apple TV. Update the app to connect."
     case .profileRequired: "Choose a profile to continue."
     case .server(_, _, let message, _): message ?? "The server request could not be completed."
     }
@@ -675,7 +677,8 @@ struct TVMediaSegments: Codable, Equatable, Sendable {
 
   /// The intro when both ends are known and in order.
   var intro: (start: Int64, end: Int64)? {
-    guard let start = introStartMilliseconds, let end = introEndMilliseconds, start >= 0, end > start
+    guard let start = introStartMilliseconds, let end = introEndMilliseconds, start >= 0,
+      end > start
     else { return nil }
     return (start, end)
   }

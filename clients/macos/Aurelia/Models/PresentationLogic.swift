@@ -184,7 +184,8 @@ enum UpNextPolicy {
 
   /// A credits time is only trusted in the second half of the title and before its end.
   static func credits(_ creditsStart: Int64?, duration: Int64) -> Int64? {
-    guard let creditsStart, duration > 0, creditsStart >= duration / 2, creditsStart < duration - 1_000
+    guard let creditsStart, duration > 0, creditsStart >= duration / 2,
+      creditsStart < duration - 1_000
     else { return nil }
     return creditsStart
   }
@@ -274,19 +275,23 @@ enum ServerIssueText {
     case "authentication_rejected": "A device's sign-in was refused (expired or signed out)"
     case "access_rejected": "A profile tried something it isn't allowed to"
     case "network_access_rejected": "A device outside the allowed networks was turned away"
-    case "request_rate_limited", "rate_limited": "A device sent too many requests and was slowed down"
+    case "request_rate_limited", "rate_limited":
+      "A device sent too many requests and was slowed down"
     case "device_pairing_rate_limited": "Too many wrong device codes; pairing was slowed down"
-    case "request_rejected", "request_body_rejected": "The server refused a request it couldn't read"
+    case "request_rejected", "request_body_rejected":
+      "The server refused a request it couldn't read"
     case "request_too_large": "A request was too large and was refused"
     case "request_failed": "A request failed on the server"
-    case "host_rejected", "host_operation_rejected": "The server refused an address it doesn't answer to"
+    case "host_rejected", "host_operation_rejected":
+      "The server refused an address it doesn't answer to"
     case "integration_key_rejected": "A Smart Home key was refused"
     case "backup_attempt_failed": "An automatic backup failed"
     case "conversion_failed": "Converting a title while it played failed"
     case "subtitle_conversion_failed": "A subtitle couldn't be converted"
     case "media_probe_failed": "A media file couldn't be read"
     case "metadata_authentication_failed": "TMDB refused the token"
-    case "metadata_job_failed", "metadata_provider_failed": "Looking up movie and show information failed"
+    case "metadata_job_failed", "metadata_provider_failed":
+      "Looking up movie and show information failed"
     case "subtitle_account_rejected": "OpenSubtitles refused the account"
     case "passkey_failed": "A Face ID or Touch ID approval failed"
     case "server_storage_operation_failed": "Changing a storage location failed"

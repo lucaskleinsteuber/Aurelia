@@ -57,7 +57,8 @@ enum SubtitleCueBuilder {
       if end - first.start < shortestCue { end = min(first.start + shortestCue, limit) }
       end = max(end, last.end)
       cues.append(
-        SubtitleCue(start: first.start, end: end, lines: lines(group.map(\.text).joined(separator: " "))))
+        SubtitleCue(
+          start: first.start, end: end, lines: lines(group.map(\.text).joined(separator: " "))))
     }
     return cues
   }
@@ -71,7 +72,8 @@ enum SubtitleCueBuilder {
     let spaces = characters.indices.filter { characters[$0] == " " }
     guard !spaces.isEmpty else { return [text] }
     let best = spaces.min { left, right in
-      score(left, middle: middle, after: characters) < score(right, middle: middle, after: characters)
+      score(left, middle: middle, after: characters)
+        < score(right, middle: middle, after: characters)
     }!
     return [
       String(characters[..<best]).trimmingCharacters(in: .whitespaces),
@@ -132,14 +134,18 @@ enum SpeechLanguages {
   }
 
   /// The best of the supported locales for a language: this Mac's own region first.
-  static func locale(for code: String, among supported: [Locale], region: String? = Locale.current
-    .region?.identifier) -> Locale?
-  {
+  static func locale(
+    for code: String, among supported: [Locale],
+    region: String? = Locale.current
+      .region?.identifier
+  ) -> Locale? {
     let matching = supported.filter { $0.language.languageCode?.identifier == code }
     if let region, let local = matching.first(where: { $0.region?.identifier == region }) {
       return local
     }
-    let usual = ["en": "US", "de": "DE", "fr": "FR", "es": "ES", "pt": "BR", "it": "IT", "nl": "NL"]
+    let usual = [
+      "en": "US", "de": "DE", "fr": "FR", "es": "ES", "pt": "BR", "it": "IT", "nl": "NL",
+    ]
     if let usualRegion = usual[code],
       let common = matching.first(where: { $0.region?.identifier == usualRegion })
     {

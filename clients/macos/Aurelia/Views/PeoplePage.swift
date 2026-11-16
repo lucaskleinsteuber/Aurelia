@@ -101,7 +101,8 @@ struct PeoplePage: View {
         description: Text(
           query.isEmpty
             ? "People appear here once TMDB has identified the titles in your library."
-            : "No one in your library matches “\(query.trimmingCharacters(in: .whitespacesAndNewlines))”.")
+            : "No one in your library matches “\(query.trimmingCharacters(in: .whitespacesAndNewlines))”."
+        )
       )
       .frame(maxWidth: .infinity, minHeight: 260)
     } else {
@@ -128,7 +129,8 @@ struct PeoplePage: View {
       if isLoadingMore {
         ProgressView().controlSize(.small).frame(maxWidth: .infinity)
       } else if let errorMessage {
-        ErrorBanner(message: errorMessage, retry: { Task { await load(reset: false) } }, inline: true)
+        ErrorBanner(
+          message: errorMessage, retry: { Task { await load(reset: false) } }, inline: true)
       }
     }
   }
@@ -158,7 +160,10 @@ struct PeoplePage: View {
       errorMessage = nil
       hasLoaded = true
     } catch {
-      if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+      if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
+      {
+        return
+      }
       guard request == generation else { return }
       errorMessage = error.localizedDescription
       hasLoaded = true
@@ -178,7 +183,9 @@ enum PeoplePresentation {
 
   /// "Born May 1, 1970 (age 56) in Invented Town", or both dates for someone who died. TMDB writes
   /// dates as YYYY-MM-DD; anything else is left out.
-  static func life(_ about: PersonAbout?, today: Date = Date(), calendar: Calendar = .current) -> String? {
+  static func life(_ about: PersonAbout?, today: Date = Date(), calendar: Calendar = .current)
+    -> String?
+  {
     guard let about else { return nil }
     let born = day(about.birthday)
     let died = day(about.deathday)
@@ -201,7 +208,9 @@ enum PeoplePresentation {
   private static func day(_ text: String?) -> DateComponents? {
     guard let text, text.count == 10 else { return nil }
     let parts = text.split(separator: "-").compactMap { Int($0) }
-    guard parts.count == 3, (1...12).contains(parts[1]), (1...31).contains(parts[2]) else { return nil }
+    guard parts.count == 3, (1...12).contains(parts[1]), (1...31).contains(parts[2]) else {
+      return nil
+    }
     return DateComponents(year: parts[0], month: parts[1], day: parts[2])
   }
 
@@ -231,7 +240,9 @@ private struct PeopleCard: View {
       AuthenticatedArtwork(artwork: person.profile, symbol: "person.fill")
         .frame(width: 112, height: 112)
         .clipShape(Circle())
-        .overlay { Circle().stroke(.white.opacity(hovering ? 0.35 : 0.1), lineWidth: hovering ? 1.5 : 1) }
+        .overlay {
+          Circle().stroke(.white.opacity(hovering ? 0.35 : 0.1), lineWidth: hovering ? 1.5 : 1)
+        }
         .shadow(color: .black.opacity(hovering ? 0.34 : 0), radius: 14, y: 8)
         .scaleEffect(hovering && !reduceMotion ? 1.04 : 1)
       Text(person.name).font(.callout.weight(.semibold)).lineLimit(1)

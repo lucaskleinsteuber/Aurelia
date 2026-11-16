@@ -80,7 +80,9 @@ struct PlayerView: View {
           onKeyDown: handleKey
         )
         .frame(width: viewport.width, height: viewport.height)
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+        .onGeometryChange(for: CGSize.self) {
+          $0.size
+        } action: { size in
           videoSize = size
           controller.setVideoFill(preferencesStore.preferences.fillsScreen, size: size)
         }
@@ -96,19 +98,20 @@ struct PlayerView: View {
 
         if let preShow {
           CinemaPreShowView(
-            show: preShow, reduceMotion: reduceMotion, onClose: { closePlayer() })
-            .frame(width: viewport.width, height: viewport.height)
-            .transition(.opacity)
-            // Moving the pointer shows it again over the pre-show, and it hides after a while.
-            .onContinuousHover { phase in
-              updateCursorEnvironment()
-              if case .active = phase {
-                cursor.pointer(inside: true, physicallyMoved: true)
-                revealControls()
-              } else {
-                cursor.pointer(inside: false, physicallyMoved: false)
-              }
+            show: preShow, reduceMotion: reduceMotion, onClose: { closePlayer() }
+          )
+          .frame(width: viewport.width, height: viewport.height)
+          .transition(.opacity)
+          // Moving the pointer shows it again over the pre-show, and it hides after a while.
+          .onContinuousHover { phase in
+            updateCursorEnvironment()
+            if case .active = phase {
+              cursor.pointer(inside: true, physicallyMoved: true)
+              revealControls()
+            } else {
+              cursor.pointer(inside: false, physicallyMoved: false)
             }
+          }
         }
 
         if preShow == nil,
@@ -206,9 +209,12 @@ struct PlayerView: View {
       .frame(width: viewport.width, height: viewport.height)
       .animation(reduceMotion ? nil : .easeInOut(duration: 0.5), value: startScreenVisible)
       .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: controller.upNext != nil)
-      .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: controller.showsSuggestionCard)
       .animation(
-        reduceMotion ? nil : .easeOut(duration: 0.3), value: controller.showsSuggestionEndScreen)
+        reduceMotion ? nil : .easeOut(duration: 0.3), value: controller.showsSuggestionCard
+      )
+      .animation(
+        reduceMotion ? nil : .easeOut(duration: 0.3), value: controller.showsSuggestionEndScreen
+      )
       .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: controller.showsGoodNight)
       .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: controller.showsSkipIntro)
     }
@@ -267,11 +273,17 @@ struct PlayerView: View {
       model.reportPlayerPlaying(false)
       if let party = model.watchParty {
         // Closing the player leaves the party; opening its next title does not.
-        if party.isChangingTitle { party.detach() } else { Task { await model.leaveWatchTogether() } }
+        if party.isChangingTitle {
+          party.detach()
+        } else {
+          Task { await model.leaveWatchTogether() }
+        }
       }
       Task { await controller.shutdown() }
     }
-    .onChange(of: watchTogetherPresented) { interaction("watch-together", active: watchTogetherPresented) }
+    .onChange(of: watchTogetherPresented) {
+      interaction("watch-together", active: watchTogetherPresented)
+    }
     .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) {
       notification in
       guard let window = notification.object as? NSWindow,
@@ -794,8 +806,10 @@ struct PlayerView: View {
       Button {
         toggleVideoFill()
       } label: {
-        Image(systemName: preferencesStore.preferences.fillsScreen ? "aspectratio.fill" : "aspectratio")
-          .frame(width: 42, height: 42)
+        Image(
+          systemName: preferencesStore.preferences.fillsScreen ? "aspectratio.fill" : "aspectratio"
+        )
+        .frame(width: 42, height: 42)
       }
       .buttonStyle(.plain)
       .accessibilityLabel(
@@ -917,7 +931,8 @@ struct PlayerView: View {
           .padding(.vertical, 3)
           .overlay(
             RoundedRectangle(cornerRadius: AureliaDesign.tinyRadius)
-              .strokeBorder(.secondary.opacity(0.6)))
+              .strokeBorder(.secondary.opacity(0.6))
+          )
           .accessibilityHidden(true)
       }
       .font(.title3.weight(.semibold))
@@ -993,7 +1008,9 @@ struct PlayerView: View {
       : ScreenTimeText.goodNight(controller.screenTime, name: name)
     return ZStack {
       RadialGradient(
-        colors: [Color(red: 0.16, green: 0.2, blue: 0.38), Color(red: 0.02, green: 0.02, blue: 0.06)],
+        colors: [
+          Color(red: 0.16, green: 0.2, blue: 0.38), Color(red: 0.02, green: 0.02, blue: 0.06),
+        ],
         center: .init(x: 0.5, y: 0.35), startRadius: 20, endRadius: 700
       )
       .opacity(0.96)

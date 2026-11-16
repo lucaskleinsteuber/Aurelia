@@ -112,8 +112,14 @@ struct IOSPowerNowResult: Decodable, Sendable {
 enum IOSAutomationText {
   static let scopes: [(id: String, title: String, detail: String)] = [
     ("status", "Read What Plays", "What is playing where, and whether the server can turn off."),
-    ("power", "Turn the Server Off", "Sleep, turn off or stop the server, for example from a Home Assistant button."),
-    ("playback", "Control Players", "Play, pause or stop on your own devices that have Aurelia open."),
+    (
+      "power", "Turn the Server Off",
+      "Sleep, turn off or stop the server, for example from a Home Assistant button."
+    ),
+    (
+      "playback", "Control Players",
+      "Play, pause or stop on your own devices that have Aurelia open."
+    ),
   ]
 
   static func powerTitle(_ action: String) -> String {
@@ -138,13 +144,16 @@ enum IOSAutomationText {
     while trimmed.hasSuffix("/") { trimmed.removeLast() }
     let id = webhookID.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty, !id.isEmpty,
-      id.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_" })
+      id.unicodeScalars.allSatisfy({
+        CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_"
+      })
     else { return nil }
     // Only a real scheme counts; a computer named "httpbox.lan" still gets one (audit C-X18).
     let lowered = trimmed.lowercased()
     let withScheme =
       lowered.hasPrefix("http://") || lowered.hasPrefix("https://") ? trimmed : "http://" + trimmed
-    guard var components = URLComponents(string: withScheme), let host = components.host, !host.isEmpty
+    guard var components = URLComponents(string: withScheme), let host = components.host,
+      !host.isEmpty
     else { return nil }
     if components.port == nil, components.scheme == "http" { components.port = 8123 }
     components.path = "/api/webhook/" + id
@@ -158,7 +167,9 @@ enum IOSAutomationText {
   }
 
   static func host(_ url: String) -> String {
-    guard let components = URLComponents(string: url), let host = components.host else { return url }
+    guard let components = URLComponents(string: url), let host = components.host else {
+      return url
+    }
     return components.port.map { "\(host):\($0)" } ?? host
   }
 
@@ -167,7 +178,9 @@ enum IOSAutomationText {
     if !webhook.enabled { return (false, "Off") }
     if webhook.pausedReason != nil { return (true, "Paused after failed deliveries") }
     guard let last = webhook.lastDelivery else { return (false, "Nothing sent yet") }
-    if last.state == "succeeded" { return (false, "Last delivery \(last.durationMilliseconds ?? 0) ms") }
+    if last.state == "succeeded" {
+      return (false, "Last delivery \(last.durationMilliseconds ?? 0) ms")
+    }
     return (true, last.error ?? "The last delivery failed")
   }
 
@@ -216,24 +229,31 @@ extension IOSAPIClient {
   }
 
   func automationOverview() async throws -> IOSAutomationOverview {
-    try Self.decodeAdmin(IOSAutomationOverview.self, data: await adminData("/api/v1/server/automation"))
+    try Self.decodeAdmin(
+      IOSAutomationOverview.self, data: await adminData("/api/v1/server/automation"))
   }
-  func createWebhook(_ request: IOSAutomationWebhookRequest) async throws -> IOSAutomationWebhookCreated {
+  func createWebhook(_ request: IOSAutomationWebhookRequest) async throws
+    -> IOSAutomationWebhookCreated
+  {
     try Self.decodeAdmin(
       IOSAutomationWebhookCreated.self,
-      data: await adminData("/api/v1/server/automation/webhooks", method: "POST", body: JSONEncoder().encode(request)))
+      data: await adminData(
+        "/api/v1/server/automation/webhooks", method: "POST", body: JSONEncoder().encode(request)))
   }
   func saveWebhook(id: UUID, _ request: IOSAutomationWebhookRequest) async throws {
     _ = try await adminData(
-      "/api/v1/server/automation/webhooks/\(Self.automationID(id))", method: "PUT", body: JSONEncoder().encode(request))
+      "/api/v1/server/automation/webhooks/\(Self.automationID(id))", method: "PUT",
+      body: JSONEncoder().encode(request))
   }
   func deleteWebhook(id: UUID) async throws {
-    _ = try await adminData("/api/v1/server/automation/webhooks/\(Self.automationID(id))", method: "DELETE")
+    _ = try await adminData(
+      "/api/v1/server/automation/webhooks/\(Self.automationID(id))", method: "DELETE")
   }
   func testWebhook(id: UUID) async throws -> IOSAutomationDelivery {
     try Self.decodeAdmin(
       IOSAutomationDelivery.self,
-      data: await adminData("/api/v1/server/automation/webhooks/\(Self.automationID(id))/test", method: "POST"))
+      data: await adminData(
+        "/api/v1/server/automation/webhooks/\(Self.automationID(id))/test", method: "POST"))
   }
   func webhookDeliveries(id: UUID) async throws -> [IOSAutomationDelivery] {
     try Self.decodeAdmin(
@@ -245,9 +265,12 @@ extension IOSAPIClient {
   func rotateWebhookSecret(id: UUID) async throws -> IOSAutomationSecret {
     try Self.decodeAdmin(
       IOSAutomationSecret.self,
-      data: await adminData("/api/v1/server/automation/webhooks/\(Self.automationID(id))/secret", method: "POST"))
+      data: await adminData(
+        "/api/v1/server/automation/webhooks/\(Self.automationID(id))/secret", method: "POST"))
   }
-  func createIntegrationToken(name: String, scopes: [String]) async throws -> IOSIntegrationTokenCreated {
+  func createIntegrationToken(name: String, scopes: [String]) async throws
+    -> IOSIntegrationTokenCreated
+  {
     struct Payload: Encodable {
       let name: String
       let scopes: [String]
@@ -255,10 +278,12 @@ extension IOSAPIClient {
     return try Self.decodeAdmin(
       IOSIntegrationTokenCreated.self,
       data: await adminData(
-        "/api/v1/server/automation/tokens", method: "POST", body: JSONEncoder().encode(Payload(name: name, scopes: scopes))))
+        "/api/v1/server/automation/tokens", method: "POST",
+        body: JSONEncoder().encode(Payload(name: name, scopes: scopes))))
   }
   func revokeIntegrationToken(id: UUID) async throws {
-    _ = try await adminData("/api/v1/server/automation/tokens/\(Self.automationID(id))", method: "DELETE")
+    _ = try await adminData(
+      "/api/v1/server/automation/tokens/\(Self.automationID(id))", method: "DELETE")
   }
   func powerNow(action: String, force: Bool = false) async throws -> IOSPowerNowResult {
     struct Payload: Encodable {
@@ -268,6 +293,7 @@ extension IOSAPIClient {
     return try Self.decodeAdmin(
       IOSPowerNowResult.self,
       data: await adminData(
-        "/api/v1/server/power/now", method: "POST", body: JSONEncoder().encode(Payload(action: action, force: force))))
+        "/api/v1/server/power/now", method: "POST",
+        body: JSONEncoder().encode(Payload(action: action, force: force))))
   }
 }

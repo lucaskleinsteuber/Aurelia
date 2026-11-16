@@ -20,7 +20,10 @@ struct IOSMovieNightView: View {
   let onPlay: (UUID) -> Void
   @State private var started = false
 
-  init(api: any IOSMovieNightAPI, deviceName: String, joining: IOSMovieNightSummary?, onPlay: @escaping (UUID) -> Void) {
+  init(
+    api: any IOSMovieNightAPI, deviceName: String, joining: IOSMovieNightSummary?,
+    onPlay: @escaping (UUID) -> Void
+  ) {
     _session = StateObject(wrappedValue: IOSMovieNightSession(api: api, deviceName: deviceName))
     self.joining = joining
     self.onPlay = onPlay
@@ -35,11 +38,16 @@ struct IOSMovieNightView: View {
             HStack {
               Text(error).font(.subheadline)
               Spacer()
-              Button { session.errorText = nil } label: { Image(systemName: "xmark") }
-                .accessibilityLabel("Dismiss")
+              Button {
+                session.errorText = nil
+              } label: {
+                Image(systemName: "xmark")
+              }
+              .accessibilityLabel("Dismiss")
             }
             .padding(12)
-            .background(MovieNightPalette.nope.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
+            .background(
+              MovieNightPalette.nope.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
           }
           content
         }
@@ -114,14 +122,18 @@ struct IOSMovieNightView: View {
           VStack(alignment: .leading, spacing: 2) {
             Text(member.isYou ? "\(member.name) (you)" : member.name).font(.body.weight(.semibold))
             Text(
-              [member.deviceName, member.isHost ? "started it" : nil, member.isVoting ? nil : "only watches"]
-                .compactMap { $0 }.joined(separator: " · ")
+              [
+                member.deviceName, member.isHost ? "started it" : nil,
+                member.isVoting ? nil : "only watches",
+              ]
+              .compactMap { $0 }.joined(separator: " · ")
             )
             .font(.caption).foregroundStyle(.secondary)
           }
           Spacer()
           if deckSize > 0 && member.isVoting {
-            Text("\(member.swiped)/\(deckSize)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            Text("\(member.swiped)/\(deckSize)").font(.caption.monospacedDigit()).foregroundStyle(
+              .secondary)
           }
         }
         .padding(.vertical, 10)
@@ -138,7 +150,8 @@ struct IOSMovieNightView: View {
         "Movie Night",
         voters == 0
           ? "Nobody is swiping yet. Open Aurelia on another phone and join this night."
-          : "\(voters == 1 ? "1 person is" : "\(voters) people are") ready to swipe. Anyone else at home can join from Aurelia.")
+          : "\(voters == 1 ? "1 person is" : "\(voters) people are") ready to swipe. Anyone else at home can join from Aurelia."
+      )
       IOSMovieNightProgramCard(state: state, voters: voters) { program in
         Task { await session.settings(program) }
       } deal: {
@@ -205,7 +218,6 @@ struct IOSMovieNightView: View {
   }
 }
 
-
 /// The stack of posters: the top one follows the finger, tilts, and gets stamped.
 private struct IOSMovieNightStack: View {
   @ObservedObject var session: IOSMovieNightSession
@@ -220,15 +232,17 @@ private struct IOSMovieNightStack: View {
       GeometryReader { geometry in
         ZStack {
           ForEach(Array(cards.enumerated().reversed()), id: \.element.id) { index, card in
-            IOSMovieNightCardView(card: card, like: index == 0 ? likeStrength : 0, nope: index == 0 ? nopeStrength : 0)
-              .scaleEffect(index == 0 ? 1 : 1 - CGFloat(index) * 0.06)
-              .offset(y: index == 0 ? 0 : CGFloat(index) * 24)
-              .brightness(index == 0 ? 0 : -0.25 * Double(index))
-              .offset(index == 0 ? offset : .zero)
-              .rotationEffect(.degrees(index == 0 ? Double(offset.width / 16) : 0))
-              .gesture(drag(width: geometry.size.width, card: card), isEnabled: index == 0)
-              .allowsHitTesting(index == 0)
-              .accessibilityHidden(index != 0)
+            IOSMovieNightCardView(
+              card: card, like: index == 0 ? likeStrength : 0, nope: index == 0 ? nopeStrength : 0
+            )
+            .scaleEffect(index == 0 ? 1 : 1 - CGFloat(index) * 0.06)
+            .offset(y: index == 0 ? 0 : CGFloat(index) * 24)
+            .brightness(index == 0 ? 0 : -0.25 * Double(index))
+            .offset(index == 0 ? offset : .zero)
+            .rotationEffect(.degrees(index == 0 ? Double(offset.width / 16) : 0))
+            .gesture(drag(width: geometry.size.width, card: card), isEnabled: index == 0)
+            .allowsHitTesting(index == 0)
+            .accessibilityHidden(index != 0)
           }
         }
       }
@@ -238,7 +252,8 @@ private struct IOSMovieNightStack: View {
       HStack(spacing: 28) {
         button(.nope, card: cards.first)
         VStack(spacing: 2) {
-          Text("\(total - session.remaining.count + 1) of \(total)").font(.headline.monospacedDigit())
+          Text("\(total - session.remaining.count + 1) of \(total)").font(
+            .headline.monospacedDigit())
           let others = session.state?.voters.filter { !$0.isYou } ?? []
           if !others.isEmpty {
             Text(others.map { "\($0.name) \($0.swiped)" }.joined(separator: " · "))
@@ -254,8 +269,12 @@ private struct IOSMovieNightStack: View {
     }
   }
 
-  private var likeStrength: Double { max(0, min(1, offset.width / IOSMovieNightRules.swipeDistance)) }
-  private var nopeStrength: Double { max(0, min(1, -offset.width / IOSMovieNightRules.swipeDistance)) }
+  private var likeStrength: Double {
+    max(0, min(1, offset.width / IOSMovieNightRules.swipeDistance))
+  }
+  private var nopeStrength: Double {
+    max(0, min(1, -offset.width / IOSMovieNightRules.swipeDistance))
+  }
 
   private func drag(width: CGFloat, card: IOSMovieNightCard) -> some Gesture {
     DragGesture()
@@ -329,10 +348,16 @@ private struct IOSMovieNightCardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
         .padding(.top, 60)
-        .background(LinearGradient(colors: [.clear, .black.opacity(0.9)], startPoint: .top, endPoint: .center))
+        .background(
+          LinearGradient(
+            colors: [.clear, .black.opacity(0.9)], startPoint: .top, endPoint: .center))
       }
-      .overlay(alignment: .topLeading) { stamp("Yes!", color: MovieNightPalette.yes, angle: -14).opacity(like) }
-      .overlay(alignment: .topTrailing) { stamp("Nope", color: MovieNightPalette.nope, angle: 14).opacity(nope) }
+      .overlay(alignment: .topLeading) {
+        stamp("Yes!", color: MovieNightPalette.yes, angle: -14).opacity(like)
+      }
+      .overlay(alignment: .topTrailing) {
+        stamp("Nope", color: MovieNightPalette.nope, angle: 14).opacity(nope)
+      }
       .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
       .shadow(color: .black.opacity(0.45), radius: 20, y: 14)
       .accessibilityElement(children: .combine)
@@ -376,8 +401,11 @@ private struct IOSMovieNightTicket: View {
       .padding(20)
       if outcome.card != nil {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-          Text(outcome.isUnanimous ? "Admit \(voters.count)" : "\(outcome.likes) of \(outcome.voters) said yes")
-            .font(.headline.weight(.black))
+          Text(
+            outcome.isUnanimous
+              ? "Admit \(voters.count)" : "\(outcome.likes) of \(outcome.voters) said yes"
+          )
+          .font(.headline.weight(.black))
           Text(voters.joined(separator: ", ")).font(.subheadline)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -428,8 +456,12 @@ private struct IOSMovieNightProgramCard: View {
     VStack(alignment: .leading, spacing: 12) {
       VStack(alignment: .leading, spacing: 2) {
         Text("Tonight's program").font(.title3.weight(.bold))
-        Text(hosting ? "You choose what gets dealt." : "\(state.host?.name ?? "The host") chooses what gets dealt.")
-          .font(.footnote).foregroundStyle(.secondary)
+        Text(
+          hosting
+            ? "You choose what gets dealt."
+            : "\(state.host?.name ?? "The host") chooses what gets dealt."
+        )
+        .font(.footnote).foregroundStyle(.secondary)
       }
       row("What", IOSMovieNightProgram.kinds, selected: program.kinds) { value in
         var next = program
@@ -437,7 +469,10 @@ private struct IOSMovieNightProgramCard: View {
         change(next)
       }
       if !state.genreOptions.isEmpty {
-        row("Genre", [("", "Any genre")] + state.genreOptions.map { ($0, $0) }, selected: program.genre ?? "") { value in
+        row(
+          "Genre", [("", "Any genre")] + state.genreOptions.map { ($0, $0) },
+          selected: program.genre ?? ""
+        ) { value in
           var next = program
           next.genre = value.isEmpty ? nil : value
           change(next)
@@ -491,7 +526,8 @@ private struct IOSMovieNightProgramCard: View {
               .font(.subheadline.weight(.semibold))
               .padding(.horizontal, 12).padding(.vertical, 7)
               .background(
-                option.0 == selected ? Color.white : Color.white.opacity(0.1), in: Capsule())
+                option.0 == selected ? Color.white : Color.white.opacity(0.1), in: Capsule()
+              )
               .foregroundStyle(option.0 == selected ? Color.black : Color.white)
               .disabled(!hosting)
               .accessibilityAddTraits(option.0 == selected ? .isSelected : [])

@@ -54,7 +54,8 @@ final class WishPosterCache {
     return decodedImages.object(forKey: key as NSString)
   }
 
-  func image(posterPath: String?, width: Int = 342, profile: StoredServerProfile) async -> NSImage? {
+  func image(posterPath: String?, width: Int = 342, profile: StoredServerProfile) async -> NSImage?
+  {
     guard let normalized = normalizePath(posterPath),
       let key = cacheKey(posterPath: normalized, width: width, profile: profile)
     else {
@@ -90,7 +91,8 @@ final class WishPosterCache {
             return nil
           }
           imageData = fetched
-          self.memoryBytes.setObject(fetched as NSData, forKey: key as NSString, cost: fetched.count)
+          self.memoryBytes.setObject(
+            fetched as NSData, forKey: key as NSString, cost: fetched.count)
           self.diskCache?.store(fetched, forKey: key)
         } catch {
           if !(error is CancellationError) {

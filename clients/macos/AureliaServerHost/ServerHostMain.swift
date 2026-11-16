@@ -733,7 +733,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
       updateStatus(
         .idle,
         message:
-          "Aurelia Server stopped because nobody used it. It starts again when you open Aurelia on this Mac.")
+          "Aurelia Server stopped because nobody used it. It starts again when you open Aurelia on this Mac."
+      )
       return
     }
 

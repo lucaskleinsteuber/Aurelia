@@ -567,7 +567,9 @@ struct IOSPlayerView: View {
       : IOSScreenTimeText.goodNight(controller.screenTime, name: profileName)
     return ZStack {
       RadialGradient(
-        colors: [Color(red: 0.16, green: 0.2, blue: 0.38), Color(red: 0.02, green: 0.02, blue: 0.06)],
+        colors: [
+          Color(red: 0.16, green: 0.2, blue: 0.38), Color(red: 0.02, green: 0.02, blue: 0.06),
+        ],
         center: .init(x: 0.5, y: 0.35), startRadius: 20, endRadius: 600
       )
       .ignoresSafeArea()
@@ -961,7 +963,8 @@ private struct IOSWatchTogetherNotice: View {
 
   var body: some View {
     let text =
-      session.notice ?? (session.state?.isWaiting == true ? "Waiting until everyone is ready…" : nil)
+      session.notice
+      ?? (session.state?.isWaiting == true ? "Waiting until everyone is ready…" : nil)
     VStack {
       if let text {
         Label(text, systemImage: "person.2.fill")
@@ -1012,9 +1015,12 @@ private struct IOSSceneNotesSheet: View {
     NavigationStack {
       List {
         Section {
-          TextField("Note at \(IOSPlayerPolicy.timeLabel(milliseconds: position))", text: $draft, axis: .vertical)
-            .lineLimit(1...4)
-            .accessibilityIdentifier("scene-note-text")
+          TextField(
+            "Note at \(IOSPlayerPolicy.timeLabel(milliseconds: position))", text: $draft,
+            axis: .vertical
+          )
+          .lineLimit(1...4)
+          .accessibilityIdentifier("scene-note-text")
           Toggle("Time Range", isOn: $range)
           if range {
             Stepper("Lasts \(rangeSeconds) seconds", value: $rangeSeconds, in: 5...600, step: 5)
@@ -1026,7 +1032,9 @@ private struct IOSSceneNotesSheet: View {
           .disabled(IOSSceneNotePolicy.cleaned(draft) == nil || notes.working)
           .accessibilityIdentifier("scene-note-add")
         } footer: {
-          Text("Notes are private to your profile. A moment shows for six seconds, a range for as long as it lasts.")
+          Text(
+            "Notes are private to your profile. A moment shows for six seconds, a range for as long as it lasts."
+          )
         }
         Section {
           if notes.sorted.isEmpty {

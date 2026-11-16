@@ -91,7 +91,8 @@ enum SetupMovePlan {
       "The old server didn't answer. Check its address and that both computers are on the same network."
     case "move_address_invalid": "That address doesn't look right."
     case "backup_invalid": "The passphrase is wrong, or the file is damaged."
-    case "move_file_invalid": "This is a backup, not a moving file. Make a moving file on the old server."
+    case "move_file_invalid":
+      "This is a backup, not a moving file. Make a moving file on the old server."
     case "folder_invalid": "One of the folders doesn't exist on this Mac."
     case "locations_overlap": "Two storage locations point at the same folder."
     case "bootstrap_required", "server_already_setup":

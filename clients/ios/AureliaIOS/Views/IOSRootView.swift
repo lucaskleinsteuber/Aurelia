@@ -238,7 +238,9 @@ struct IOSSavedServerView: View {
         Image(systemName: "power").font(.system(size: 44, weight: .medium))
           .foregroundStyle(.secondary)
         VStack(spacing: 10) {
-          Text(model.savedServerAppHost.map { "Start Aurelia on Your \($0)" } ?? "The Server Is Off").font(.title.bold())
+          Text(
+            model.savedServerAppHost.map { "Start Aurelia on Your \($0)" } ?? "The Server Is Off"
+          ).font(.title.bold())
           Text(
             model.savedServerAppHost.map {
               "“\(name)” runs inside the Aurelia app on a \($0). Open Aurelia there, or wake the \($0), and Aurelia connects by itself."
@@ -268,7 +270,8 @@ struct IOSSavedServerView: View {
               }
               Button("Try Again") { Task { await model.reconnect(userInitiated: true) } }
                 .buttonStyle(
-                  IOSButtonStyle(kind: model.wakeOnLanStatus.canWake ? .secondary : .primary))
+                  IOSButtonStyle(kind: model.wakeOnLanStatus.canWake ? .secondary : .primary)
+                )
                 .accessibilityIdentifier("tv-server-retry")
             }
           }
@@ -358,9 +361,13 @@ struct IOSPairingView: View {
           .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
       }
       VStack(alignment: .leading, spacing: 6) {
-        IOSPairingStep(number: 1, text: "On the computer that runs Aurelia, open Settings › Profiles and Devices.")
-        IOSPairingStep(number: 2, text: "Click Create Code. On a Linux server without screen, run aurelia pair.")
-        IOSPairingStep(number: 3, text: "Type the 8 digits below. A code works once and for five minutes.")
+        IOSPairingStep(
+          number: 1,
+          text: "On the computer that runs Aurelia, open Settings › Profiles and Devices.")
+        IOSPairingStep(
+          number: 2, text: "Click Create Code. On a Linux server without screen, run aurelia pair.")
+        IOSPairingStep(
+          number: 3, text: "Type the 8 digits below. A code works once and for five minutes.")
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       TextField("8-digit code", text: $code)

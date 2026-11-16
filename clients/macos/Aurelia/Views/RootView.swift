@@ -83,7 +83,9 @@ struct RootView: View {
       .transition(.opacity)
       // Under Settings the library isn't drawn: its hero and blurred sidebar no longer redraw
       // with every frame of Settings (audit M3). It keeps its state and shows again at once.
-      .opacity(model.isSettingsPresented && model.playback == nil && model.offlineMode == nil ? 0 : 1)
+      .opacity(
+        model.isSettingsPresented && model.playback == nil && model.offlineMode == nil ? 0 : 1
+      )
       .accessibilityHidden(
         model.playback != nil || model.isSettingsPresented || model.movieNightLaunch != nil
           || model.wrappedLaunch != nil)
@@ -106,7 +108,8 @@ struct RootView: View {
       }
 
       // Movie Night and Wrapped take the whole window, over the library and Settings.
-      if model.playback == nil, let launch = model.movieNightLaunch, let api = model.profileClient() {
+      if model.playback == nil, let launch = model.movieNightLaunch, let api = model.profileClient()
+      {
         MovieNightView(api: api, joining: launch.joining)
           .id(launch.id)
           .transition(.opacity)
@@ -172,7 +175,8 @@ struct RootView: View {
       introductionReplay = UUID()
     }
     // A server this Mac hosts that stopped for being unused starts again when Aurelia is opened.
-    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification))
+    { _ in
       Task { await model.resumeIdleHost() }
     }
     .task { await model.resumeIdleHost() }

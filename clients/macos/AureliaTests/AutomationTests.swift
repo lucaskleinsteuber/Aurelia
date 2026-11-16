@@ -6,10 +6,18 @@ import XCTest
 /// Smart Home on the Mac ("automation-v1"): what the player reports and the settings' words.
 final class AutomationTests: XCTestCase {
   func testThePlayerReportsRealStatesOnce() {
-    XCTAssertEqual(AutomationPlaybackState.state(wantsPlayback: true, isPlaying: true, finished: false), "playing")
-    XCTAssertEqual(AutomationPlaybackState.state(wantsPlayback: true, isPlaying: false, finished: false), "buffering")
-    XCTAssertEqual(AutomationPlaybackState.state(wantsPlayback: false, isPlaying: false, finished: false), "paused")
-    XCTAssertEqual(AutomationPlaybackState.state(wantsPlayback: true, isPlaying: true, finished: true), "finished")
+    XCTAssertEqual(
+      AutomationPlaybackState.state(wantsPlayback: true, isPlaying: true, finished: false),
+      "playing")
+    XCTAssertEqual(
+      AutomationPlaybackState.state(wantsPlayback: true, isPlaying: false, finished: false),
+      "buffering")
+    XCTAssertEqual(
+      AutomationPlaybackState.state(wantsPlayback: false, isPlaying: false, finished: false),
+      "paused")
+    XCTAssertEqual(
+      AutomationPlaybackState.state(wantsPlayback: true, isPlaying: true, finished: true),
+      "finished")
     XCTAssertTrue(AutomationPlaybackState.shouldReport(last: nil, next: "playing"))
     XCTAssertFalse(AutomationPlaybackState.shouldReport(last: "playing", next: "playing"))
     XCTAssertFalse(AutomationPlaybackState.shouldReport(last: "finished", next: "paused"))
@@ -28,11 +36,16 @@ final class AutomationTests: XCTestCase {
       "http://httpbox.lan:8123/api/webhook/abc")
     XCTAssertNil(AutomationText.homeAssistantURL(base: "homeassistant.local", webhookID: "bad id!"))
     XCTAssertNil(AutomationText.homeAssistantURL(base: "", webhookID: "abc"))
-    let parts = AutomationText.splitHomeAssistantURL("http://homeassistant.local:8123/api/webhook/aurelia_lights")
+    let parts = AutomationText.splitHomeAssistantURL(
+      "http://homeassistant.local:8123/api/webhook/aurelia_lights")
     XCTAssertEqual(parts.base, "http://homeassistant.local:8123")
     XCTAssertEqual(parts.webhookID, "aurelia_lights")
-    XCTAssertEqual(AutomationText.host("http://homeassistant.local:8123/api/webhook/secret"), "homeassistant.local:8123")
-    XCTAssertTrue(AutomationText.homeAssistantExample(webhookID: "aurelia_lights").contains("webhook_id: aurelia_lights"))
+    XCTAssertEqual(
+      AutomationText.host("http://homeassistant.local:8123/api/webhook/secret"),
+      "homeassistant.local:8123")
+    XCTAssertTrue(
+      AutomationText.homeAssistantExample(webhookID: "aurelia_lights").contains(
+        "webhook_id: aurelia_lights"))
   }
 
   func testTheOverviewDecodesAndSaysHowDeliveriesWent() throws {
@@ -49,14 +62,20 @@ final class AutomationTests: XCTestCase {
       """
     let overview = try JSONDecoder().decode(AutomationOverview.self, from: Data(json.utf8))
     XCTAssertEqual(AutomationText.status(overview.webhooks[0]).text, "Last delivery 18 ms")
-    XCTAssertEqual(overview.powerActions.map(AutomationText.powerTitle), ["Sleep Now", "Turn Off Now", "Stop Aurelia Now"])
+    XCTAssertEqual(
+      overview.powerActions.map(AutomationText.powerTitle),
+      ["Sleep Now", "Turn Off Now", "Stop Aurelia Now"])
   }
 }
 
 final class SiriSupportTests: XCTestCase {
   func testASpokenRequestSplitsIntoTitleSeasonAndEpisode() {
-    XCTAssertEqual(SiriTitleRequest.parse("Breaking Bad season 3 episode 4"), .init(title: "Breaking Bad", season: 3, episode: 4))
-    XCTAssertEqual(SiriTitleRequest.parse("An Invented Show S1E2"), .init(title: "An Invented Show", season: 1, episode: 2))
+    XCTAssertEqual(
+      SiriTitleRequest.parse("Breaking Bad season 3 episode 4"),
+      .init(title: "Breaking Bad", season: 3, episode: 4))
+    XCTAssertEqual(
+      SiriTitleRequest.parse("An Invented Show S1E2"),
+      .init(title: "An Invented Show", season: 1, episode: 2))
     XCTAssertEqual(SiriTitleRequest.parse("Arrival"), .init(title: "Arrival"))
     XCTAssertTrue(SiriKeyStore.isKey("aur_it_" + String(repeating: "A", count: 43)))
     XCTAssertFalse(SiriKeyStore.isKey("whsec_abc"))

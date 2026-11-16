@@ -26,6 +26,11 @@ sh scripts/verify-product-names.sh
 scripts/test-macos.sh
 ```
 
+Swift is formatted as swift-format (from the pinned Xcode) formats it with `.swift-format` at the
+repository root. `bash scripts/check-swift-format.sh` checks every Swift file of the Mac, iPhone
+and iPad and Apple TV apps in about two seconds, and `--fix` formats them first. The Mac, iOS and
+tvOS test and build scripts run the check before anything is built.
+
 Native-host, autostart and disk-full recovery checks use `test-native-host.sh`,
 `test-release-app-autostart.sh` and `test-recovery-disk-full.sh` in `scripts/`. Use isolated synthetic data;
 UI tests need an unlocked GUI session. A cross-build is not an execution pass.

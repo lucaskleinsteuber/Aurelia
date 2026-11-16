@@ -185,8 +185,10 @@ private struct TVLicenseView: View {
     guard let url = Bundle.main.url(forResource: resource, withExtension: nil),
       let text = try? String(contentsOf: url, encoding: .utf8)
     else { return ["The license text is missing from this build."] }
-    return text.components(separatedBy: "\n\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-      .filter { !$0.isEmpty }
+    return text.components(separatedBy: "\n\n").map {
+      $0.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    .filter { !$0.isEmpty }
   }
 
   var body: some View {
@@ -240,7 +242,8 @@ private struct TVLicenseParagraph: View {
       Text(
         (try? AttributedString(
           markdown: text,
-          options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+          options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+          ?? AttributedString(text)
       ).font(.system(size: 26))
     }
   }

@@ -295,10 +295,14 @@ struct TVLibraryLogicTests {
     #expect(detail.resolvedMembers[1].displayTitle.hasSuffix("Specials"))
     #expect(TVCollectionPresentation.cleanedOverview(detail.overview) == "Every chapter in order.")
     #expect(TVCollectionPresentation.providerLabel(for: detail.summary) == "TMDB")
-    #expect(TVCollectionPresentation.statsLine(detail) == "2020–2026 · 3 titles · 1h 30m · 1 of 3 watched")
+    #expect(
+      TVCollectionPresentation.statsLine(detail) == "2020–2026 · 3 titles · 1h 30m · 1 of 3 watched"
+    )
     #expect(TVCollectionPresentation.playLabel(for: detail) == "Resume S01 E02")
-    #expect(TVCollectionPresentation.playableItems(in: detail).map(\.id) == [movie1.id, ep1.id, ep2.id])
-    #expect(TVCollectionPresentation.playbackQueue(in: detail, startingAt: ep1.id).map(\.id) == [ep2.id])
+    #expect(
+      TVCollectionPresentation.playableItems(in: detail).map(\.id) == [movie1.id, ep1.id, ep2.id])
+    #expect(
+      TVCollectionPresentation.playbackQueue(in: detail, startingAt: ep1.id).map(\.id) == [ep2.id])
     #expect(TVCollectionPresentation.cardSubtitle(franchise) == "1 of 3 watched · 2020–2026")
     #expect(loadedFranchises.map(\.name) == ["Sci-Fi Universe"])
 
@@ -314,11 +318,15 @@ struct TVLibraryLogicTests {
     let client = api(TVLibraryTestTransport(responses: []))
     let artwork = TVArtwork(
       id: collectionID, kind: "backdrop",
-      path: "/api/v1/artwork/collection/\(collectionID.uuidString.lowercased())/backdrop?kind=backdrop&rev=4",
+      path:
+        "/api/v1/artwork/collection/\(collectionID.uuidString.lowercased())/backdrop?kind=backdrop&rev=4",
       contentType: "image/jpeg", contentLength: 100, revision: 4)
     let request = try client.artworkRequest(artwork: artwork, width: 1280)
-    let components = try #require(request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) })
-    #expect(components.path == "/api/v1/artwork/collection/\(collectionID.uuidString.lowercased())/backdrop")
+    let components = try #require(
+      request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) })
+    #expect(
+      components.path
+        == "/api/v1/artwork/collection/\(collectionID.uuidString.lowercased())/backdrop")
     #expect(components.queryItems?.contains(URLQueryItem(name: "kind", value: "backdrop")) == true)
     #expect(components.queryItems?.contains(URLQueryItem(name: "rev", value: "4")) == true)
     #expect(components.queryItems?.contains(URLQueryItem(name: "width", value: "1280")) == true)

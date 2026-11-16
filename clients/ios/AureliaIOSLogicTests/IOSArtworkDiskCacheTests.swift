@@ -81,7 +81,8 @@ struct IOSArtworkDiskCacheTests {
     let posterKey = try #require(
       IOSArtworkDiskCache.key(serverID: server, profileID: profile, artwork: posterArt, width: 640))
     let backdropKey = try #require(
-      IOSArtworkDiskCache.key(serverID: server, profileID: profile, artwork: backdropArt, width: 640))
+      IOSArtworkDiskCache.key(
+        serverID: server, profileID: profile, artwork: backdropArt, width: 640))
     #expect(posterKey != backdropKey)
   }
 

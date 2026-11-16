@@ -149,7 +149,8 @@ enum SubtitleSync {
         verdict: .noMatch, timing: SubtitleTiming(.none), fitBefore: shareBefore,
         fitAfter: shareBefore, poorParts: poor)
     }
-    let moved = timing.segments.count > 1 || abs(timing.segments[0].offset) >= 0.1
+    let moved =
+      timing.segments.count > 1 || abs(timing.segments[0].offset) >= 0.1
       || timing.scale != 1
     if !moved || after - before < worthwhile {
       return SubtitleSyncResult(
@@ -210,9 +211,13 @@ enum SubtitleSync {
     var start = 0.0
     while start <= last {
       let part = cues.filter { $0.start >= start && $0.start < start + partLength }
-      if part.count >= 10 { parts.append(part) } else if !part.isEmpty, !parts.isEmpty {
+      if part.count >= 10 {
+        parts.append(part)
+      } else if !part.isEmpty, !parts.isEmpty {
         parts[parts.count - 1] += part
-      } else if !part.isEmpty { parts.append(part) }
+      } else if !part.isEmpty {
+        parts.append(part)
+      }
       start += partLength
     }
     return parts
@@ -226,8 +231,7 @@ enum SubtitleSync {
   /// offset joined, and the change placed at the subtitle gap that fits best.
   private static func segments(
     speech: [TimeSpan], cues: [TimeSpan], around shift: SubtitleShift
-  ) -> (timing: SubtitleTiming, fit: Double)?
-  {
+  ) -> (timing: SubtitleTiming, fit: Double)? {
     let parts = parts(cues)
     guard parts.count >= 2 else { return nil }
     var offsets: [Double] = []
@@ -242,7 +246,8 @@ enum SubtitleSync {
         candidate += 0.05
       }
       // A part moves away from the whole only when that clearly fits.
-      offsets.append(best.fit >= plausible && best.fit - global >= 0.15 ? best.offset : shift.offset)
+      offsets.append(
+        best.fit >= plausible && best.fit - global >= 0.15 ? best.offset : shift.offset)
     }
     // Neighboring parts with (nearly) the same offset are one segment.
     var groups: [(parts: Range<Int>, offset: Double)] = []
@@ -257,13 +262,16 @@ enum SubtitleSync {
     // Each segment's exact offset over all its subtitles.
     let exact = groups.map { group -> Double in
       let members = group.parts.flatMap { parts[$0] }
-      return refine(speech: speech, cues: members,
-        around: SubtitleShift(offset: group.offset, scale: shift.scale)).shift.offset
+      return refine(
+        speech: speech, cues: members,
+        around: SubtitleShift(offset: group.offset, scale: shift.scale)
+      ).shift.offset
     }
     var segments = [SubtitleSegment(from: 0, offset: exact[0])]
     for index in 1..<groups.count {
       // The change lies between the last part of one segment and the first of the next.
-      let near = parts[groups[index - 1].parts.upperBound - 1] + parts[groups[index].parts.lowerBound]
+      let near =
+        parts[groups[index - 1].parts.upperBound - 1] + parts[groups[index].parts.lowerBound]
       var best = (from: near.first!.start, fit: -1.0)
       for cue in near {
         let trial = SubtitleTiming(
@@ -291,7 +299,8 @@ enum SubtitleSync {
   }
 
   static func score(speech: [TimeSpan], cues: [TimeSpan], timing: SubtitleTiming) -> Double {
-    agreement(speech, cues.map { TimeSpan(start: timing.apply($0.start), end: timing.apply($0.end)) })
+    agreement(
+      speech, cues.map { TimeSpan(start: timing.apply($0.start), end: timing.apply($0.end)) })
   }
 
   private static func agreement(_ speech: [TimeSpan], _ moved: [TimeSpan]) -> Double {
@@ -382,7 +391,8 @@ enum SubtitleSync {
     var peaks: [(lag: Int, value: Double)] = []
     for lag in -reach...reach {
       let value = correlation[(lag + size) % size]
-      guard value > correlation[(lag - 1 + size) % size], value >= correlation[(lag + 1 + size) % size]
+      guard value > correlation[(lag - 1 + size) % size],
+        value >= correlation[(lag + 1 + size) % size]
       else { continue }
       peaks.append((lag, value))
     }
@@ -501,7 +511,9 @@ enum SubtitleText {
       guard let timing = lines.firstIndex(where: { $0.contains("-->") }) else { continue }
       let parts = lines[timing].components(separatedBy: "-->")
       guard parts.count == 2, let start = seconds(parts[0]),
-        let end = seconds(parts[1].split(separator: " ", omittingEmptySubsequences: true).first.map(String.init) ?? ""),
+        let end = seconds(
+          parts[1].split(separator: " ", omittingEmptySubsequences: true).first.map(String.init)
+            ?? ""),
         end > start
       else { continue }
       let text = lines[(timing + 1)...].map(clean).filter { !$0.isEmpty }
@@ -539,8 +551,10 @@ enum SubtitleText {
         output.append(character)
       }
     }
-    return output.replacingOccurrences(of: "&amp;", with: "&").replacingOccurrences(of: "&lt;", with: "<")
-      .replacingOccurrences(of: "&gt;", with: ">").replacingOccurrences(of: "&nbsp;", with: " ")
-      .trimmingCharacters(in: .whitespaces)
+    return output.replacingOccurrences(of: "&amp;", with: "&").replacingOccurrences(
+      of: "&lt;", with: "<"
+    )
+    .replacingOccurrences(of: "&gt;", with: ">").replacingOccurrences(of: "&nbsp;", with: " ")
+    .trimmingCharacters(in: .whitespaces)
   }
 }

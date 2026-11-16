@@ -4,12 +4,14 @@ import Testing
 /// The file watch on iPhone and iPad ("file-checks-v1"): the same words as on the Mac.
 struct IOSFileWatchTests {
   private func settings(
-    enabled: Bool = true, total: Int = 120, pending: Int = 0, problems: Int = 0, paused: Bool = false,
+    enabled: Bool = true, total: Int = 120, pending: Int = 0, problems: Int = 0,
+    paused: Bool = false,
     remaining: Int? = nil
   ) -> IOSFileCheckSettings {
     IOSFileCheckSettings(
       enabled: enabled, depth: "container", recheckDays: 90, canInspect: true, totalCount: total,
-      checkedCount: total - pending, pendingCount: pending, problemCount: problems, running: pending > 0,
+      checkedCount: total - pending, pendingCount: pending, problemCount: problems,
+      running: pending > 0,
       pausedForPlayback: paused, estimatedSecondsRemaining: remaining)
   }
 

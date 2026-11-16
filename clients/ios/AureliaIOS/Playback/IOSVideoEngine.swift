@@ -41,7 +41,8 @@ final class IOSVideoEngine: IOSPlaybackEngine {
       guard let values = raw as? [AnyHashable: Any] else { return nil }
       let time = Self.chapterTime(values[VLCChapterDescriptionTimeOffset])
       let duration = Self.chapterTime(values[VLCChapterDescriptionDuration])
-      let supplied = (values[VLCChapterDescriptionName] as? String)?
+      let supplied =
+        (values[VLCChapterDescriptionName] as? String)?
         .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
       return IOSPlaybackChapter(
         index: Int32(offset), title: supplied.isEmpty ? "Chapter \(offset + 1)" : supplied,

@@ -8,23 +8,29 @@ struct IOSMovieNightTests {
   static let ids = (1...3).map { UUID(uuidString: "00000000-0000-4000-8000-0000000000a\($0)")! }
   static let deck = ids.enumerated().map { index, id in
     IOSMovieNightCard(
-      mediaId: id, kind: .movie, title: "Invented Film \(index + 1)", year: 2020 + index, overview: nil,
-      genres: ["Comedy", "Crime", "Drama"], runtimeMinutes: 95 + index * 25, poster: nil, backdrop: nil)
+      mediaId: id, kind: .movie, title: "Invented Film \(index + 1)", year: 2020 + index,
+      overview: nil,
+      genres: ["Comedy", "Crime", "Drama"], runtimeMinutes: 95 + index * 25, poster: nil,
+      backdrop: nil)
   }
 
   static func night(
-    phase: String = "voting", revision: Int64 = 2, round: Int = 1, deck: [IOSMovieNightCard]? = deck,
+    phase: String = "voting", revision: Int64 = 2, round: Int = 1,
+    deck: [IOSMovieNightCard]? = deck,
     votes: [IOSMovieNightVote] = [], voting: Bool = true
   ) -> IOSMovieNightState {
     IOSMovieNightState(
-      id: UUID(uuidString: "00000000-0000-4000-8000-0000000000b1")!, phase: phase, revision: revision,
+      id: UUID(uuidString: "00000000-0000-4000-8000-0000000000b1")!, phase: phase,
+      revision: revision,
       round: round, deckVersion: round, kinds: "movies", genre: nil, genreOptions: ["Comedy"],
       members: [
         IOSMovieNightMember(
-          id: UUID(), name: "Invented Phone", deviceName: "iPhone", isVoting: voting, isHost: true, isYou: true,
+          id: UUID(), name: "Invented Phone", deviceName: "iPhone", isVoting: voting, isHost: true,
+          isYou: true,
           swiped: votes.count),
         IOSMovieNightMember(
-          id: UUID(), name: "Mia", deviceName: "Browser", isVoting: true, isHost: false, isYou: false, swiped: 1),
+          id: UUID(), name: "Mia", deviceName: "Browser", isVoting: true, isHost: false,
+          isYou: false, swiped: 1),
       ],
       deck: deck, yourVotes: votes, result: nil, lastAction: nil, lastActionBy: nil)
   }
@@ -50,7 +56,10 @@ struct IOSMovieNightTests {
     #expect(IOSMovieNightRules.runtime(120) == "2h")
     #expect(IOSMovieNightRules.runtime(nil) == nil)
     #expect(Self.deck[0].meta == "2020 · 1h 35m · Comedy · Crime")
-    #expect(IOSMovieNightRules.slowpokes(Self.night(votes: Self.deck.map { .init(mediaId: $0.mediaId, like: true) }), deckSize: 3).map(\.name) == ["Mia"])
+    #expect(
+      IOSMovieNightRules.slowpokes(
+        Self.night(votes: Self.deck.map { .init(mediaId: $0.mediaId, like: true) }), deckSize: 3
+      ).map(\.name) == ["Mia"])
   }
 
   @Test func aSwipeCountsAtOnceAndTheDeckIsKeptBetweenPolls() async {
@@ -65,7 +74,9 @@ struct IOSMovieNightTests {
 
     session.vote(Self.deck[0], like: true)
     #expect(session.remaining.map(\.mediaId) == Array(Self.ids[1...]))
-    for _ in 0..<50 where session.state?.revision != 3 { try? await Task.sleep(for: .milliseconds(10)) }
+    for _ in 0..<50 where session.state?.revision != 3 {
+      try? await Task.sleep(for: .milliseconds(10))
+    }
     #expect(session.state?.revision == 3)
     #expect(session.deck.count == 3)
     #expect(session.pending.isEmpty)
@@ -136,8 +147,11 @@ private actor FakeMovieNightAPI: IOSMovieNightAPI {
   }
 
   func movieNights() async throws -> [IOSMovieNightSummary] { [] }
-  func createMovieNight(deviceName: String, voting: Bool) async throws -> IOSMovieNightState { try next() }
-  func joinMovieNight(id: UUID, deviceName: String, voting: Bool) async throws -> IOSMovieNightState { try next() }
+  func createMovieNight(deviceName: String, voting: Bool) async throws -> IOSMovieNightState {
+    try next()
+  }
+  func joinMovieNight(id: UUID, deviceName: String, voting: Bool) async throws -> IOSMovieNightState
+  { try next() }
   func movieNight(id: UUID, after: Int64?, deckVersion: Int?, waitMilliseconds: Int) async throws
     -> IOSMovieNightState
   {

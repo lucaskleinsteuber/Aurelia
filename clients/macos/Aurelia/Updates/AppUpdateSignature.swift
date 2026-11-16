@@ -12,7 +12,8 @@ enum AppUpdateSignature {
   static let publicKey = "RWT0nYptHNjXQSXnVurY9XXdPF2Ssq5sUlSP+WoBwjA5GPXWnugBc7lE"
 
   /// True when `signatureFile` is a valid signature of `message` by `publicKey`.
-  static func verify(_ message: Data, signatureFile: String, publicKey: String = publicKey) -> Bool {
+  static func verify(_ message: Data, signatureFile: String, publicKey: String = publicKey) -> Bool
+  {
     guard let (keyID, key) = readPublicKey(publicKey) else { return false }
     let lines = signatureFile.replacingOccurrences(of: "\r\n", with: "\n")
       .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)

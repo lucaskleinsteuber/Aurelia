@@ -305,7 +305,8 @@ struct MediaDetailView: View {
   private func playPrimary(_ detail: CatalogDetailPresentation) {
     if model.supportsLibraryState {
       // The plan this page shows is the one Play promises: no second request before the player.
-      requestPlannedPlayback(mediaId: detail.item.id, known: detail.item.id == mediaId ? shownPlan : nil)
+      requestPlannedPlayback(
+        mediaId: detail.item.id, known: detail.item.id == mediaId ? shownPlan : nil)
     } else if detail.item.kind == .movie {
       model.startPlayback(
         mediaId: detail.item.id, title: detail.item.title,
@@ -359,7 +360,9 @@ struct MediaDetailView: View {
     isStartingPlayback = true
     let profile = model.profile
     playbackTask = Task {
-      do { try await model.startPlannedPlayback(mediaId: mediaId, intent: intent, known: known) } catch {
+      do {
+        try await model.startPlannedPlayback(mediaId: mediaId, intent: intent, known: known)
+      } catch {
         if model.profile == profile, !Task.isCancelled, !(error is CancellationError) {
           errorMessage = error.localizedDescription
         }
@@ -650,18 +653,18 @@ struct MediaDetailView: View {
         $0.value?.isEmpty == false
       }
       if !fields.isEmpty {
-      Text("Information").font(AureliaDesign.sectionTitle)
-      LazyVGrid(
-        columns: detail.item.kind == .series
-          ? [GridItem(.adaptive(minimum: 240, maximum: 320), spacing: 46)]
-          : Array(repeating: GridItem(.flexible(minimum: 160), alignment: .leading), count: 2),
-        alignment: .leading,
-        spacing: 22
-      ) {
-        ForEach(fields) { field in
-          InfoValue(title: field.title, value: field.value)
+        Text("Information").font(AureliaDesign.sectionTitle)
+        LazyVGrid(
+          columns: detail.item.kind == .series
+            ? [GridItem(.adaptive(minimum: 240, maximum: 320), spacing: 46)]
+            : Array(repeating: GridItem(.flexible(minimum: 160), alignment: .leading), count: 2),
+          alignment: .leading,
+          spacing: 22
+        ) {
+          ForEach(fields) { field in
+            InfoValue(title: field.title, value: field.value)
+          }
         }
-      }
       }
     }
     .padding(.horizontal, AureliaDesign.pagePadding)
@@ -1057,7 +1060,9 @@ private struct PersonCreditCard: View {
       AuthenticatedArtwork(artwork: credit.profile, symbol: "person.fill")
         .frame(width: 112, height: 112)
         .clipShape(Circle())
-        .overlay { Circle().stroke(.white.opacity(hovering ? 0.35 : 0.1), lineWidth: hovering ? 1.5 : 1) }
+        .overlay {
+          Circle().stroke(.white.opacity(hovering ? 0.35 : 0.1), lineWidth: hovering ? 1.5 : 1)
+        }
         .shadow(color: .black.opacity(hovering ? 0.34 : 0), radius: 14, y: 8)
         .scaleEffect(hovering && !reduceMotion ? 1.04 : 1)
       Text(credit.name).font(.callout.weight(.semibold)).lineLimit(1)

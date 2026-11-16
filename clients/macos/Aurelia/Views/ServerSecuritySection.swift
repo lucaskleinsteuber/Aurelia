@@ -18,7 +18,9 @@ struct ServerSecuritySection: View {
   private var owner: Bool { model.profile?.user?.role == .owner }
 
   var body: some View {
-    if model.libraryCapabilities.contains("security-v1"), model.profile?.user?.role.canManageLibraries == true {
+    if model.libraryCapabilities.contains("security-v1"),
+      model.profile?.user?.role.canManageLibraries == true
+    {
       AureliaSettingsSection(
         "Security", symbol: "lock.shield",
         description:
@@ -32,7 +34,9 @@ struct ServerSecuritySection: View {
           if owner {
             Button("Show Security Log…") { showsLog = true }
           }
-          if let message { Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+          if let message {
+            Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+          }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .disabled(working)
@@ -56,8 +60,10 @@ struct ServerSecuritySection: View {
       }
     } else {
       HStack {
-        Text("Confirm changes with Touch ID instead of the Server Password. Setting it up asks once for the password.")
-          .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        Text(
+          "Confirm changes with Touch ID instead of the Server Password. Setting it up asks once for the password."
+        )
+        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         Spacer()
         Button("Set Up Touch ID") { Task { await setUp() } }
       }
@@ -83,7 +89,9 @@ struct ServerSecuritySection: View {
       "Require Face ID or Touch ID for administrators",
       isOn: Binding(
         get: { settings.requirePasskeysForAdministrators },
-        set: { value in Task { await save(logDays: logDays ?? settings.securityLogDays, require: value) } }))
+        set: { value in
+          Task { await save(logDays: logDays ?? settings.securityLogDays, require: value) }
+        }))
     Text(
       "When required, devices without a key ask one with a key to confirm. On the server computer itself the Server Password still works, the way back if every key is lost."
     )
@@ -91,9 +99,12 @@ struct ServerSecuritySection: View {
     HStack {
       Stepper(
         "Keep the log for \(logDays ?? settings.securityLogDays) days",
-        value: Binding(get: { logDays ?? settings.securityLogDays }, set: { logDays = $0 }), in: 30...365, step: 30)
+        value: Binding(get: { logDays ?? settings.securityLogDays }, set: { logDays = $0 }),
+        in: 30...365, step: 30)
       if let days = logDays, days != settings.securityLogDays {
-        Button("Save") { Task { await save(logDays: days, require: settings.requirePasskeysForAdministrators) } }
+        Button("Save") {
+          Task { await save(logDays: days, require: settings.requirePasskeysForAdministrators) }
+        }
       }
     }
   }
@@ -134,7 +145,8 @@ struct ServerSecuritySection: View {
           }
         }
         if let security {
-          let line = SecurityText.deviceLine(platform: security.platform, ipAddress: security.ipAddress)
+          let line = SecurityText.deviceLine(
+            platform: security.platform, ipAddress: security.ipAddress)
           if !line.isEmpty { Text(line).font(.caption).foregroundStyle(.secondary) }
         }
         Text(
@@ -169,8 +181,11 @@ struct ServerSecuritySection: View {
         VStack(alignment: .leading) {
           Text(device.deviceName)
           Text(
-            [SecurityText.deviceLine(platform: device.platform, ipAddress: device.ipAddress), "blocked \(ServerDateText.display(device.blockedAt))"]
-              .filter { !$0.isEmpty }.joined(separator: " · ")
+            [
+              SecurityText.deviceLine(platform: device.platform, ipAddress: device.ipAddress),
+              "blocked \(ServerDateText.display(device.blockedAt))",
+            ]
+            .filter { !$0.isEmpty }.joined(separator: " · ")
           )
           .font(.caption).foregroundStyle(.secondary)
         }
@@ -190,7 +205,9 @@ struct ServerSecuritySection: View {
   }
 
   /// Runs a change; a locked server asks for Touch ID or the Server Password once.
-  private func run<T: Sendable>(_ work: @escaping @Sendable (APIClient) async throws -> T) async -> T? {
+  private func run<T: Sendable>(_ work: @escaping @Sendable (APIClient) async throws -> T) async
+    -> T?
+  {
     guard let client else { return nil }
     working = true
     defer { working = false }
@@ -218,7 +235,8 @@ struct ServerSecuritySection: View {
     if let created = await run({ try await $0.registerPasskey(name: name, signer: signer) }) {
       do {
         try PasskeyStore.save(
-          StoredPasskey(passkeyId: created.id, keyReference: signer.keyReference, publicKey: signer.publicKey),
+          StoredPasskey(
+            passkeyId: created.id, keyReference: signer.keyReference, publicKey: signer.publicKey),
           server: profile.serverId, profile: user.id)
         message = "Touch ID is set up. Aurelia asks for it instead of the Server Password."
       } catch {
@@ -239,7 +257,9 @@ struct ServerSecuritySection: View {
   }
 
   private func save(logDays: Int, require: Bool) async {
-    if await run({ try await $0.saveSecuritySettings(logDays: logDays, requirePasskeys: require) }) != nil {
+    if await run({ try await $0.saveSecuritySettings(logDays: logDays, requirePasskeys: require) })
+      != nil
+    {
       self.logDays = nil
     }
   }
@@ -251,7 +271,8 @@ struct ServerSecuritySection: View {
   private func block(_ device: ServerSecurityDevice) async {
     let alert = NSAlert()
     alert.messageText = "Block “\(device.deviceName)”?"
-    alert.informativeText = "It is signed out at once and can't sign in or pair again until you unblock it."
+    alert.informativeText =
+      "It is signed out at once and can't sign in or pair again until you unblock it."
     alert.addButton(withTitle: "Block")
     alert.addButton(withTitle: "Cancel")
     guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -276,7 +297,8 @@ struct SecurityLogSheet: View {
   var body: some View {
     AureliaSheet(
       title: "Security Log",
-      subtitle: "Who signed in when and from which device, failed attempts and changes, newest first.",
+      subtitle:
+        "Who signed in when and from which device, failed attempts and changes, newest first.",
       symbol: "list.bullet.rectangle", errorMessage: error,
       retry: { Task { await load(more: false) } }, onCancel: { dismiss() }
     ) {
@@ -301,15 +323,19 @@ struct SecurityLogSheet: View {
             HStack(alignment: .top, spacing: 10) {
               Image(
                 systemName: event.outcome == "failed"
-                  ? "exclamationmark.triangle.fill" : event.outcome == "succeeded" ? "person.badge.key" : "slider.horizontal.3"
+                  ? "exclamationmark.triangle.fill"
+                  : event.outcome == "succeeded" ? "person.badge.key" : "slider.horizontal.3"
               )
               .foregroundStyle(event.outcome == "failed" ? Color.orange : .secondary)
               .frame(width: 20)
               VStack(alignment: .leading, spacing: 2) {
                 Text(SecurityText.kind(event.kind) + (event.detail.map { " · \($0)" } ?? ""))
                 Text(
-                  [event.userName, event.deviceName, SecurityText.deviceLine(platform: event.platform, ipAddress: event.ipAddress)]
-                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+                  [
+                    event.userName, event.deviceName,
+                    SecurityText.deviceLine(platform: event.platform, ipAddress: event.ipAddress),
+                  ]
+                  .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
                 )
                 .font(.caption).foregroundStyle(.secondary)
               }
@@ -333,7 +359,8 @@ struct SecurityLogSheet: View {
     loading = true
     defer { loading = false }
     do {
-      let page = try await client.securityEvents(outcome: filter == "all" ? nil : filter, before: more ? before : nil)
+      let page = try await client.securityEvents(
+        outcome: filter == "all" ? nil : filter, before: more ? before : nil)
       events = more ? events + page.events : page.events
       before = page.before
       error = nil
@@ -362,7 +389,8 @@ final class SecurityAlertCenter: ObservableObject {
     version = 0
     newDevices = []
     unlockRequests = []
-    guard model.libraryCapabilities.contains("security-v1"), let profile = model.profile, profile.isViewingSession,
+    guard model.libraryCapabilities.contains("security-v1"), let profile = model.profile,
+      profile.isViewingSession,
       profile.user?.role.canManageLibraries == true
     else { return }
     task = Task { [weak self] in
@@ -393,20 +421,27 @@ final class SecurityAlertCenter: ObservableObject {
   }
 
   private func notify() async {
-    guard SystemWishNotificationDeliverer.isAvailableInCurrentProcess, NSApp?.isActive != true else { return }
+    guard SystemWishNotificationDeliverer.isAvailableInCurrentProcess, NSApp?.isActive != true
+    else { return }
     let deliverer = SystemWishNotificationDeliverer()
     let status = await deliverer.authorizationStatus()
     guard status == .authorized || status == .provisional else { return }
     for device in newDevices where notified.insert(device.id).inserted {
       await deliverer.post(
-        identifier: "aurelia.security.device.\(device.id.uuidString)", title: "New device signed in",
-        body: [device.deviceName, SecurityText.deviceLine(platform: device.platform, ipAddress: device.ipAddress)]
-          .filter { !$0.isEmpty }.joined(separator: " · "), category: "aurelia.security")
+        identifier: "aurelia.security.device.\(device.id.uuidString)",
+        title: "New device signed in",
+        body: [
+          device.deviceName,
+          SecurityText.deviceLine(platform: device.platform, ipAddress: device.ipAddress),
+        ]
+        .filter { !$0.isEmpty }.joined(separator: " · "), category: "aurelia.security")
     }
     for request in unlockRequests where notified.insert(request.id).inserted {
       await deliverer.post(
-        identifier: "aurelia.security.unlock.\(request.id.uuidString)", title: "Confirm a server change",
-        body: "\(request.deviceName) asks to manage the server. Code \(request.code).", category: "aurelia.security")
+        identifier: "aurelia.security.unlock.\(request.id.uuidString)",
+        title: "Confirm a server change",
+        body: "\(request.deviceName) asks to manage the server. Code \(request.code).",
+        category: "aurelia.security")
     }
   }
 
@@ -473,7 +508,8 @@ struct SecurityAlertBanner: View {
             Button("Block…", role: .destructive) {
               let alert = NSAlert()
               alert.messageText = "Block “\(device.deviceName)”?"
-              alert.informativeText = "It is signed out at once and can't sign in or pair again until you unblock it."
+              alert.informativeText =
+                "It is signed out at once and can't sign in or pair again until you unblock it."
               alert.addButton(withTitle: "Block")
               alert.addButton(withTitle: "Cancel")
               if alert.runModal() == .alertFirstButtonReturn { Task { await center.block(device) } }
@@ -502,7 +538,8 @@ struct SecurityAlertBanner: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .background(
         .regularMaterial,
-        in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
+        in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
+      )
       .shadow(color: .black.opacity(0.3), radius: 10, y: 3)
   }
 }

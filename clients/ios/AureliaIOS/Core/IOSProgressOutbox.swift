@@ -26,7 +26,9 @@ struct IOSProgressSnapshot: Codable, Equatable, Sendable {
   /// When the player took it; missing in snapshots journaled by older builds.
   let capturedAt: Date?
 
-  init(position: Int64, duration: Int64, finished: Bool, id: UUID = UUID(), capturedAt: Date? = Date()) {
+  init(
+    position: Int64, duration: Int64, finished: Bool, id: UUID = UUID(), capturedAt: Date? = Date()
+  ) {
     self.id = id
     self.position = position
     self.duration = duration
@@ -515,7 +517,8 @@ actor IOSProgressOutbox {
           // as while someone is watching here, it is sent again on the server's revision instead
           // of being thrown away.
           let key = revisionKey(scope: scope, mediaID: mediaID)
-          if (rebases[key] ?? 0) < 3, let current = try? await client.readProgress(mediaID: mediaID) {
+          if (rebases[key] ?? 0) < 3, let current = try? await client.readProgress(mediaID: mediaID)
+          {
             guard operation == generation, !Task.isCancelled else { return }
             if let index = entryIndex(scope: scope, mediaID: mediaID), current.mediaId == mediaID,
               current.revision >= 0,

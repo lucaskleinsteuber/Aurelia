@@ -19,9 +19,13 @@ final class ServerSecurityTests: XCTestCase {
     // Signing runs from a background task, as the real Touch ID key's does.
     let signature = try await Task.detached { try await signer.sign(message) }.value
     let key = try P256.Signing.PublicKey(x963Representation: signer.publicKey)
-    XCTAssertTrue(key.isValidSignature(try P256.Signing.ECDSASignature(derRepresentation: signature), for: message))
+    XCTAssertTrue(
+      key.isValidSignature(
+        try P256.Signing.ECDSASignature(derRepresentation: signature), for: message))
     let other = PasskeyMessage.data(purpose: "unlock", challenge: "nonce")
-    XCTAssertFalse(key.isValidSignature(try P256.Signing.ECDSASignature(derRepresentation: signature), for: other))
+    XCTAssertFalse(
+      key.isValidSignature(
+        try P256.Signing.ECDSASignature(derRepresentation: signature), for: other))
   }
 
   func testAlertsAndEventsDecodeWithUnknownKinds() throws {
@@ -39,7 +43,8 @@ final class ServerSecurityTests: XCTestCase {
     XCTAssertEqual(alerts.unlockRequests.first?.code, "1234")
     XCTAssertEqual(SecurityText.kind("library_removed"), "Storage location removed")
     XCTAssertEqual(SecurityText.kind("something_new"), "Something New")
-    XCTAssertEqual(SecurityText.deviceLine(platform: "iOS", ipAddress: "192.0.2.40"), "iOS · 192.0.2.40")
+    XCTAssertEqual(
+      SecurityText.deviceLine(platform: "iOS", ipAddress: "192.0.2.40"), "iOS · 192.0.2.40")
     XCTAssertEqual(SecurityText.deviceLine(platform: nil, ipAddress: nil), "")
   }
 

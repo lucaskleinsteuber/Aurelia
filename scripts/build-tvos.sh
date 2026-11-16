@@ -5,6 +5,8 @@ repository_root=${0:A:h:h}
 source "$repository_root/scripts/workspace-paths.sh"
 # Old builds and test results are removed first; see prune-workspace.sh.
 /bin/sh "$repository_root/scripts/prune-workspace.sh" || true
+# Unformatted Swift fails here, before anything is built (scripts/check-swift-format.sh).
+bash "$repository_root/scripts/check-swift-format.sh"
 unsigned=0
 provisioning=0
 device_id=""

@@ -31,7 +31,8 @@ struct RelayRequest: Equatable, Sendable {
   /// with at most a sound track in the query.
   static func isAllowedHLSPath(_ path: String) -> Bool {
     path.range(
-      of: #"^hls/(master\.m3u8|[1-9][0-9]{2,3}p/(index\.m3u8|init\.mp4|[0-9]{1,6}\.m4s))(\?audio=[0-9]{1,4})?$"#,
+      of:
+        #"^hls/(master\.m3u8|[1-9][0-9]{2,3}p/(index\.m3u8|init\.mp4|[0-9]{1,6}\.m4s))(\?audio=[0-9]{1,4})?$"#,
       options: .regularExpression) != nil
   }
 }

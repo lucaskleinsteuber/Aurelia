@@ -204,7 +204,10 @@ struct ServerProfileEditor: View {
   }
 
   private var childSection: some View {
-    AureliaSettingsSection("Children's Profile", symbol: "figure.and.child.holdinghands", description: "Limits what this profile may watch, by age rating.") {
+    AureliaSettingsSection(
+      "Children's Profile", symbol: "figure.and.child.holdinghands",
+      description: "Limits what this profile may watch, by age rating."
+    ) {
       VStack(alignment: .leading, spacing: 12) {
         Toggle("Children's Profile", isOn: $isChild)
           .accessibilityIdentifier("profile-editor-child")
@@ -259,7 +262,8 @@ struct ServerProfileEditor: View {
           .frame(minHeight: 80, maxHeight: 170)
           .background(
             .quaternary.opacity(0.25),
-            in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius))
+            in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius)
+          )
           .scrollIndicators(.hidden).aureliaOverlayScrollbars()
         } else {
           Text(
@@ -283,7 +287,10 @@ struct ServerProfileEditor: View {
   }
 
   private var protectionSection: some View {
-    AureliaSettingsSection("PIN Protection", symbol: "lock.fill", description: "A PIN keeps others from opening this profile.") {
+    AureliaSettingsSection(
+      "PIN Protection", symbol: "lock.fill",
+      description: "A PIN keeps others from opening this profile."
+    ) {
       VStack(alignment: .leading, spacing: 12) {
         Toggle("Require a Profile PIN", isOn: $pinProtected)
           .disabled(role.canManageLibraries).accessibilityIdentifier(
@@ -317,7 +324,9 @@ struct ServerProfileEditor: View {
   }
 
   private var contentSection: some View {
-    AureliaSettingsSection("Content Access", symbol: "eye", description: "Which titles this profile can see.") {
+    AureliaSettingsSection(
+      "Content Access", symbol: "eye", description: "Which titles this profile can see."
+    ) {
       VStack(alignment: .leading, spacing: 12) {
         Picker(
           "Can watch",
@@ -376,7 +385,8 @@ struct ServerProfileEditor: View {
           }.frame(minHeight: 100, maxHeight: 190)
             .background(
               .quaternary.opacity(0.25),
-              in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius))
+              in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius)
+            )
             .scrollIndicators(.hidden).aureliaOverlayScrollbars()
           Text("A series includes all current and future seasons, episodes, extras and trailers.")
             .font(.caption).foregroundStyle(.secondary)

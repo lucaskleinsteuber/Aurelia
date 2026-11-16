@@ -68,7 +68,8 @@ final class WishAndSleepGoodNightTests: XCTestCase {
 
     let controller = PlaybackController(
       client: client,
-      presentation: PlaybackPresentation(mediaId: source.mediaId, title: "Night Film", subtitle: nil),
+      presentation: PlaybackPresentation(
+        mediaId: source.mediaId, title: "Night Film", subtitle: nil),
       engine: engine,
       preferences: prefs,
       relayFactory: { _, _ in relay },
@@ -83,7 +84,9 @@ final class WishAndSleepGoodNightTests: XCTestCase {
 
     clock.wakeFirst()
     for _ in 0..<1_000 {
-      if controller.showsGoodNight && clock.delays.count >= 2 && controller.sleepTimerEndedStatus != nil {
+      if controller.showsGoodNight && clock.delays.count >= 2
+        && controller.sleepTimerEndedStatus != nil
+      {
         break
       }
       await Task.yield()
@@ -118,7 +121,8 @@ final class WishAndSleepGoodNightTests: XCTestCase {
 
     let controller = PlaybackController(
       client: client,
-      presentation: PlaybackPresentation(mediaId: source.mediaId, title: "Night Film", subtitle: nil),
+      presentation: PlaybackPresentation(
+        mediaId: source.mediaId, title: "Night Film", subtitle: nil),
       engine: engine,
       preferences: prefs,
       relayFactory: { _, _ in relay },
@@ -227,7 +231,8 @@ final class WishAndSleepGoodNightTests: XCTestCase {
     XCTAssertTrue(ranOnMain)
     lock.unlock()
 
-    let ignoredDone = expectation(description: "unrelated category completes without opening wishes")
+    let ignoredDone = expectation(
+      description: "unrelated category completes without opening wishes")
     DispatchQueue.global(qos: .background).async {
       delegate.handleNotificationActivation(categoryIdentifier: "other.category") {
         ignoredDone.fulfill()
@@ -277,7 +282,8 @@ final class WishAndSleepGoodNightTests: XCTestCase {
       disk.store(Data(repeating: UInt8(i), count: 200), forKey: "key-\(i)")
     }
     disk.prune()
-    let files = try FileManager.default.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: [.fileSizeKey])
+    let files = try FileManager.default.contentsOfDirectory(
+      at: tempDir, includingPropertiesForKeys: [.fileSizeKey])
     let totalBytes = try files.reduce(0) { sum, url in
       sum + ((try url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
     }

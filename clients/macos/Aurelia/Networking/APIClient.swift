@@ -348,7 +348,8 @@ struct APIClient: Sendable {
   func screenTime(user: UUID) async throws -> ProfileScreenTime {
     try await get("/api/v1/users/\(user.uuidString)/screen-time")
   }
-  func setScreenTime(user: UUID, _ value: ProfileScreenTimeUpdate) async throws -> ProfileScreenTime {
+  func setScreenTime(user: UUID, _ value: ProfileScreenTimeUpdate) async throws -> ProfileScreenTime
+  {
     try Self.decode(
       ProfileScreenTime.self,
       from: await perform(
@@ -744,7 +745,9 @@ struct APIClient: Sendable {
     "/api/v1/movie-night/\(id.uuidString.lowercased())\(tail)"
   }
 
-  private func movieNightPost(_ path: String, _ body: some Encodable) async throws -> MovieNightState {
+  private func movieNightPost(_ path: String, _ body: some Encodable) async throws
+    -> MovieNightState
+  {
     let data = try await perform(path: path, method: "POST", body: try JSONEncoder().encode(body))
     return try Self.decode(MovieNightState.self, from: data)
   }
@@ -752,12 +755,14 @@ struct APIClient: Sendable {
   func movieNights() async throws -> [MovieNightSummary] { try await get("/api/v1/movie-night") }
 
   func createMovieNight(deviceName: String, voting: Bool) async throws -> MovieNightState {
-    try await movieNightPost("/api/v1/movie-night", MovieNightJoinBody(deviceName: deviceName, isVoting: voting))
+    try await movieNightPost(
+      "/api/v1/movie-night", MovieNightJoinBody(deviceName: deviceName, isVoting: voting))
   }
 
   func joinMovieNight(id: UUID, deviceName: String, voting: Bool) async throws -> MovieNightState {
     try await movieNightPost(
-      Self.movieNightPath(id, "/join"), MovieNightJoinBody(deviceName: deviceName, isVoting: voting))
+      Self.movieNightPath(id, "/join"), MovieNightJoinBody(deviceName: deviceName, isVoting: voting)
+    )
   }
 
   /// The night once its revision is newer than `after`, or after up to `waitMilliseconds`.
@@ -783,7 +788,8 @@ struct APIClient: Sendable {
   }
 
   func voteMovieNight(id: UUID, mediaID: UUID, like: Bool) async throws -> MovieNightState {
-    try await movieNightPost(Self.movieNightPath(id, "/votes"), MovieNightVote(mediaId: mediaID, like: like))
+    try await movieNightPost(
+      Self.movieNightPath(id, "/votes"), MovieNightVote(mediaId: mediaID, like: like))
   }
 
   func keepSwiping(id: UUID) async throws -> MovieNightState {
@@ -879,7 +885,8 @@ struct APIClient: Sendable {
     // servers ignore it and page as before.
     let startQuery = cursor == 0 && generation == nil ? "&latest=true" : ""
     let data = try await perform(
-      path: "/api/v1/sync/changes?after=\(cursor)&waitSeconds=\(waitSeconds)\(generationQuery)\(startQuery)",
+      path:
+        "/api/v1/sync/changes?after=\(cursor)&waitSeconds=\(waitSeconds)\(generationQuery)\(startQuery)",
       method: "GET",
       timeout: TimeInterval(max(waitSeconds + 5, 15)))
     return try Self.decode(SyncChangesResponse.self, from: data)
@@ -1070,7 +1077,8 @@ struct APIClient: Sendable {
   func updateCollectionOrder(
     id: UUID, members: [CollectionMemberInput], sortMode: String? = "custom"
   ) async throws -> CollectionDetail {
-    let body = try JSONEncoder().encode(CollectionOrderRequest(members: members, sortMode: sortMode))
+    let body = try JSONEncoder().encode(
+      CollectionOrderRequest(members: members, sortMode: sortMode))
     let data = try await perform(
       path: "/api/v1/collections/\(id.uuidString.lowercased())/order", method: "PUT", body: body)
     return try Self.decode(CollectionDetail.self, from: data)
@@ -1089,7 +1097,9 @@ struct APIClient: Sendable {
       method: "POST")
   }
 
-  func removeCollectionItem(collectionId: UUID, mediaId: UUID, seasonNumber: Int? = nil) async throws {
+  func removeCollectionItem(collectionId: UUID, mediaId: UUID, seasonNumber: Int? = nil)
+    async throws
+  {
     let query = seasonNumber.map { "?seasonNumber=\($0)" } ?? ""
     _ = try await perform(
       path:
@@ -1238,7 +1248,9 @@ struct APIClient: Sendable {
     try await get("/api/v1/server/file-checks")
   }
 
-  func saveServerFileChecks(_ request: UpdateFileCheckSettingsRequest) async throws -> FileCheckSettings {
+  func saveServerFileChecks(_ request: UpdateFileCheckSettingsRequest) async throws
+    -> FileCheckSettings
+  {
     let data = try await perform(
       path: "/api/v1/server/file-checks", method: "PUT", body: try JSONEncoder().encode(request))
     return try Self.decode(FileCheckSettings.self, from: data)
@@ -1252,7 +1264,8 @@ struct APIClient: Sendable {
 
   func recheckFile(mediaId: UUID) async throws {
     _ = try await perform(
-      path: "/api/v1/library/health/files/\(mediaId.uuidString.lowercased())/recheck", method: "POST")
+      path: "/api/v1/library/health/files/\(mediaId.uuidString.lowercased())/recheck",
+      method: "POST")
   }
 
   func setFileProblemIgnored(mediaId: UUID, ignored: Bool) async throws {
@@ -1521,7 +1534,9 @@ struct APIClient: Sendable {
       return query.count == 1 && query[0].name == "width"
         && ["320", "640", "1280", "1920"].contains(query[0].value ?? "")
     }
-    if parts.count >= 2, parts.count <= 3, parts[0] == "collection", UUID(uuidString: parts[1]) != nil {
+    if parts.count >= 2, parts.count <= 3, parts[0] == "collection",
+      UUID(uuidString: parts[1]) != nil
+    {
       if parts.count == 3, !["poster", "backdrop"].contains(parts[2]) { return false }
       guard let query = components.queryItems else { return true }
       for item in query {
@@ -1653,7 +1668,9 @@ struct APIClient: Sendable {
 
   /// A playback ticket. `forDownload` tells the server nobody watches yet: Smart Home hears
   /// nothing and no scrub previews are made (servers before 2.20.0 ignore it).
-  func createPlayback(mediaId: UUID, forDownload: Bool = false) async throws -> PlaybackSourceResponse {
+  func createPlayback(mediaId: UUID, forDownload: Bool = false) async throws
+    -> PlaybackSourceResponse
+  {
     let data = try await perform(
       path: "/api/v1/media/\(mediaId.uuidString.lowercased())/playback"
         + (forDownload ? "?purpose=download" : ""),
@@ -1735,7 +1752,9 @@ struct APIClient: Sendable {
   }
 
   /// Has the server write subtitles from speech, or sync a subtitle track to it, in the background.
-  func startServerSpeech(mediaId: UUID, _ request: StartServerSpeechRequest) async throws -> MediaSpeechInfo {
+  func startServerSpeech(mediaId: UUID, _ request: StartServerSpeechRequest) async throws
+    -> MediaSpeechInfo
+  {
     let data = try await perform(
       path: "/api/v1/media/\(mediaId.uuidString.lowercased())/speech", method: "POST",
       body: try JSONEncoder().encode(request))
@@ -1743,11 +1762,14 @@ struct APIClient: Sendable {
   }
 
   func cancelServerSpeech(mediaId: UUID) async throws {
-    _ = try await perform(path: "/api/v1/media/\(mediaId.uuidString.lowercased())/speech", method: "DELETE")
+    _ = try await perform(
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/speech", method: "DELETE")
   }
 
   /// The owner's Speech Recognition settings: whisper.cpp, the model and the jobs.
-  func serverSpeech() async throws -> ServerSpeechSettings { try await get("/api/v1/server/speech") }
+  func serverSpeech() async throws -> ServerSpeechSettings {
+    try await get("/api/v1/server/speech")
+  }
 
   func downloadSpeechModel(_ name: String) async throws -> ServerSpeechSettings {
     let data = try await perform(
@@ -1798,7 +1820,8 @@ struct APIClient: Sendable {
     }
     _ = try await perform(
       path: "/api/v1/playback/\(ticket.uuidString.lowercased())/state", method: "POST",
-      body: try JSONEncoder().encode(Body(state: state, positionSeconds: positionSeconds)), timeout: 5)
+      body: try JSONEncoder().encode(Body(state: state, positionSeconds: positionSeconds)),
+      timeout: 5)
   }
 
   func revokePlayback(id: UUID) async throws {
@@ -1991,11 +2014,15 @@ struct APIClient: Sendable {
 
   // MARK: Smart Home ("automation-v1")
 
-  func automationOverview() async throws -> AutomationOverview { try await get("/api/v1/server/automation") }
+  func automationOverview() async throws -> AutomationOverview {
+    try await get("/api/v1/server/automation")
+  }
   func createWebhook(_ request: AutomationWebhookRequest) async throws -> AutomationWebhookCreated {
     try Self.decode(
       AutomationWebhookCreated.self,
-      from: await perform(path: "/api/v1/server/automation/webhooks", method: "POST", body: JSONEncoder().encode(request)))
+      from: await perform(
+        path: "/api/v1/server/automation/webhooks", method: "POST",
+        body: JSONEncoder().encode(request)))
   }
   func saveWebhook(id: UUID, _ request: AutomationWebhookRequest) async throws {
     _ = try await perform(
@@ -2003,22 +2030,30 @@ struct APIClient: Sendable {
       body: JSONEncoder().encode(request))
   }
   func deleteWebhook(id: UUID) async throws {
-    _ = try await perform(path: "/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())", method: "DELETE")
+    _ = try await perform(
+      path: "/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())", method: "DELETE")
   }
   func testWebhook(id: UUID) async throws -> AutomationDelivery {
     try Self.decode(
       AutomationDelivery.self,
-      from: await perform(path: "/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())/test", method: "POST", timeout: 20))
+      from: await perform(
+        path: "/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())/test",
+        method: "POST", timeout: 20))
   }
   func webhookDeliveries(id: UUID) async throws -> [AutomationDelivery] {
-    try await get("/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())/deliveries?limit=50")
+    try await get(
+      "/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())/deliveries?limit=50")
   }
   func rotateWebhookSecret(id: UUID) async throws -> AutomationSecret {
     try Self.decode(
       AutomationSecret.self,
-      from: await perform(path: "/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())/secret", method: "POST"))
+      from: await perform(
+        path: "/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())/secret",
+        method: "POST"))
   }
-  func createIntegrationToken(name: String, scopes: [String]) async throws -> IntegrationTokenCreated {
+  func createIntegrationToken(name: String, scopes: [String]) async throws
+    -> IntegrationTokenCreated
+  {
     struct Payload: Encodable {
       let name: String
       let scopes: [String]
@@ -2030,7 +2065,8 @@ struct APIClient: Sendable {
         body: JSONEncoder().encode(Payload(name: name, scopes: scopes))))
   }
   func revokeIntegrationToken(id: UUID) async throws {
-    _ = try await perform(path: "/api/v1/server/automation/tokens/\(id.uuidString.lowercased())", method: "DELETE")
+    _ = try await perform(
+      path: "/api/v1/server/automation/tokens/\(id.uuidString.lowercased())", method: "DELETE")
   }
   func powerNow(action: String, force: Bool = false) async throws -> PowerNowResult {
     struct Payload: Encodable {
@@ -2040,12 +2076,15 @@ struct APIClient: Sendable {
     return try Self.decode(
       PowerNowResult.self,
       from: await perform(
-        path: "/api/v1/server/power/now", method: "POST", body: JSONEncoder().encode(Payload(action: action, force: force))))
+        path: "/api/v1/server/power/now", method: "POST",
+        body: JSONEncoder().encode(Payload(action: action, force: force))))
   }
 
   // MARK: Security ("security-v1")
 
-  func securityEvents(outcome: String? = nil, before: String? = nil) async throws -> ServerSecurityEventPage {
+  func securityEvents(outcome: String? = nil, before: String? = nil) async throws
+    -> ServerSecurityEventPage
+  {
     var path = "/api/v1/server/security/events?limit=100"
     if let outcome { path += "&" + (try Self.query(name: "outcome", value: outcome)) }
     if let before { path += "&" + (try Self.query(name: "before", value: before)) }
@@ -2055,23 +2094,30 @@ struct APIClient: Sendable {
     try await get("/api/v1/server/security/devices")
   }
   func acknowledgeDevice(id: UUID) async throws {
-    _ = try await perform(path: "/api/v1/server/security/devices/\(id.uuidString.lowercased())/acknowledge", method: "POST")
+    _ = try await perform(
+      path: "/api/v1/server/security/devices/\(id.uuidString.lowercased())/acknowledge",
+      method: "POST")
   }
   func blockDevice(id: UUID) async throws -> ServerBlockResult {
     try Self.decode(
       ServerBlockResult.self,
-      from: await perform(path: "/api/v1/server/security/devices/\(id.uuidString.lowercased())/block", method: "POST"))
+      from: await perform(
+        path: "/api/v1/server/security/devices/\(id.uuidString.lowercased())/block", method: "POST")
+    )
   }
   func blockedDevices() async throws -> [ServerBlockedDevice] {
     try await get("/api/v1/server/security/blocked")
   }
   func unblockDevice(id: UUID) async throws {
-    _ = try await perform(path: "/api/v1/server/security/blocked/\(id.uuidString.lowercased())", method: "DELETE")
+    _ = try await perform(
+      path: "/api/v1/server/security/blocked/\(id.uuidString.lowercased())", method: "DELETE")
   }
   func securitySettings() async throws -> ServerSecuritySettings {
     try await get("/api/v1/server/security/settings")
   }
-  func saveSecuritySettings(logDays: Int, requirePasskeys: Bool) async throws -> ServerSecuritySettings {
+  func saveSecuritySettings(logDays: Int, requirePasskeys: Bool) async throws
+    -> ServerSecuritySettings
+  {
     struct Payload: Encodable {
       let securityLogDays: Int
       let requirePasskeysForAdministrators: Bool
@@ -2080,7 +2126,8 @@ struct APIClient: Sendable {
       ServerSecuritySettings.self,
       from: await perform(
         path: "/api/v1/server/security/settings", method: "PUT",
-        body: JSONEncoder().encode(Payload(securityLogDays: logDays, requirePasskeysForAdministrators: requirePasskeys))))
+        body: JSONEncoder().encode(
+          Payload(securityLogDays: logDays, requirePasskeysForAdministrators: requirePasskeys))))
   }
   func securityAlerts(version: Int64, waitSeconds: Int) async throws -> ServerSecurityAlerts {
     let wait = min(max(waitSeconds, 0), 30)
@@ -2094,13 +2141,15 @@ struct APIClient: Sendable {
   func passkeyChallenge() async throws -> String {
     struct Response: Decodable { let challenge: String }
     return try Self.decode(
-      Response.self, from: await perform(path: "/api/v1/management/passkey-challenge", method: "POST")
+      Response.self,
+      from: await perform(path: "/api/v1/management/passkey-challenge", method: "POST")
     ).challenge
   }
   /// Registers this Mac's key: proves it holds the private key by signing a fresh challenge.
   func registerPasskey(name: String, signer: any PasskeySigner) async throws -> ServerPasskey {
     let challenge = try await passkeyChallenge()
-    let signature = try await signer.sign(PasskeyMessage.data(purpose: "register", challenge: challenge))
+    let signature = try await signer.sign(
+      PasskeyMessage.data(purpose: "register", challenge: challenge))
     struct Payload: Encodable {
       let name: String
       let publicKey: String
@@ -2117,12 +2166,14 @@ struct APIClient: Sendable {
             signature: signature.base64EncodedString()))))
   }
   func removePasskey(id: UUID) async throws {
-    _ = try await perform(path: "/api/v1/management/passkeys/\(id.uuidString.lowercased())", method: "DELETE")
+    _ = try await perform(
+      path: "/api/v1/management/passkeys/\(id.uuidString.lowercased())", method: "DELETE")
   }
   /// Unlocks management with Touch ID instead of the Server Password; returns the expiry.
   func unlockManagement(passkeyId: UUID, signer: any PasskeySigner) async throws -> String {
     let challenge = try await passkeyChallenge()
-    let signature = try await signer.sign(PasskeyMessage.data(purpose: "unlock", challenge: challenge))
+    let signature = try await signer.sign(
+      PasskeyMessage.data(purpose: "unlock", challenge: challenge))
     struct Payload: Encodable {
       let passkeyId: UUID
       let challenge: String
@@ -2134,11 +2185,15 @@ struct APIClient: Sendable {
       from: await perform(
         path: "/api/v1/management/passkey-unlock", method: "POST",
         body: JSONEncoder().encode(
-          Payload(passkeyId: passkeyId, challenge: challenge, signature: signature.base64EncodedString())))
+          Payload(
+            passkeyId: passkeyId, challenge: challenge, signature: signature.base64EncodedString()))
+      )
     ).expiresAt
   }
   /// Confirms (with this Mac's key) or denies another device's request to unlock management.
-  func decideRemoteUnlock(id: UUID, approve: Bool, passkeyId: UUID?, signer: (any PasskeySigner)?) async throws {
+  func decideRemoteUnlock(id: UUID, approve: Bool, passkeyId: UUID?, signer: (any PasskeySigner)?)
+    async throws
+  {
     struct Payload: Encodable {
       let approve: Bool
       let passkeyId: UUID?
@@ -2151,7 +2206,9 @@ struct APIClient: Sendable {
       let challenge = try await passkeyChallenge()
       let signature = try await signer.sign(
         PasskeyMessage.data(purpose: PasskeyMessage.remotePurpose(id), challenge: challenge))
-      payload = Payload(approve: true, passkeyId: passkeyId, challenge: challenge, signature: signature.base64EncodedString())
+      payload = Payload(
+        approve: true, passkeyId: passkeyId, challenge: challenge,
+        signature: signature.base64EncodedString())
     }
     _ = try await perform(
       path: "/api/v1/management/remote-unlock/\(id.uuidString.lowercased())/decide", method: "POST",
@@ -2706,9 +2763,11 @@ struct APIClient: Sendable {
       request.httpBody = body
       request.setValue(
         path.hasSuffix("/editor/uploads")
-          ? "image/png" : path.hasSuffix("/picture/photo") ? "image/jpeg"
-          : path.contains("/subtitles/speech") || path.contains("/subtitles/synced")
-            ? "text/plain; charset=utf-8" : "application/json",
+          ? "image/png"
+          : path.hasSuffix("/picture/photo")
+            ? "image/jpeg"
+            : path.contains("/subtitles/speech") || path.contains("/subtitles/synced")
+              ? "text/plain; charset=utf-8" : "application/json",
         forHTTPHeaderField: "Content-Type")
     }
 

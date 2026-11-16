@@ -75,7 +75,9 @@ struct WatchTogetherNotice: View {
   @Environment(\.aureliaReduceTransparency) private var reduceTransparency
 
   var body: some View {
-    if let text = session.notice ?? (session.state?.isWaiting == true ? "Waiting until everyone is ready…" : nil) {
+    if let text = session.notice
+      ?? (session.state?.isWaiting == true ? "Waiting until everyone is ready…" : nil)
+    {
       Label(text, systemImage: "person.2.fill")
         .font(.callout)
         .padding(.horizontal, 14).padding(.vertical, 8)

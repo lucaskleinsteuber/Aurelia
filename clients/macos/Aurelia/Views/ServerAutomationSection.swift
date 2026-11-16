@@ -55,8 +55,10 @@ struct ServerAutomationSection: View {
       ) {
         VStack(alignment: .leading, spacing: 12) {
           Text("Webhooks").font(.headline)
-          Text("Each webhook gets the events you choose, signed so the receiver can check they came from your server.")
-            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+          Text(
+            "Each webhook gets the events you choose, signed so the receiver can check they came from your server."
+          )
+          .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
           if let overview {
             if overview.webhooks.isEmpty {
               Text(
@@ -90,15 +92,18 @@ struct ServerAutomationSection: View {
                 VStack(alignment: .leading, spacing: 2) {
                   Text(token.name)
                   Text(
-                    token.scopes.map { scope in AutomationText.scopes.first { $0.id == scope }?.title ?? scope }
-                      .joined(separator: ", ") + " · last used " + Self.when(token.lastUsedAt)
+                    token.scopes.map { scope in
+                      AutomationText.scopes.first { $0.id == scope }?.title ?? scope
+                    }
+                    .joined(separator: ", ") + " · last used " + Self.when(token.lastUsedAt)
                   )
                   .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("Remove…", role: .destructive) {
                   confirmation = Confirmation(
-                    title: "Remove the key “\(token.name)”?", message: "Whatever uses it stops working at once.",
+                    title: "Remove the key “\(token.name)”?",
+                    message: "Whatever uses it stops working at once.",
                     action: "Remove"
                   ) { Task { await run { try await $0.revokeIntegrationToken(id: token.id) } } }
                 }
@@ -122,8 +127,11 @@ struct ServerAutomationSection: View {
         VStack(alignment: .leading, spacing: 10) {
           if let overview {
             LabeledContent("Network Card") {
-              Text(overview.wakeOnLanAddresses.isEmpty ? "Not reported" : overview.wakeOnLanAddresses.joined(separator: ", "))
-                .textSelection(.enabled)
+              Text(
+                overview.wakeOnLanAddresses.isEmpty
+                  ? "Not reported" : overview.wakeOnLanAddresses.joined(separator: ", ")
+              )
+              .textSelection(.enabled)
             }
             Text(
               overview.wakeOnLanAddresses.isEmpty
@@ -132,14 +140,17 @@ struct ServerAutomationSection: View {
             )
             .font(.caption).foregroundStyle(.secondary)
             if overview.powerActions.isEmpty {
-              Text("This server can't turn itself off; it runs as a service that something else starts and stops.")
-                .font(.callout).foregroundStyle(.secondary)
+              Text(
+                "This server can't turn itself off; it runs as a service that something else starts and stops."
+              )
+              .font(.callout).foregroundStyle(.secondary)
             }
             HStack {
               ForEach(overview.powerActions, id: \.self) { action in
                 Button(AutomationText.powerTitle(action)) {
                   confirmation = Confirmation(
-                    title: "\(AutomationText.powerTitle(action))?", message: AutomationText.powerDetail(action),
+                    title: "\(AutomationText.powerTitle(action))?",
+                    message: AutomationText.powerDetail(action),
                     action: AutomationText.powerTitle(action)
                   ) { Task { await powerNow(action, force: false) } }
                 }
@@ -151,19 +162,26 @@ struct ServerAutomationSection: View {
           } else {
             unavailable
           }
-          if let message { Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+          if let message {
+            Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+          }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
     .disabled(working)
-    .onAppear { siriReady = model.profile.map { SiriKeyStore().load(server: $0.serverId) != nil } ?? false }
+    .onAppear {
+      siriReady = model.profile.map { SiriKeyStore().load(server: $0.serverId) != nil } ?? false
+    }
     .task(id: model.administrationGeneration) { await reload() }
     .sheet(item: $editing) { target in
       if let overview, let client {
-        AutomationWebhookEditor(client: client, overview: overview, webhook: target.webhook) { created in
+        AutomationWebhookEditor(client: client, overview: overview, webhook: target.webhook) {
+          created in
           editing = nil
-          if let created { shownSecret = ShownSecret(secret: created.secret, webhook: created.webhook) }
+          if let created {
+            shownSecret = ShownSecret(secret: created.secret, webhook: created.webhook)
+          }
           Task { await reload() }
         }
       }
@@ -182,16 +200,20 @@ struct ServerAutomationSection: View {
         }
       }
     }
-    .sheet(item: $shownSecret) { shown in AutomationSecretSheet(secret: shown.secret, webhook: shown.webhook) }
+    .sheet(item: $shownSecret) { shown in
+      AutomationSecretSheet(secret: shown.secret, webhook: shown.webhook)
+    }
     .sheet(isPresented: Binding(get: { shownToken != nil }, set: { if !$0 { shownToken = nil } })) {
       AutomationValueSheet(
         title: "Key Created",
         subtitle: "Copy the key now; Aurelia shows it only once.",
-        explanation: "Copy the key now: it is shown only once. Aurelia keeps only a fingerprint of it. Send it as “Authorization: Bearer <key>”.",
+        explanation:
+          "Copy the key now: it is shown only once. Aurelia keeps only a fingerprint of it. Send it as “Authorization: Bearer <key>”.",
         value: shownToken ?? "")
     }
     .alert(
-      confirmation?.title ?? "", isPresented: Binding(get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }),
+      confirmation?.title ?? "",
+      isPresented: Binding(get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }),
       presenting: confirmation
     ) { item in
       Button(item.action, role: .destructive) { item.perform() }
@@ -216,13 +238,18 @@ struct ServerAutomationSection: View {
         if siriReady {
           Label("Siri is set up on this Mac", systemImage: "checkmark.circle.fill")
           ForEach(
-            ["Turn on my Aurelia server", "Play in Aurelia", "What's playing in Aurelia", "Turn off my Aurelia server"],
+            [
+              "Turn on my Aurelia server", "Play in Aurelia", "What's playing in Aurelia",
+              "Turn off my Aurelia server",
+            ],
             id: \.self
           ) { phrase in
             Text("“\(phrase)”").font(.callout)
           }
-          Text("“Play in Aurelia” asks what to play: say a movie or a show, with a season and episode if you like. Siri understands these phrases in English.")
-            .font(.caption).foregroundStyle(.secondary)
+          Text(
+            "“Play in Aurelia” asks what to play: say a movie or a show, with a season and episode if you like. Siri understands these phrases in English."
+          )
+          .font(.caption).foregroundStyle(.secondary)
           HStack {
             Button("Open Shortcuts") {
               if let url = URL(string: "shortcuts://") { NSWorkspace.shared.open(url) }
@@ -239,7 +266,9 @@ struct ServerAutomationSection: View {
 
   private func webhookRow(_ webhook: AutomationWebhook, overview: AutomationOverview) -> some View {
     let status = AutomationText.status(webhook)
-    let events = webhook.events.map { kind in overview.events.first { $0.kind == kind }?.title ?? kind }
+    let events = webhook.events.map { kind in
+      overview.events.first { $0.kind == kind }?.title ?? kind
+    }
     return VStack(alignment: .leading, spacing: 6) {
       HStack(alignment: .firstTextBaseline) {
         VStack(alignment: .leading, spacing: 2) {
@@ -247,11 +276,15 @@ struct ServerAutomationSection: View {
             Text(webhook.name).font(.body.weight(.medium))
             Text(status.text).font(.caption2.weight(.semibold))
               .padding(.horizontal, 6).padding(.vertical, 2)
-              .background(Capsule().fill(status.warning ? Color.orange.opacity(0.85) : Color.white.opacity(0.12)))
+              .background(
+                Capsule().fill(
+                  status.warning ? Color.orange.opacity(0.85) : Color.white.opacity(0.12)))
           }
           Text("\(AutomationText.host(webhook.url)) · \(events.joined(separator: ", "))")
             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-          if let reason = webhook.pausedReason { Text(reason).font(.caption).foregroundStyle(.orange) }
+          if let reason = webhook.pausedReason {
+            Text(reason).font(.caption).foregroundStyle(.orange)
+          }
         }
         Spacer()
       }
@@ -276,7 +309,8 @@ struct ServerAutomationSection: View {
         Spacer()
         Button("Remove…", role: .destructive) {
           confirmation = Confirmation(
-            title: "Remove “\(webhook.name)”?", message: "It stops getting events at once. Your automation in Home Assistant stays.",
+            title: "Remove “\(webhook.name)”?",
+            message: "It stops getting events at once. Your automation in Home Assistant stays.",
             action: "Remove"
           ) { Task { await run { try await $0.deleteWebhook(id: webhook.id) } } }
         }
@@ -293,7 +327,10 @@ struct ServerAutomationSection: View {
   private func setUpSiri() async {
     guard let server = model.profile?.serverId else { return }
     let name = siriKeyName
-    guard let created = await run({ try await $0.createIntegrationToken(name: name, scopes: ["status", "power", "playback"]) })
+    guard
+      let created = await run({
+        try await $0.createIntegrationToken(name: name, scopes: ["status", "power", "playback"])
+      })
     else { return }
     do {
       try SiriKeyStore().save(created.value, server: server)
@@ -360,7 +397,9 @@ struct ServerAutomationSection: View {
   }
 
   @discardableResult
-  private func run<T: Sendable>(_ work: @escaping @Sendable (APIClient) async throws -> T) async -> T? {
+  private func run<T: Sendable>(_ work: @escaping @Sendable (APIClient) async throws -> T) async
+    -> T?
+  {
     guard let client else { return nil }
     working = true
     defer { working = false }
@@ -414,7 +453,10 @@ struct AutomationWebhookEditor: View {
   @State private var problem: String?
   @State private var saving = false
 
-  init(client: APIClient, overview: AutomationOverview, webhook: AutomationWebhook?, done: @escaping (AutomationWebhookCreated?) -> Void) {
+  init(
+    client: APIClient, overview: AutomationOverview, webhook: AutomationWebhook?,
+    done: @escaping (AutomationWebhookCreated?) -> Void
+  ) {
     self.client = client
     self.overview = overview
     self.webhook = webhook
@@ -425,9 +467,12 @@ struct AutomationWebhookEditor: View {
     _base = State(initialValue: parts.base)
     _webhookID = State(initialValue: parts.webhookID)
     _url = State(initialValue: webhook?.url ?? "")
-    _events = State(initialValue: Set(webhook?.events ?? [
-      "playback.started", "playback.paused", "playback.resumed", "playback.stopped", "playback.finished",
-    ]))
+    _events = State(
+      initialValue: Set(
+        webhook?.events ?? [
+          "playback.started", "playback.paused", "playback.resumed", "playback.stopped",
+          "playback.finished",
+        ]))
     _devices = State(initialValue: Set(webhook?.deviceIds ?? []))
     _profiles = State(initialValue: Set(webhook?.profileIds ?? []))
     _includeTitles = State(initialValue: webhook?.includeTitles ?? true)
@@ -455,14 +500,19 @@ struct AutomationWebhookEditor: View {
             Text("Other Receiver").tag("generic")
           }
           if preset == "homeAssistant" {
-            TextField("Home Assistant Address", text: $base, prompt: Text("homeassistant.local:8123"))
+            TextField(
+              "Home Assistant Address", text: $base, prompt: Text("homeassistant.local:8123"))
             TextField("Webhook ID", text: $webhookID, prompt: Text("aurelia_movie_lights"))
-            Text("The ID of the automation's Webhook trigger in Home Assistant. Letters, digits, - and _.")
-              .font(.caption).foregroundStyle(.secondary)
+            Text(
+              "The ID of the automation's Webhook trigger in Home Assistant. Letters, digits, - and _."
+            )
+            .font(.caption).foregroundStyle(.secondary)
           } else {
             TextField("Address", text: $url, prompt: Text("https://…"))
-            Text("Receives a signed JSON POST for each event. Use https:// outside your home network.")
-              .font(.caption).foregroundStyle(.secondary)
+            Text(
+              "Receives a signed JSON POST for each event. Use https:// outside your home network."
+            )
+            .font(.caption).foregroundStyle(.secondary)
           }
           Toggle(isOn: $enabled) {
             VStack(alignment: .leading, spacing: 1) {
@@ -484,13 +534,18 @@ struct AutomationWebhookEditor: View {
         }
         Section {
           DisclosureGroup("Only Some Devices or Profiles") {
-            Text("With none chosen, events come from every device and profile.").font(.caption).foregroundStyle(.secondary)
+            Text("With none chosen, events come from every device and profile.").font(.caption)
+              .foregroundStyle(.secondary)
             ForEach(overview.devices) { device in
-              Toggle(device.detail.map { "\(device.name) · \($0)" } ?? device.name, isOn: binding(device.id, in: $devices))
+              Toggle(
+                device.detail.map { "\(device.name) · \($0)" } ?? device.name,
+                isOn: binding(device.id, in: $devices))
             }
             Divider()
             ForEach(overview.profiles) { profile in
-              Toggle(profile.detail.map { "\(profile.name) · \($0)" } ?? profile.name, isOn: binding(profile.id, in: $profiles))
+              Toggle(
+                profile.detail.map { "\(profile.name) · \($0)" } ?? profile.name,
+                isOn: binding(profile.id, in: $profiles))
             }
           }
         }
@@ -498,13 +553,15 @@ struct AutomationWebhookEditor: View {
           Toggle(isOn: $includeTitles) {
             VStack(alignment: .leading, spacing: 1) {
               Text("Send Titles and Profile Names")
-              Text("Off sends only which device played, not what or who.").font(.caption).foregroundStyle(.secondary)
+              Text("Off sends only which device played, not what or who.").font(.caption)
+                .foregroundStyle(.secondary)
             }
           }
           Toggle(isOn: $excludeChildren) {
             VStack(alignment: .leading, spacing: 1) {
               Text("Leave Out Children's Profiles")
-              Text("Nothing is sent while a children's profile watches.").font(.caption).foregroundStyle(.secondary)
+              Text("Nothing is sent while a children's profile watches.").font(.caption)
+                .foregroundStyle(.secondary)
             }
           }
         }
@@ -515,16 +572,23 @@ struct AutomationWebhookEditor: View {
     .frame(width: 560, height: 700)
   }
 
-  private func binding<Value: Hashable>(_ value: Value, in set: Binding<Set<Value>>) -> Binding<Bool> {
+  private func binding<Value: Hashable>(_ value: Value, in set: Binding<Set<Value>>) -> Binding<
+    Bool
+  > {
     Binding(
       get: { set.wrappedValue.contains(value) },
-      set: { on in if on { set.wrappedValue.insert(value) } else { set.wrappedValue.remove(value) } })
+      set: { on in if on { set.wrappedValue.insert(value) } else { set.wrappedValue.remove(value) }
+      })
   }
 
   private func save() async {
-    let address = preset == "homeAssistant" ? AutomationText.homeAssistantURL(base: base, webhookID: webhookID) : url
+    let address =
+      preset == "homeAssistant"
+      ? AutomationText.homeAssistantURL(base: base, webhookID: webhookID) : url
     guard let address, !address.trimmingCharacters(in: .whitespaces).isEmpty else {
-      problem = preset == "homeAssistant" ? "Enter Home Assistant's address and the webhook ID." : "Enter the address."
+      problem =
+        preset == "homeAssistant"
+        ? "Enter Home Assistant's address and the webhook ID." : "Enter the address."
       return
     }
     guard !events.isEmpty else {
@@ -534,7 +598,8 @@ struct AutomationWebhookEditor: View {
     let request = AutomationWebhookRequest(
       name: name.trimmingCharacters(in: .whitespaces), url: address, preset: preset,
       events: overview.events.map(\.kind).filter(events.contains), deviceIds: Array(devices),
-      profileIds: Array(profiles), includeTitles: includeTitles, excludeChildren: excludeChildren, enabled: enabled)
+      profileIds: Array(profiles), includeTitles: includeTitles, excludeChildren: excludeChildren,
+      enabled: enabled)
     saving = true
     defer { saving = false }
     do {
@@ -563,14 +628,20 @@ struct AutomationSecretSheet: View {
       symbol: "checkmark.seal", onCancel: { dismiss() }
     ) {
       VStack(alignment: .leading, spacing: 12) {
-        Text("Every event carries a signature made with this secret (header X-Aurelia-Signature). Keep it if your receiver checks signatures.")
-          .fixedSize(horizontal: false, vertical: true)
+        Text(
+          "Every event carries a signature made with this secret (header X-Aurelia-Signature). Keep it if your receiver checks signatures."
+        )
+        .fixedSize(horizontal: false, vertical: true)
         CopyableText(text: secret)
         if webhook.preset == "homeAssistant" {
           Text("Example Automation").font(.headline)
-          Text("In Home Assistant: Settings › Automations › Create Automation › ⋯ › Edit in YAML, paste this and change the lights to yours.")
-            .font(.caption).foregroundStyle(.secondary)
-          CopyableText(text: AutomationText.homeAssistantExample(webhookID: AutomationText.splitHomeAssistantURL(webhook.url).webhookID))
+          Text(
+            "In Home Assistant: Settings › Automations › Create Automation › ⋯ › Edit in YAML, paste this and change the lights to yours."
+          )
+          .font(.caption).foregroundStyle(.secondary)
+          CopyableText(
+            text: AutomationText.homeAssistantExample(
+              webhookID: AutomationText.splitHomeAssistantURL(webhook.url).webhookID))
         }
       }
       .padding(20)
@@ -650,9 +721,10 @@ struct IntegrationTokenSheet: View {
           .fixedSize(horizontal: false, vertical: true)
         TextField("Name", text: $name)
         ForEach(AutomationText.scopes, id: \.id) { scope in
-          Toggle(isOn: Binding(
-            get: { scopes.contains(scope.id) },
-            set: { on in if on { scopes.insert(scope.id) } else { scopes.remove(scope.id) } })
+          Toggle(
+            isOn: Binding(
+              get: { scopes.contains(scope.id) },
+              set: { on in if on { scopes.insert(scope.id) } else { scopes.remove(scope.id) } })
           ) {
             VStack(alignment: .leading, spacing: 1) {
               Text(scope.title)
@@ -715,19 +787,24 @@ struct AutomationDeliveriesSheet: View {
         if deliveries == nil, problem == nil {
           AureliaDelayedProgress(controlSize: .small).frame(maxWidth: .infinity)
         }
-        if let deliveries, deliveries.isEmpty { Text("Nothing sent yet.").foregroundStyle(.secondary) }
+        if let deliveries, deliveries.isEmpty {
+          Text("Nothing sent yet.").foregroundStyle(.secondary)
+        }
         ForEach(deliveries ?? []) { delivery in
           VStack(alignment: .leading, spacing: 2) {
             Text(delivery.event)
             Text(
               [
-                delivery.state == "succeeded" ? "Delivered" : delivery.state == "pending" ? "Trying again" : "Failed",
-                delivery.statusCode.map { "HTTP \($0)" }, delivery.durationMilliseconds.map { "\($0) ms" },
+                delivery.state == "succeeded"
+                  ? "Delivered" : delivery.state == "pending" ? "Trying again" : "Failed",
+                delivery.statusCode.map { "HTTP \($0)" },
+                delivery.durationMilliseconds.map { "\($0) ms" },
                 delivery.attempt > 1 ? "attempt \(delivery.attempt)" : nil, delivery.error,
                 ServerAutomationSection.when(delivery.at),
               ].compactMap { $0 }.joined(separator: " · ")
             )
-            .font(.caption).foregroundStyle(delivery.state == "succeeded" ? Color.secondary : Color.orange)
+            .font(.caption).foregroundStyle(
+              delivery.state == "succeeded" ? Color.secondary : Color.orange)
           }
         }
       }
@@ -740,6 +817,8 @@ struct AutomationDeliveriesSheet: View {
 
   private func load() async {
     problem = nil
-    do { deliveries = try await client.webhookDeliveries(id: webhook.id) } catch { problem = error.localizedDescription }
+    do { deliveries = try await client.webhookDeliveries(id: webhook.id) } catch {
+      problem = error.localizedDescription
+    }
   }
 }

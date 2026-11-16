@@ -89,10 +89,13 @@ struct IOSWatchTogetherTests {
     let playing = Self.state(playing: true, position: 0)
     #expect(IOSWatchTogetherFollower.position(playing, serverNow: now) == 10_000)
     #expect(
-      IOSWatchTogetherFollower.position(Self.state(playing: true, position: 0, waiting: true), serverNow: now) == 0)
+      IOSWatchTogetherFollower.position(
+        Self.state(playing: true, position: 0, waiting: true), serverNow: now) == 0)
     #expect(
-      IOSWatchTogetherFollower.steps(playing, serverNow: now, localPosition: 9_000, localPlaying: true)
-        .isEmpty)
+      IOSWatchTogetherFollower.steps(
+        playing, serverNow: now, localPosition: 9_000, localPlaying: true
+      )
+      .isEmpty)
     #expect(
       IOSWatchTogetherFollower.steps(
         Self.state(playing: false, position: 42_000), serverNow: now, localPosition: 42_800,
@@ -121,9 +124,11 @@ struct IOSWatchTogetherTests {
     let api = API(answer: Self.state(playing: true, position: 5_000, revision: 3, action: "seek"))
     let player = Player()
     let session = IOSWatchTogetherSession(api: api, deviceName: "iPad", now: { Self.start })
-    #expect(await session.join(IOSWatchPartySummary(
-      id: UUID(), mediaId: Self.film, title: "Invented Film", hostName: "Mia", memberCount: 1,
-      isPlaying: true)))
+    #expect(
+      await session.join(
+        IOSWatchPartySummary(
+          id: UUID(), mediaId: Self.film, title: "Invented Film", hostName: "Mia", memberCount: 1,
+          isPlaying: true)))
     session.attach(player)
     session.userAction(.pause(7_000))
     try await Task.sleep(for: .milliseconds(200))
@@ -137,7 +142,9 @@ struct IOSWatchTogetherTests {
   }
 
   @Test func aNewTitleOpensOnceAndTheAppMovingOnChangesTheParty() async throws {
-    let api = API(answer: Self.state(playing: true, position: 0, revision: 4, action: "change", media: Self.episode))
+    let api = API(
+      answer: Self.state(
+        playing: true, position: 0, revision: 4, action: "change", media: Self.episode))
     let player = Player()
     let session = IOSWatchTogetherSession(api: api, deviceName: "iPad", now: { Self.start })
     var opened: [UUID] = []

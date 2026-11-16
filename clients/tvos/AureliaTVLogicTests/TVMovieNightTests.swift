@@ -8,8 +8,10 @@ struct TVMovieNightTests {
   static let ids = (1...3).map { UUID(uuidString: "00000000-0000-4000-8000-0000000000a\($0)")! }
   static let deck = ids.enumerated().map { index, id in
     TVMovieNightCard(
-      mediaId: id, kind: .movie, title: "Invented Film \(index + 1)", year: 2020 + index, overview: nil,
-      genres: ["Comedy", "Crime", "Drama"], runtimeMinutes: 95 + index * 25, poster: nil, backdrop: nil)
+      mediaId: id, kind: .movie, title: "Invented Film \(index + 1)", year: 2020 + index,
+      overview: nil,
+      genres: ["Comedy", "Crime", "Drama"], runtimeMinutes: 95 + index * 25, poster: nil,
+      backdrop: nil)
   }
 
   static func night(
@@ -17,14 +19,17 @@ struct TVMovieNightTests {
     votes: [TVMovieNightVote] = [], voting: Bool = true
   ) -> TVMovieNightState {
     TVMovieNightState(
-      id: UUID(uuidString: "00000000-0000-4000-8000-0000000000b1")!, phase: phase, revision: revision,
+      id: UUID(uuidString: "00000000-0000-4000-8000-0000000000b1")!, phase: phase,
+      revision: revision,
       round: round, deckVersion: round, kinds: "movies", genre: nil, genreOptions: ["Comedy"],
       members: [
         TVMovieNightMember(
-          id: UUID(), name: "Invented TV", deviceName: "iPhone", isVoting: voting, isHost: true, isYou: true,
+          id: UUID(), name: "Invented TV", deviceName: "iPhone", isVoting: voting, isHost: true,
+          isYou: true,
           swiped: votes.count),
         TVMovieNightMember(
-          id: UUID(), name: "Mia", deviceName: "Browser", isVoting: true, isHost: false, isYou: false, swiped: 1),
+          id: UUID(), name: "Mia", deviceName: "Browser", isVoting: true, isHost: false,
+          isYou: false, swiped: 1),
       ],
       deck: deck, yourVotes: votes, result: nil, lastAction: nil, lastActionBy: nil)
   }
@@ -50,7 +55,10 @@ struct TVMovieNightTests {
     #expect(TVMovieNightRules.runtime(120) == "2h")
     #expect(TVMovieNightRules.runtime(nil) == nil)
     #expect(Self.deck[0].meta == "2020 · 1h 35m · Comedy · Crime")
-    #expect(TVMovieNightRules.slowpokes(Self.night(votes: Self.deck.map { .init(mediaId: $0.mediaId, like: true) }), deckSize: 3).map(\.name) == ["Mia"])
+    #expect(
+      TVMovieNightRules.slowpokes(
+        Self.night(votes: Self.deck.map { .init(mediaId: $0.mediaId, like: true) }), deckSize: 3
+      ).map(\.name) == ["Mia"])
   }
 
   @Test func aSwipeCountsAtOnceAndTheDeckIsKeptBetweenPolls() async {
@@ -65,7 +73,9 @@ struct TVMovieNightTests {
 
     session.vote(Self.deck[0], like: true)
     #expect(session.remaining.map(\.mediaId) == Array(Self.ids[1...]))
-    for _ in 0..<50 where session.state?.revision != 3 { try? await Task.sleep(for: .milliseconds(10)) }
+    for _ in 0..<50 where session.state?.revision != 3 {
+      try? await Task.sleep(for: .milliseconds(10))
+    }
     #expect(session.state?.revision == 3)
     #expect(session.deck.count == 3)
     #expect(session.pending.isEmpty)
@@ -94,8 +104,11 @@ private actor FakeMovieNightAPI: TVMovieNightAPI {
   }
 
   func movieNights() async throws -> [TVMovieNightSummary] { [] }
-  func createMovieNight(deviceName: String, voting: Bool) async throws -> TVMovieNightState { try next() }
-  func joinMovieNight(id: UUID, deviceName: String, voting: Bool) async throws -> TVMovieNightState { try next() }
+  func createMovieNight(deviceName: String, voting: Bool) async throws -> TVMovieNightState {
+    try next()
+  }
+  func joinMovieNight(id: UUID, deviceName: String, voting: Bool) async throws -> TVMovieNightState
+  { try next() }
   func movieNight(id: UUID, after: Int64?, deckVersion: Int?, waitMilliseconds: Int) async throws
     -> TVMovieNightState
   {
@@ -103,7 +116,8 @@ private actor FakeMovieNightAPI: TVMovieNightAPI {
     try await Task.sleep(for: .seconds(60))
     throw CancellationError()
   }
-  func movieNightSettings(id: UUID, kinds: String, genre: String?) async throws -> TVMovieNightState { try next() }
+  func movieNightSettings(id: UUID, kinds: String, genre: String?) async throws -> TVMovieNightState
+  { try next() }
   func dealMovieNight(id: UUID) async throws -> TVMovieNightState { try next() }
   func voteMovieNight(id: UUID, mediaID: UUID, like: Bool) async throws -> TVMovieNightState {
     votes.append(.init(mediaId: mediaID, like: like))

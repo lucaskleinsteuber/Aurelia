@@ -20,16 +20,22 @@ struct ReadableTextTests {
         for: item(.episode, parent: "Test Show", season: 4, episode: 3)) == "Test Show · S4 · E3")
     #expect(
       CatalogPlaybackLogic.episodeEyebrow(
-        for: item(.episode, parent: "Test Show", season: 0, episode: 2)) == "Test Show · Special · E2")
+        for: item(.episode, parent: "Test Show", season: 0, episode: 2))
+        == "Test Show · Special · E2")
     #expect(
       CatalogPlaybackLogic.episodeEyebrow(for: item(.episode, parent: nil, season: 2, episode: nil))
         == "S2")
-    #expect(CatalogPlaybackLogic.episodeEyebrow(for: item(.episode, parent: "", season: nil, episode: nil)) == nil)
-    #expect(CatalogPlaybackLogic.episodeEyebrow(for: item(.movie, parent: "Test Show", season: 1, episode: 1)) == nil)
+    #expect(
+      CatalogPlaybackLogic.episodeEyebrow(
+        for: item(.episode, parent: "", season: nil, episode: nil)) == nil)
+    #expect(
+      CatalogPlaybackLogic.episodeEyebrow(
+        for: item(.movie, parent: "Test Show", season: 1, episode: 1)) == nil)
   }
 
   @Test func serverIssuesReadAsSentences() {
-    #expect(ServerIssueText.title(for: "metadata_authentication_failed") == "TMDB refused the token")
+    #expect(
+      ServerIssueText.title(for: "metadata_authentication_failed") == "TMDB refused the token")
     #expect(
       ServerIssueText.title(for: "rate_limited")
         == ServerIssueText.title(for: "request_rate_limited"))
@@ -57,9 +63,10 @@ struct ReadableTextTests {
       PlaybackTrack(id: 2, title: "Track 2 - [German]"),
       PlaybackTrack(id: 3, title: "Track 3 - [English]"),
     ]
-    #expect(tracks.map { PlaybackTrackNames.menuTitle(for: $0, in: tracks) } == [
-      "English", "German", "English (2)",
-    ])
+    #expect(
+      tracks.map { PlaybackTrackNames.menuTitle(for: $0, in: tracks) } == [
+        "English", "German", "English (2)",
+      ])
     // The saved preference still matches the original title.
     #expect(tracks[2].title == "Track 3 - [English]")
   }

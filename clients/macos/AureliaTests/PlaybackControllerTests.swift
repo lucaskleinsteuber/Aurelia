@@ -1159,7 +1159,8 @@ final class PlaybackControllerTests: XCTestCase {
     let relay = FakePlaybackRelay()
     let controller = PlaybackController(
       client: client,
-      presentation: PlaybackPresentation(mediaId: source.mediaId, title: "Episode 1", subtitle: nil),
+      presentation: PlaybackPresentation(
+        mediaId: source.mediaId, title: "Episode 1", subtitle: nil),
       engine: engine, relayFactory: { _, _ in relay })
 
     await controller.start()

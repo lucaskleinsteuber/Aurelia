@@ -20,8 +20,9 @@ struct DownloadQualitySheet: View {
 
   init(choice: PendingDownloadChoice) {
     self.choice = choice
-    _quality = State(initialValue: choice.options.qualities.first(where: { $0.id == "720p" })?.id
-      ?? choice.options.qualities.first?.id ?? DownloadQualityPreference.original)
+    _quality = State(
+      initialValue: choice.options.qualities.first(where: { $0.id == "720p" })?.id
+        ?? choice.options.qualities.first?.id ?? DownloadQualityPreference.original)
     _audio = State(initialValue: choice.options.audioTrack)
   }
 
@@ -38,8 +39,10 @@ struct DownloadQualitySheet: View {
           Picker("Quality", selection: $quality) {
             VStack(alignment: .leading, spacing: 2) {
               Text("Original")
-              Text("\(DownloadText.size(choice.options.originalBytes)) · the file as it is on the server")
-                .font(.caption).foregroundStyle(.secondary)
+              Text(
+                "\(DownloadText.size(choice.options.originalBytes)) · the file as it is on the server"
+              )
+              .font(.caption).foregroundStyle(.secondary)
             }
             .tag(DownloadQualityPreference.original)
             ForEach(choice.options.qualities) { option in
@@ -54,7 +57,9 @@ struct DownloadQualitySheet: View {
           .accessibilityIdentifier("download-quality")
           if quality != DownloadQualityPreference.original && choice.options.audioTracks.count > 1 {
             Picker("Sound", selection: $audio) {
-              ForEach(choice.options.audioTracks) { track in Text(DownloadText.audio(track)).tag(Optional(track.index)) }
+              ForEach(choice.options.audioTracks) { track in
+                Text(DownloadText.audio(track)).tag(Optional(track.index))
+              }
             }
           }
           Toggle("Use This Quality from Now On", isOn: $remember)

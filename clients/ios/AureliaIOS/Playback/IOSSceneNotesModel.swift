@@ -17,7 +17,9 @@ final class IOSSceneNotesModel: ObservableObject {
 
   var sorted: [IOSSceneNote] { notes.sorted { $0.startMilliseconds < $1.startMilliseconds } }
 
-  func cue(at position: Int64) -> IOSSceneNote? { IOSSceneNotePolicy.cue(notes, position: position) }
+  func cue(at position: Int64) -> IOSSceneNote? {
+    IOSSceneNotePolicy.cue(notes, position: position)
+  }
 
   /// Another title opened in the player (the next episode).
   func show(mediaID: UUID) async {
@@ -63,7 +65,8 @@ final class IOSSceneNotesModel: ObservableObject {
       notes.removeAll { $0.id == note.id }
       message = nil
     } catch {
-      message = "The note could not be deleted. It may have changed on another device; Reload shows the latest."
+      message =
+        "The note could not be deleted. It may have changed on another device; Reload shows the latest."
     }
   }
 
@@ -77,7 +80,8 @@ final class IOSSceneNotesModel: ObservableObject {
       message = nil
       return true
     } catch {
-      message = "The note could not be saved. It may have changed on another device; Reload shows the latest."
+      message =
+        "The note could not be saved. It may have changed on another device; Reload shows the latest."
       return false
     }
   }

@@ -90,7 +90,9 @@ final class SystemWishNotificationDeliverer: WishNotificationDelivering {
   }
 
   func post(identifier: String, title: String, body: String) async {
-    await post(identifier: identifier, title: title, body: body, category: WishNotificationCenter.categoryIdentifier)
+    await post(
+      identifier: identifier, title: title, body: body,
+      category: WishNotificationCenter.categoryIdentifier)
   }
 
   /// Posts with another category, so a click only brings Aurelia forward instead of opening Wishes.

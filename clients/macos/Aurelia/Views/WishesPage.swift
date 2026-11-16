@@ -146,7 +146,9 @@ struct WishesPage: View {
           }
         }
         .buttonStyle(AureliaPrimaryActionButtonStyle())
-        .disabled(isSearching || searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .disabled(
+          isSearching || searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        )
         .accessibilityIdentifier("wishes-search-button")
 
         if providerEnabled {
@@ -532,7 +534,8 @@ struct WishesPage: View {
           .help(
             wish.supportedByCaller
               ? "You want this too. Click to take it back."
-              : "Tell the owner you want this too.")
+              : "Tell the owner you want this too."
+          )
           .disabled(isBusy)
         }
 
@@ -545,8 +548,8 @@ struct WishesPage: View {
 
         if wish.state == .open, isOwner {
           Button("Withdraw…") { deletingWish = wish }
-          .buttonStyle(.bordered)
-          .disabled(isBusy)
+            .buttonStyle(.bordered)
+            .disabled(isBusy)
         }
 
         Spacer()
@@ -616,8 +619,8 @@ struct WishesPage: View {
     }
 
     Button("Delete…", role: .destructive) { deletingWish = wish }
-    .buttonStyle(.bordered)
-    .disabled(isBusy)
+      .buttonStyle(.bordered)
+      .disabled(isBusy)
   }
 
   private func declineSheet(for wish: WishSummary) -> some View {
@@ -904,7 +907,9 @@ struct WishPosterThumbnail: View {
     ZStack {
       RoundedRectangle(cornerRadius: AureliaDesign.smallRadius, style: .continuous)
         .fill(AureliaDesign.raisedSurface)
-      if let displayed = image ?? cache.cachedImage(posterPath: posterPath, width: width, profile: profile) {
+      if let displayed = image
+        ?? cache.cachedImage(posterPath: posterPath, width: width, profile: profile)
+      {
         Image(nsImage: displayed)
           .resizable()
           .aspectRatio(contentMode: .fill)

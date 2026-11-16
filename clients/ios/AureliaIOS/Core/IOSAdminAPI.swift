@@ -87,7 +87,9 @@ extension IOSAPIClient {
 
   // MARK: Backups
 
-  func serverBackups() async throws -> [IOSServerBackup] { try await admin("/api/v1/server/backups") }
+  func serverBackups() async throws -> [IOSServerBackup] {
+    try await admin("/api/v1/server/backups")
+  }
   func createBackup() async throws {
     try await adminSend("/api/v1/server/backups/database", method: "POST", longRunning: true)
   }
@@ -133,7 +135,10 @@ extension IOSAPIClient {
     let upload = UUID()
     let path = "/api/v1/server/backups/uploads/\(Self.id(upload))"
     defer {
-      Task { try? await adminSend("/api/v1/server/backups/transfers/\(Self.id(upload))", method: "DELETE") }
+      Task {
+        try? await adminSend(
+          "/api/v1/server/backups/transfers/\(Self.id(upload))", method: "DELETE")
+      }
     }
     var request = try adminFileRequest(path, method: "PUT")
     request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
@@ -227,7 +232,9 @@ extension IOSAPIClient {
 
   // MARK: Profiles
 
-  func serverUsers() async throws -> [IOSUserAccessSummary] { try await admin("/api/v1/server/users") }
+  func serverUsers() async throws -> [IOSUserAccessSummary] {
+    try await admin("/api/v1/server/users")
+  }
   func profileEditor(id: UUID) async throws -> IOSProfileEditor {
     try await admin("/api/v1/users/\(Self.id(id))/profile")
   }
@@ -323,7 +330,8 @@ extension IOSAPIClient {
   func libraries() async throws -> [IOSLibrarySummary] { try await admin("/api/v1/libraries") }
   func serverFolders(path: String?) async throws -> IOSServerFolderListing {
     try await admin(
-      "/api/v1/libraries/folders", query: path.map { [URLQueryItem(name: "path", value: $0)] } ?? [])
+      "/api/v1/libraries/folders", query: path.map { [URLQueryItem(name: "path", value: $0)] } ?? []
+    )
   }
   func createLibrary(_ request: IOSCreateLibraryRequest) async throws -> IOSLibrarySummary {
     try await admin("/api/v1/libraries", method: "POST", json: request)
@@ -461,7 +469,9 @@ extension IOSAPIClient {
   func serverFileChecks() async throws -> IOSFileCheckSettings {
     try await admin("/api/v1/server/file-checks")
   }
-  func saveServerFileChecks(_ request: IOSUpdateFileCheckSettings) async throws -> IOSFileCheckSettings {
+  func saveServerFileChecks(_ request: IOSUpdateFileCheckSettings) async throws
+    -> IOSFileCheckSettings
+  {
     try await admin("/api/v1/server/file-checks", method: "PUT", json: request)
   }
   func fileProblems(ignored: Bool = false) async throws -> [IOSFileProblem] {
@@ -475,7 +485,8 @@ extension IOSAPIClient {
   }
   func setFileProblemIgnored(mediaId: UUID, ignored: Bool) async throws {
     try await adminSend(
-      "/api/v1/library/health/files/\(Self.id(mediaId))/ignore", method: ignored ? "POST" : "DELETE")
+      "/api/v1/library/health/files/\(Self.id(mediaId))/ignore", method: ignored ? "POST" : "DELETE"
+    )
   }
   func drives(refresh: Bool = false) async throws -> IOSDriveHealthResponse {
     refresh
@@ -604,7 +615,9 @@ extension IOSAPIClient {
 
   // MARK: Security ("security-v1")
 
-  func securityEvents(outcome: String? = nil, before: String? = nil) async throws -> IOSSecurityEventPage {
+  func securityEvents(outcome: String? = nil, before: String? = nil) async throws
+    -> IOSSecurityEventPage
+  {
     var query = [URLQueryItem(name: "limit", value: "100")]
     if let outcome { query.append(URLQueryItem(name: "outcome", value: outcome)) }
     if let before { query.append(URLQueryItem(name: "before", value: before)) }
@@ -614,7 +627,8 @@ extension IOSAPIClient {
     try await admin("/api/v1/server/security/devices")
   }
   func acknowledgeDevice(id: UUID) async throws {
-    try await adminSend("/api/v1/server/security/devices/\(Self.id(id))/acknowledge", method: "POST")
+    try await adminSend(
+      "/api/v1/server/security/devices/\(Self.id(id))/acknowledge", method: "POST")
   }
   func blockDevice(id: UUID) async throws -> IOSBlockResult {
     try await admin("/api/v1/server/security/devices/\(Self.id(id))/block", method: "POST")
@@ -628,7 +642,8 @@ extension IOSAPIClient {
   func securitySettings() async throws -> IOSSecuritySettings {
     try await admin("/api/v1/server/security/settings")
   }
-  func saveSecuritySettings(logDays: Int, requirePasskeys: Bool) async throws -> IOSSecuritySettings {
+  func saveSecuritySettings(logDays: Int, requirePasskeys: Bool) async throws -> IOSSecuritySettings
+  {
     struct Payload: Encodable {
       let securityLogDays: Int
       let requirePasskeysForAdministrators: Bool
@@ -655,7 +670,8 @@ extension IOSAPIClient {
   /// Registers this device's key: proves it holds the private key by signing a fresh challenge.
   func registerPasskey(name: String, signer: any IOSPasskeySigner) async throws -> IOSPasskey {
     let challenge = try await passkeyChallenge()
-    let signature = try await signer.sign(IOSPasskeyMessage.data(purpose: "register", challenge: challenge))
+    let signature = try await signer.sign(
+      IOSPasskeyMessage.data(purpose: "register", challenge: challenge))
     struct Payload: Encodable {
       let name: String
       let publicKey: String
@@ -674,7 +690,8 @@ extension IOSAPIClient {
   /// Unlocks management with Face ID or Touch ID instead of the Server Password.
   func unlockManagement(passkeyId: UUID, signer: any IOSPasskeySigner) async throws -> Date {
     let challenge = try await passkeyChallenge()
-    let signature = try await signer.sign(IOSPasskeyMessage.data(purpose: "unlock", challenge: challenge))
+    let signature = try await signer.sign(
+      IOSPasskeyMessage.data(purpose: "unlock", challenge: challenge))
     struct Payload: Encodable {
       let passkeyId: UUID
       let challenge: String
@@ -683,12 +700,17 @@ extension IOSAPIClient {
     struct Response: Decodable { let expiresAt: String }
     let response: Response = try await admin(
       "/api/v1/management/passkey-unlock", method: "POST",
-      json: Payload(passkeyId: passkeyId, challenge: challenge, signature: signature.base64EncodedString()))
-    guard let date = IOSServerDate.parse(response.expiresAt) else { throw IOSCoreError.invalidResponse }
+      json: Payload(
+        passkeyId: passkeyId, challenge: challenge, signature: signature.base64EncodedString()))
+    guard let date = IOSServerDate.parse(response.expiresAt) else {
+      throw IOSCoreError.invalidResponse
+    }
     return date
   }
   /// Confirms (with this device's key) or denies another device's request to unlock management.
-  func decideRemoteUnlock(id: UUID, approve: Bool, passkeyId: UUID?, signer: (any IOSPasskeySigner)?) async throws {
+  func decideRemoteUnlock(
+    id: UUID, approve: Bool, passkeyId: UUID?, signer: (any IOSPasskeySigner)?
+  ) async throws {
     struct Payload: Encodable {
       let approve: Bool
       let passkeyId: UUID?
@@ -702,8 +724,10 @@ extension IOSAPIClient {
       let signature = try await signer.sign(
         IOSPasskeyMessage.data(purpose: IOSPasskeyMessage.remotePurpose(id), challenge: challenge))
       payload = Payload(
-        approve: true, passkeyId: passkeyId, challenge: challenge, signature: signature.base64EncodedString())
+        approve: true, passkeyId: passkeyId, challenge: challenge,
+        signature: signature.base64EncodedString())
     }
-    try await adminSend("/api/v1/management/remote-unlock/\(Self.id(id))/decide", method: "POST", json: payload)
+    try await adminSend(
+      "/api/v1/management/remote-unlock/\(Self.id(id))/decide", method: "POST", json: payload)
   }
 }

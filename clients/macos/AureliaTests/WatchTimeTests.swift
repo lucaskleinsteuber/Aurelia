@@ -19,7 +19,8 @@ struct WatchTimeTests {
   @Test func theLastTwelveWeeksIncludeWeeksWithoutWatching() throws {
     var calendar = Calendar(identifier: .iso8601)
     calendar.timeZone = try #require(TimeZone(identifier: "Europe/Berlin"))
-    let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 10, day: 31, hour: 19)))
+    let now = try #require(
+      calendar.date(from: DateComponents(year: 2026, month: 10, day: 31, hour: 19)))
     let weeks = WatchTime.lastWeeks(
       [PeriodHours(period: "2026-W43", hours: 1.5), PeriodHours(period: "2026-W30", hours: 9)],
       now: now, calendar: calendar)

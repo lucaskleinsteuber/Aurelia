@@ -332,7 +332,8 @@ struct IOSDetailView: View {
             Button {
               playSupplement(value)
             } label: {
-              IOSWideCard(item: value, eyebrow: supplement.category.uppercased(), highlighted: false)
+              IOSWideCard(
+                item: value, eyebrow: supplement.category.uppercased(), highlighted: false)
             }.buttonStyle(IOSContentButtonStyle()).disabled(launching)
               .accessibilityIdentifier("supplement-\(value.id)")
           }
@@ -369,7 +370,8 @@ struct IOSDetailView: View {
             if model.supportsWatchlist {
               NavigationLink {
                 IOSPersonDetailView(
-                  name: person.name, personKey: person.id.hasPrefix("unidentified:") ? nil : person.id)
+                  name: person.name,
+                  personKey: person.id.hasPrefix("unidentified:") ? nil : person.id)
               } label: {
                 IOSPersonLabel(person: person)
               }.buttonStyle(IOSContentButtonStyle())
@@ -568,7 +570,8 @@ private struct IOSWideCard: View {
       VStack(alignment: .leading, spacing: 3) {
         Text(item.availabilityMessage ?? eyebrow).font(.caption2.weight(.bold)).tracking(0.6)
           .foregroundStyle(
-            item.availabilityMessage != nil ? Color.orange : highlighted ? Color.accentColor : .white.opacity(0.85)
+            item.availabilityMessage != nil
+              ? Color.orange : highlighted ? Color.accentColor : .white.opacity(0.85)
           )
           .lineLimit(1)
         Text(item.title).font(.subheadline.weight(.bold)).foregroundStyle(.white).lineLimit(1)

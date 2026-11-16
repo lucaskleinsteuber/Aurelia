@@ -61,16 +61,18 @@ struct SetupMovePlanTests {
     #expect(choices[missing.id] == nil)
     let mappings = SetupMovePlan.mappings(
       for: [found, missing], choices: choices.merging([missing.id: "  "]) { $1 })
-    #expect(mappings == [
-      SetupMoveMapping(id: found.id, path: "/mnt/ssd/Movies"),
-      SetupMoveMapping(id: missing.id, path: nil),
-    ])
+    #expect(
+      mappings == [
+        SetupMoveMapping(id: found.id, path: "/mnt/ssd/Movies"),
+        SetupMoveMapping(id: missing.id, path: nil),
+      ])
   }
 
   @Test func typedAddressesGetHTTPSAndTheServerPort() {
     #expect(SetupMovePlan.normalizedAddress("minipc.local") == "https://minipc.local:43111")
     #expect(SetupMovePlan.normalizedAddress(" 192.168.1.20 ") == "https://192.168.1.20:43111")
-    #expect(SetupMovePlan.normalizedAddress("https://minipc.local:8443") == "https://minipc.local:8443")
+    #expect(
+      SetupMovePlan.normalizedAddress("https://minipc.local:8443") == "https://minipc.local:8443")
   }
 
   @Test func statusDecodesWithoutLocationsAndFailuresReadPlainly() throws {

@@ -12,7 +12,8 @@ enum AppEdition {
 
   static let bundleIdentifier = isTest ? "com.lucas.aurelia.media.test" : "com.lucas.aurelia.media"
   static let appGroup =
-    isTest ? "B5N7JVK37J.com.lucas.aurelia.media.test.host" : "B5N7JVK37J.com.lucas.aurelia.media.host"
+    isTest
+    ? "B5N7JVK37J.com.lucas.aurelia.media.test.host" : "B5N7JVK37J.com.lucas.aurelia.media.host"
   static let displayName = isTest ? "Aurelia Test" : "Aurelia"
   /// The launch agents of the bundled server host: "<identifier>.host.background" and ".host.login".
   static func agentName(startAtLogin: Bool) -> String {

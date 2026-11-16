@@ -28,7 +28,8 @@ struct IOSDownloadQualityDialog: ViewModifier {
       ForEach(choice.options.qualities) { quality in
         Button(IOSDownloadText.button(quality)) {
           model.startDownloads(
-            choice.items, quality: quality.id, audio: choice.options.audioTrack, options: choice.options)
+            choice.items, quality: quality.id, audio: choice.options.audioTrack,
+            options: choice.options)
         }
       }
       Button("Cancel", role: .cancel) {}

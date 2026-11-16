@@ -14,7 +14,9 @@ enum SegmentTrimPart: String, Identifiable, Sendable {
 /// handle may move. Times are milliseconds.
 enum SegmentTrimRange {
   /// The intro is looked for in the first 12 minutes (at most 40 %); the credits in the last ten.
-  static func span(part: SegmentTrimPart, duration: Int64, start: Int64?, end: Int64?) -> ClosedRange<Int64> {
+  static func span(part: SegmentTrimPart, duration: Int64, start: Int64?, end: Int64?)
+    -> ClosedRange<Int64>
+  {
     guard duration > 0 else { return 0...1 }
     switch part {
     case .intro:
@@ -28,7 +30,8 @@ enum SegmentTrimRange {
   }
 
   /// Where a new intro or credits begins when none is known yet.
-  static func initial(part: SegmentTrimPart, span: ClosedRange<Int64>) -> (start: Int64, end: Int64) {
+  static func initial(part: SegmentTrimPart, span: ClosedRange<Int64>) -> (start: Int64, end: Int64)
+  {
     switch part {
     case .intro: (span.lowerBound, min(span.upperBound, span.lowerBound + 30_000))
     case .credits: (max(span.lowerBound, span.upperBound - 60_000), span.upperBound)
@@ -36,7 +39,9 @@ enum SegmentTrimRange {
   }
 
   /// Keeps the start at least a second before the end and both inside the strip.
-  static func clamp(start: Int64, end: Int64, span: ClosedRange<Int64>) -> (start: Int64, end: Int64) {
+  static func clamp(start: Int64, end: Int64, span: ClosedRange<Int64>) -> (
+    start: Int64, end: Int64
+  ) {
     let end = min(max(end, span.lowerBound + 1_000), span.upperBound)
     let start = min(max(start, span.lowerBound), end - 1_000)
     return (start, end)
@@ -88,13 +93,19 @@ final class SegmentTrimPlayer: ObservableObject {
       let source = try await api.createPlayback(mediaId: mediaId)
       ticket = source.id
       // Closed while the ticket was made: release it instead of starting to play.
-      if Task.isCancelled || closed { close(); return }
+      if Task.isCancelled || closed {
+        close()
+        return
+      }
       let relay = try LoopbackStreamRelay(
         sourceURL: try api.streamURL(path: source.streamPath),
         publicKeyFingerprint: profile.publicKeyFingerprint, authorizationToken: profile.token)
       self.relay = relay
       let local = try await relay.start()
-      if Task.isCancelled || closed { close(); return }
+      if Task.isCancelled || closed {
+        close()
+        return
+      }
       engine.onUpdate = { [weak self] in self?.update() }
       engine.onEnded = { [weak self] in self?.isPlaying = false }
       engine.onError = { [weak self] _ in self?.failed = true }
@@ -105,7 +116,10 @@ final class SegmentTrimPlayer: ObservableObject {
       for _ in 0..<100 where engine.durationMilliseconds <= 0 {
         try await Task.sleep(for: .milliseconds(100))
       }
-      if Task.isCancelled || closed { close(); return }
+      if Task.isCancelled || closed {
+        close()
+        return
+      }
       engine.pause()
       if !engine.opensAtStartPosition { engine.seek(to: milliseconds) }
       duration = engine.durationMilliseconds
@@ -234,13 +248,15 @@ struct SegmentTrimEditor: View {
           Button {
             if player.isPlaying { player.pause() } else { player.play(from: start, to: end) }
           } label: {
-            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill").frame(width: 22, height: 22)
+            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill").frame(
+              width: 22, height: 22)
           }
           .keyboardShortcut(.space, modifiers: [])
           .help(
             player.isPlaying
               ? "Pauses (Space)."
-              : "Plays the yellow selection from its start; at its end it starts over (Space).")
+              : "Plays the yellow selection from its start; at its end it starts over (Space)."
+          )
           .accessibilityLabel(player.isPlaying ? "Pause" : "Play Selection")
           .accessibilityIdentifier("trim-play")
 
@@ -250,7 +266,8 @@ struct SegmentTrimEditor: View {
             onMove: { time in
               player.pause()
               player.seek(to: time)
-            })
+            }
+          )
           .frame(height: 56)
         }
         .buttonStyle(.bordered)
@@ -258,11 +275,16 @@ struct SegmentTrimEditor: View {
         .disabled(!player.ready)
 
         HStack(spacing: 18) {
-          nudge("Starts", value: start, identifier: "trim-start") { start = clamped(start: $0, end: end).start }
+          nudge("Starts", value: start, identifier: "trim-start") {
+            start = clamped(start: $0, end: end).start
+          }
           if part == .intro {
-            nudge("Ends", value: end, identifier: "trim-end") { end = clamped(start: start, end: $0).end }
+            nudge("Ends", value: end, identifier: "trim-end") {
+              end = clamped(start: start, end: $0).end
+            }
           } else {
-            Text("Credits run to the end of the episode.").font(.callout).foregroundStyle(.secondary)
+            Text("Credits run to the end of the episode.").font(.callout).foregroundStyle(
+              .secondary)
           }
           Spacer()
           Text("Length \(SegmentTrimRange.label(end - start))")
@@ -287,7 +309,8 @@ struct SegmentTrimEditor: View {
           .help(
             part == .intro
               ? "Saves that this episode has no intro, so Skip Intro never appears in it."
-              : "Saves that this episode has no credits, so Up Next appears only in its last seconds.")
+              : "Saves that this episode has no credits, so Up Next appears only in its last seconds."
+          )
           .accessibilityIdentifier("trim-remove")
         Spacer()
         Button("Cancel") { dismiss() }
@@ -296,7 +319,9 @@ struct SegmentTrimEditor: View {
         Button("Save \(part.title)") { Task { await save(remove: false) } }
           .buttonStyle(AureliaPrimaryActionButtonStyle(compact: true))
           .keyboardShortcut(.defaultAction)
-          .help("Saves the yellow selection as this episode's \(part.title.lowercased()). Detection never replaces it.")
+          .help(
+            "Saves the yellow selection as this episode's \(part.title.lowercased()). Detection never replaces it."
+          )
           .disabled(!player.ready || saving)
           .accessibilityIdentifier("trim-save")
       }
@@ -307,22 +332,33 @@ struct SegmentTrimEditor: View {
     .task { await prepare() }
     .onDisappear { player.close() }
     .onChange(of: start) { _, value in if !player.isPlaying { player.seek(to: value) } }
-    .onChange(of: end) { _, value in if !player.isPlaying, part == .intro { player.seek(to: value) } }
+    .onChange(of: end) { _, value in if !player.isPlaying, part == .intro { player.seek(to: value) }
+    }
     .accessibilityIdentifier("trim-editor-\(part.rawValue)")
   }
 
   /// A time with buttons that move it by a tenth of a second.
-  private func nudge(_ title: String, value: Int64, identifier: String, set: @escaping (Int64) -> Void) -> some View {
+  private func nudge(
+    _ title: String, value: Int64, identifier: String, set: @escaping (Int64) -> Void
+  ) -> some View {
     HStack(spacing: 6) {
       Text(title).font(.callout)
-      Button { set(value - 100) } label: { Image(systemName: "chevron.left") }
-        .help("Moves it a tenth of a second earlier.")
-        .accessibilityLabel("\(title) Earlier")
+      Button {
+        set(value - 100)
+      } label: {
+        Image(systemName: "chevron.left")
+      }
+      .help("Moves it a tenth of a second earlier.")
+      .accessibilityLabel("\(title) Earlier")
       Text(SegmentTrimRange.label(value)).font(.callout.monospacedDigit()).frame(minWidth: 64)
         .accessibilityIdentifier(identifier)
-      Button { set(value + 100) } label: { Image(systemName: "chevron.right") }
-        .help("Moves it a tenth of a second later.")
-        .accessibilityLabel("\(title) Later")
+      Button {
+        set(value + 100)
+      } label: {
+        Image(systemName: "chevron.right")
+      }
+      .help("Moves it a tenth of a second later.")
+      .accessibilityLabel("\(title) Later")
     }
     .buttonStyle(.borderless)
   }
@@ -359,7 +395,9 @@ struct SegmentTrimEditor: View {
     await withTaskGroup(of: (Int, Data?).self) { group in
       for index in 0..<Self.frames {
         let seconds = Int((Double(span.lowerBound) + step * (Double(index) + 0.5)) / 1_000)
-        group.addTask { (index, try? await client.scrubPreviewFrame(mediaId: mediaId, seconds: seconds)) }
+        group.addTask {
+          (index, try? await client.scrubPreviewFrame(mediaId: mediaId, seconds: seconds))
+        }
       }
       for await (index, data) in group {
         if let data, let image = NSImage(data: data) { thumbnails[index] = image }
@@ -389,7 +427,8 @@ struct SegmentTrimEditor: View {
     saving = true
     defer { saving = false }
     var request = SetMediaSegmentsRequest(
-      introStartMilliseconds: times.introStartMilliseconds, introEndMilliseconds: times.introEndMilliseconds,
+      introStartMilliseconds: times.introStartMilliseconds,
+      introEndMilliseconds: times.introEndMilliseconds,
       creditsStartMilliseconds: times.creditsStartMilliseconds)
     switch part {
     case .intro:
@@ -425,7 +464,9 @@ private struct SegmentTrimStrip: View {
     GeometryReader { geometry in
       let width = max(1, geometry.size.width - handle * 2)
       let x = { (time: Int64) -> CGFloat in
-        handle + CGFloat(Double(time - span.lowerBound) / Double(max(1, span.upperBound - span.lowerBound))) * width
+        handle + CGFloat(
+          Double(time - span.lowerBound) / Double(max(1, span.upperBound - span.lowerBound)))
+          * width
       }
       let time = { (point: CGFloat) -> Int64 in
         let share = min(max(0, (point - handle) / width), 1)
@@ -452,8 +493,10 @@ private struct SegmentTrimStrip: View {
         // Outside the selection is dimmed.
         Color.black.opacity(0.45).frame(width: max(0, x(start) - handle)).offset(x: handle)
           .allowsHitTesting(false)
-        Color.black.opacity(0.45).frame(width: max(0, x(span.upperBound) - x(end))).offset(x: x(end))
-          .allowsHitTesting(false)
+        Color.black.opacity(0.45).frame(width: max(0, x(span.upperBound) - x(end))).offset(
+          x: x(end)
+        )
+        .allowsHitTesting(false)
 
         RoundedRectangle(cornerRadius: AureliaDesign.tinyRadius)
           .stroke(Color.yellow, lineWidth: 4)
@@ -469,8 +512,12 @@ private struct SegmentTrimStrip: View {
           .offset(x: x(start) - handle)
           .gesture(
             DragGesture().onChanged { value in
-              start = SegmentTrimRange.clamp(start: time(value.location.x + handle / 2), end: end, span: span).start
-            })
+              start =
+                SegmentTrimRange.clamp(
+                  start: time(value.location.x + handle / 2), end: end, span: span
+                ).start
+            }
+          )
           .accessibilityLabel("Start")
           .accessibilityValue(SegmentTrimRange.label(start))
           .accessibilityAdjustableAction { direction in
@@ -482,8 +529,12 @@ private struct SegmentTrimStrip: View {
             .offset(x: x(end))
             .gesture(
               DragGesture().onChanged { value in
-                end = SegmentTrimRange.clamp(start: start, end: time(value.location.x - handle / 2), span: span).end
-              })
+                end =
+                  SegmentTrimRange.clamp(
+                    start: start, end: time(value.location.x - handle / 2), span: span
+                  ).end
+              }
+            )
             .accessibilityLabel("End")
             .accessibilityValue(SegmentTrimRange.label(end))
             .accessibilityAdjustableAction { direction in
@@ -504,7 +555,8 @@ private struct SegmentTrimStrip: View {
       .frame(width: handle)
       .overlay(
         Image(systemName: edge == .leading ? "chevron.compact.left" : "chevron.compact.right")
-          .font(.system(size: 14, weight: .bold)).foregroundStyle(.black))
+          .font(.system(size: 14, weight: .bold)).foregroundStyle(.black)
+      )
       .contentShape(Rectangle())
   }
 }

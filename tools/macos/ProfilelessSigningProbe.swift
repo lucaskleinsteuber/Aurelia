@@ -21,16 +21,19 @@ var copied: CFTypeRef?
 var readQuery = query
 readQuery[kSecReturnData as String] = true
 readQuery[kSecMatchLimit as String] = kSecMatchLimitOne
-let read = added == errSecSuccess
+let read =
+  added == errSecSuccess
   ? SecItemCopyMatching(readQuery as CFDictionary, &copied) : added
 let matches = copied as? Data == expected
 let deleted = added == errSecSuccess ? SecItemDelete(query as CFDictionary) : added
-let groupAvailable = FileManager.default.containerURL(
-  forSecurityApplicationGroupIdentifier: group) != nil
+let groupAvailable =
+  FileManager.default.containerURL(
+    forSecurityApplicationGroupIdentifier: group) != nil
 print("syntheticKeychainWriteStatus=\(added)")
 print("syntheticKeychainReadStatus=\(read)")
 print("syntheticKeychainRoundTrip=\(matches)")
 print("syntheticKeychainCleanupStatus=\(deleted)")
 print("syntheticAppGroupAvailable=\(groupAvailable)")
-exit(added == errSecSuccess && read == errSecSuccess && matches
-  && deleted == errSecSuccess && groupAvailable ? 0 : 1)
+exit(
+  added == errSecSuccess && read == errSecSuccess && matches
+    && deleted == errSecSuccess && groupAvailable ? 0 : 1)

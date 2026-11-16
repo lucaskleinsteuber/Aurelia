@@ -434,7 +434,9 @@ enum CinemaTunes {
   private static func bells(_ notes: [(Double, Int)], length: Double = 0.4, level: Double = 0.4)
     -> [CinemaNote]
   {
-    notes.map { CinemaNote(time: $0.0, frequency: hertz($0.1), length: length, voice: .bell, level: level) }
+    notes.map {
+      CinemaNote(time: $0.0, frequency: hertz($0.1), length: length, voice: .bell, level: level)
+    }
   }
 
   /// The ad's tune, its notes moved to where their pictures are in the slower ad.
@@ -455,11 +457,15 @@ enum CinemaTunes {
           CinemaNote(time: $0 + 0.55, frequency: 180, length: 0.04, voice: .pop, level: 0.5)
         }
         + bells([(5.2, 103)], length: 0.3, level: 0.25)
-        + [(6.5, 60), (7.0, 67), (7.5, 64), (8.0, 67), (9.0, 65), (9.5, 69), (10.0, 67), (10.5, 72)]
+        + [
+          (6.5, 60), (7.0, 67), (7.5, 64), (8.0, 67), (9.0, 65), (9.5, 69), (10.0, 67), (10.5, 72),
+        ]
         .map {
-          CinemaNote(time: $0.0, frequency: hertz($0.1 - 12), length: 0.3, voice: .pluck, level: 0.35)
+          CinemaNote(
+            time: $0.0, frequency: hertz($0.1 - 12), length: 0.3, voice: .pluck, level: 0.35)
         }
-        + bells([(11.0, 79), (11.15, 81), (11.3, 83), (11.5, 84), (11.5, 88), (11.5, 91)], level: 0.35)
+        + bells(
+          [(11.0, 79), (11.15, 81), (11.3, 83), (11.5, 84), (11.5, 88), (11.5, 91)], level: 0.35)
     case .popcorn:
       var noise = CinemaSynth.Noise(seed: 0xC0FFEE)
       let pops = CinemaPopcorn.kernels.map {

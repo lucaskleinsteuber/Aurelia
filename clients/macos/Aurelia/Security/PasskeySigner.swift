@@ -16,7 +16,9 @@ struct SoftwarePasskeySigner: PasskeySigner {
   let key: P256.Signing.PrivateKey
   init(key: P256.Signing.PrivateKey = .init()) { self.key = key }
   var publicKey: Data { key.publicKey.x963Representation }
-  func sign(_ message: Data) async throws -> Data { try key.signature(for: message).derRepresentation }
+  func sign(_ message: Data) async throws -> Data {
+    try key.signature(for: message).derRepresentation
+  }
 }
 
 /// A P-256 key in this Mac's Secure Enclave, usable only after Touch ID or the login password.
@@ -34,10 +36,15 @@ struct SecureEnclavePasskeySigner: PasskeySigner {
     var error: Unmanaged<CFError>?
     guard
       let access = SecAccessControlCreateWithFlags(
-        nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, [.privateKeyUsage, .userPresence], &error)
-    else { throw APIClientError.serverRejected(code: "passkey_unavailable", message: "This Mac can't keep a Touch ID key.") }
+        nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, [.privateKeyUsage, .userPresence], &error
+      )
+    else {
+      throw APIClientError.serverRejected(
+        code: "passkey_unavailable", message: "This Mac can't keep a Touch ID key.")
+    }
     let key = try SecureEnclave.P256.Signing.PrivateKey(accessControl: access)
-    return SecureEnclavePasskeySigner(keyReference: key.dataRepresentation, publicKey: key.publicKey.x963Representation)
+    return SecureEnclavePasskeySigner(
+      keyReference: key.dataRepresentation, publicKey: key.publicKey.x963Representation)
   }
 
   func sign(_ message: Data) async throws -> Data {
@@ -45,7 +52,8 @@ struct SecureEnclavePasskeySigner: PasskeySigner {
     return try await Task.detached(priority: .userInitiated) { () throws -> Data in
       let context = LAContext()
       context.localizedReason = "confirm the change on your Aurelia server"
-      let key = try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: reference, authenticationContext: context)
+      let key = try SecureEnclave.P256.Signing.PrivateKey(
+        dataRepresentation: reference, authenticationContext: context)
       return try key.signature(for: message).derRepresentation
     }.value
   }
@@ -73,7 +81,8 @@ enum PasskeyStore {
     query[kSecReturnData as String] = true
     query[kSecMatchLimit as String] = kSecMatchLimitOne
     var result: CFTypeRef?
-    guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data
+    guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+      let data = result as? Data
     else { return nil }
     return try? JSONDecoder().decode(StoredPasskey.self, from: data)
   }
@@ -86,7 +95,8 @@ enum PasskeyStore {
     query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
     let status = SecItemAdd(query as CFDictionary, nil)
     guard status == errSecSuccess else {
-      throw APIClientError.serverRejected(code: "passkey_save_failed", message: "The key could not be saved on this Mac.")
+      throw APIClientError.serverRejected(
+        code: "passkey_save_failed", message: "The key could not be saved on this Mac.")
     }
   }
 

@@ -22,7 +22,8 @@ struct IOSAdminSecurityView: View {
       // Devices are listed under Profiles and Devices; here only how many are new.
       async let blocked = owner ? (try? client.blockedDevices()) ?? [] : []
       return Overview(
-        settings: await settings, passkeys: try await passkeys, devices: await devices, blocked: await blocked)
+        settings: await settings, passkeys: try await passkeys, devices: await devices,
+        blocked: await blocked)
     } content: { overview, reload in
       IOSAdminSecurityContent(overview: overview, owner: owner, reload: reload)
     }
@@ -50,17 +51,23 @@ private struct IOSAdminSecurityContent: View {
         page: .security,
         text: owner
           ? "Who signed in when and from where, \(biometry) instead of the Server Password, and devices you blocked."
-          : "\(biometry) instead of the Server Password for your profile on this \(IOSDesign.deviceName).")
+          : "\(biometry) instead of the Server Password for your profile on this \(IOSDesign.deviceName)."
+      )
       Section {
         if !IOSSecureEnclaveSigner.isAvailable {
           Text("This \(IOSDesign.deviceName) can't keep a Face ID or Touch ID key.")
             .foregroundStyle(.secondary)
-        } else if let key = thisDeviceKey, overview.passkeys.contains(where: { $0.id == key.passkeyId }) {
-          Label("\(biometry) is set up on this \(IOSDesign.deviceName)", systemImage: "checkmark.shield")
+        } else if let key = thisDeviceKey,
+          overview.passkeys.contains(where: { $0.id == key.passkeyId })
+        {
+          Label(
+            "\(biometry) is set up on this \(IOSDesign.deviceName)", systemImage: "checkmark.shield"
+          )
           Button("Remove from This \(IOSDesign.deviceName)…", role: .destructive) {
             confirmation = IOSAdminConfirmation(
               title: "Remove \(biometry)?",
-              message: "This \(IOSDesign.deviceName) asks for the Server Password again.", action: "Remove"
+              message: "This \(IOSDesign.deviceName) asks for the Server Password again.",
+              action: "Remove"
             ) { remove(key.passkeyId) }
           }
         } else {
@@ -92,7 +99,8 @@ private struct IOSAdminSecurityContent: View {
               Spacer()
               Button("Remove", role: .destructive) {
                 confirmation = IOSAdminConfirmation(
-                  title: "Remove “\(passkey.name)”?", message: "That device asks for the Server Password again.",
+                  title: "Remove “\(passkey.name)”?",
+                  message: "That device asks for the Server Password again.",
                   action: "Remove"
                 ) { remove(passkey.id) }
               }
@@ -109,13 +117,16 @@ private struct IOSAdminSecurityContent: View {
               get: { settings.requirePasskeysForAdministrators },
               set: { value in save(logDays: logDays ?? settings.securityLogDays, require: value) }))
           Stepper(
-            value: Binding(get: { logDays ?? settings.securityLogDays }, set: { logDays = $0 }), in: 30...365,
+            value: Binding(get: { logDays ?? settings.securityLogDays }, set: { logDays = $0 }),
+            in: 30...365,
             step: 30
           ) {
             LabeledContent("Keep the Log", value: "\(logDays ?? settings.securityLogDays) days")
           }
           if let days = logDays, days != settings.securityLogDays {
-            Button("Save") { save(logDays: days, require: settings.requirePasskeysForAdministrators) }
+            Button("Save") {
+              save(logDays: days, require: settings.requirePasskeysForAdministrators)
+            }
           }
         } header: {
           Text("Settings")
@@ -132,8 +143,12 @@ private struct IOSAdminSecurityContent: View {
                 VStack(alignment: .leading, spacing: 2) {
                   Text(blocked.deviceName)
                   Text(
-                    [IOSSecurityText.deviceLine(platform: blocked.platform, ipAddress: blocked.ipAddress), "blocked \(IOSAdminFormat.relative(blocked.blockedAt))"]
-                      .filter { !$0.isEmpty }.joined(separator: " · ")
+                    [
+                      IOSSecurityText.deviceLine(
+                        platform: blocked.platform, ipAddress: blocked.ipAddress),
+                      "blocked \(IOSAdminFormat.relative(blocked.blockedAt))",
+                    ]
+                    .filter { !$0.isEmpty }.joined(separator: " · ")
                   )
                   .font(.caption).foregroundStyle(.secondary)
                 }
@@ -154,7 +169,9 @@ private struct IOSAdminSecurityContent: View {
         Section {
           NavigationLink("Security Log") { IOSAdminSecurityLogView() }
         } footer: {
-          Text("Who signed in when and from which device, failed attempts, and changes made by administrators.")
+          Text(
+            "Who signed in when and from which device, failed attempts, and changes made by administrators."
+          )
         }
       }
     }
@@ -174,7 +191,8 @@ private struct IOSAdminSecurityContent: View {
           Text(fresh > 0 ? "\(fresh) new" : "\(overview.devices.count)")
             .foregroundStyle(fresh > 0 ? Color.orange : .secondary)
         } label: {
-          IOSAdminToggleLabel("Signed-In Devices", "Sign out or block a device, and confirm new ones.")
+          IOSAdminToggleLabel(
+            "Signed-In Devices", "Sign out or block a device, and confirm new ones.")
         }
       }
     }
@@ -182,9 +200,12 @@ private struct IOSAdminSecurityContent: View {
 
   private func save(logDays: Int, require: Bool) {
     Task {
-      if await admin.perform("Saving…", {
-        _ = try await $0.saveSecuritySettings(logDays: logDays, requirePasskeys: require)
-      }) {
+      if await admin.perform(
+        "Saving…",
+        {
+          _ = try await $0.saveSecuritySettings(logDays: logDays, requirePasskeys: require)
+        })
+      {
         self.logDays = nil
       }
     }
@@ -204,19 +225,25 @@ private struct IOSAdminSecurityContent: View {
   private func setUp() async {
     settingUp = true
     defer { settingUp = false }
-    guard let server = model.connection?.serverID, let profile = model.session?.user.id else { return }
+    guard let server = model.connection?.serverID, let profile = model.session?.user.id else {
+      return
+    }
     let signer: IOSSecureEnclaveSigner
     do { signer = try IOSSecureEnclaveSigner.create() } catch {
       admin.alert = IOSAdministrationModel.message(error)
       return
     }
     let name = model.deviceName
-    if let passkey = await admin.value("Setting up \(biometry)…", {
-      try await $0.registerPasskey(name: name, signer: signer)
-    }) {
+    if let passkey = await admin.value(
+      "Setting up \(biometry)…",
+      {
+        try await $0.registerPasskey(name: name, signer: signer)
+      })
+    {
       do {
         try IOSPasskeyStore.save(
-          IOSStoredPasskey(passkeyId: passkey.id, keyReference: signer.keyReference, publicKey: signer.publicKey),
+          IOSStoredPasskey(
+            passkeyId: passkey.id, keyReference: signer.keyReference, publicKey: signer.publicKey),
           server: server, profile: profile)
       } catch {
         admin.alert = IOSAdministrationModel.message(error)
@@ -240,7 +267,8 @@ struct IOSSecurityDeviceRow: View {
               .background(Capsule().fill(Color.orange.opacity(0.85)))
           }
         }
-        let line = IOSSecurityText.deviceLine(platform: device.platform, ipAddress: device.ipAddress)
+        let line = IOSSecurityText.deviceLine(
+          platform: device.platform, ipAddress: device.ipAddress)
         if !line.isEmpty { Text(line).font(.caption).foregroundStyle(.secondary) }
         Text("\(device.userName) · last used \(IOSAdminFormat.relative(device.lastSeenAt))")
           .font(.caption2).foregroundStyle(.secondary)
@@ -282,8 +310,11 @@ private struct IOSAdminSecurityLogView: View {
             VStack(alignment: .leading, spacing: 2) {
               Text(IOSSecurityText.kind(event.kind) + (event.detail.map { " · \($0)" } ?? ""))
               Text(
-                [event.userName, event.deviceName, IOSSecurityText.deviceLine(platform: event.platform, ipAddress: event.ipAddress)]
-                  .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+                [
+                  event.userName, event.deviceName,
+                  IOSSecurityText.deviceLine(platform: event.platform, ipAddress: event.ipAddress),
+                ]
+                .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
               )
               .font(.caption).foregroundStyle(.secondary)
               Text(IOSAdminFormat.date(event.at)).font(.caption2).foregroundStyle(.secondary)
@@ -309,7 +340,10 @@ private struct IOSAdminSecurityLogView: View {
     defer { loading = false }
     let outcome = filter == "all" ? nil : filter
     let cursor = more ? before : nil
-    guard let page = await admin.value(nil, { try await $0.securityEvents(outcome: outcome, before: cursor) }) else {
+    guard
+      let page = await admin.value(
+        nil, { try await $0.securityEvents(outcome: outcome, before: cursor) })
+    else {
       return
     }
     events = more ? events + page.events : page.events
@@ -343,7 +377,8 @@ final class IOSSecurityAlertCenter: ObservableObject {
       while !Task.isCancelled {
         guard let self, let client = model?.client else { return }
         do {
-          let alerts = try await client.securityAlerts(version: self.version, waitSeconds: self.version == 0 ? 0 : 25)
+          let alerts = try await client.securityAlerts(
+            version: self.version, waitSeconds: self.version == 0 ? 0 : 25)
           self.version = alerts.version
           self.newDevices = alerts.newDevices.filter { !self.dismissed.contains($0.id) }
           self.unlockRequests = alerts.unlockRequests
@@ -381,7 +416,8 @@ final class IOSSecurityAlertCenter: ObservableObject {
   }
 
   func decide(_ request: IOSRemoteUnlockRequest, approve: Bool, model: IOSAppModel) async {
-    guard let client = model.client, let server = model.connection?.serverID, let profile = model.session?.user.id
+    guard let client = model.client, let server = model.connection?.serverID,
+      let profile = model.session?.user.id
     else { return }
     let stored = IOSPasskeyStore.load(server: server, profile: profile)
     do {
@@ -425,8 +461,10 @@ struct IOSSecurityAlertBanner: View {
           HStack {
             Button("Block") { Task { await center.block(device, client: model.client) } }
               .buttonStyle(IOSButtonStyle(kind: .secondary))
-            Button("That Was Me") { Task { await center.acknowledge(device, client: model.client) } }
-              .buttonStyle(IOSButtonStyle(kind: .primary))
+            Button("That Was Me") {
+              Task { await center.acknowledge(device, client: model.client) }
+            }
+            .buttonStyle(IOSButtonStyle(kind: .primary))
           }
         }
       }

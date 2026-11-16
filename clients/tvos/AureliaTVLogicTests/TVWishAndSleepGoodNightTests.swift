@@ -81,8 +81,10 @@ struct TVWishAndSleepGoodNightTests {
     #expect(TVSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended))
     TVSleepTimerWakeRule.markEnded(defaults, now: ended)
     #expect(!TVSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(33)))
-    #expect(!TVSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(3599)))
-    #expect(TVSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(3600)))
+    #expect(
+      !TVSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(3599)))
+    #expect(
+      TVSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(3600)))
     TVSleepTimerWakeRule.markEnded(defaults, now: ended)
     TVSleepTimerWakeRule.clear(defaults)
     #expect(TVSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(60)))

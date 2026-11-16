@@ -147,18 +147,21 @@ final class IOSAdministrationModel: ObservableObject {
     unlocking = true
     defer { unlocking = false }
     do {
-      let expiry = try await client.unlockManagement(passkeyId: passkey.passkeyId, signer: passkey.signer)
+      let expiry = try await client.unlockManagement(
+        passkeyId: passkey.passkeyId, signer: passkey.signer)
       managementExpiresAt = expiry
       scheduleExpiry(expiry)
       unlockRequested = false
       finishUnlock(true)
     } catch {
-      if (error as? IOSCoreError)?.code == "passkey_invalid", let server = app?.connection?.serverID,
+      if (error as? IOSCoreError)?.code == "passkey_invalid",
+        let server = app?.connection?.serverID,
         let profile = app?.session?.user.id
       {
         // The server no longer knows this key (removed elsewhere): forget it here too.
         IOSPasskeyStore.remove(server: server, profile: profile)
-        unlockError = "This \(IOSDesign.deviceName)'s key was removed on the server. Use the Server Password and set it up again."
+        unlockError =
+          "This \(IOSDesign.deviceName)'s key was removed on the server. Use the Server Password and set it up again."
       } else if (error as? CancellationError) == nil {
         unlockError = Self.message(error)
       }
@@ -349,7 +352,8 @@ struct IOSAdminConfirmation: Identifiable {
 extension View {
   func adminConfirmation(_ item: Binding<IOSAdminConfirmation?>) -> some View {
     alert(
-      item.wrappedValue?.title ?? "", isPresented: Binding(
+      item.wrappedValue?.title ?? "",
+      isPresented: Binding(
         get: { item.wrappedValue != nil }, set: { if !$0 { item.wrappedValue = nil } }),
       presenting: item.wrappedValue
     ) { confirmation in
@@ -446,7 +450,10 @@ struct IOSAdminActionButton: View {
   let work: @Sendable (IOSAPIClient) async throws -> Void
   @State private var state: Phase = .idle
 
-  enum Phase: Equatable { case idle, running, done, failed(String) }
+  enum Phase: Equatable {
+    case idle, running, done
+    case failed(String)
+  }
 
   init(
     _ title: String, systemImage: String, detail: String? = nil, role: ButtonRole? = nil,

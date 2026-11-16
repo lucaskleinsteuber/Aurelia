@@ -57,11 +57,13 @@ struct TVArtworkDiskCacheTests {
     let collectionID = UUID()
     let poster = TVArtwork(
       id: collectionID, kind: "poster",
-      path: "/api/v1/artwork/collection/\(collectionID.uuidString.lowercased())/poster?kind=poster&rev=2",
+      path:
+        "/api/v1/artwork/collection/\(collectionID.uuidString.lowercased())/poster?kind=poster&rev=2",
       contentType: "image/jpeg", contentLength: 3, revision: 2)
     let backdrop = TVArtwork(
       id: collectionID, kind: "backdrop",
-      path: "/api/v1/artwork/collection/\(collectionID.uuidString.lowercased())/backdrop?kind=backdrop&rev=2",
+      path:
+        "/api/v1/artwork/collection/\(collectionID.uuidString.lowercased())/backdrop?kind=backdrop&rev=2",
       contentType: "image/jpeg", contentLength: 3, revision: 2)
     let posterKey = try #require(
       TVArtworkDiskCache.key(serverID: server, profileID: profile, artwork: poster, width: 640))

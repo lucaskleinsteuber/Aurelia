@@ -166,7 +166,8 @@ enum TVWrapped {
 
   /// The number to count up to, when the big text is a plain number ("143", not "02:47").
   static func countTarget(_ text: String?) -> Int? {
-    guard let text, !text.isEmpty, text.count <= 6, text.allSatisfy(\.isASCII), text.allSatisfy(\.isNumber)
+    guard let text, !text.isEmpty, text.count <= 6, text.allSatisfy(\.isASCII),
+      text.allSatisfy(\.isNumber)
     else { return nil }
     return Int(text)
   }

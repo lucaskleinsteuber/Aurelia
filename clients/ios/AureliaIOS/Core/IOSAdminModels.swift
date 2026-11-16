@@ -525,7 +525,8 @@ struct IOSMetadataJob: Codable, Identifiable, Equatable, Sendable {
     if itemsFailed > 0 { parts.append("\(itemsFailed) failed") }
     let detail =
       parts.isEmpty
-      ? "\(itemsTotal) \(itemsTotal == 1 ? "title" : "titles") checked" : parts.joined(separator: ", ")
+      ? "\(itemsTotal) \(itemsTotal == 1 ? "title" : "titles") checked"
+      : parts.joined(separator: ", ")
     switch state {
     case "completed": return "Done · " + detail
     case "cancelled": return "Stopped · " + detail

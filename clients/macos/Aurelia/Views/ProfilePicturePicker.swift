@@ -136,7 +136,8 @@ struct ProfilePicturePicker: View {
     panel.message =
       "Choose a photo for this profile. Next you choose the part that shows in the circle."
     guard panel.runModal() == .OK, let url = panel.url else { return }
-    guard let data = try? Data(contentsOf: url), let image = ProfilePictureCatalog.editablePhoto(data)
+    guard let data = try? Data(contentsOf: url),
+      let image = ProfilePictureCatalog.editablePhoto(data)
     else {
       problem = "This file is not a picture Aurelia can read."
       return

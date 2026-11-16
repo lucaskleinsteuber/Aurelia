@@ -18,7 +18,8 @@ struct IOSOfflineTests {
     lock.recordFailure(now: start)
     #expect(lock.isLocked(now: start.addingTimeInterval(29)))
     #expect(!lock.isLocked(now: start.addingTimeInterval(31)))
-    #expect(lock.message(now: start.addingTimeInterval(10)) == "Too many wrong PINs. Try again in 20 s.")
+    #expect(
+      lock.message(now: start.addingTimeInterval(10)) == "Too many wrong PINs. Try again in 20 s.")
     lock.recordFailure(now: start)
     #expect(lock.isLocked(now: start.addingTimeInterval(59)))
     for _ in 1...10 { lock.recordFailure(now: start) }
@@ -89,7 +90,8 @@ struct IOSOfflineTests {
     let profile = IOSWatchingProfile(
       id: profileID, name: "Synthetic", role: "user", needsPinSetup: false,
       pinProtectionEnabled: true)
-    let card = try #require(IOSOfflineProfileCard.make(serverID: serverID, profile: profile, pin: "4826"))
+    let card = try #require(
+      IOSOfflineProfileCard.make(serverID: serverID, profile: profile, pin: "4826"))
     #expect(card.accepts("4826"))
     #expect(!card.accepts("4827"))
     #expect(!card.accepts("48"))
@@ -99,7 +101,8 @@ struct IOSOfflineTests {
     #expect(IOSOfflineProfileCard.make(serverID: serverID, profile: profile, pin: nil) == nil)
     let open = IOSWatchingProfile(
       id: profileID, name: "Open", role: "user", needsPinSetup: false, pinProtectionEnabled: false)
-    #expect(IOSOfflineProfileCard.make(serverID: serverID, profile: open, pin: nil)?.accepts("") == true)
+    #expect(
+      IOSOfflineProfileCard.make(serverID: serverID, profile: open, pin: nil)?.accepts("") == true)
   }
 
   // MARK: Offline player
@@ -207,7 +210,8 @@ struct IOSOfflineTests {
     store.record(kept)
     let profile = IOSWatchingProfile(
       id: profileID, name: "Open", role: "user", needsPinSetup: false, pinProtectionEnabled: false)
-    store.remember(try #require(IOSOfflineProfileCard.make(serverID: serverID, profile: profile, pin: nil)))
+    store.remember(
+      try #require(IOSOfflineProfileCard.make(serverID: serverID, profile: profile, pin: nil)))
     #expect(store.offlineProfiles(serverID: serverID).count == 1)
     store.forget(serverID: serverID)
     #expect(store.titles.isEmpty && store.cards.isEmpty)

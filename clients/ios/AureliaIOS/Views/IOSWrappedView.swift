@@ -64,7 +64,10 @@ struct IOSWrappedView: View {
       if slide.kind == "summary" {
         Text(slide.headline).font(.system(size: 40, weight: .black)).tracking(-1)
         if let posters = slide.posters, !posters.isEmpty {
-          LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+          LazyVGrid(
+            columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
+            spacing: 8
+          ) {
             ForEach(Array(posters.prefix(4).enumerated()), id: \.offset) { _, poster in
               IOSArtworkView(artwork: poster, width: 160)
                 .aspectRatio(2 / 3, contentMode: .fit)
@@ -143,8 +146,12 @@ struct IOSWrappedView: View {
       .accessibilityHidden(true)
       HStack {
         Spacer()
-        Button { dismiss() } label: { Image(systemName: "xmark").font(.headline).frame(width: 44, height: 44) }
-          .accessibilityLabel("Close Wrapped")
+        Button {
+          dismiss()
+        } label: {
+          Image(systemName: "xmark").font(.headline).frame(width: 44, height: 44)
+        }
+        .accessibilityLabel("Close Wrapped")
       }
       .padding(.horizontal, 8)
       HStack(spacing: 0) {
@@ -169,7 +176,9 @@ struct IOSWrappedView: View {
 
   private func go(forward: Bool) {
     guard let count = wrapped?.slides.count else { return }
-    guard let next = IOSWrapped.step(from: index, count: count, forward: forward) else { return dismiss() }
+    guard let next = IOSWrapped.step(from: index, count: count, forward: forward) else {
+      return dismiss()
+    }
     progress = 0
     index = next
   }
@@ -178,7 +187,9 @@ struct IOSWrappedView: View {
   private func run() async {
     guard let slides = wrapped?.slides, slides.indices.contains(index) else { return }
     let slide = slides[index]
-    if progress == 0, !reduceMotion, let target = IOSWrapped.countTarget(slide.bigNumber), target > 1 {
+    if progress == 0, !reduceMotion, let target = IOSWrapped.countTarget(slide.bigNumber),
+      target > 1
+    {
       let start = Date()
       while !Task.isCancelled {
         let fraction = Date().timeIntervalSince(start) / 1.1

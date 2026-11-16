@@ -96,7 +96,9 @@ struct IOSSoftwarePasskeySigner: IOSPasskeySigner {
   let key: P256.Signing.PrivateKey
   init(key: P256.Signing.PrivateKey = .init()) { self.key = key }
   var publicKey: Data { key.publicKey.x963Representation }
-  func sign(_ message: Data) async throws -> Data { try key.signature(for: message).derRepresentation }
+  func sign(_ message: Data) async throws -> Data {
+    try key.signature(for: message).derRepresentation
+  }
 }
 
 enum IOSPasskeyMessage {
@@ -115,7 +117,9 @@ enum IOSInstallation {
   static let defaultsKey = "AureliaIOSInstallationId"
 
   static func identifier(defaults: UserDefaults = .standard) -> String {
-    if let saved = defaults.string(forKey: defaultsKey), UUID(uuidString: saved) != nil { return saved }
+    if let saved = defaults.string(forKey: defaultsKey), UUID(uuidString: saved) != nil {
+      return saved
+    }
     let created = UUID().uuidString
     defaults.set(created, forKey: defaultsKey)
     return created
@@ -123,7 +127,8 @@ enum IOSInstallation {
 
   /// "ios/2.11.0".
   static var clientHeader: String {
-    let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+    let version =
+      Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     return "ios/" + version.filter { $0.isNumber || $0 == "." }
   }
 }

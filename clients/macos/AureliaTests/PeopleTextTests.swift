@@ -7,7 +7,8 @@ import XCTest
 final class PeopleTextTests: XCTestCase {
   private func about(born: String?, died: String? = nil, place: String? = nil) -> PersonAbout {
     PersonAbout(
-      biography: nil, birthday: born, deathday: died, placeOfBirth: place, knownForDepartment: "Acting",
+      biography: nil, birthday: born, deathday: died, placeOfBirth: place,
+      knownForDepartment: "Acting",
       provider: "tmdb", providerPersonId: "17")
   }
 
@@ -22,19 +23,30 @@ final class PeopleTextTests: XCTestCase {
       PeoplePresentation.life(about(born: "1970-05-01", place: "Invented Town"), today: today),
       "Born May 1, 1970 (age 56) in Invented Town")
     // The birthday later in the year has not come yet.
-    XCTAssertEqual(PeoplePresentation.life(about(born: "1970-12-24"), today: today), "Born December 24, 1970 (age 55)")
     XCTAssertEqual(
-      PeoplePresentation.life(about(born: "1931-02-08", died: "1955-09-30", place: "Invented Town"), today: today),
+      PeoplePresentation.life(about(born: "1970-12-24"), today: today),
+      "Born December 24, 1970 (age 55)")
+    XCTAssertEqual(
+      PeoplePresentation.life(
+        about(born: "1931-02-08", died: "1955-09-30", place: "Invented Town"), today: today),
       "February 8, 1931 – September 30, 1955 (aged 24) · Invented Town")
-    XCTAssertEqual(PeoplePresentation.life(about(born: nil, died: "2001-03-04"), today: today), "Died March 4, 2001")
-    XCTAssertEqual(PeoplePresentation.life(about(born: nil, place: "Invented Town"), today: today), "Born in Invented Town")
+    XCTAssertEqual(
+      PeoplePresentation.life(about(born: nil, died: "2001-03-04"), today: today),
+      "Died March 4, 2001")
+    XCTAssertEqual(
+      PeoplePresentation.life(about(born: nil, place: "Invented Town"), today: today),
+      "Born in Invented Town")
     XCTAssertNil(PeoplePresentation.life(about(born: "sometime"), today: today))
     XCTAssertNil(PeoplePresentation.life(nil, today: today))
   }
 
   func testACardSaysTheJobOnlyForPeopleBehindTheCamera() {
-    let actor = PersonSummary(name: "Morgan Vale", personKey: "tmdb:person:17", profile: nil, titleCount: 3, department: "Acting")
-    let director = PersonSummary(name: "Theo Brandt", personKey: "tmdb:person:18", profile: nil, titleCount: 1, department: "Director")
+    let actor = PersonSummary(
+      name: "Morgan Vale", personKey: "tmdb:person:17", profile: nil, titleCount: 3,
+      department: "Acting")
+    let director = PersonSummary(
+      name: "Theo Brandt", personKey: "tmdb:person:18", profile: nil, titleCount: 1,
+      department: "Director")
     XCTAssertEqual(PeoplePresentation.role(actor), "3 titles")
     XCTAssertEqual(PeoplePresentation.role(director), "Director · 1 title")
     XCTAssertEqual(director.selection.personKey, "tmdb:person:18")

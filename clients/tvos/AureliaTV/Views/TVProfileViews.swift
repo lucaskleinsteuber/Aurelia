@@ -81,7 +81,8 @@ private struct TVProfileEntry: View {
         Label(asleep, systemImage: "moon.fill").font(.system(size: 20)).foregroundStyle(.secondary)
       }
       if profile.needsPinSetup {
-        Text("Set up a PIN on the server computer").font(.system(size: 20)).foregroundStyle(.secondary)
+        Text("Set up a PIN on the server computer").font(.system(size: 20)).foregroundStyle(
+          .secondary)
       }
     }
     .frame(width: 260)

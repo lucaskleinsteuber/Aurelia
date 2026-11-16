@@ -4,7 +4,8 @@ import SwiftUI
 struct IOSPlaybackSettingsView: View {
   @EnvironmentObject private var model: IOSAppModel
   @State private var value = IOSPlaybackPreferences.defaultValue
-  @AppStorage(IOSDownloadQualityPreference.key) private var downloadQuality = IOSDownloadQualityPreference.ask
+  @AppStorage(IOSDownloadQualityPreference.key) private var downloadQuality =
+    IOSDownloadQualityPreference.ask
   @State private var error: String?
   @State private var loaded = false
   @State private var confirmForget = false

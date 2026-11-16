@@ -319,7 +319,9 @@ struct IOSLibraryLogicTests {
     #expect(detail.members.count == 2)
     #expect(detail.members[1].seasonNumber == 0)
     #expect(IOSCollectionRules.providerLabel(detail.provider) == "TMDB Collection")
-    #expect(!IOSCollectionRules.canEdit(detail.summary, userID: profileID, role: "owner", supportsV3: true))
+    #expect(
+      !IOSCollectionRules.canEdit(
+        detail.summary, userID: profileID, role: "owner", supportsV3: true))
     #expect(IOSCollectionRules.playLabel(detail.nextItem) == "Resume · S01 E01")
     #expect(IOSCollectionRules.playableItems(from: detail).map(\.id) == [m1.id, ep1.id])
     #expect(IOSCollectionRules.queue(in: detail, startingAt: m1).map(\.id) == [ep1.id])
@@ -331,7 +333,9 @@ struct IOSLibraryLogicTests {
       contentType: "image/webp", contentLength: 100, revision: 3)
     let uploadID = UUID()
     let uploadSummary = IOSUploadedEditorImage(
-      id: uploadID, path: "/api/v1/collections/\(colID.uuidString.lowercased())/editor/uploads/\(uploadID.uuidString.lowercased())",
+      id: uploadID,
+      path:
+        "/api/v1/collections/\(colID.uuidString.lowercased())/editor/uploads/\(uploadID.uuidString.lowercased())",
       width: 800, height: 1200)
     let transport = IOSLibraryTestTransport(responses: [
       try response(detail),
@@ -350,21 +354,24 @@ struct IOSLibraryLogicTests {
     _ = try await client.collectionDetail(id: colID)
     _ = try await client.franchises()
     _ = try await client.saveFromFranchise(id: colID)
-    let uploaded = try await client.uploadCollectionEditorImage(collectionID: colID, Data([0xFF, 0xD8, 0xFF]))
+    let uploaded = try await client.uploadCollectionEditorImage(
+      collectionID: colID, Data([0xFF, 0xD8, 0xFF]))
     #expect(uploaded.id == uploadID)
     _ = try await client.saveCollectionArtwork(
       collectionID: colID, kind: "poster",
-      IOSSaveCollectionArtwork(uploadId: uploadID, crop: IOSArtworkCrop(x: 0, y: 0, width: 1, height: 1)))
+      IOSSaveCollectionArtwork(
+        uploadId: uploadID, crop: IOSArtworkCrop(x: 0, y: 0, width: 1, height: 1)))
     try await client.discardCollectionEditorImage(collectionID: colID, uploadID: uploadID)
     let recorded = await transport.requests
-    #expect(recorded.map { $0.url?.path } == [
-      "/api/v1/collections/\(colID.uuidString.lowercased())",
-      "/api/v1/catalog/franchises",
-      "/api/v1/collections/from-franchise/\(colID.uuidString.lowercased())",
-      "/api/v1/collections/\(colID.uuidString.lowercased())/editor/uploads",
-      "/api/v1/collections/\(colID.uuidString.lowercased())/artwork/poster",
-      "/api/v1/collections/\(colID.uuidString.lowercased())/editor/uploads/\(uploadID.uuidString.lowercased())",
-    ])
+    #expect(
+      recorded.map { $0.url?.path } == [
+        "/api/v1/collections/\(colID.uuidString.lowercased())",
+        "/api/v1/catalog/franchises",
+        "/api/v1/collections/from-franchise/\(colID.uuidString.lowercased())",
+        "/api/v1/collections/\(colID.uuidString.lowercased())/editor/uploads",
+        "/api/v1/collections/\(colID.uuidString.lowercased())/artwork/poster",
+        "/api/v1/collections/\(colID.uuidString.lowercased())/editor/uploads/\(uploadID.uuidString.lowercased())",
+      ])
   }
 
   @Test func rectCropProducesNormalizedCoordinatesInUnitSquare() {

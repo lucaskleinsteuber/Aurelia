@@ -21,11 +21,15 @@ struct ClientContractTests {
     let players = Data(
       #"[{"deviceId":"tv","deviceName":"Living Room","clientType":"tvos","isPlaying":true,"mediaId":null,"title":"Synthetic","positionSeconds":12.5,"durationSeconds":60,"isPaused":false,"lastSeen":"\#(time)"}]"#
         .utf8)
-    #expect(try JSONDecoder().decode([RemotePlayerDevice].self, from: players).first?.deviceName == "Living Room")
+    #expect(
+      try JSONDecoder().decode([RemotePlayerDevice].self, from: players).first?.deviceName
+        == "Living Room")
     let commands = Data(
       #"[{"commandId":"5f0c2f1e-4c7b-4a39-9a3e-0d6c1c2b8a11","action":"pause","mediaId":null,"positionSeconds":null,"skipSeconds":null,"createdAt":"\#(time)"}]"#
         .utf8)
-    #expect(try JSONDecoder().decode([RemotePlaybackCommand].self, from: commands).first?.action == "pause")
+    #expect(
+      try JSONDecoder().decode([RemotePlaybackCommand].self, from: commands).first?.action
+        == "pause")
     #expect(
       try JSONDecoder().decode(
         PlayerHeartbeatResponse.self, from: Data(#"{"success":true,"timestamp":"\#(time)"}"#.utf8)
@@ -43,11 +47,14 @@ struct ClientContractTests {
     #expect(sent["combination"] as? String == "or")
     #expect(sent["watched"] == nil && sent["search"] == nil && sent["match"] == nil)
     // Read back from the server, and as earlier versions of the app saved it.
-    #expect(try JSONDecoder().decode(SmartCollectionRules.self, from: JSONEncoder().encode(rules)) == rules)
+    #expect(
+      try JSONDecoder().decode(SmartCollectionRules.self, from: JSONEncoder().encode(rules))
+        == rules)
     let legacy = try JSONDecoder().decode(
       SmartCollectionRules.self,
       from: Data(#"{"kind":"movies","watched":"watched","search":"x","match":"any"}"#.utf8))
-    #expect(legacy == SmartCollectionRules(kind: "movies", watched: "watched", search: "x", match: "any"))
+    #expect(
+      legacy == SmartCollectionRules(kind: "movies", watched: "watched", search: "x", match: "any"))
   }
 
   @Test func sharedArtworkFixturesRemainCompatible() throws {
@@ -122,7 +129,8 @@ struct ClientContractTests {
   @Test func collectionArtworkPathsAndQueryVariantsValidate() throws {
     let collectionId = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
     let basePoster = "/api/v1/artwork/collection/11111111-1111-1111-1111-111111111111?kind=poster"
-    let baseBackdrop = "/api/v1/artwork/collection/11111111-1111-1111-1111-111111111111?kind=backdrop"
+    let baseBackdrop =
+      "/api/v1/artwork/collection/11111111-1111-1111-1111-111111111111?kind=backdrop"
     let poster = ArtworkSummary(
       id: collectionId, kind: .poster, path: basePoster, contentType: "image/jpeg",
       contentLength: 1024, revision: 2)
@@ -132,126 +140,131 @@ struct ClientContractTests {
     #expect(APIClient.isValidArtworkPath(baseBackdrop))
     #expect(APIClient.isValidArtworkPath(sized.path))
     #expect(APIClient.isValidArtworkPath("\(basePoster)&width=320&rev=2"))
-    #expect(!APIClient.isValidArtworkPath("/api/v1/artwork/collection/11111111-1111-1111-1111-111111111111?kind=other"))
+    #expect(
+      !APIClient.isValidArtworkPath(
+        "/api/v1/artwork/collection/11111111-1111-1111-1111-111111111111?kind=other"))
     #expect(!APIClient.isValidArtworkPath("\(basePoster)&width=321"))
     #expect(!APIClient.isValidArtworkPath("\(basePoster)&other=1"))
   }
 
   @Test func boxSetModelsAndPlaybackQueueLogicDecodeAndOrderUnits() throws {
-    let legacyData = Data(#"{"id":"11111111-1111-1111-1111-111111111111","name":"Legacy","items":[]}"#.utf8)
+    let legacyData = Data(
+      #"{"id":"11111111-1111-1111-1111-111111111111","name":"Legacy","items":[]}"#.utf8)
     let legacy = try JSONDecoder().decode(CollectionSummary.self, from: legacyData)
     #expect(legacy.canEdit)
     #expect(legacy.itemCount == 0)
 
-    let tmdbData = Data(#"{"id":"11111111-1111-1111-1111-111111111111","name":"Sci-Fi Trilogy","overview":"Box desc","provider":"tmdb","canEdit":false,"itemCount":3,"watchedCount":1,"yearRange":"1999 - 2003","sortMode":"release","items":[]}"#.utf8)
+    let tmdbData = Data(
+      #"{"id":"11111111-1111-1111-1111-111111111111","name":"Sci-Fi Trilogy","overview":"Box desc","provider":"tmdb","canEdit":false,"itemCount":3,"watchedCount":1,"yearRange":"1999 - 2003","sortMode":"release","items":[]}"#
+        .utf8)
     let tmdb = try JSONDecoder().decode(CollectionSummary.self, from: tmdbData)
     #expect(!tmdb.canEdit)
     #expect(BoxSetLogic.providerLabel(tmdb.provider) == "TMDB Collection")
     #expect(BoxSetLogic.cardSubtitle(for: tmdb) == "TMDB Collection · 1999 - 2003 · 1 of 3 watched")
 
     let detailJSON = #"""
-    {
-      "id": "11111111-1111-1111-1111-111111111111",
-      "name": "Galaxy Box",
-      "overview": "All parts.",
-      "provider": null,
-      "canEdit": true,
-      "isSmart": false,
-      "isShared": true,
-      "sortMode": "custom",
-      "itemCount": 3,
-      "watchedCount": 1,
-      "yearRange": "2020 - 2024",
-      "totalRuntimeSeconds": 5400,
-      "genres": ["Sci-Fi"],
-      "members": [
-        {
-          "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-          "mediaId": "22222222-2222-2222-2222-222222222222",
-          "kind": "movie",
-          "title": "Opening Film",
-          "seasonNumber": null,
-          "watchedCount": 1,
-          "itemCount": 1,
-          "totalRuntimeSeconds": 3600,
-          "item": {
-            "id": "22222222-2222-2222-2222-222222222222",
+      {
+        "id": "11111111-1111-1111-1111-111111111111",
+        "name": "Galaxy Box",
+        "overview": "All parts.",
+        "provider": null,
+        "canEdit": true,
+        "isSmart": false,
+        "isShared": true,
+        "sortMode": "custom",
+        "itemCount": 3,
+        "watchedCount": 1,
+        "yearRange": "2020 - 2024",
+        "totalRuntimeSeconds": 5400,
+        "genres": ["Sci-Fi"],
+        "members": [
+          {
+            "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "mediaId": "22222222-2222-2222-2222-222222222222",
             "kind": "movie",
             "title": "Opening Film",
-            "year": 2020,
-            "genres": ["Sci-Fi"],
-            "availability": "available",
-            "isFavorite": false,
-            "addedAt": "2026-01-01T00:00:00Z"
-          }
-        },
-        {
-          "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-          "mediaId": "33333333-3333-3333-3333-333333333333",
-          "kind": "series",
-          "title": "Mini Show",
-          "seasonNumber": 0,
-          "watchedCount": 0,
-          "itemCount": 2,
-          "totalRuntimeSeconds": 1800,
-          "item": {
-            "id": "33333333-3333-3333-3333-333333333333",
+            "seasonNumber": null,
+            "watchedCount": 1,
+            "itemCount": 1,
+            "totalRuntimeSeconds": 3600,
+            "item": {
+              "id": "22222222-2222-2222-2222-222222222222",
+              "kind": "movie",
+              "title": "Opening Film",
+              "year": 2020,
+              "genres": ["Sci-Fi"],
+              "availability": "available",
+              "isFavorite": false,
+              "addedAt": "2026-01-01T00:00:00Z"
+            }
+          },
+          {
+            "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            "mediaId": "33333333-3333-3333-3333-333333333333",
             "kind": "series",
             "title": "Mini Show",
-            "year": 2024,
-            "genres": ["Sci-Fi"],
+            "seasonNumber": 0,
+            "watchedCount": 0,
+            "itemCount": 2,
+            "totalRuntimeSeconds": 1800,
+            "item": {
+              "id": "33333333-3333-3333-3333-333333333333",
+              "kind": "series",
+              "title": "Mini Show",
+              "year": 2024,
+              "genres": ["Sci-Fi"],
+              "availability": "available",
+              "isFavorite": false,
+              "addedAt": "2026-01-01T00:00:00Z"
+            },
+            "episodes": [
+              {
+                "id": "44444444-4444-4444-4444-444444444444",
+                "kind": "episode",
+                "title": "Special Pilot",
+                "seasonNumber": 0,
+                "episodeNumber": 1,
+                "genres": [],
+                "availability": "available",
+                "isFavorite": false,
+                "addedAt": "2026-01-01T00:00:00Z",
+                "parentId": "33333333-3333-3333-3333-333333333333"
+              },
+              {
+                "id": "55555555-5555-5555-5555-555555555555",
+                "kind": "episode",
+                "title": "Special Finale",
+                "seasonNumber": 0,
+                "episodeNumber": 2,
+                "genres": [],
+                "availability": "available",
+                "isFavorite": false,
+                "addedAt": "2026-01-01T00:00:00Z",
+                "parentId": "33333333-3333-3333-3333-333333333333"
+              }
+            ]
+          }
+        ],
+        "nextItem": {
+          "item": {
+            "id": "44444444-4444-4444-4444-444444444444",
+            "kind": "episode",
+            "title": "Special Pilot",
+            "seasonNumber": 0,
+            "episodeNumber": 1,
+            "genres": [],
             "availability": "available",
             "isFavorite": false,
-            "addedAt": "2026-01-01T00:00:00Z"
+            "addedAt": "2026-01-01T00:00:00Z",
+            "parentId": "33333333-3333-3333-3333-333333333333"
           },
-          "episodes": [
-            {
-              "id": "44444444-4444-4444-4444-444444444444",
-              "kind": "episode",
-              "title": "Special Pilot",
-              "seasonNumber": 0,
-              "episodeNumber": 1,
-              "genres": [],
-              "availability": "available",
-              "isFavorite": false,
-              "addedAt": "2026-01-01T00:00:00Z",
-              "parentId": "33333333-3333-3333-3333-333333333333"
-            },
-            {
-              "id": "55555555-5555-5555-5555-555555555555",
-              "kind": "episode",
-              "title": "Special Finale",
-              "seasonNumber": 0,
-              "episodeNumber": 2,
-              "genres": [],
-              "availability": "available",
-              "isFavorite": false,
-              "addedAt": "2026-01-01T00:00:00Z",
-              "parentId": "33333333-3333-3333-3333-333333333333"
-            }
-          ]
+          "resume": true,
+          "positionMilliseconds": 45000,
+          "itemIndex": 1,
+          "totalItems": 3
         }
-      ],
-      "nextItem": {
-        "item": {
-          "id": "44444444-4444-4444-4444-444444444444",
-          "kind": "episode",
-          "title": "Special Pilot",
-          "seasonNumber": 0,
-          "episodeNumber": 1,
-          "genres": [],
-          "availability": "available",
-          "isFavorite": false,
-          "addedAt": "2026-01-01T00:00:00Z",
-          "parentId": "33333333-3333-3333-3333-333333333333"
-        },
-        "resume": true,
-        "positionMilliseconds": 45000,
-        "itemIndex": 1,
-        "totalItems": 3
       }
-    }
-    """#
+      """#
     let detail = try JSONDecoder().decode(CollectionDetail.self, from: Data(detailJSON.utf8))
     #expect(detail.members[1].seasonNumber == 0)
     #expect(BoxSetLogic.playLabel(for: detail.nextItem) == "Resume · S00 E01")

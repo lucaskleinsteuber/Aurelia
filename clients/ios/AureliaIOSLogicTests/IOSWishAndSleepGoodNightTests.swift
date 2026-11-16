@@ -42,23 +42,27 @@ struct IOSWishAndSleepGoodNightTests {
 
   @Test func sleepTimerGoodNightFormatsPowerLineOnlyForSleepOrShutdown() {
     let off = IOSScreenTimeText.goodNight(
-      sleepTimerStatus: IOSSleepTimerEndedResponse(powerMode: "off", afterSleepTimer: false, minutes: 0),
+      sleepTimerStatus: IOSSleepTimerEndedResponse(
+        powerMode: "off", afterSleepTimer: false, minutes: 0),
       name: "Mina")
     #expect(off.title == "Good night, Mina")
     #expect(off.text.isEmpty)
 
     let stopped = IOSScreenTimeText.goodNight(
-      sleepTimerStatus: IOSSleepTimerEndedResponse(powerMode: "stop", afterSleepTimer: true, minutes: 5),
+      sleepTimerStatus: IOSSleepTimerEndedResponse(
+        powerMode: "stop", afterSleepTimer: true, minutes: 5),
       name: "Mina")
     #expect(stopped.text.isEmpty)
 
     let sleep = IOSScreenTimeText.goodNight(
-      sleepTimerStatus: IOSSleepTimerEndedResponse(powerMode: "sleep", afterSleepTimer: true, minutes: 12),
+      sleepTimerStatus: IOSSleepTimerEndedResponse(
+        powerMode: "sleep", afterSleepTimer: true, minutes: 12),
       name: "Mina")
     #expect(sleep.text == "The server goes to sleep in about 12 minutes.")
 
     let sleepSoon = IOSScreenTimeText.goodNight(
-      sleepTimerStatus: IOSSleepTimerEndedResponse(powerMode: "sleep", afterSleepTimer: true, minutes: 0),
+      sleepTimerStatus: IOSSleepTimerEndedResponse(
+        powerMode: "sleep", afterSleepTimer: true, minutes: 0),
       name: "")
     #expect(sleepSoon.title == "Good night")
     #expect(sleepSoon.text == "The server goes to sleep soon.")
@@ -77,9 +81,12 @@ struct IOSWishAndSleepGoodNightTests {
     let ended = Date(timeIntervalSince1970: 1_800_000_000)
     #expect(IOSSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended))
     IOSSleepTimerWakeRule.markEnded(defaults, now: ended)
-    #expect(!IOSSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(33)))
-    #expect(!IOSSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(3599)))
-    #expect(IOSSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(3600)))
+    #expect(
+      !IOSSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(33)))
+    #expect(
+      !IOSSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(3599)))
+    #expect(
+      IOSSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(3600)))
     IOSSleepTimerWakeRule.markEnded(defaults, now: ended)
     IOSSleepTimerWakeRule.clear(defaults)
     #expect(IOSSleepTimerWakeRule.mayWakeAutomatically(defaults, now: ended.addingTimeInterval(60)))
@@ -107,7 +114,8 @@ struct IOSWishAndSleepGoodNightTests {
   @Test func sleepTimerEndedDecodesStatusAndHandlesEmptyLegacyResponse() async throws {
     let payload = #"{"powerMode":"sleep","afterSleepTimer":true,"minutes":8}"#
     let transport = IOSWishFakeTransport(responses: [
-      IOSHTTPResponse(statusCode: 200, headers: [:], body: Data(payload.utf8), fingerprint: Self.fingerprint),
+      IOSHTTPResponse(
+        statusCode: 200, headers: [:], body: Data(payload.utf8), fingerprint: Self.fingerprint),
       IOSHTTPResponse(statusCode: 204, headers: [:], body: Data(), fingerprint: Self.fingerprint),
     ])
     let client = IOSAPIClient(
@@ -122,11 +130,14 @@ struct IOSWishAndSleepGoodNightTests {
 
   @Test func wishPresentationCalculatesBadgesNotificationsAndYearValidation() {
     #expect(
-      IOSWishPresentation.isAdministrator(IOSUser(id: Self.profileID, username: "a", role: "owner")))
+      IOSWishPresentation.isAdministrator(IOSUser(id: Self.profileID, username: "a", role: "owner"))
+    )
     #expect(
-      IOSWishPresentation.isAdministrator(IOSUser(id: Self.profileID, username: "b", role: "admin")))
+      IOSWishPresentation.isAdministrator(IOSUser(id: Self.profileID, username: "b", role: "admin"))
+    )
     #expect(
-      !IOSWishPresentation.isAdministrator(IOSUser(id: Self.profileID, username: "c", role: "user")))
+      !IOSWishPresentation.isAdministrator(IOSUser(id: Self.profileID, username: "c", role: "user"))
+    )
 
     let summary = IOSWishSummaryResponse(openCount: 3, newlyFulfilledCount: 2)
     #expect(IOSWishPresentation.badgeCount(summary: summary, isAdmin: true) == 5)
@@ -170,10 +181,14 @@ struct IOSWishAndSleepGoodNightTests {
       {"openCount":2,"newlyFulfilledCount":1}
       """
     let transport = IOSWishFakeTransport(responses: [
-      IOSHTTPResponse(statusCode: 200, headers: [:], body: Data(listJSON.utf8), fingerprint: Self.fingerprint),
-      IOSHTTPResponse(statusCode: 200, headers: [:], body: Data(searchJSON.utf8), fingerprint: Self.fingerprint),
-      IOSHTTPResponse(statusCode: 409, headers: [:], body: Data(conflictJSON.utf8), fingerprint: Self.fingerprint),
-      IOSHTTPResponse(statusCode: 200, headers: [:], body: Data(summaryJSON.utf8), fingerprint: Self.fingerprint),
+      IOSHTTPResponse(
+        statusCode: 200, headers: [:], body: Data(listJSON.utf8), fingerprint: Self.fingerprint),
+      IOSHTTPResponse(
+        statusCode: 200, headers: [:], body: Data(searchJSON.utf8), fingerprint: Self.fingerprint),
+      IOSHTTPResponse(
+        statusCode: 409, headers: [:], body: Data(conflictJSON.utf8), fingerprint: Self.fingerprint),
+      IOSHTTPResponse(
+        statusCode: 200, headers: [:], body: Data(summaryJSON.utf8), fingerprint: Self.fingerprint),
     ])
     let client = IOSAPIClient(
       connection: Self.connection, session: Self.session, transport: transport)

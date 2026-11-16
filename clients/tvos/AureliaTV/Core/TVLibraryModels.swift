@@ -414,7 +414,8 @@ struct TVCollectionDetail: Codable, Identifiable, Equatable, Sendable {
       TVCollectionMember(
         id: item.id, mediaId: item.id, kind: item.kind, title: item.title,
         seasonNumber: item.seasonNumber, item: item, episodes: nil,
-        watchedCount: (item.watchState == "completed" || item.progress?.isCompleted == true) ? 1 : 0,
+        watchedCount: (item.watchState == "completed" || item.progress?.isCompleted == true)
+          ? 1 : 0,
         itemCount: 1, totalRuntimeSeconds: nil)
     }
   }

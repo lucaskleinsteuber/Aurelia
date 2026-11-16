@@ -45,7 +45,8 @@ private struct IOSAdminServerContent: View {
       IOSAdminPageHeader(
         page: .server,
         text:
-          "How your server is doing, what it does by itself, and its backups and network. Most people never need the sections further down.")
+          "How your server is doing, what it does by itself, and its backups and network. Most people never need the sections further down."
+      )
       Section {
         let healthy = IOSServerHealthText.isHealthy(overview.health, status: status)
         LabeledContent("Status") {
@@ -67,7 +68,9 @@ private struct IOSAdminServerContent: View {
               message: "Everything playing stops for a moment. Devices reconnect by themselves.",
               action: "Restart"
             ) {
-              Task { await admin.perform("Restarting the server…") { _ = try await $0.restartServer() } }
+              Task {
+                await admin.perform("Restarting the server…") { _ = try await $0.restartServer() }
+              }
             }
           } label: {
             Label("Restart Server…", systemImage: "arrow.clockwise.circle")
@@ -81,13 +84,16 @@ private struct IOSAdminServerContent: View {
           Text("A restart applies saved network settings and can clear a stuck job.")
         }
       }
-      if let components = status.readiness?.components.filter({ $0.state != "ready" && $0.state != "ok" }),
+      if let components = status.readiness?.components.filter({
+        $0.state != "ready" && $0.state != "ok"
+      }),
         !components.isEmpty
       {
         Section {
           ForEach(components) { component in
             VStack(alignment: .leading, spacing: 2) {
-              Label(component.title, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+              Label(component.title, systemImage: "exclamationmark.triangle").foregroundStyle(
+                .orange)
               Text(component.detail).font(.caption).foregroundStyle(.secondary)
             }
           }
@@ -100,26 +106,38 @@ private struct IOSAdminServerContent: View {
         NavigationLink {
           IOSAdminPerformanceView()
         } label: {
-          IOSAdminToggleLabel("Performance", "How fast the server answers and which database queries were slow.")
+          IOSAdminToggleLabel(
+            "Performance", "How fast the server answers and which database queries were slow.")
         }
       }
       Section {
-        NavigationLink { IOSAdminScrubPreviewsView() } label: {
+        NavigationLink {
+          IOSAdminScrubPreviewsView()
+        } label: {
           IOSAdminToggleLabel("Scrub Previews", "Small pictures while you scrub through a video.")
         }
-        NavigationLink { IOSAdminSegmentsView() } label: {
+        NavigationLink {
+          IOSAdminSegmentsView()
+        } label: {
           IOSAdminToggleLabel("Intros and Credits", "Finds them so players can offer Skip Intro.")
         }
-        NavigationLink { IOSAdminSpeechView() } label: {
+        NavigationLink {
+          IOSAdminSpeechView()
+        } label: {
           IOSAdminToggleLabel("Speech Recognition", "Writes and syncs subtitles from speech.")
         }
         if model.supportsFileChecks {
-          NavigationLink { IOSAdminFileWatchView() } label: {
+          NavigationLink {
+            IOSAdminFileWatchView()
+          } label: {
             IOSAdminToggleLabel("File Watch", "Reads every file and finds damaged ones.")
           }
         }
-        NavigationLink { IOSAdminTranscodingView() } label: {
-          IOSAdminToggleLabel("Video Conversion", "Converts video live for devices that can’t play the original.")
+        NavigationLink {
+          IOSAdminTranscodingView()
+        } label: {
+          IOSAdminToggleLabel(
+            "Video Conversion", "Converts video live for devices that can’t play the original.")
         }
       } header: {
         Text("What the Server Does by Itself")
@@ -135,10 +153,15 @@ private struct IOSAdminServerContent: View {
           IOSAdminToggleLabel("Backups", "Automatic backups, Back Up Now, export and restore.")
         }
         .accessibilityIdentifier("admin-backups")
-        NavigationLink { IOSAdminJobsView() } label: {
-          IOSAdminToggleLabel("Background Jobs", "Running and recent scans and information lookups.")
+        NavigationLink {
+          IOSAdminJobsView()
+        } label: {
+          IOSAdminToggleLabel(
+            "Background Jobs", "Running and recent scans and information lookups.")
         }
-        NavigationLink { IOSAdminDiagnosticsView(configuration: overview.configuration) } label: {
+        NavigationLink {
+          IOSAdminDiagnosticsView(configuration: overview.configuration)
+        } label: {
           IOSAdminToggleLabel("Diagnostics", "Recent problems and a report you can share.")
         }
       } header: {
@@ -155,9 +178,12 @@ private struct IOSAdminServerContent: View {
             IOSAdminPolicyView(
               title: "Limits", groups: [.limits], configuration: configuration,
               explanation:
-                "How long devices and profiles stay signed in, how many wrong tries are allowed, and how many videos can play at once.")
+                "How long devices and profiles stay signed in, how many wrong tries are allowed, and how many videos can play at once."
+            )
           } label: {
-            IOSAdminToggleLabel("Sign-In and Streaming Limits", "How long sign-ins last and how many streams run at once.")
+            IOSAdminToggleLabel(
+              "Sign-In and Streaming Limits",
+              "How long sign-ins last and how many streams run at once.")
           }
         }
       } header: {
@@ -232,7 +258,8 @@ struct IOSServerHealthSection: View {
       LabeledContent(
         "Scrub Previews",
         value:
-          "\(health.scrubPreviewTitleCount) titles · \(IOSAdminText.bytes(health.scrubPreviewBytes))")
+          "\(health.scrubPreviewTitleCount) titles · \(IOSAdminText.bytes(health.scrubPreviewBytes))"
+      )
       if let scan = health.lastScan {
         LabeledContent(
           "Last Scan",
@@ -279,7 +306,8 @@ private struct IOSAdminDetailsView: View {
       Section("Server") {
         LabeledContent("Version", value: status.version)
         LabeledContent("Database", value: IOSAdminText.bytes(status.databaseBytes))
-        LabeledContent("Certificate Valid Until", value: IOSAdminFormat.date(status.certificateExpiresAt))
+        LabeledContent(
+          "Certificate Valid Until", value: IOSAdminFormat.date(status.certificateExpiresAt))
       }
       Section {
         if let active = configuration?.active {
@@ -350,8 +378,11 @@ struct IOSAdminPolicyView: View {
                 in: field.range, step: field.step
               ) {
                 LabeledContent(field.label) {
-                  Text(field.unit == ":00" ? String(format: "%02d:00", value) : "\(value) \(field.unit)")
-                    .monospacedDigit()
+                  Text(
+                    field.unit == ":00"
+                      ? String(format: "%02d:00", value) : "\(value) \(field.unit)"
+                  )
+                  .monospacedDigit()
                 }
               }
             }
@@ -392,7 +423,9 @@ struct IOSAdminPolicyView: View {
 /// Scrub previews: small still pictures for scrubbing, optional and with a size cap.
 private struct IOSAdminScrubPreviewsView: View {
   var body: some View {
-    IOSAdminLoader { try await $0.serverScrubPreviews() } content: { settings, reload in
+    IOSAdminLoader {
+      try await $0.serverScrubPreviews()
+    } content: { settings, reload in
       IOSAdminScrubPreviewsForm(settings: settings, reload: reload)
     }
     .navigationTitle("Scrub Previews")
@@ -447,7 +480,9 @@ private struct IOSAdminScrubPreviewsForm: View {
           LabeledContent("Space", value: IOSAdminText.bytes(settings.storedBytes))
           LabeledContent(
             "Progress",
-            value: "\(settings.completedCount) of \(settings.totalScheduledCount) · \(settings.pendingCount) waiting")
+            value:
+              "\(settings.completedCount) of \(settings.totalScheduledCount) · \(settings.pendingCount) waiting"
+          )
           if settings.pausedForPlayback {
             Label("Paused while someone watches", systemImage: "pause.circle")
               .foregroundStyle(.secondary)
@@ -457,7 +492,11 @@ private struct IOSAdminScrubPreviewsForm: View {
               title: "Remove all scrub previews?",
               message: "They are made again if previews stay on.", action: "Remove"
             ) {
-              Task { await admin.perform("Removing previews…") { _ = try await $0.deleteServerScrubPreviews() } }
+              Task {
+                await admin.perform("Removing previews…") {
+                  _ = try await $0.deleteServerScrubPreviews()
+                }
+              }
             }
           }
           .disabled(settings.storedTitleCount == 0)
@@ -483,7 +522,9 @@ private struct IOSAdminScrubPreviewsForm: View {
     }
   }
 
-  private func binding<Value>(_ path: WritableKeyPath<IOSUpdateScrubPreviews, Value>) -> Binding<Value> {
+  private func binding<Value>(_ path: WritableKeyPath<IOSUpdateScrubPreviews, Value>) -> Binding<
+    Value
+  > {
     Binding(
       get: { current[keyPath: path] },
       set: { value in
@@ -523,7 +564,9 @@ private struct IOSAdminSegmentsForm: View {
     let settings = overview.settings
     Form {
       if !settings.available {
-        Section { Text("This server can’t examine intros and credits.").foregroundStyle(.secondary) }
+        Section {
+          Text("This server can’t examine intros and credits.").foregroundStyle(.secondary)
+        }
       } else {
         Section {
           Toggle(
@@ -533,7 +576,8 @@ private struct IOSAdminSegmentsForm: View {
               set: { enabled in
                 Task {
                   await admin.perform {
-                    _ = try await $0.saveServerSegments(enabled: enabled, usePictures: settings.usePictures)
+                    _ = try await $0.saveServerSegments(
+                      enabled: enabled, usePictures: settings.usePictures)
                   }
                 }
               }))
@@ -545,7 +589,8 @@ private struct IOSAdminSegmentsForm: View {
                 set: { value in
                   Task {
                     await admin.perform {
-                      _ = try await $0.saveServerSegments(enabled: settings.enabled, usePictures: value)
+                      _ = try await $0.saveServerSegments(
+                        enabled: settings.enabled, usePictures: value)
                     }
                   }
                 }))
@@ -557,23 +602,32 @@ private struct IOSAdminSegmentsForm: View {
         }
         Section("Progress") {
           ProgressView(value: settings.progress)
-          LabeledContent("Episodes Examined", value: "\(settings.analyzedCount + settings.noResultCount)")
+          LabeledContent(
+            "Episodes Examined", value: "\(settings.analyzedCount + settings.noResultCount)")
           LabeledContent("Waiting", value: "\(settings.pendingCount)")
           if let movies = settings.movieCount {
-            LabeledContent("Movies with Credits", value: "\(settings.moviesWithCredits ?? 0) of \(movies)")
+            LabeledContent(
+              "Movies with Credits", value: "\(settings.moviesWithCredits ?? 0) of \(movies)")
           }
           if let title = settings.currentTitle {
-            LabeledContent("Now", value: [title, settings.currentStep].compactMap { $0 }.joined(separator: " · "))
+            LabeledContent(
+              "Now",
+              value: [title, settings.currentStep].compactMap { $0 }.joined(separator: " · "))
           }
           if settings.pausedForPlayback {
-            Label("Paused while someone watches", systemImage: "pause.circle").foregroundStyle(.secondary)
+            Label("Paused while someone watches", systemImage: "pause.circle").foregroundStyle(
+              .secondary)
           }
           Button("Examine Everything Again") {
             Task { await admin.perform("Starting…") { _ = try await $0.reanalyzeSegments() } }
           }
           if settings.movieCount != nil {
             Button("Examine All Movies Again") {
-              Task { await admin.perform("Starting…") { _ = try await $0.reanalyzeSegments(movies: true) } }
+              Task {
+                await admin.perform("Starting…") {
+                  _ = try await $0.reanalyzeSegments(movies: true)
+                }
+              }
             }
           }
         }
@@ -591,7 +645,11 @@ private struct IOSAdminSegmentsForm: View {
                 Spacer()
                 Button("Again") {
                   let id = series.seriesId
-                  Task { await admin.perform("Starting…") { _ = try await $0.reanalyzeSegments(seriesId: id) } }
+                  Task {
+                    await admin.perform("Starting…") {
+                      _ = try await $0.reanalyzeSegments(seriesId: id)
+                    }
+                  }
                 }
                 .buttonStyle(.borderless)
               }
@@ -609,7 +667,9 @@ private struct IOSAdminSegmentsForm: View {
 /// Speech recognition: the model the server uses to write and sync subtitles.
 private struct IOSAdminSpeechView: View {
   var body: some View {
-    IOSAdminLoader { try await $0.serverSpeech() } content: { speech, reload in
+    IOSAdminLoader {
+      try await $0.serverSpeech()
+    } content: { speech, reload in
       IOSAdminSpeechForm(speech: speech, reload: reload)
     }
     .navigationTitle("Speech Recognition")
@@ -627,18 +687,24 @@ private struct IOSAdminSpeechForm: View {
     Form {
       if !speech.available {
         Section {
-          Text("This server has no speech recognition. On Linux, install whisper.cpp from your distribution.")
-            .foregroundStyle(.secondary)
+          Text(
+            "This server has no speech recognition. On Linux, install whisper.cpp from your distribution."
+          )
+          .foregroundStyle(.secondary)
         }
       } else {
         Section {
           if let model = speech.model {
             LabeledContent(
-              "Model", value: "\(speech.models.first { $0.name == model }?.label ?? model) · \(IOSAdminText.bytes(speech.modelBytes))")
+              "Model",
+              value:
+                "\(speech.models.first { $0.name == model }?.label ?? model) · \(IOSAdminText.bytes(speech.modelBytes))"
+            )
             Button("Remove Model…", role: .destructive) {
               confirmation = IOSAdminConfirmation(
                 title: "Remove the speech model?",
-                message: "Subtitles already written stay. Download a model again to write new ones.",
+                message:
+                  "Subtitles already written stay. Download a model again to write new ones.",
                 action: "Remove"
               ) {
                 Task { await admin.perform("Removing…") { _ = try await $0.removeSpeechModel() } }
@@ -654,7 +720,11 @@ private struct IOSAdminSpeechForm: View {
             ForEach(speech.models) { choice in
               Button {
                 let name = choice.name
-                Task { await admin.perform("Starting the download…") { _ = try await $0.downloadSpeechModel(name) } }
+                Task {
+                  await admin.perform("Starting the download…") {
+                    _ = try await $0.downloadSpeechModel(name)
+                  }
+                }
               } label: {
                 VStack(alignment: .leading, spacing: 2) {
                   Text("Download \(choice.label) · \(IOSAdminText.bytes(choice.bytes))")
@@ -698,11 +768,14 @@ private struct IOSAdminSpeechForm: View {
 /// Video conversion: the encoder and what converts now.
 private struct IOSAdminTranscodingView: View {
   var body: some View {
-    IOSAdminLoader { try await $0.serverTranscoding() } content: { status, reload in
+    IOSAdminLoader {
+      try await $0.serverTranscoding()
+    } content: { status, reload in
       Form {
         Section {
           LabeledContent("Encoder", value: status.encoderSummary)
-          LabeledContent("Converting Now", value: "\(status.runningConversions) of \(status.videoLimit)")
+          LabeledContent(
+            "Converting Now", value: "\(status.runningConversions) of \(status.videoLimit)")
           if let hint = status.hint { Text(hint).foregroundStyle(.orange) }
         } footer: {
           Text("Converted video stays in memory while it plays and is never stored.")
@@ -735,15 +808,21 @@ private struct IOSAdminJobsView: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
 
   var body: some View {
-    IOSAdminLoader { try await $0.serverJobs() } content: { jobs, reload in
+    IOSAdminLoader {
+      try await $0.serverJobs()
+    } content: { jobs, reload in
       Form {
         Section("Scans") {
           if jobs.scans.isEmpty { Text("No scans yet").foregroundStyle(.secondary) }
           ForEach(jobs.scans) { scan in
             VStack(alignment: .leading, spacing: 2) {
-              Text("\(scan.stateTitle) · \(IOSAdminFormat.relative(scan.completedAt ?? scan.startedAt ?? scan.createdAt))")
-              Text("\(scan.addedFiles) added · \(scan.updatedFiles) updated · \(scan.missingFiles) missing")
-                .font(.caption).foregroundStyle(.secondary)
+              Text(
+                "\(scan.stateTitle) · \(IOSAdminFormat.relative(scan.completedAt ?? scan.startedAt ?? scan.createdAt))"
+              )
+              Text(
+                "\(scan.addedFiles) added · \(scan.updatedFiles) updated · \(scan.missingFiles) missing"
+              )
+              .font(.caption).foregroundStyle(.secondary)
             }
           }
         }
@@ -784,7 +863,9 @@ private struct IOSAdminBackupsView: View {
   let encrypted: Bool
 
   var body: some View {
-    IOSAdminLoader { try await $0.serverBackups() } content: { backups, reload in
+    IOSAdminLoader {
+      try await $0.serverBackups()
+    } content: { backups, reload in
       IOSAdminBackupsForm(
         backups: backups, configuration: configuration, canRestore: canRestore,
         encrypted: encrypted, reload: reload)
@@ -827,8 +908,11 @@ private struct IOSAdminBackupsForm: View {
             Button("Check") {
               let name = backup.name
               Task {
-                if let valid = await admin.value("Checking the backup…", { try await $0.verifyBackup(name: name) }) {
-                  message = valid ? "The backup is complete and readable." : "The backup is damaged."
+                if let valid = await admin.value(
+                  "Checking the backup…", { try await $0.verifyBackup(name: name) })
+                {
+                  message =
+                    valid ? "The backup is complete and readable." : "The backup is damaged."
                 }
               }
             }
@@ -858,9 +942,12 @@ private struct IOSAdminBackupsForm: View {
             let destination = FileManager.default.temporaryDirectory
               .appendingPathComponent("Aurelia-Server.aureliabackup")
             Task {
-              if await admin.perform("Encrypting the backup…", {
-                try await $0.exportEncryptedBackup(passphrase: phrase, to: destination)
-              }) {
+              if await admin.perform(
+                "Encrypting the backup…",
+                {
+                  try await $0.exportEncryptedBackup(passphrase: phrase, to: destination)
+                })
+              {
                 exported = destination
                 passphrase = ""
                 repeated = ""
@@ -907,7 +994,9 @@ private struct IOSAdminBackupsForm: View {
           } header: {
             Text("Restore")
           } footer: {
-            Text("Enter the backup’s passphrase above. The backup is checked first; nothing changes until you restore.")
+            Text(
+              "Enter the backup’s passphrase above. The backup is checked first; nothing changes until you restore."
+            )
           }
         }
       }
@@ -924,9 +1013,13 @@ private struct IOSAdminBackupsForm: View {
       Task {
         let access = file.startAccessingSecurityScopedResource()
         defer { if access { file.stopAccessingSecurityScopedResource() } }
-        if let result = await admin.value("Sending and checking the backup…", {
-          try await $0.prepareRestore(from: file, passphrase: phrase, acceptDifferentIdentity: other)
-        }) {
+        if let result = await admin.value(
+          "Sending and checking the backup…",
+          {
+            try await $0.prepareRestore(
+              from: file, passphrase: phrase, acceptDifferentIdentity: other)
+          })
+        {
           prepared = result
           passphrase = ""
           repeated = ""
@@ -949,14 +1042,18 @@ private struct IOSAdminDiagnosticsView: View {
   @State private var report: URL?
 
   var body: some View {
-    IOSAdminLoader { try await $0.serverDiagnostics() } content: { events, reload in
+    IOSAdminLoader {
+      try await $0.serverDiagnostics()
+    } content: { events, reload in
       Form {
         Section {
           Button("Prepare Diagnostics Report") {
             let destination = FileManager.default.temporaryDirectory
               .appendingPathComponent("Aurelia-Diagnostics.json")
             Task {
-              if let data = await admin.value("Preparing the report…", { try await $0.serverDiagnosticsReport() }) {
+              if let data = await admin.value(
+                "Preparing the report…", { try await $0.serverDiagnosticsReport() })
+              {
                 try? data.write(to: destination, options: .atomic)
                 report = destination
               }
@@ -966,7 +1063,9 @@ private struct IOSAdminDiagnosticsView: View {
             ShareLink(item: report) { Label("Share Report…", systemImage: "square.and.arrow.up") }
           }
         } footer: {
-          Text("The report holds event codes, versions and counts: no passwords, tokens, file paths or titles.")
+          Text(
+            "The report holds event codes, versions and counts: no passwords, tokens, file paths or titles."
+          )
         }
         if let configuration {
           Section {
@@ -1002,7 +1101,9 @@ private struct IOSAdminPerformanceView: View {
   @State private var confirmation: IOSAdminConfirmation?
 
   var body: some View {
-    IOSAdminLoader { try await $0.serverPerformance() } content: { performance, reload in
+    IOSAdminLoader {
+      try await $0.serverPerformance()
+    } content: { performance, reload in
       Form {
         Section {
           LabeledContent("Requests", value: performance.requests.formatted())
@@ -1016,7 +1117,9 @@ private struct IOSAdminPerformanceView: View {
           )
         }
         Section("Slowest Endpoints") {
-          if performance.endpoints.isEmpty { Text("Nothing measured yet").foregroundStyle(.secondary) }
+          if performance.endpoints.isEmpty {
+            Text("Nothing measured yet").foregroundStyle(.secondary)
+          }
           ForEach(performance.endpoints.prefix(15)) { endpoint in
             VStack(alignment: .leading, spacing: 3) {
               Text("\(endpoint.method) \(IOSPerformanceText.route(endpoint.route))")
@@ -1039,8 +1142,10 @@ private struct IOSAdminPerformanceView: View {
                   "\(IOSPerformanceText.duration(query.milliseconds)) · \(query.kind)\(query.warmUp ? " · while starting" : "")"
                 )
                 .font(.subheadline.weight(.semibold))
-                Text("\(query.endpoint ?? "Background work") · \(IOSAdminFormat.relative(query.at))")
-                  .font(.caption).foregroundStyle(.secondary)
+                Text(
+                  "\(query.endpoint ?? "Background work") · \(IOSAdminFormat.relative(query.at))"
+                )
+                .font(.caption).foregroundStyle(.secondary)
                 Text(query.statement).font(.caption2.monospaced()).textSelection(.enabled)
                   .lineLimit(6)
               }
@@ -1073,7 +1178,9 @@ private struct IOSAdminPerformanceView: View {
 /// The file watch: the server reads every file in the background and finds damaged ones.
 struct IOSAdminFileWatchView: View {
   var body: some View {
-    IOSAdminLoader { try await $0.serverFileChecks() } content: { settings, reload in
+    IOSAdminLoader {
+      try await $0.serverFileChecks()
+    } content: { settings, reload in
       IOSAdminFileWatchForm(settings: settings, reload: reload)
     }
     .navigationTitle("File Watch")
@@ -1091,7 +1198,8 @@ private struct IOSAdminFileWatchForm: View {
       Section {
         Toggle(
           "Watch Files",
-          isOn: Binding(get: { settings.enabled }, set: { enabled in save(.init(enabled: enabled)) }))
+          isOn: Binding(
+            get: { settings.enabled }, set: { enabled in save(.init(enabled: enabled)) }))
       } footer: {
         Text(
           "The server reads every file in the background, only while nobody watches, and tells you in Library Health when one is damaged, can’t be read or changed by itself. Files are only read, never changed. The first round reads the whole library once."
@@ -1104,7 +1212,8 @@ private struct IOSAdminFileWatchForm: View {
             get: { IOSFileCheckDepth(rawValue: settings.depth) ?? .container },
             set: { depth in save(.init(enabled: settings.enabled, depth: depth.rawValue)) })
         ) {
-          ForEach(IOSFileCheckDepth.allCases.filter { settings.canInspect || $0 == .read }) { depth in
+          ForEach(IOSFileCheckDepth.allCases.filter { settings.canInspect || $0 == .read }) {
+            depth in
             Text(depth.title).tag(depth)
           }
         }
@@ -1114,12 +1223,15 @@ private struct IOSAdminFileWatchForm: View {
             get: { settings.recheckDays },
             set: { days in save(.init(enabled: settings.enabled, recheckDays: days)) })
         ) {
-          ForEach(IOSFileWatchText.recheckChoices, id: \.days) { choice in Text(choice.title).tag(choice.days) }
+          ForEach(IOSFileWatchText.recheckChoices, id: \.days) { choice in
+            Text(choice.title).tag(choice.days)
+          }
         }
       } footer: {
         Text(
           (IOSFileCheckDepth(rawValue: settings.depth)?.detail ?? "")
-            + (settings.canInspect ? "" : " This server has no FFmpeg, so it can only read every byte.")
+            + (settings.canInspect
+              ? "" : " This server has no FFmpeg, so it can only read every byte.")
             + " Read Again compares every file with the first time, to find bit rot.")
       }
       Section("Progress") {
@@ -1143,7 +1255,9 @@ private struct IOSAdminFileWatchForm: View {
 
   private func save(_ request: IOSUpdateFileCheckSettings) {
     Task {
-      if await admin.perform(nil, { _ = try await $0.saveServerFileChecks(request) }) { await reload() }
+      if await admin.perform(nil, { _ = try await $0.saveServerFileChecks(request) }) {
+        await reload()
+      }
     }
   }
 }

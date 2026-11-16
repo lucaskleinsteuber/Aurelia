@@ -11,7 +11,9 @@ struct ScreenTimeSection: View {
   @State private var granting = false
 
   var body: some View {
-    AureliaSettingsSection("Screen Time", symbol: "hourglass", description: "Bedtimes and daily limits for this profile.") {
+    AureliaSettingsSection(
+      "Screen Time", symbol: "hourglass", description: "Bedtimes and daily limits for this profile."
+    ) {
       VStack(alignment: .leading, spacing: 12) {
         Toggle("Screen Time", isOn: $rules.enabled)
           .accessibilityIdentifier("profile-editor-screen-time")

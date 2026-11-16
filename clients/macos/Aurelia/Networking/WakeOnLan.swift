@@ -41,7 +41,9 @@ enum WakeOnLan {
       if hosting == "macApp" || hosting == "linuxApp" {
         // A desktop or laptop is started by its owner; old addresses must not wake it.
         var stored = defaults.dictionary(forKey: defaultsKey) as? [String: [String]] ?? [:]
-        if stored.removeValue(forKey: info.serverId.uuidString) != nil { defaults.set(stored, forKey: defaultsKey) }
+        if stored.removeValue(forKey: info.serverId.uuidString) != nil {
+          defaults.set(stored, forKey: defaultsKey)
+        }
         return
       }
     }

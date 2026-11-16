@@ -226,16 +226,21 @@ private struct IceCreamAd: View {
           .scaleEffect(motion ? 0.6 + 0.4 * sin(time * 4 + Double(index)) : 0.8)
           .offset(
             x: cos(angle * .pi / 180) * 22 * unit,
-            y: -60 * unit + sin(angle * .pi / 180) * 16 * unit)
+            y: -60 * unit + sin(angle * .pi / 180) * 16 * unit
+          )
           .opacity(shown(t, 5.2, 20))
       }
       CinemaCone()
         .fill(
           LinearGradient(
-            colors: [Color(red: 0.88, green: 0.64, blue: 0.36), Color(red: 0.72, green: 0.47, blue: 0.24)],
+            colors: [
+              Color(red: 0.88, green: 0.64, blue: 0.36), Color(red: 0.72, green: 0.47, blue: 0.24),
+            ],
             startPoint: .leading, endPoint: .trailing)
         )
-        .overlay(CinemaWaffle(spacing: 4.5 * unit).stroke(.black.opacity(0.14), lineWidth: 0.5 * unit))
+        .overlay(
+          CinemaWaffle(spacing: 4.5 * unit).stroke(.black.opacity(0.14), lineWidth: 0.5 * unit)
+        )
         .clipShape(CinemaCone())
         .frame(width: 25 * unit, height: 36 * unit)
         .offset(y: motion ? (1 - ease(t, 0.3, 0.9)) * 70 * unit : 0)
@@ -251,12 +256,16 @@ private struct IceCreamAd: View {
           .frame(width: 27 * unit, height: 27 * unit)
           .offset(
             y: -(30 * unit + CGFloat(index) * 16 * unit)
-              - (motion ? (1 - bounce(t, at)) * 90 * unit : 0))
+              - (motion ? (1 - bounce(t, at)) * 90 * unit : 0)
+          )
           .opacity(motion ? (t >= at ? 1 : 0) : ease(t, at, 0.3))
       }
       Circle()
         .fill(Color(red: 0.86, green: 0.05, blue: 0.14))
-        .overlay(Circle().fill(.white.opacity(0.5)).frame(width: 2 * unit).offset(x: -1.5 * unit, y: -1.5 * unit))
+        .overlay(
+          Circle().fill(.white.opacity(0.5)).frame(width: 2 * unit).offset(
+            x: -1.5 * unit, y: -1.5 * unit)
+        )
         .frame(width: 8 * unit, height: 8 * unit)
         .offset(y: -82 * unit - (motion ? (1 - bounce(t, 5.0, 0.6)) * 60 * unit : 0))
         .opacity(motion ? (t >= 5 ? 1 : 0) : ease(t, 5, 0.3))
@@ -323,7 +332,9 @@ private struct PopcornAd: View {
   var body: some View {
     ZStack {
       RadialGradient(
-        colors: [Color(red: 0.62, green: 0.05, blue: 0.10), Color(red: 0.22, green: 0, blue: 0.04)],
+        colors: [
+          Color(red: 0.62, green: 0.05, blue: 0.10), Color(red: 0.22, green: 0, blue: 0.04),
+        ],
         center: .center, startRadius: 0, endRadius: 120 * unit)
       CinemaMarquee(time: motion ? time : 0, bulb: 1.6 * unit, color: gold)
       HStack(alignment: .center, spacing: 12 * unit) {
@@ -363,7 +374,8 @@ private struct PopcornAd: View {
       ZStack {
         HStack(spacing: 0) {
           ForEach(0..<7, id: \.self) { index in
-            Rectangle().fill(index.isMultiple(of: 2) ? Color(red: 0.86, green: 0.07, blue: 0.13) : .white)
+            Rectangle().fill(
+              index.isMultiple(of: 2) ? Color(red: 0.86, green: 0.07, blue: 0.13) : .white)
           }
         }
         Text("POPCORN")
@@ -470,7 +482,9 @@ private struct PhonesAd: View {
     RoundedRectangle(cornerRadius: 4.5 * unit)
       .fill(
         LinearGradient(
-          colors: [Color(red: 0.3, green: 0.45, blue: 1), Color(red: 0.55, green: 0.25, blue: 0.9)],
+          colors: [
+            Color(red: 0.3, green: 0.45, blue: 1), Color(red: 0.55, green: 0.25, blue: 0.9),
+          ],
           startPoint: .top, endPoint: .bottom)
       )
       .overlay(RoundedRectangle(cornerRadius: 4.5 * unit).fill(.black.opacity(off)))
@@ -653,7 +667,8 @@ struct AureliaLetter: Shape {
   /// The light echo: the same A, 34 and 30 icon units to the lower right.
   let echo: Bool
 
-  private static let outline = "M329.3 792.0 Q296.8 792.0 278.0 774.3 Q259.2 756.7 259.2 726.0 Q259.2 706.7 268.8 680.8 L402.9 312.8 Q417.9 271.2 443.8 251.6 Q469.6 232.0 510.0 232.0 Q552.8 232.0 579.0 251.1 Q605.2 270.2 620.7 312.7 L755.8 680.8 Q764.8 705.6 764.8 725.7 Q764.8 754.6 745.3 773.3 Q725.7 792.0 695.8 792.0 Q665.8 792.0 648.9 777.3 Q631.9 762.6 623.0 729.2 L604.5 669.2 L418.6 669.2 L400.1 727.2 Q390.3 761.7 373.7 776.9 Q357.1 792.0 329.3 792.0 Z M446.2 564.8 L574.3 564.8 L510.7 355.6 L507.9 355.6 Z"
+  private static let outline =
+    "M329.3 792.0 Q296.8 792.0 278.0 774.3 Q259.2 756.7 259.2 726.0 Q259.2 706.7 268.8 680.8 L402.9 312.8 Q417.9 271.2 443.8 251.6 Q469.6 232.0 510.0 232.0 Q552.8 232.0 579.0 251.1 Q605.2 270.2 620.7 312.7 L755.8 680.8 Q764.8 705.6 764.8 725.7 Q764.8 754.6 745.3 773.3 Q725.7 792.0 695.8 792.0 Q665.8 792.0 648.9 777.3 Q631.9 762.6 623.0 729.2 L604.5 669.2 L418.6 669.2 L400.1 727.2 Q390.3 761.7 373.7 776.9 Q357.1 792.0 329.3 792.0 Z M446.2 564.8 L574.3 564.8 L510.7 355.6 L507.9 355.6 Z"
   /// The letter and its echo in icon units, so together they fill the frame.
   private static let bounds = CGRect(x: 259.2, y: 232, width: 539.6, height: 590)
 
@@ -662,7 +677,8 @@ struct AureliaLetter: Shape {
     let offset = CGPoint(
       x: rect.midX - Self.bounds.midX * scale, y: rect.midY - Self.bounds.midY * scale)
     func point(_ x: Double, _ y: Double) -> CGPoint {
-      CGPoint(x: offset.x + (x + (echo ? 34 : 0)) * scale, y: offset.y + (y + (echo ? 30 : 0)) * scale)
+      CGPoint(
+        x: offset.x + (x + (echo ? 34 : 0)) * scale, y: offset.y + (y + (echo ? 30 : 0)) * scale)
     }
     var path = Path()
     var numbers: [Double] = []
@@ -753,8 +769,9 @@ private struct CinemaCurtain: View {
       ZStack {
         RadialGradient(
           colors: [CinemaBrand.echoBottom.opacity(0.45), .clear], center: .center, startRadius: 0,
-          endRadius: height * 0.12)
-          .frame(width: height * 0.3, height: height * 0.3)
+          endRadius: height * 0.12
+        )
+        .frame(width: height * 0.3, height: height * 0.3)
         AureliaMark().frame(width: height * 0.085, height: height * 0.085)
       }
       .frame(height: height * 0.1)
@@ -937,10 +954,13 @@ private enum CinemaStage {
       let center = CGPoint(x: size.width * side, y: size.height * 0.42)
       let radius = size.height * 0.34
       light.fill(
-        Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)),
+        Path(
+          ellipseIn: CGRect(
+            x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)),
         with: .radialGradient(
           Gradient(colors: [
-            Color(red: 1, green: 0.7, blue: 0.35).opacity(0.38 * (1 - timing.lightsDown(time))), .clear,
+            Color(red: 1, green: 0.7, blue: 0.35).opacity(0.38 * (1 - timing.lightsDown(time))),
+            .clear,
           ]), center: center, startRadius: 0, endRadius: radius))
     }
     let spot = timing.spot(time)
@@ -948,7 +968,9 @@ private enum CinemaStage {
     let center = CGPoint(x: size.width / 2, y: size.height * 0.48)
     let radius = size.height * 0.44
     light.fill(
-      Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)),
+      Path(
+        ellipseIn: CGRect(
+          x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)),
       with: .radialGradient(
         Gradient(stops: [
           .init(color: Color(red: 1, green: 0.93, blue: 0.8).opacity(0.3 * spot), location: 0),
@@ -969,7 +991,8 @@ private enum CinemaStage {
       let glow = spot * (1 - distance) * (0.55 + 0.45 * sin(time * 1.7 + seed * 1.3))
       let dot = 0.8 + c * 1.8
       light.fill(
-        Path(ellipseIn: CGRect(x: point.x - dot / 2, y: point.y - dot / 2, width: dot, height: dot)),
+        Path(
+          ellipseIn: CGRect(x: point.x - dot / 2, y: point.y - dot / 2, width: dot, height: dot)),
         with: .color(Color(red: 1, green: 0.92, blue: 0.78).opacity(0.7 * glow)))
     }
   }
@@ -1032,7 +1055,8 @@ private enum CinemaStage {
       cord.move(to: CGPoint(x: x, y: depth * 0.45))
       cord.addLine(to: CGPoint(x: x, y: depth * 0.8))
       context.stroke(cord, with: .color(deepGold), lineWidth: max(1, trim * 0.5))
-      let tassel = CGRect(x: x - depth * 0.06, y: depth * 0.78, width: depth * 0.12, height: depth * 0.3)
+      let tassel = CGRect(
+        x: x - depth * 0.06, y: depth * 0.78, width: depth * 0.12, height: depth * 0.3)
       context.fill(
         Path(roundedRect: tassel, cornerRadius: depth * 0.05),
         with: .linearGradient(
@@ -1126,9 +1150,12 @@ private struct CinemaKernel: Shape {
     var path = Path()
     let w = rect.width
     let h = rect.height
-    path.addEllipse(in: CGRect(x: rect.minX, y: rect.minY + h * 0.3, width: w * 0.55, height: h * 0.6))
-    path.addEllipse(in: CGRect(x: rect.minX + w * 0.4, y: rect.minY + h * 0.25, width: w * 0.6, height: h * 0.65))
-    path.addEllipse(in: CGRect(x: rect.minX + w * 0.2, y: rect.minY, width: w * 0.6, height: h * 0.6))
+    path.addEllipse(
+      in: CGRect(x: rect.minX, y: rect.minY + h * 0.3, width: w * 0.55, height: h * 0.6))
+    path.addEllipse(
+      in: CGRect(x: rect.minX + w * 0.4, y: rect.minY + h * 0.25, width: w * 0.6, height: h * 0.65))
+    path.addEllipse(
+      in: CGRect(x: rect.minX + w * 0.2, y: rect.minY, width: w * 0.6, height: h * 0.6))
     return path
   }
 }

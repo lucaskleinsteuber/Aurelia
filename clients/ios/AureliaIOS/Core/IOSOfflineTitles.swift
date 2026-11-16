@@ -323,8 +323,10 @@ struct IOSOfflineSession: Equatable, Sendable {
       user: IOSUser(
         id: profileID, username: name, role: "viewer", displayName: name,
         pictureKey: pictureKey, pictureRevision: pictureRevision),
-      sessionId: profileID, token: "offline-" + profileID.uuidString.replacingOccurrences(
-        of: "-", with: ""),
+      sessionId: profileID,
+      token: "offline-"
+        + profileID.uuidString.replacingOccurrences(
+          of: "-", with: ""),
       expiresAt: "2099-01-01T00:00:00Z")
   }
 }

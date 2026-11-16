@@ -301,7 +301,9 @@ struct ServerManagementView: View {
       }
       // Power needs only to know where the server runs; the rest of the server page is not loaded.
       if part == .power {
-        let abilities = try await model.currentAdministration { try await client.serverCapabilities() }
+        let abilities = try await model.currentAdministration {
+          try await client.serverCapabilities()
+        }
         guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
         capabilities = abilities
         error = nil
@@ -357,7 +359,11 @@ private struct ServerSecurityEditor: View {
     _draft = State(initialValue: ServerSettingsDraft(configuration.stored))
   }
   var body: some View {
-    AureliaSettingsSection("Sign-In & Streaming Limits", symbol: "gauge.with.dots.needle.50percent", description: "How many attempts and streams the server allows, so one device can't slow it down for everyone.") {
+    AureliaSettingsSection(
+      "Sign-In & Streaming Limits", symbol: "gauge.with.dots.needle.50percent",
+      description:
+        "How many attempts and streams the server allows, so one device can't slow it down for everyone."
+    ) {
       VStack(alignment: .leading, spacing: 12) {
         Stepper(
           "Keep new devices signed in for \(draft.value.deviceSessionDays) days",
@@ -414,7 +420,10 @@ private struct ServerLinuxNetworkBox: View {
   let configuration: ServerConfigurationResponse
 
   var body: some View {
-    AureliaSettingsSection("Network", symbol: "network", description: "Which networks may reach the server and how it shows up in your home network.") {
+    AureliaSettingsSection(
+      "Network", symbol: "network",
+      description: "Which networks may reach the server and how it shows up in your home network."
+    ) {
       VStack(alignment: .leading, spacing: 10) {
         LabeledContent(
           "Home network access", value: configuration.active.lanAccessEnabled ? "On" : "Off")

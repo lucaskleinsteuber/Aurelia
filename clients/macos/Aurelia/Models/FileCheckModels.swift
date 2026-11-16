@@ -46,7 +46,8 @@ enum FileCheckDepth: String, CaseIterable, Identifiable, Sendable {
 
   var detail: String {
     switch self {
-    case .read: "Finds places the drive can't read and, later, files that changed by themselves. Fast."
+    case .read:
+      "Finds places the drive can't read and, later, files that changed by themselves. Fast."
     case .container: "Also finds files that are cut off or have damaged packets. Recommended."
     case .decode:
       "Also finds damage inside pictures and sound. Takes about as long as playing them on a small computer."
@@ -104,10 +105,14 @@ enum FileWatchText {
     let problems =
       settings.problemCount > 0
       ? " · \(settings.problemCount) \(settings.problemCount == 1 ? "problem" : "problems")" : ""
-    if settings.pendingCount == 0 { return "All \(total) \(total == 1 ? "file" : "files") examined\(problems)" }
+    if settings.pendingCount == 0 {
+      return "All \(total) \(total == 1 ? "file" : "files") examined\(problems)"
+    }
     var parts = ["\(max(0, total - settings.pendingCount)) of \(total) files\(problems)"]
     if settings.pausedForPlayback { parts.append("paused while someone watches") }
-    if let seconds = settings.estimatedSecondsRemaining, let left = remaining(seconds) { parts.append(left) }
+    if let seconds = settings.estimatedSecondsRemaining, let left = remaining(seconds) {
+      parts.append(left)
+    }
     return parts.joined(separator: " · ")
   }
 
@@ -156,7 +161,8 @@ enum FileWatchText {
     let minutes = (total % 3600) / 60
     let rest = total % 60
     return hours > 0
-      ? String(format: "%d:%02d:%02d", hours, minutes, rest) : String(format: "%d:%02d", minutes, rest)
+      ? String(format: "%d:%02d:%02d", hours, minutes, rest)
+      : String(format: "%d:%02d", minutes, rest)
   }
 
   /// "At about 1:02:10 of 1:45:00 · 3 errors · Movies".

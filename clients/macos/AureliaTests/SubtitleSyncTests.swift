@@ -46,7 +46,8 @@ struct SubtitleSyncTests {
   func offsetsAndFrameRatesAreFound(truth: SubtitleShift) {
     var dice = Dice(state: 7)
     let speech = film(&dice)
-    let result = SubtitleSync.find(speech: speech, cues: subtitles(&dice, for: speech, truth: truth))
+    let result = SubtitleSync.find(
+      speech: speech, cues: subtitles(&dice, for: speech, truth: truth))
     #expect(result.verdict == .shifted)
     #expect(result.timing.segments.count == 1)
     #expect(abs(result.timing.segments[0].offset - truth.offset) < 0.25)
@@ -57,7 +58,8 @@ struct SubtitleSyncTests {
   @Test func fittingSubtitlesStayAsTheyAre() {
     var dice = Dice(state: 11)
     let speech = film(&dice)
-    let result = SubtitleSync.find(speech: speech, cues: subtitles(&dice, for: speech, truth: .none))
+    let result = SubtitleSync.find(
+      speech: speech, cues: subtitles(&dice, for: speech, truth: .none))
     #expect(result.verdict == .alreadyInSync)
     #expect(result.timing == SubtitleTiming(.none))
   }
@@ -67,7 +69,8 @@ struct SubtitleSyncTests {
     let speech = film(&dice)
     for _ in 0..<8 {
       let other = film(&dice)
-      let result = SubtitleSync.find(speech: speech, cues: subtitles(&dice, for: other, truth: .none))
+      let result = SubtitleSync.find(
+        speech: speech, cues: subtitles(&dice, for: other, truth: .none))
       #expect(result.verdict == .noMatch)
       #expect(result.timing == SubtitleTiming(.none))
     }
@@ -93,14 +96,16 @@ struct SubtitleSyncTests {
     let speech = film(&dice)
     let heard = speech.filter { _ in dice.next(0...1) > 0.33 }
     let result = SubtitleSync.find(
-      speech: heard, cues: subtitles(&dice, for: speech, truth: SubtitleShift(offset: 7.5, scale: 1)))
+      speech: heard,
+      cues: subtitles(&dice, for: speech, truth: SubtitleShift(offset: 7.5, scale: 1)))
     #expect(result.verdict == .shifted)
     #expect(abs(result.timing.segments[0].offset - 7.5) < 0.25)
   }
 
   @Test func movedPartsNeverOverlap() {
     let timing = SubtitleTiming(
-      scale: 1, segments: [SubtitleSegment(from: 0, offset: 0), SubtitleSegment(from: 10, offset: -3)])
+      scale: 1,
+      segments: [SubtitleSegment(from: 0, offset: 0), SubtitleSegment(from: 10, offset: -3)])
     let moved = timing.apply([
       SubtitleCue(start: 8, end: 9.5, lines: ["A"]), SubtitleCue(start: 10, end: 12, lines: ["B"]),
       SubtitleCue(start: 12.5, end: 14, lines: ["C"]),
@@ -135,10 +140,11 @@ struct SubtitleSyncTests {
       Falsch herum
       """
     let cues = SubtitleText.cues(webVTT: text)
-    #expect(cues == [
-      SubtitleCue(start: 1.5, end: 3.25, lines: ["Hallo & <i>willkommen</i>", "zusammen"]),
-      SubtitleCue(start: 125, end: 127, lines: ["Zwei"]),
-    ])
+    #expect(
+      cues == [
+        SubtitleCue(start: 1.5, end: 3.25, lines: ["Hallo & <i>willkommen</i>", "zusammen"]),
+        SubtitleCue(start: 125, end: 127, lines: ["Zwei"]),
+      ])
     #expect(SubtitleText.seconds("01:02:03,450") == 3723.45)
   }
 
@@ -148,11 +154,13 @@ struct SubtitleSyncTests {
       fitBefore: 0.31, fitAfter: 0.88, poorParts: 0)
     #expect(
       SpeechSubtitleJobs.summary(later)
-        == "Moved 2.4 s later, adjusted for another frame rate. Fits 88 % of the speech (was 31 %).")
+        == "Moved 2.4 s later, adjusted for another frame rate. Fits 88 % of the speech (was 31 %)."
+    )
     let parts = SubtitleSyncResult(
       verdict: .shifted,
       timing: SubtitleTiming(
-        scale: 1, segments: [SubtitleSegment(from: 0, offset: 0), SubtitleSegment(from: 900, offset: 30)]),
+        scale: 1,
+        segments: [SubtitleSegment(from: 0, offset: 0), SubtitleSegment(from: 900, offset: 30)]),
       fitBefore: 0.6, fitAfter: 0.88, poorParts: 0)
     #expect(SpeechSubtitleJobs.summary(parts).hasPrefix("Moved in 2 parts, as for another cut"))
   }

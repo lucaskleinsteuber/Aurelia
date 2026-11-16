@@ -53,8 +53,12 @@ struct MovieNightHomeStrip: View {
         VStack(alignment: .leading, spacing: 2) {
           Text(open.map { "\($0.hostName)'s Movie Night is on" } ?? "Can't decide what to watch?")
             .font(.headline)
-          Text(open == nil ? "Start a Movie Night and let everyone swipe on their phone." : "Join and start swiping.")
-            .font(.callout).foregroundStyle(.secondary)
+          Text(
+            open == nil
+              ? "Start a Movie Night and let everyone swipe on their phone."
+              : "Join and start swiping."
+          )
+          .font(.callout).foregroundStyle(.secondary)
         }
         Spacer()
         Image(systemName: "chevron.right").foregroundStyle(.secondary)
@@ -62,7 +66,8 @@ struct MovieNightHomeStrip: View {
       .padding(14)
       .background(
         AureliaDesign.surface,
-        in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
+        in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
+      )
       .contentShape(RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
     }
     .buttonStyle(AureliaPressableButtonStyle())
@@ -111,7 +116,9 @@ struct MovieNightView: View {
             .transition(.move(edge: .top).combined(with: .opacity))
           }
           content
-            .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.97)), removal: .opacity))
+            .transition(
+              .asymmetric(
+                insertion: .opacity.combined(with: .scale(scale: 0.97)), removal: .opacity))
         }
         .aureliaAnimation(AureliaMotion.page, value: session.screen)
         .frame(maxWidth: session.screen == .lobby ? 1040 : 760, alignment: .leading)
@@ -184,8 +191,11 @@ struct MovieNightView: View {
           VStack(alignment: .leading, spacing: 2) {
             Text(member.isYou ? "\(member.name) (you)" : member.name).fontWeight(.semibold)
             Text(
-              [member.deviceName, member.isHost ? "started it" : nil, member.isVoting ? nil : "only watches"]
-                .compactMap { $0 }.joined(separator: " · ")
+              [
+                member.deviceName, member.isHost ? "started it" : nil,
+                member.isVoting ? nil : "only watches",
+              ]
+              .compactMap { $0 }.joined(separator: " · ")
             )
             .font(.callout).foregroundStyle(.secondary)
           }
@@ -198,7 +208,8 @@ struct MovieNightView: View {
         .padding(.horizontal, 12)
         .background(
           .white.opacity(0.05),
-          in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
+          in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
+        )
         .transition(.move(edge: .leading).combined(with: .opacity))
       }
     }
@@ -242,10 +253,15 @@ struct MovieNightView: View {
       HStack(alignment: .firstTextBaseline) {
         Text("Tonight's Program").font(.title3.weight(.bold))
         Spacer(minLength: 12)
-        Text(hosting ? "You choose what gets dealt." : "\(state.host?.name ?? "The host") chooses what gets dealt.")
-          .font(.callout).foregroundStyle(.secondary)
+        Text(
+          hosting
+            ? "You choose what gets dealt."
+            : "\(state.host?.name ?? "The host") chooses what gets dealt."
+        )
+        .font(.callout).foregroundStyle(.secondary)
       }
-      programRow("What", MovieNightProgram.kindChoices, selected: current.kinds, enabled: hosting) { value in
+      programRow("What", MovieNightProgram.kindChoices, selected: current.kinds, enabled: hosting) {
+        value in
         { $0.kinds = value }
       }
       if !state.genreOptions.isEmpty {
@@ -255,15 +271,20 @@ struct MovieNightView: View {
       }
       // Servers before 2.7 don't know eras and lengths.
       if state.era != nil {
-        programRow("When", MovieNightProgram.eraChoices, selected: current.era, enabled: hosting) { value in
+        programRow("When", MovieNightProgram.eraChoices, selected: current.era, enabled: hosting) {
+          value in
           { $0.era = value }
         }
-        programRow("Length", MovieNightProgram.lengthChoices, selected: current.length, enabled: hosting) { value in
+        programRow(
+          "Length", MovieNightProgram.lengthChoices, selected: current.length, enabled: hosting
+        ) { value in
           { $0.length = value }
         }
       }
-      DashedRule().stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 4])).foregroundStyle(.white.opacity(0.18))
-        .frame(height: 1)
+      DashedRule().stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 4])).foregroundStyle(
+        .white.opacity(0.18)
+      )
+      .frame(height: 1)
       HStack(spacing: 14) {
         Text(current.summary).fontWeight(.semibold).foregroundStyle(MovieNightPalette.yes)
         Spacer(minLength: 12)
@@ -284,13 +305,16 @@ struct MovieNightView: View {
     .padding(22)
     .background(
       LinearGradient(
-        colors: [Color(red: 0.17, green: 0.19, blue: 0.21), Color(red: 0.14, green: 0.15, blue: 0.17)],
+        colors: [
+          Color(red: 0.17, green: 0.19, blue: 0.21), Color(red: 0.14, green: 0.15, blue: 0.17),
+        ],
         startPoint: .topLeading, endPoint: .bottomTrailing),
       in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
     )
     .overlay(
       RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
-        .strokeBorder(.white.opacity(0.08)))
+        .strokeBorder(.white.opacity(0.08))
+    )
     .shadow(color: .black.opacity(0.35), radius: 24, y: 14)
   }
 
@@ -299,7 +323,8 @@ struct MovieNightView: View {
     change: @escaping (String) -> (inout MovieNightProgram) -> Void
   ) -> some View {
     HStack(alignment: .firstTextBaseline, spacing: 12) {
-      Text(label).font(.callout.weight(.semibold)).foregroundStyle(.secondary).frame(width: 60, alignment: .leading)
+      Text(label).font(.callout.weight(.semibold)).foregroundStyle(.secondary).frame(
+        width: 60, alignment: .leading)
       FlowLayout(spacing: 8) {
         ForEach(choices, id: \.0) { value, title in
           FilterChip(title: title, selected: selected == value) {
@@ -315,16 +340,20 @@ struct MovieNightView: View {
 
   private func crowd(_ state: MovieNightState) -> some View {
     VStack(alignment: .leading, spacing: 12) {
-      Text(state.voters.count == 1 ? "1 swiping" : "\(state.voters.count) swiping").font(.title3.weight(.bold))
+      Text(state.voters.count == 1 ? "1 swiping" : "\(state.voters.count) swiping").font(
+        .title3.weight(.bold))
       people(state)
-      Text("Anyone at home joins from Aurelia on a phone, tablet, computer or in a browser: Movie Night › Join.")
-        .font(.callout).foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
+      Text(
+        "Anyone at home joins from Aurelia on a phone, tablet, computer or in a browser: Movie Night › Join."
+      )
+      .font(.callout).foregroundStyle(.secondary)
+      .fixedSize(horizontal: false, vertical: true)
     }
     .padding(18)
     .background(
       .white.opacity(0.04),
-      in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous))
+      in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
+    )
     .overlay(
       RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
         .strokeBorder(.white.opacity(0.08)))
@@ -400,16 +429,18 @@ private struct MovieNightStack: View {
     VStack(spacing: 24) {
       ZStack {
         ForEach(Array(cards.enumerated().reversed()), id: \.element.id) { index, card in
-          MovieNightCardView(card: card, like: index == 0 ? strength(1) : 0, nope: index == 0 ? strength(-1) : 0)
-            .frame(width: 340, height: 510)
-            .scaleEffect(index == 0 ? 1 : 1 - CGFloat(index) * 0.06)
-            .offset(y: index == 0 ? 0 : CGFloat(index) * 24)
-            .brightness(index == 0 ? 0 : -0.25 * Double(index))
-            .offset(index == 0 ? offset : .zero)
-            .rotationEffect(.degrees(index == 0 ? Double(offset.width / 16) : 0))
-            .gesture(drag(card), isEnabled: index == 0)
-            .allowsHitTesting(index == 0)
-            .accessibilityHidden(index != 0)
+          MovieNightCardView(
+            card: card, like: index == 0 ? strength(1) : 0, nope: index == 0 ? strength(-1) : 0
+          )
+          .frame(width: 340, height: 510)
+          .scaleEffect(index == 0 ? 1 : 1 - CGFloat(index) * 0.06)
+          .offset(y: index == 0 ? 0 : CGFloat(index) * 24)
+          .brightness(index == 0 ? 0 : -0.25 * Double(index))
+          .offset(index == 0 ? offset : .zero)
+          .rotationEffect(.degrees(index == 0 ? Double(offset.width / 16) : 0))
+          .gesture(drag(card), isEnabled: index == 0)
+          .allowsHitTesting(index == 0)
+          .accessibilityHidden(index != 0)
         }
       }
       .frame(maxWidth: .infinity)
@@ -417,7 +448,8 @@ private struct MovieNightStack: View {
       HStack(spacing: 28) {
         button(.nope, card: cards.first)
         VStack(spacing: 2) {
-          Text("\(total - session.remaining.count + 1) of \(total)").font(.headline.monospacedDigit())
+          Text("\(total - session.remaining.count + 1) of \(total)").font(
+            .headline.monospacedDigit())
           let others = session.state?.voters.filter { !$0.isYou } ?? []
           if !others.isEmpty {
             Text(others.map { "\($0.name) \($0.swiped)" }.joined(separator: " · "))
@@ -463,7 +495,9 @@ private struct MovieNightStack: View {
         {
           fly(choice, card: card)
         } else {
-          withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.7)) { offset = .zero }
+          withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.7)) {
+            offset = .zero
+          }
         }
       }
   }
@@ -523,10 +557,16 @@ private struct MovieNightCardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
         .padding(.top, 60)
-        .background(LinearGradient(colors: [.clear, .black.opacity(0.9)], startPoint: .top, endPoint: .center))
+        .background(
+          LinearGradient(
+            colors: [.clear, .black.opacity(0.9)], startPoint: .top, endPoint: .center))
       }
-      .overlay(alignment: .topLeading) { stamp("Yes!", color: MovieNightPalette.yes, angle: -14).opacity(like) }
-      .overlay(alignment: .topTrailing) { stamp("Nope", color: MovieNightPalette.nope, angle: 14).opacity(nope) }
+      .overlay(alignment: .topLeading) {
+        stamp("Yes!", color: MovieNightPalette.yes, angle: -14).opacity(like)
+      }
+      .overlay(alignment: .topTrailing) {
+        stamp("Nope", color: MovieNightPalette.nope, angle: 14).opacity(nope)
+      }
       .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous))
       .shadow(color: .black.opacity(0.45), radius: 20, y: 14)
       .accessibilityElement(children: .combine)
@@ -539,7 +579,8 @@ private struct MovieNightCardView: View {
       .padding(.vertical, 2)
       .overlay(
         RoundedRectangle(cornerRadius: AureliaDesign.smallRadius)
-          .stroke(color, lineWidth: 4))
+          .stroke(color, lineWidth: 4)
+      )
       .foregroundStyle(color)
       .rotationEffect(.degrees(angle))
       .padding(24)
@@ -562,13 +603,17 @@ private struct DashedRule: Shape {
 private struct MovieNightConfetti: View {
   @Environment(\.aureliaReduceMotion) private var reduceMotion
   @State private var fallen = false
-  private let pieces: [(x: Double, drift: Double, spin: Double, delay: Double, color: Color)] = (0..<28).map { index in
-    (
-      Double.random(in: 0...1), Double.random(in: -80...80), Double.random(in: -360...360),
-      Double.random(in: 0...0.26),
-      [MovieNightPalette.yes, MovieNightPalette.nope, MovieNightPalette.paper, Color(red: 0.48, green: 0.64, blue: 1)][index % 4]
-    )
-  }
+  private let pieces: [(x: Double, drift: Double, spin: Double, delay: Double, color: Color)] =
+    (0..<28).map { index in
+      (
+        Double.random(in: 0...1), Double.random(in: -80...80), Double.random(in: -360...360),
+        Double.random(in: 0...0.26),
+        [
+          MovieNightPalette.yes, MovieNightPalette.nope, MovieNightPalette.paper,
+          Color(red: 0.48, green: 0.64, blue: 1),
+        ][index % 4]
+      )
+    }
 
   var body: some View {
     if !reduceMotion {
@@ -579,9 +624,12 @@ private struct MovieNightConfetti: View {
             .fill(piece.color)
             .frame(width: 8, height: 14)
             .rotationEffect(.degrees(fallen ? piece.spin : 0))
-            .offset(x: geometry.size.width * piece.x + (fallen ? piece.drift : 0), y: fallen ? 420 : -30)
+            .offset(
+              x: geometry.size.width * piece.x + (fallen ? piece.drift : 0), y: fallen ? 420 : -30
+            )
             .opacity(fallen ? 0 : 1)
-            .animation(.timingCurve(0.2, 0.6, 0.4, 1, duration: 1.3).delay(piece.delay), value: fallen)
+            .animation(
+              .timingCurve(0.2, 0.6, 0.4, 1, duration: 1.3).delay(piece.delay), value: fallen)
         }
       }
       .allowsHitTesting(false)
@@ -618,8 +666,11 @@ private struct MovieNightTicket: View {
       .padding(22)
       if outcome.card != nil {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-          Text(outcome.isUnanimous ? "Admit \(voters.count)" : "\(outcome.likes) of \(outcome.voters) said yes")
-            .font(.headline.weight(.black))
+          Text(
+            outcome.isUnanimous
+              ? "Admit \(voters.count)" : "\(outcome.likes) of \(outcome.voters) said yes"
+          )
+          .font(.headline.weight(.black))
           Text(voters.joined(separator: ", "))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -634,7 +685,10 @@ private struct MovieNightTicket: View {
     .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous))
     .shadow(color: .black.opacity(0.5), radius: 24, y: 16)
     // The ticket drops in and tips forward, as if handed over the counter.
-    .rotation3DEffect(.degrees(landed || reduceMotion ? 0 : 55), axis: (x: 1, y: 0, z: 0), anchor: .top, perspective: 0.6)
+    .rotation3DEffect(
+      .degrees(landed || reduceMotion ? 0 : 55), axis: (x: 1, y: 0, z: 0), anchor: .top,
+      perspective: 0.6
+    )
     .offset(y: landed || reduceMotion ? 0 : -50)
     .opacity(landed ? 1 : 0)
     .onAppear {

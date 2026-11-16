@@ -91,7 +91,9 @@ struct ServerSummaryCard: View {
         ) {
           Button("Restart Server", role: .destructive) { restart() }
         } message: {
-          Text("Everything playing on any device stops for a moment, and apps reconnect by themselves.")
+          Text(
+            "Everything playing on any device stops for a moment, and apps reconnect by themselves."
+          )
         }
         if let message {
           Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
@@ -229,7 +231,8 @@ struct ServerEssentialsEditor: View {
 
   private var lastBackupText: String {
     guard backupsLoaded else {
-      return message == nil ? "Looking for the last backup…" : "The last backup couldn't be checked."
+      return message == nil
+        ? "Looking for the last backup…" : "The last backup couldn't be checked."
     }
     guard let lastBackup else { return "No backup yet." }
     return "Last backup: \(ServerDateText.display(lastBackup.createdAt))"
@@ -359,7 +362,10 @@ struct ServerDetailsBox: View {
   let status: ServerStatusSummary
 
   var body: some View {
-    AureliaSettingsSection("Server Details", symbol: "info.circle", description: "Version and technical details of this server.") {
+    AureliaSettingsSection(
+      "Server Details", symbol: "info.circle",
+      description: "Version and technical details of this server."
+    ) {
       VStack(alignment: .leading, spacing: 10) {
         LabeledContent("State", value: (status.readiness?.state ?? status.state).capitalized)
         if let readiness = status.readiness {

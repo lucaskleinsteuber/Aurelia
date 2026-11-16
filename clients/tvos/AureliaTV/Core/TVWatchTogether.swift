@@ -64,7 +64,10 @@ enum TVWatchTogetherFollower {
   static let driftTolerance: Int64 = 1_500
   static let stillTolerance: Int64 = 500
 
-  enum Step: Equatable { case play, pause, seek(Int64) }
+  enum Step: Equatable {
+    case play, pause
+    case seek(Int64)
+  }
 
   static func shouldPlay(_ state: TVWatchPartyState) -> Bool { state.isPlaying && !state.isWaiting }
 
@@ -164,7 +167,10 @@ final class TVWatchTogetherSession: ObservableObject {
   private var reportedReady = false
   private(set) var isChangingTitle = false
 
-  init(api: any TVWatchTogetherAPI, deviceName: String, now: @escaping @MainActor () -> Date = { Date() }) {
+  init(
+    api: any TVWatchTogetherAPI, deviceName: String,
+    now: @escaping @MainActor () -> Date = { Date() }
+  ) {
     self.api = api
     self.deviceName = deviceName
     self.now = now
@@ -212,7 +218,9 @@ final class TVWatchTogetherSession: ObservableObject {
       // The player moved on by itself (Up Next): the party follows.
       if player.watchIsReady || reportedReady {
         reportedReady = false
-        send(TVWatchPartyCommand(action: "change", positionMilliseconds: 0, mediaId: player.watchMediaID))
+        send(
+          TVWatchPartyCommand(
+            action: "change", positionMilliseconds: 0, mediaId: player.watchMediaID))
       }
       return
     }
@@ -232,9 +240,12 @@ final class TVWatchTogetherSession: ObservableObject {
   func userAction(_ action: TVPlaybackUserAction) {
     guard !applyingRemote, state != nil else { return }
     switch action {
-    case .play(let position): send(TVWatchPartyCommand(action: "play", positionMilliseconds: position))
-    case .pause(let position): send(TVWatchPartyCommand(action: "pause", positionMilliseconds: position))
-    case .seek(let position): send(TVWatchPartyCommand(action: "seek", positionMilliseconds: position))
+    case .play(let position):
+      send(TVWatchPartyCommand(action: "play", positionMilliseconds: position))
+    case .pause(let position):
+      send(TVWatchPartyCommand(action: "pause", positionMilliseconds: position))
+    case .seek(let position):
+      send(TVWatchPartyCommand(action: "seek", positionMilliseconds: position))
     }
   }
 
@@ -261,7 +272,8 @@ final class TVWatchTogetherSession: ObservableObject {
     }
   }
 
-  private func run(_ action: @escaping @Sendable () async throws -> TVWatchPartyState) async -> Bool {
+  private func run(_ action: @escaping @Sendable () async throws -> TVWatchPartyState) async -> Bool
+  {
     do {
       let sent = now()
       let next = try await action()
@@ -313,7 +325,9 @@ final class TVWatchTogetherSession: ObservableObject {
   }
 
   func receive(_ next: TVWatchPartyState, sent: Date, own: Bool) {
-    if let measured = TVWatchTogetherClock.offset(serverTime: next.serverTime, sent: sent, received: now()) {
+    if let measured = TVWatchTogetherClock.offset(
+      serverTime: next.serverTime, sent: sent, received: now())
+    {
       offset = measured
     }
     if own { ownRevisions.insert(next.revision) }
@@ -376,13 +390,22 @@ extension TVAPIClient: TVWatchTogetherAPI {
     }
     return try await postWatchTogether(
       "/api/v1/watch-together",
-      Body(mediaId: mediaID, positionMilliseconds: position, isPlaying: playing, deviceName: deviceName))
+      Body(
+        mediaId: mediaID, positionMilliseconds: position, isPlaying: playing, deviceName: deviceName
+      ))
   }
 
-  func watchParty(id: UUID, after: Int64?, waitMilliseconds: Int) async throws -> TVWatchPartyState {
+  func watchParty(id: UUID, after: Int64?, waitMilliseconds: Int) async throws -> TVWatchPartyState
+  {
     let query =
-      after.map { [URLQueryItem(name: "after", value: String($0)), URLQueryItem(name: "waitMs", value: String(waitMilliseconds))] } ?? []
-    return try await getWatchTogether("/api/v1/watch-together/\(id.uuidString.lowercased())", query: query)
+      after.map {
+        [
+          URLQueryItem(name: "after", value: String($0)),
+          URLQueryItem(name: "waitMs", value: String(waitMilliseconds)),
+        ]
+      } ?? []
+    return try await getWatchTogether(
+      "/api/v1/watch-together/\(id.uuidString.lowercased())", query: query)
   }
 
   func sendWatchPartyCommand(id: UUID, _ command: TVWatchPartyCommand) async throws

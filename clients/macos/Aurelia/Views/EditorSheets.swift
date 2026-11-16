@@ -591,7 +591,8 @@ struct CollectionEditorSheet: View {
               let seasonDraft = CollectionMemberDraft(
                 mediaId: item.id,
                 seasonNumber: season.number,
-                title: "\(item.title) · \(season.number == 0 ? "Specials" : "Season \(season.number)")",
+                title:
+                  "\(item.title) · \(season.number == 0 ? "Specials" : "Season \(season.number)")",
                 kind: .series)
               let seasonSelected = isSelected(mediaId: item.id, seasonNumber: season.number)
               Button {
@@ -613,7 +614,8 @@ struct CollectionEditorSheet: View {
               .buttonStyle(.plain)
 
               ForEach(season.episodes) { episode in
-                let epCode = "S\(String(format: "%02d", episode.seasonNumber))E\(String(format: "%02d", episode.episodeNumber))"
+                let epCode =
+                  "S\(String(format: "%02d", episode.seasonNumber))E\(String(format: "%02d", episode.episodeNumber))"
                 let epDraft = CollectionMemberDraft(
                   mediaId: episode.id,
                   seasonNumber: nil,

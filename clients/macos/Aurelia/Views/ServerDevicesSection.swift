@@ -26,8 +26,10 @@ struct ServerDevicesSection: View {
         } else if !sessions.isEmpty {
           Divider()
           Text("Signed-In Devices").font(.headline)
-          Text("Devices that can use this server now. Sign Out ends a device’s access; it then needs a new code.")
-            .font(.caption).foregroundStyle(.secondary)
+          Text(
+            "Devices that can use this server now. Sign Out ends a device’s access; it then needs a new code."
+          )
+          .font(.caption).foregroundStyle(.secondary)
           ForEach(sessions) { session in
             HStack {
               VStack(alignment: .leading) {
@@ -194,7 +196,8 @@ private struct PairingDirection: View {
     .padding(.vertical, 6)
     .padding(.horizontal, 10)
     .background(
-      .quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius))
+      .quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius)
+    )
     .accessibilityElement(children: .combine)
   }
 

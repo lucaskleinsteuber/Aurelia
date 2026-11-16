@@ -44,13 +44,16 @@ private struct IOSAdminLibraryContent: View {
       IOSAdminPageHeader(
         page: .library,
         text:
-          "The folders on the server computer that hold your movies and shows. Aurelia only reads them: nothing here moves, renames or deletes a video.")
+          "The folders on the server computer that hold your movies and shows. Aurelia only reads them: nothing here moves, renames or deletes a video."
+      )
       Section {
         if overview.libraries.isEmpty {
           VStack(alignment: .leading, spacing: 6) {
             Text("No storage locations yet").font(.headline)
-            Text("Add the folder on the server computer where your movies or shows are, and Aurelia finds them.")
-              .font(.subheadline).foregroundStyle(.secondary)
+            Text(
+              "Add the folder on the server computer where your movies or shows are, and Aurelia finds them."
+            )
+            .font(.subheadline).foregroundStyle(.secondary)
           }
           .padding(.vertical, 4)
         }
@@ -59,15 +62,22 @@ private struct IOSAdminLibraryContent: View {
             IOSAdminStorageLocationView(libraryID: library.id)
           } label: {
             IOSLibraryRow(
-              library: library, scan: overview.scans.first { $0.libraryId == library.id && $0.isActive })
+              library: library,
+              scan: overview.scans.first { $0.libraryId == library.id && $0.isActive })
           }
           .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) { confirmRemove(library) } label: {
+            Button(role: .destructive) {
+              confirmRemove(library)
+            } label: {
               Label("Remove", systemImage: "trash")
             }
             if !IOSLibraryAdminText.isWaitingForReview(library) {
-              Button { scan(library) } label: { Label("Scan", systemImage: "arrow.clockwise") }
-                .tint(.indigo)
+              Button {
+                scan(library)
+              } label: {
+                Label("Scan", systemImage: "arrow.clockwise")
+              }
+              .tint(.indigo)
             }
           }
           .contextMenu { menu(for: library) }
@@ -82,7 +92,8 @@ private struct IOSAdminLibraryContent: View {
         if !overview.libraries.isEmpty {
           IOSAdminActionButton(
             "Scan All", systemImage: "arrow.clockwise",
-            detail: "Looks for new, changed and missing files in every location.", doneText: "Started"
+            detail: "Looks for new, changed and missing files in every location.",
+            doneText: "Started"
           ) { _ = try await $0.scanAllLibraries() }
         }
       } header: {
@@ -100,7 +111,8 @@ private struct IOSAdminLibraryContent: View {
           ForEach(active) { scan in
             IOSScanRow(
               scan: scan,
-              name: overview.libraries.first { $0.id == scan.libraryId }?.name ?? "Storage location")
+              name: overview.libraries.first { $0.id == scan.libraryId }?.name ?? "Storage location"
+            )
           }
         } header: {
           Text("Scanning Now")
@@ -111,13 +123,15 @@ private struct IOSAdminLibraryContent: View {
       if let configuration = overview.configuration {
         Section {
           IOSPolicyToggle(
-            configuration: configuration, key: "monitoringEnabled", label: "Watch Storage for Changes",
+            configuration: configuration, key: "monitoringEnabled",
+            label: "Watch Storage for Changes",
             detail: "Notices new and changed files by itself, so you rarely need to scan by hand.")
           NavigationLink {
             IOSAdminPolicyView(
               title: "Automatic Scans", groups: [.maintenance], configuration: configuration,
               explanation:
-                "How often the server scans by itself and when maintenance runs. Each storage location can also watch for changes on its own.")
+                "How often the server scans by itself and when maintenance runs. Each storage location can also watch for changes on its own."
+            )
           } label: {
             IOSAdminToggleLabel("Scan Schedule", "When the server checks every location by itself.")
           }
@@ -134,7 +148,8 @@ private struct IOSAdminLibraryContent: View {
           IOSAdminLibraryHealthView()
         } label: {
           IOSAdminToggleLabel(
-            "Library Health", "Duplicates, titles whose drive is away, and titles without information.")
+            "Library Health",
+            "Duplicates, titles whose drive is away, and titles without information.")
         }
         .accessibilityIdentifier("admin-library-health")
       }
@@ -174,28 +189,46 @@ private struct IOSAdminLibraryContent: View {
   private func menu(for library: IOSLibrarySummary) -> some View {
     let waiting = IOSLibraryAdminText.isWaitingForReview(library)
     if waiting {
-      Button { reviewing = library } label: { Label("Review Import…", systemImage: "checklist") }
+      Button {
+        reviewing = library
+      } label: {
+        Label("Review Import…", systemImage: "checklist")
+      }
     } else {
-      Button { scan(library) } label: { Label("Scan Now", systemImage: "arrow.clockwise") }
+      Button {
+        scan(library)
+      } label: {
+        Label("Scan Now", systemImage: "arrow.clockwise")
+      }
       Button {
         let (id, enabled) = (library.id, !(library.monitoringEnabled ?? false))
-        Task { await admin.perform { _ = try await $0.setLibraryMonitoring(id: id, enabled: enabled) } }
+        Task {
+          await admin.perform { _ = try await $0.setLibraryMonitoring(id: id, enabled: enabled) }
+        }
       } label: {
         Label(
           library.monitoringEnabled == true ? "Stop Watching for Changes" : "Watch for Changes",
           systemImage: library.monitoringEnabled == true ? "eye.slash" : "eye")
       }
-      Button { reviewing = library } label: { Label("Review Assignments…", systemImage: "checklist") }
+      Button {
+        reviewing = library
+      } label: {
+        Label("Review Assignments…", systemImage: "checklist")
+      }
     }
     Divider()
-    Button(role: .destructive) { confirmRemove(library) } label: {
+    Button(role: .destructive) {
+      confirmRemove(library)
+    } label: {
       Label("Remove…", systemImage: "trash")
     }
   }
 
   private func scan(_ library: IOSLibrarySummary) {
     let id = library.id
-    Task { await admin.perform("Scanning \(library.name)…") { _ = try await $0.scanLibrary(id: id) } }
+    Task {
+      await admin.perform("Scanning \(library.name)…") { _ = try await $0.scanLibrary(id: id) }
+    }
   }
 
   private func confirmRemove(_ library: IOSLibrarySummary) {
@@ -230,10 +263,13 @@ private struct IOSLibraryRow: View {
 
   var body: some View {
     HStack(spacing: 12) {
-      Image(systemName: library.isAvailable ? "externaldrive.fill" : "externaldrive.badge.exclamationmark")
-        .font(.title3)
-        .foregroundStyle(library.isAvailable ? Color.secondary : Color.orange)
-        .frame(width: 28)
+      Image(
+        systemName: library.isAvailable
+          ? "externaldrive.fill" : "externaldrive.badge.exclamationmark"
+      )
+      .font(.title3)
+      .foregroundStyle(library.isAvailable ? Color.secondary : Color.orange)
+      .frame(width: 28)
       VStack(alignment: .leading, spacing: 3) {
         HStack(spacing: 6) {
           Text(library.name).font(.body.weight(.medium))
@@ -354,8 +390,11 @@ private struct IOSAdminStorageLocationForm: View {
     Form {
       Section {
         HStack(spacing: 12) {
-          Image(systemName: library.isAvailable ? "externaldrive.fill" : "externaldrive.badge.exclamationmark")
-            .font(.title2).foregroundStyle(library.isAvailable ? Color.indigo : Color.orange)
+          Image(
+            systemName: library.isAvailable
+              ? "externaldrive.fill" : "externaldrive.badge.exclamationmark"
+          )
+          .font(.title2).foregroundStyle(library.isAvailable ? Color.indigo : Color.orange)
           VStack(alignment: .leading, spacing: 2) {
             Text(library.name).font(.headline)
             Text(library.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
@@ -391,7 +430,8 @@ private struct IOSAdminStorageLocationForm: View {
       Section {
         IOSAdminActionButton(
           "Scan Now", systemImage: "arrow.clockwise",
-          detail: waiting ? "Available after the import." : "Looks for new, changed and missing files.",
+          detail: waiting
+            ? "Available after the import." : "Looks for new, changed and missing files.",
           doneText: "Started"
         ) { [id = library.id] client in _ = try await client.scanLibrary(id: id) }
         .disabled(waiting || scanning)
@@ -400,7 +440,11 @@ private struct IOSAdminStorageLocationForm: View {
             get: { library.monitoringEnabled ?? false },
             set: { value in
               let id = library.id
-              Task { await admin.perform { _ = try await $0.setLibraryMonitoring(id: id, enabled: value) } }
+              Task {
+                await admin.perform {
+                  _ = try await $0.setLibraryMonitoring(id: id, enabled: value)
+                }
+              }
             })
         ) {
           IOSAdminToggleLabel(
@@ -426,7 +470,9 @@ private struct IOSAdminStorageLocationForm: View {
         } header: {
           Text("Folders to Sort")
         } footer: {
-          Text("Aurelia wasn’t sure whether these folders hold movies or a TV show. Your choice applies at once.")
+          Text(
+            "Aurelia wasn’t sure whether these folders hold movies or a TV show. Your choice applies at once."
+          )
         }
       }
       let pending = loaded.reviews.filter { $0.state == "pending" }
@@ -442,7 +488,9 @@ private struct IOSAdminStorageLocationForm: View {
                 Button("Leave Out") {
                   let (id, review) = (library.id, review.id)
                   Task {
-                    await admin.perform { _ = try await $0.decideImportReview(library: id, review: review, movieId: nil) }
+                    await admin.perform {
+                      _ = try await $0.decideImportReview(library: id, review: review, movieId: nil)
+                    }
                   }
                 }
               }
@@ -467,7 +515,9 @@ private struct IOSAdminStorageLocationForm: View {
               Spacer()
               Button("Include") {
                 let (library, id) = (library.id, excluded.id)
-                Task { await admin.perform { try await $0.restoreExclusion(library: library, id: id) } }
+                Task {
+                  await admin.perform { try await $0.restoreExclusion(library: library, id: id) }
+                }
               }
               .buttonStyle(.borderless)
             }
@@ -475,7 +525,9 @@ private struct IOSAdminStorageLocationForm: View {
         } header: {
           Text("Left Out")
         } footer: {
-          Text("Files and folders you removed from Aurelia. Include brings them back with the next scan; the files were never touched.")
+          Text(
+            "Files and folders you removed from Aurelia. Include brings them back with the next scan; the files were never touched."
+          )
         }
       }
       Section {
@@ -496,7 +548,9 @@ private struct IOSAdminStorageLocationForm: View {
           ) {
             let id = library.id
             Task {
-              if await admin.perform("Removing…", { try await $0.removeLibrary(id: id) }) { dismiss() }
+              if await admin.perform("Removing…", { try await $0.removeLibrary(id: id) }) {
+                dismiss()
+              }
             }
           }
         }
@@ -537,7 +591,8 @@ private struct IOSAssignToMovieView: View {
       Section {
         Text(review.relativePath).font(.caption).foregroundStyle(.secondary)
       } footer: {
-        Text("Search for the movie this file belongs to, for example as a second version or an extra.")
+        Text(
+          "Search for the movie this file belongs to, for example as a second version or an extra.")
       }
       if searching { ProgressView() }
       if !searching && results.isEmpty && !query.isEmpty {
@@ -547,21 +602,29 @@ private struct IOSAssignToMovieView: View {
         Button {
           let (libraryID, reviewID, movieID) = (library.id, review.id, movie.id)
           Task {
-            if await admin.perform("Assigning…", {
-              _ = try await $0.decideImportReview(library: libraryID, review: reviewID, movieId: movieID)
-            }) {
+            if await admin.perform(
+              "Assigning…",
+              {
+                _ = try await $0.decideImportReview(
+                  library: libraryID, review: reviewID, movieId: movieID)
+              })
+            {
               dismiss()
             }
           }
         } label: {
           VStack(alignment: .leading, spacing: 2) {
             Text(movie.title).foregroundStyle(.primary)
-            if let year = movie.year { Text(String(year)).font(.caption).foregroundStyle(.secondary) }
+            if let year = movie.year {
+              Text(String(year)).font(.caption).foregroundStyle(.secondary)
+            }
           }
         }
       }
     }
-    .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Movie title")
+    .searchable(
+      text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Movie title"
+    )
     .scrollContentBackground(.hidden)
     .background(IOSDesign.canvas.ignoresSafeArea())
     .navigationTitle("Assign to Movie")
@@ -597,7 +660,8 @@ private struct IOSDiscoveryRow: View {
                 if decision.isEmpty {
                   _ = try await $0.resetClassification(library: library, discovery: id)
                 } else {
-                  _ = try await $0.setClassification(library: library, discovery: id, decision: decision)
+                  _ = try await $0.setClassification(
+                    library: library, discovery: id, decision: decision)
                 }
               }
             }
@@ -675,13 +739,15 @@ private struct IOSAdminAddLibraryView: View {
             Toggle(isOn: $review) {
               IOSAdminToggleLabel(
                 "Review Before Importing",
-                "First shows what each folder and file becomes. Nothing is imported until you confirm.")
+                "First shows what each folder and file becomes. Nothing is imported until you confirm."
+              )
             }
           } footer: {
             Text(
               review
                 ? "After adding, the review opens right away."
-                : "After adding, the first scan starts right away and titles appear as it finds them.")
+                : "After adding, the first scan starts right away and titles appear as it finds them."
+            )
           }
           if let problem { Section { Text(problem).foregroundStyle(.orange) } }
         }
@@ -713,7 +779,8 @@ private struct IOSAdminAddLibraryView: View {
     var created: [IOSLibrarySummary] = []
     for request in requests {
       guard let library = await admin.value(nil, { try await $0.createLibrary(request) }) else {
-        problem = created.isEmpty ? nil : "\(created.count) of \(requests.count) folders were added."
+        problem =
+          created.isEmpty ? nil : "\(created.count) of \(requests.count) folders were added."
         if !created.isEmpty { added(created) }
         return
       }
@@ -734,14 +801,19 @@ private struct IOSServerFolderBrowser: View {
   @State private var typedPath: String?
 
   var body: some View {
-    IOSAdminLoader { try await $0.serverFolders(path: path) } content: { listing, _ in
+    IOSAdminLoader {
+      try await $0.serverFolders(path: path)
+    } content: { listing, _ in
       List {
         if let current = listing.path {
           Section {
             Button {
-              choose(IOSServerFolder(name: IOSLibraryAdminText.suggestedName(for: current), path: current))
+              choose(
+                IOSServerFolder(
+                  name: IOSLibraryAdminText.suggestedName(for: current), path: current))
             } label: {
-              Label("Use This Folder", systemImage: "checkmark.circle.fill").font(.body.weight(.semibold))
+              Label("Use This Folder", systemImage: "checkmark.circle.fill").font(
+                .body.weight(.semibold))
             }
             .accessibilityIdentifier("admin-use-folder")
             .disabled(chosen.contains { $0.path == current })
@@ -786,7 +858,9 @@ private struct IOSServerFolderBrowser: View {
       }
       .scrollContentBackground(.hidden)
       .background(IOSDesign.canvas.ignoresSafeArea())
-      .navigationTitle(listing.path.map { IOSLibraryAdminText.suggestedName(for: $0) } ?? "Server Folders")
+      .navigationTitle(
+        listing.path.map { IOSLibraryAdminText.suggestedName(for: $0) } ?? "Server Folders"
+      )
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .primaryAction) {
@@ -857,7 +931,8 @@ private struct IOSAdminImportPreviewView: View {
             Text("\(counts.pending) need review · \(counts.errors) errors").foregroundStyle(.orange)
           }
           if counts.errors > 0 {
-            Text("Fix the errors first: they would import wrongly.").font(.caption).foregroundStyle(.orange)
+            Text("Fix the errors first: they would import wrongly.").font(.caption).foregroundStyle(
+              .orange)
           }
           Picker("Show", selection: $filter) {
             Text("All").tag("all")
@@ -874,7 +949,11 @@ private struct IOSAdminImportPreviewView: View {
         ForEach(shown) { item in
           Button {
             if selecting {
-              if selection.contains(item.id) { selection.remove(item.id) } else { selection.insert(item.id) }
+              if selection.contains(item.id) {
+                selection.remove(item.id)
+              } else {
+                selection.insert(item.id)
+              }
             } else {
               editing = [item]
             }
@@ -896,7 +975,8 @@ private struct IOSAdminImportPreviewView: View {
               Spacer()
               Text(Self.kindLabel(item))
                 .font(.caption)
-                .foregroundStyle(item.status == "pending" || item.status == "error" ? Color.orange : .secondary)
+                .foregroundStyle(
+                  item.status == "pending" || item.status == "error" ? Color.orange : .secondary)
             }
           }
         }
@@ -941,7 +1021,8 @@ private struct IOSAdminImportPreviewView: View {
       Button("Close", role: .destructive) { dismiss() }
       Button("Keep Reviewing", role: .cancel) {}
     } message: {
-      Text("Nothing from “\(library.name)” is imported yet. Your corrections are kept for next time.")
+      Text(
+        "Nothing from “\(library.name)” is imported yet. Your corrections are kept for next time.")
     }
     .confirmationDialog(
       "Read the folder again?", isPresented: $confirmingAgain, titleVisibility: .visible
@@ -974,7 +1055,8 @@ private struct IOSAdminImportPreviewView: View {
     case "extra": return "Extra"
     case "trailer": return "Trailer"
     default:
-      return item.status == "ignored" ? "Ignored" : item.status == "error" ? "Error" : "Needs Review"
+      return item.status == "ignored"
+        ? "Ignored" : item.status == "error" ? "Error" : "Needs Review"
     }
   }
 
@@ -995,9 +1077,13 @@ private struct IOSAdminImportPreviewView: View {
     var offset = 0
     while true {
       let start = offset
-      guard let page = await admin.value(nil, {
-        try await $0.importPreviewItems(library: library, preview: preview, offset: start)
-      }) else { return }
+      guard
+        let page = await admin.value(
+          nil,
+          {
+            try await $0.importPreviewItems(library: library, preview: preview, offset: start)
+          })
+      else { return }
       all += page.items
       offset += page.items.count
       if page.items.isEmpty || offset >= page.totalCount { break }
@@ -1008,10 +1094,13 @@ private struct IOSAdminImportPreviewView: View {
   private func save(_ changes: [IOSImportAssignment]) async {
     guard let summary else { return }
     let (library, preview, revision) = (library.id, summary.previewId, summary.revision)
-    if let updated = await admin.value("Saving…", {
-      try await $0.updateImportPreview(
-        library: library, preview: preview, revision: revision, assignments: changes)
-    }) {
+    if let updated = await admin.value(
+      "Saving…",
+      {
+        try await $0.updateImportPreview(
+          library: library, preview: preview, revision: revision, assignments: changes)
+      })
+    {
       self.summary = updated
       editing = nil
       selecting = false
@@ -1024,9 +1113,13 @@ private struct IOSAdminImportPreviewView: View {
     guard let summary else { return }
     let (library, preview, revision) = (library.id, summary.previewId, summary.revision)
     Task {
-      if await admin.perform("Importing…", {
-        _ = try await $0.confirmImportPreview(library: library, preview: preview, revision: revision)
-      }) {
+      if await admin.perform(
+        "Importing…",
+        {
+          _ = try await $0.confirmImportPreview(
+            library: library, preview: preview, revision: revision)
+        })
+      {
         dismiss()
       }
     }
@@ -1053,10 +1146,15 @@ private struct IOSImportAssignmentEditor: View {
   }
 
   private var needsParent: Bool { ["episode", "extra", "trailer"].contains(form.choice) }
-  private var parent: IOSImportPreviewTarget? { targets.first { $0.relativePath == form.parentPath } }
+  private var parent: IOSImportPreviewTarget? {
+    targets.first { $0.relativePath == form.parentPath }
+  }
 
   var body: some View {
-    IOSAdminForm(title: items.count == 1 ? (items[0].title.isEmpty ? "Item" : items[0].title) : "\(items.count) Items") {
+    IOSAdminForm(
+      title: items.count == 1
+        ? (items[0].title.isEmpty ? "Item" : items[0].title) : "\(items.count) Items"
+    ) {
       Section {
         Picker("This Is", selection: $form.choice) {
           ForEach(IOSImportRules.choices(for: items)) { Text($0.label).tag($0.id) }
@@ -1139,7 +1237,8 @@ private struct IOSAdminLibraryHealthView: View {
     Form {
       IOSAdminPageHeader(
         systemImage: "stethoscope", title: "Library Health",
-        text: "Things worth tidying up. Nothing here deletes a file: only Aurelia’s entries change.")
+        text: "Things worth tidying up. Nothing here deletes a file: only Aurelia’s entries change."
+      )
       duplicatesSection
       offlineSection
       unmatchedSection
@@ -1168,15 +1267,21 @@ private struct IOSAdminLibraryHealthView: View {
       switch duplicates {
       case nil: ProgressView()
       case .failure(let error):
-        IOSAdminSectionProblem(message: IOSAdministrationModel.message(error)) { await loadDuplicates() }
+        IOSAdminSectionProblem(message: IOSAdministrationModel.message(error)) {
+          await loadDuplicates()
+        }
       case .success(let groups):
-        if groups.isEmpty { Label("No duplicates", systemImage: "checkmark.circle").foregroundStyle(.secondary) }
+        if groups.isEmpty {
+          Label("No duplicates", systemImage: "checkmark.circle").foregroundStyle(.secondary)
+        }
         ForEach(groups) { group in duplicateGroup(group) }
       }
     } header: {
       Text("Duplicates")
     } footer: {
-      Text("The same title found more than once. Keep one: the others are combined into it with their watch history and favorites.")
+      Text(
+        "The same title found more than once. Keep one: the others are combined into it with their watch history and favorites."
+      )
     }
   }
 
@@ -1188,15 +1293,22 @@ private struct IOSAdminLibraryHealthView: View {
       switch offline {
       case nil: ProgressView()
       case .failure(let error):
-        IOSAdminSectionProblem(message: IOSAdministrationModel.message(error)) { await loadOffline() }
+        IOSAdminSectionProblem(message: IOSAdministrationModel.message(error)) {
+          await loadOffline()
+        }
       case .success(let titles):
-        if titles.isEmpty { Label("Nothing away that long", systemImage: "checkmark.circle").foregroundStyle(.secondary) }
+        if titles.isEmpty {
+          Label("Nothing away that long", systemImage: "checkmark.circle").foregroundStyle(
+            .secondary)
+        }
         ForEach(titles) { title in offlineRow(title) }
       }
     } header: {
       Text("Drive Away")
     } footer: {
-      Text("Titles keep their progress and favorites while their drive is away. Remove only those that won’t come back.")
+      Text(
+        "Titles keep their progress and favorites while their drive is away. Remove only those that won’t come back."
+      )
     }
   }
 
@@ -1231,9 +1343,14 @@ private struct IOSAdminLibraryHealthView: View {
       switch unmatched {
       case nil: ProgressView()
       case .failure(let error):
-        IOSAdminSectionProblem(message: IOSAdministrationModel.message(error)) { await loadUnmatched() }
+        IOSAdminSectionProblem(message: IOSAdministrationModel.message(error)) {
+          await loadUnmatched()
+        }
       case .success(let titles):
-        if titles.isEmpty { Label("Every title has information", systemImage: "checkmark.circle").foregroundStyle(.secondary) }
+        if titles.isEmpty {
+          Label("Every title has information", systemImage: "checkmark.circle").foregroundStyle(
+            .secondary)
+        }
         ForEach(titles) { title in
           HStack {
             VStack(alignment: .leading, spacing: 2) {
@@ -1248,7 +1365,9 @@ private struct IOSAdminLibraryHealthView: View {
     } header: {
       Text("Without Information")
     } footer: {
-      Text("Aurelia couldn’t find these on TMDB by their file names. Match one to give it a poster and description.")
+      Text(
+        "Aurelia couldn’t find these on TMDB by their file names. Match one to give it a poster and description."
+      )
     }
   }
 
@@ -1261,8 +1380,10 @@ private struct IOSAdminLibraryHealthView: View {
         HStack {
           VStack(alignment: .leading, spacing: 2) {
             Text(item.fileName).font(.caption).lineLimit(2)
-            Text(item.availability == "available" ? IOSAdminText.bytes(item.fileSize) : "Drive away")
-              .font(.caption2).foregroundStyle(.secondary)
+            Text(
+              item.availability == "available" ? IOSAdminText.bytes(item.fileSize) : "Drive away"
+            )
+            .font(.caption2).foregroundStyle(.secondary)
           }
           Spacer()
           if group.items.count > 1 {
@@ -1276,9 +1397,14 @@ private struct IOSAdminLibraryHealthView: View {
                 action: "Combine"
               ) {
                 Task {
-                  if await admin.perform("Combining…", { client in
-                    for source in sources { try await client.mergeDuplicates(source: source, target: target) }
-                  }) {
+                  if await admin.perform(
+                    "Combining…",
+                    { client in
+                      for source in sources {
+                        try await client.mergeDuplicates(source: source, target: target)
+                      }
+                    })
+                  {
                     await loadDuplicates()
                   }
                 }
@@ -1310,9 +1436,14 @@ private struct IOSAdminLibraryHealthView: View {
       switch problems {
       case nil: ProgressView()
       case .failure(let error):
-        IOSAdminSectionProblem(message: IOSAdministrationModel.message(error)) { await loadFileWatch() }
+        IOSAdminSectionProblem(message: IOSAdministrationModel.message(error)) {
+          await loadFileWatch()
+        }
       case .success(let list):
-        if list.isEmpty { Label("No file has a problem", systemImage: "checkmark.shield").foregroundStyle(.secondary) }
+        if list.isEmpty {
+          Label("No file has a problem", systemImage: "checkmark.shield").foregroundStyle(
+            .secondary)
+        }
         ForEach(list) { problem in fileProblemRow(problem) }
       }
     } header: {
@@ -1326,8 +1457,11 @@ private struct IOSAdminLibraryHealthView: View {
 
   private func fileProblemRow(_ problem: IOSFileProblem) -> some View {
     VStack(alignment: .leading, spacing: 4) {
-      Label("\(problem.title) · \(IOSFileWatchText.problemTitle(problem.state))", systemImage: IOSFileWatchText.problemSymbol(problem.state))
-        .font(.headline)
+      Label(
+        "\(problem.title) · \(IOSFileWatchText.problemTitle(problem.state))",
+        systemImage: IOSFileWatchText.problemSymbol(problem.state)
+      )
+      .font(.headline)
       Text(problem.fileName).font(.caption).foregroundStyle(.secondary).lineLimit(2)
       if let detail = problem.detail { Text(detail).font(.caption) }
       let facts = IOSFileWatchText.facts(problem)
@@ -1335,13 +1469,21 @@ private struct IOSAdminLibraryHealthView: View {
       HStack {
         Button("Examine Again") {
           let id = problem.mediaId
-          Task { if await admin.perform(nil, { try await $0.recheckFile(mediaId: id) }) { await loadFileWatch() } }
+          Task {
+            if await admin.perform(nil, { try await $0.recheckFile(mediaId: id) }) {
+              await loadFileWatch()
+            }
+          }
         }
         Spacer()
         Button("Set Aside") {
           let id = problem.mediaId
           Task {
-            if await admin.perform(nil, { try await $0.setFileProblemIgnored(mediaId: id, ignored: true) }) { await loadFileWatch() }
+            if await admin.perform(
+              nil, { try await $0.setFileProblemIgnored(mediaId: id, ignored: true) })
+            {
+              await loadFileWatch()
+            }
           }
         }
       }
@@ -1355,14 +1497,20 @@ private struct IOSAdminLibraryHealthView: View {
       switch drives {
       case nil: ProgressView()
       case .failure(let error):
-        IOSAdminSectionProblem(message: IOSAdministrationModel.message(error)) { await loadFileWatch() }
+        IOSAdminSectionProblem(message: IOSAdministrationModel.message(error)) {
+          await loadFileWatch()
+        }
       case .success(let answer):
         ForEach(answer.drives) { drive in
           VStack(alignment: .leading, spacing: 2) {
             Label(
               "\(drive.name) · \(IOSFileWatchText.driveTitle(drive.state))",
-              systemImage: drive.state == "failing" || drive.state == "warning" ? "externaldrive.badge.exclamationmark" : "externaldrive")
-              .foregroundStyle(drive.state == "failing" ? Color.red : drive.state == "warning" ? Color.orange : Color.primary)
+              systemImage: drive.state == "failing" || drive.state == "warning"
+                ? "externaldrive.badge.exclamationmark" : "externaldrive"
+            )
+            .foregroundStyle(
+              drive.state == "failing"
+                ? Color.red : drive.state == "warning" ? Color.orange : Color.primary)
             Text(drive.libraries.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
             if let detail = drive.detail { Text(detail).font(.caption) }
             let facts = IOSFileWatchText.driveFacts(drive)
@@ -1374,7 +1522,9 @@ private struct IOSAdminLibraryHealthView: View {
     } header: {
       Text("Drives")
     } footer: {
-      Text("How the drives with your storage locations are doing, as they report it themselves. Many USB cases and network shares don’t report it.")
+      Text(
+        "How the drives with your storage locations are doing, as they report it themselves. Many USB cases and network shares don’t report it."
+      )
     }
   }
 
@@ -1433,7 +1583,9 @@ private struct IOSMetadataMatchView: View {
         Button {
           let id = title.id
           Task {
-            if await admin.perform("Matching…", { try await $0.selectMetadataMatch(mediaId: id, candidate: candidate) }) {
+            if await admin.perform(
+              "Matching…", { try await $0.selectMetadataMatch(mediaId: id, candidate: candidate) })
+            {
               matched()
               dismiss()
             }
@@ -1441,10 +1593,12 @@ private struct IOSMetadataMatchView: View {
         } label: {
           VStack(alignment: .leading, spacing: 3) {
             Text(
-              [candidate.title, candidate.year.map(String.init)].compactMap { $0 }.joined(separator: " · ")
+              [candidate.title, candidate.year.map(String.init)].compactMap { $0 }.joined(
+                separator: " · ")
             )
             .foregroundStyle(.primary)
-            Text(candidate.mediaType == "tv" ? "TV Show" : "Movie").font(.caption).foregroundStyle(.secondary)
+            Text(candidate.mediaType == "tv" ? "TV Show" : "Movie").font(.caption).foregroundStyle(
+              .secondary)
             if let overview = candidate.overview, !overview.isEmpty {
               Text(overview).font(.caption2).foregroundStyle(.secondary).lineLimit(3)
             }
@@ -1462,9 +1616,13 @@ private struct IOSMetadataMatchView: View {
       try? await Task.sleep(for: .milliseconds(400))
       guard !Task.isCancelled else { return }
       let (typed, id) = (query.trimmingCharacters(in: .whitespaces), title.id)
-      guard !typed.isEmpty else { candidates = []; return }
+      guard !typed.isEmpty else {
+        candidates = []
+        return
+      }
       searching = true
-      candidates = (try? await admin.run { try await $0.searchMetadata(mediaId: id, query: typed) }) ?? []
+      candidates =
+        (try? await admin.run { try await $0.searchMetadata(mediaId: id, query: typed) }) ?? []
       searching = false
     }
   }

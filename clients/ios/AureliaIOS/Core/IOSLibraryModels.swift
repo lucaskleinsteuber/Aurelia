@@ -405,13 +405,15 @@ struct IOSCollectionDetail: Codable, Identifiable, Equatable, Sendable {
     userId = try container.decodeIfPresent(UUID.self, forKey: .userId)
     rulesJson = try container.decodeIfPresent(String.self, forKey: .rulesJson)
     sortMode = try container.decodeIfPresent(String.self, forKey: .sortMode) ?? "custom"
-    let decodedMembers = try container.decodeIfPresent([IOSCollectionMember].self, forKey: .members) ?? []
+    let decodedMembers =
+      try container.decodeIfPresent([IOSCollectionMember].self, forKey: .members) ?? []
     members = decodedMembers
     let count = try container.decodeIfPresent(Int.self, forKey: .itemCount) ?? 0
     itemCount = count == 0 ? decodedMembers.count : count
     watchedCount = try container.decodeIfPresent(Int.self, forKey: .watchedCount) ?? 0
     yearRange = try container.decodeIfPresent(String.self, forKey: .yearRange)
-    totalRuntimeSeconds = try container.decodeIfPresent(Int64.self, forKey: .totalRuntimeSeconds) ?? 0
+    totalRuntimeSeconds =
+      try container.decodeIfPresent(Int64.self, forKey: .totalRuntimeSeconds) ?? 0
     genres = try container.decodeIfPresent([String].self, forKey: .genres) ?? []
     nextItem = try container.decodeIfPresent(IOSCollectionNextResponse.self, forKey: .nextItem)
   }

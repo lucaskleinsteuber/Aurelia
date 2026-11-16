@@ -6,7 +6,9 @@ import UIKit
 /// receivers, keys for Home Assistant and shortcuts, and turning the server on and off.
 struct IOSAdminAutomationView: View {
   var body: some View {
-    IOSAdminLoader { try await $0.automationOverview() } content: { overview, reload in
+    IOSAdminLoader {
+      try await $0.automationOverview()
+    } content: { overview, reload in
       IOSAdminAutomationForm(overview: overview, reload: reload)
     }
     .navigationTitle("Smart Home")
@@ -45,11 +47,14 @@ private struct IOSAdminAutomationForm: View {
       IOSAdminPageHeader(
         page: .smartHome,
         text:
-          "Aurelia tells Home Assistant and other automations the moment a movie starts, pauses or ends, or a new title arrives, so lights and scenes can follow. Home Assistant can also wake the server and turn it off.")
+          "Aurelia tells Home Assistant and other automations the moment a movie starts, pauses or ends, or a new title arrives, so lights and scenes can follow. Home Assistant can also wake the server and turn it off."
+      )
       Section {
         if overview.webhooks.isEmpty {
-          Text("No webhooks yet. In Home Assistant create an automation with a Webhook trigger, then add it here with its ID.")
-            .font(.subheadline).foregroundStyle(.secondary)
+          Text(
+            "No webhooks yet. In Home Assistant create an automation with a Webhook trigger, then add it here with its ID."
+          )
+          .font(.subheadline).foregroundStyle(.secondary)
         }
         ForEach(overview.webhooks) { webhook in
           Button {
@@ -58,16 +63,44 @@ private struct IOSAdminAutomationForm: View {
             webhookRow(webhook)
           }
           .swipeActions(edge: .trailing) {
-            Button(role: .destructive) { confirmRemove(webhook) } label: { Label("Remove", systemImage: "trash") }
-            Button { Task { await test(webhook) } } label: { Label("Test", systemImage: "paperplane") }.tint(.indigo)
+            Button(role: .destructive) {
+              confirmRemove(webhook)
+            } label: {
+              Label("Remove", systemImage: "trash")
+            }
+            Button {
+              Task { await test(webhook) }
+            } label: {
+              Label("Test", systemImage: "paperplane")
+            }.tint(.indigo)
           }
           .contextMenu {
-            Button { Task { await test(webhook) } } label: { Label("Send Test", systemImage: "paperplane") }
-            Button { deliveriesFor = webhook } label: { Label("Deliveries", systemImage: "list.bullet.rectangle") }
-            Button { editing = EditorTarget(webhook: webhook) } label: { Label("Edit", systemImage: "pencil") }
-            Button { Task { await rotate(webhook) } } label: { Label("New Secret", systemImage: "key") }
+            Button {
+              Task { await test(webhook) }
+            } label: {
+              Label("Send Test", systemImage: "paperplane")
+            }
+            Button {
+              deliveriesFor = webhook
+            } label: {
+              Label("Deliveries", systemImage: "list.bullet.rectangle")
+            }
+            Button {
+              editing = EditorTarget(webhook: webhook)
+            } label: {
+              Label("Edit", systemImage: "pencil")
+            }
+            Button {
+              Task { await rotate(webhook) }
+            } label: {
+              Label("New Secret", systemImage: "key")
+            }
             Divider()
-            Button(role: .destructive) { confirmRemove(webhook) } label: { Label("Remove…", systemImage: "trash") }
+            Button(role: .destructive) {
+              confirmRemove(webhook)
+            } label: {
+              Label("Remove…", systemImage: "trash")
+            }
           }
         }
         Button {
@@ -80,7 +113,9 @@ private struct IOSAdminAutomationForm: View {
       } header: {
         Text("Webhooks")
       } footer: {
-        Text("Each webhook gets the events you choose, signed so the receiver can check they came from your server. Touch and hold one for Test, Deliveries and New Secret.")
+        Text(
+          "Each webhook gets the events you choose, signed so the receiver can check they came from your server. Touch and hold one for Test, Deliveries and New Secret."
+        )
       }
       Section {
         if overview.tokens.isEmpty { Text("No keys yet.").foregroundStyle(.secondary) }
@@ -88,15 +123,18 @@ private struct IOSAdminAutomationForm: View {
           VStack(alignment: .leading, spacing: 2) {
             Text(token.name)
             Text(
-              token.scopes.map { scope in IOSAutomationText.scopes.first { $0.id == scope }?.title ?? scope }
-                .joined(separator: ", ") + " · last used " + IOSAdminFormat.relative(token.lastUsedAt)
+              token.scopes.map { scope in
+                IOSAutomationText.scopes.first { $0.id == scope }?.title ?? scope
+              }
+              .joined(separator: ", ") + " · last used " + IOSAdminFormat.relative(token.lastUsedAt)
             )
             .font(.caption).foregroundStyle(.secondary)
           }
           .swipeActions {
             Button(role: .destructive) {
               confirmation = IOSAdminConfirmation(
-                title: "Remove the key “\(token.name)”?", message: "Whatever uses it stops working at once.",
+                title: "Remove the key “\(token.name)”?",
+                message: "Whatever uses it stops working at once.",
                 action: "Remove"
               ) {
                 let id = token.id
@@ -115,22 +153,29 @@ private struct IOSAdminAutomationForm: View {
       } header: {
         Text("Keys for Home Assistant and Shortcuts")
       } footer: {
-        Text("For the other direction: Home Assistant reads what plays, or turns the server off, with a key you create here. Swipe a key to remove it.")
+        Text(
+          "For the other direction: Home Assistant reads what plays, or turns the server off, with a key you create here. Swipe a key to remove it."
+        )
       }
       Section {
         if siriReady {
-          Label("Siri is set up on this \(IOSDesign.deviceName)", systemImage: "checkmark.circle.fill")
+          Label(
+            "Siri is set up on this \(IOSDesign.deviceName)", systemImage: "checkmark.circle.fill")
           ForEach(Self.phrases, id: \.self) { phrase in
             Text("“\(phrase)”").font(.callout)
           }
           ShortcutsLink()
-          Button("Remove Siri from This \(IOSDesign.deviceName)", role: .destructive) { Task { await removeSiri() } }
+          Button("Remove Siri from This \(IOSDesign.deviceName)", role: .destructive) {
+            Task { await removeSiri() }
+          }
         } else {
           Button {
             Task { await setUpSiri() }
           } label: {
             IOSAdminToggleLabel(
-              "Set Up Siri", "Creates a key for this \(IOSDesign.deviceName), so Siri can play, turn the server off and say what plays, even when Aurelia is closed.")
+              "Set Up Siri",
+              "Creates a key for this \(IOSDesign.deviceName), so Siri can play, turn the server off and say what plays, even when Aurelia is closed."
+            )
           }
           .accessibilityIdentifier("automation-set-up-siri")
         }
@@ -143,21 +188,28 @@ private struct IOSAdminAutomationForm: View {
       }
       Section {
         LabeledContent("Network Card") {
-          Text(overview.wakeOnLanAddresses.isEmpty ? "Not reported" : overview.wakeOnLanAddresses.joined(separator: ", "))
-            .textSelection(.enabled)
+          Text(
+            overview.wakeOnLanAddresses.isEmpty
+              ? "Not reported" : overview.wakeOnLanAddresses.joined(separator: ", ")
+          )
+          .textSelection(.enabled)
         }
         if overview.powerActions.isEmpty {
-          Text("This server can't turn itself off; it runs as a service that something else starts and stops.")
-            .font(.subheadline).foregroundStyle(.secondary)
+          Text(
+            "This server can't turn itself off; it runs as a service that something else starts and stops."
+          )
+          .font(.subheadline).foregroundStyle(.secondary)
         }
         ForEach(overview.powerActions, id: \.self) { action in
           Button(role: action == "stop" ? nil : .destructive) {
             confirmation = IOSAdminConfirmation(
-              title: "\(IOSAutomationText.powerTitle(action))?", message: IOSAutomationText.powerDetail(action),
+              title: "\(IOSAutomationText.powerTitle(action))?",
+              message: IOSAutomationText.powerDetail(action),
               action: IOSAutomationText.powerTitle(action)
             ) { Task { await powerNow(action, force: false) } }
           } label: {
-            IOSAdminToggleLabel(IOSAutomationText.powerTitle(action), IOSAutomationText.powerDetail(action))
+            IOSAdminToggleLabel(
+              IOSAutomationText.powerTitle(action), IOSAutomationText.powerDetail(action))
           }
         }
       } header: {
@@ -174,29 +226,37 @@ private struct IOSAdminAutomationForm: View {
     .background(IOSDesign.canvas.ignoresSafeArea())
     .refreshable { await reload() }
     .adminConfirmation($confirmation)
-    .onAppear { siriReady = model.connection.map { IOSSiriKeyStore().load(server: $0.serverID) != nil } ?? false }
+    .onAppear {
+      siriReady =
+        model.connection.map { IOSSiriKeyStore().load(server: $0.serverID) != nil } ?? false
+    }
     .sheet(item: $editing) { target in
       NavigationStack {
         IOSWebhookEditor(overview: overview, webhook: target.webhook) { created in
           if let created {
             shown = ShownValue(
               title: "Webhook Saved",
-              explanation: "Every event carries a signature made with this secret (header X-Aurelia-Signature). Keep it if your receiver checks signatures; it is shown only now.",
+              explanation:
+                "Every event carries a signature made with this secret (header X-Aurelia-Signature). Keep it if your receiver checks signatures; it is shown only now.",
               value: created.secret,
               example: created.webhook.preset == "homeAssistant"
                 ? IOSAutomationText.homeAssistantExample(
-                  webhookID: IOSAutomationText.splitHomeAssistantURL(created.webhook.url).webhookID) : nil)
+                  webhookID: IOSAutomationText.splitHomeAssistantURL(created.webhook.url).webhookID)
+                : nil)
           }
         }
       }
     }
-    .sheet(item: $deliveriesFor) { webhook in NavigationStack { IOSWebhookDeliveriesView(webhook: webhook) } }
+    .sheet(item: $deliveriesFor) { webhook in
+      NavigationStack { IOSWebhookDeliveriesView(webhook: webhook) }
+    }
     .sheet(isPresented: $creatingToken) {
       NavigationStack {
         IOSIntegrationTokenEditor { value in
           shown = ShownValue(
             title: "Key Created",
-            explanation: "Copy the key now: it is shown only once. Aurelia keeps only a fingerprint of it. Send it as “Authorization: Bearer <key>”.",
+            explanation:
+              "Copy the key now: it is shown only once. Aurelia keeps only a fingerprint of it. Send it as “Authorization: Bearer <key>”.",
             value: value)
         }
       }
@@ -205,7 +265,8 @@ private struct IOSAdminAutomationForm: View {
   }
 
   static let phrases = [
-    "Hey Siri, turn on my Aurelia server", "Hey Siri, play in Aurelia", "Hey Siri, what's playing in Aurelia",
+    "Hey Siri, turn on my Aurelia server", "Hey Siri, play in Aurelia",
+    "Hey Siri, what's playing in Aurelia",
     "Hey Siri, turn off my Aurelia server",
   ]
 
@@ -215,9 +276,11 @@ private struct IOSAdminAutomationForm: View {
     guard let server = model.connection?.serverID else { return }
     let name = siriKeyName
     guard
-      let created = await admin.value("Setting up Siri…", {
-        try await $0.createIntegrationToken(name: name, scopes: ["status", "power", "playback"])
-      })
+      let created = await admin.value(
+        "Setting up Siri…",
+        {
+          try await $0.createIntegrationToken(name: name, scopes: ["status", "power", "playback"])
+        })
     else { return }
     do {
       try IOSSiriKeyStore().save(created.value, server: server)
@@ -240,13 +303,17 @@ private struct IOSAdminAutomationForm: View {
 
   private func webhookRow(_ webhook: IOSAutomationWebhook) -> some View {
     let status = IOSAutomationText.status(webhook)
-    let events = webhook.events.map { kind in overview.events.first { $0.kind == kind }?.title ?? kind }
+    let events = webhook.events.map { kind in
+      overview.events.first { $0.kind == kind }?.title ?? kind
+    }
     return VStack(alignment: .leading, spacing: 3) {
       HStack(spacing: 6) {
         Text(webhook.name).foregroundStyle(Color.primary)
         Text(status.text).font(.caption2.weight(.semibold))
           .padding(.horizontal, 6).padding(.vertical, 2)
-          .background(Capsule().fill(status.warning ? Color.orange.opacity(0.85) : Color.white.opacity(0.12)))
+          .background(
+            Capsule().fill(status.warning ? Color.orange.opacity(0.85) : Color.white.opacity(0.12))
+          )
           .foregroundStyle(Color.primary)
       }
       Text("\(IOSAutomationText.host(webhook.url)) · \(events.joined(separator: ", "))")
@@ -257,7 +324,8 @@ private struct IOSAdminAutomationForm: View {
 
   private func confirmRemove(_ webhook: IOSAutomationWebhook) {
     confirmation = IOSAdminConfirmation(
-      title: "Remove “\(webhook.name)”?", message: "It stops getting events at once. Your automation in Home Assistant stays.",
+      title: "Remove “\(webhook.name)”?",
+      message: "It stops getting events at once. Your automation in Home Assistant stays.",
       action: "Remove"
     ) {
       let id = webhook.id
@@ -267,7 +335,8 @@ private struct IOSAdminAutomationForm: View {
 
   private func test(_ webhook: IOSAutomationWebhook) async {
     let id = webhook.id
-    guard let delivery = await admin.value("Sending a test…", { try await $0.testWebhook(id: id) }) else { return }
+    guard let delivery = await admin.value("Sending a test…", { try await $0.testWebhook(id: id) })
+    else { return }
     result =
       delivery.state == "succeeded"
       ? "“\(webhook.name)”: delivered in \(delivery.durationMilliseconds ?? 0) ms."
@@ -276,9 +345,14 @@ private struct IOSAdminAutomationForm: View {
 
   private func rotate(_ webhook: IOSAutomationWebhook) async {
     let id = webhook.id
-    guard let secret = await admin.value("Creating a new secret…", { try await $0.rotateWebhookSecret(id: id) }) else { return }
+    guard
+      let secret = await admin.value(
+        "Creating a new secret…", { try await $0.rotateWebhookSecret(id: id) })
+    else { return }
     shown = ShownValue(
-      title: "New Secret", explanation: "The old secret no longer works. Give this one to your receiver if it checks signatures.",
+      title: "New Secret",
+      explanation:
+        "The old secret no longer works. Give this one to your receiver if it checks signatures.",
       value: secret.secret)
   }
 
@@ -318,7 +392,10 @@ private struct IOSWebhookEditor: View {
   @State private var enabled: Bool
   @State private var problem: String?
 
-  init(overview: IOSAutomationOverview, webhook: IOSAutomationWebhook?, created: @escaping (IOSAutomationWebhookCreated?) -> Void) {
+  init(
+    overview: IOSAutomationOverview, webhook: IOSAutomationWebhook?,
+    created: @escaping (IOSAutomationWebhookCreated?) -> Void
+  ) {
     self.overview = overview
     self.webhook = webhook
     self.created = created
@@ -328,9 +405,12 @@ private struct IOSWebhookEditor: View {
     _base = State(initialValue: parts.base)
     _webhookID = State(initialValue: parts.webhookID)
     _url = State(initialValue: webhook?.url ?? "")
-    _events = State(initialValue: Set(webhook?.events ?? [
-      "playback.started", "playback.paused", "playback.resumed", "playback.stopped", "playback.finished",
-    ]))
+    _events = State(
+      initialValue: Set(
+        webhook?.events ?? [
+          "playback.started", "playback.paused", "playback.resumed", "playback.stopped",
+          "playback.finished",
+        ]))
     _devices = State(initialValue: Set(webhook?.deviceIds ?? []))
     _profiles = State(initialValue: Set(webhook?.profileIds ?? []))
     _includeTitles = State(initialValue: webhook?.includeTitles ?? true)
@@ -373,10 +453,14 @@ private struct IOSWebhookEditor: View {
       Section {
         DisclosureGroup("Only Some Devices or Profiles") {
           ForEach(overview.devices) { device in
-            Toggle(device.detail.map { "\(device.name) · \($0)" } ?? device.name, isOn: binding(device.id, in: $devices))
+            Toggle(
+              device.detail.map { "\(device.name) · \($0)" } ?? device.name,
+              isOn: binding(device.id, in: $devices))
           }
           ForEach(overview.profiles) { profile in
-            Toggle(profile.detail.map { "\(profile.name) · \($0)" } ?? profile.name, isOn: binding(profile.id, in: $profiles))
+            Toggle(
+              profile.detail.map { "\(profile.name) · \($0)" } ?? profile.name,
+              isOn: binding(profile.id, in: $profiles))
           }
         }
       } footer: {
@@ -384,10 +468,12 @@ private struct IOSWebhookEditor: View {
       }
       Section {
         Toggle(isOn: $includeTitles) {
-          IOSAdminToggleLabel("Send Titles and Profile Names", "Off sends only which device played, not what or who.")
+          IOSAdminToggleLabel(
+            "Send Titles and Profile Names", "Off sends only which device played, not what or who.")
         }
         Toggle(isOn: $excludeChildren) {
-          IOSAdminToggleLabel("Leave Out Children's Profiles", "Nothing is sent while a children's profile watches.")
+          IOSAdminToggleLabel(
+            "Leave Out Children's Profiles", "Nothing is sent while a children's profile watches.")
         }
         Toggle("On", isOn: $enabled)
       } header: {
@@ -403,16 +489,23 @@ private struct IOSWebhookEditor: View {
     }
   }
 
-  private func binding<Value: Hashable>(_ value: Value, in set: Binding<Set<Value>>) -> Binding<Bool> {
+  private func binding<Value: Hashable>(_ value: Value, in set: Binding<Set<Value>>) -> Binding<
+    Bool
+  > {
     Binding(
       get: { set.wrappedValue.contains(value) },
-      set: { on in if on { set.wrappedValue.insert(value) } else { set.wrappedValue.remove(value) } })
+      set: { on in if on { set.wrappedValue.insert(value) } else { set.wrappedValue.remove(value) }
+      })
   }
 
   private func save() async {
-    let address = preset == "homeAssistant" ? IOSAutomationText.homeAssistantURL(base: base, webhookID: webhookID) : url
+    let address =
+      preset == "homeAssistant"
+      ? IOSAutomationText.homeAssistantURL(base: base, webhookID: webhookID) : url
     guard let address, !address.trimmingCharacters(in: .whitespaces).isEmpty else {
-      problem = preset == "homeAssistant" ? "Enter Home Assistant's address and the webhook ID." : "Enter the address."
+      problem =
+        preset == "homeAssistant"
+        ? "Enter Home Assistant's address and the webhook ID." : "Enter the address."
       return
     }
     guard !events.isEmpty else {
@@ -422,7 +515,8 @@ private struct IOSWebhookEditor: View {
     let request = IOSAutomationWebhookRequest(
       name: name.trimmingCharacters(in: .whitespaces), url: address, preset: preset,
       events: overview.events.map(\.kind).filter(events.contains), deviceIds: Array(devices),
-      profileIds: Array(profiles), includeTitles: includeTitles, excludeChildren: excludeChildren, enabled: enabled)
+      profileIds: Array(profiles), includeTitles: includeTitles, excludeChildren: excludeChildren,
+      enabled: enabled)
     if let webhook {
       let id = webhook.id
       if await admin.perform("Saving…", { try await $0.saveWebhook(id: id, request) }) {
@@ -448,13 +542,16 @@ private struct IOSIntegrationTokenEditor: View {
       Section {
         TextField("Name", text: $name)
       } footer: {
-        Text("A key lets Home Assistant or a shortcut talk to Aurelia without a profile. It can do only what you allow below, and you can remove it any time.")
+        Text(
+          "A key lets Home Assistant or a shortcut talk to Aurelia without a profile. It can do only what you allow below, and you can remove it any time."
+        )
       }
       Section {
         ForEach(IOSAutomationText.scopes, id: \.id) { scope in
-          Toggle(isOn: Binding(
-            get: { scopes.contains(scope.id) },
-            set: { on in if on { scopes.insert(scope.id) } else { scopes.remove(scope.id) } })
+          Toggle(
+            isOn: Binding(
+              get: { scopes.contains(scope.id) },
+              set: { on in if on { scopes.insert(scope.id) } else { scopes.remove(scope.id) } })
           ) {
             IOSAdminToggleLabel(scope.title, scope.detail)
           }
@@ -467,9 +564,15 @@ private struct IOSIntegrationTokenEditor: View {
       ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
       ToolbarItem(placement: .confirmationAction) {
         Button("Create") {
-          let (title, chosen) = (name.trimmingCharacters(in: .whitespaces), IOSAutomationText.scopes.map(\.id).filter(scopes.contains))
+          let (title, chosen) = (
+            name.trimmingCharacters(in: .whitespaces),
+            IOSAutomationText.scopes.map(\.id).filter(scopes.contains)
+          )
           Task {
-            if let result = await admin.value("Creating the key…", { try await $0.createIntegrationToken(name: title, scopes: chosen) }) {
+            if let result = await admin.value(
+              "Creating the key…",
+              { try await $0.createIntegrationToken(name: title, scopes: chosen) })
+            {
               dismiss()
               created(result.value)
             }
@@ -504,7 +607,9 @@ private struct IOSShownValueView: View {
         } header: {
           Text("Example Automation")
         } footer: {
-          Text("In Home Assistant: Settings › Automations › Create Automation › ⋮ › Edit in YAML, paste this and change the lights to yours.")
+          Text(
+            "In Home Assistant: Settings › Automations › Create Automation › ⋮ › Edit in YAML, paste this and change the lights to yours."
+          )
         }
       }
     }
@@ -517,7 +622,9 @@ private struct IOSWebhookDeliveriesView: View {
   let webhook: IOSAutomationWebhook
 
   var body: some View {
-    IOSAdminLoader { [id = webhook.id] client in try await client.webhookDeliveries(id: id) } content: { deliveries, _ in
+    IOSAdminLoader { [id = webhook.id] client in
+      try await client.webhookDeliveries(id: id)
+    } content: { deliveries, _ in
       Form {
         Section {
           if deliveries.isEmpty { Text("Nothing sent yet.").foregroundStyle(.secondary) }
@@ -526,17 +633,22 @@ private struct IOSWebhookDeliveriesView: View {
               Text(delivery.event)
               Text(
                 [
-                  delivery.state == "succeeded" ? "Delivered" : delivery.state == "pending" ? "Trying again" : "Failed",
-                  delivery.statusCode.map { "HTTP \($0)" }, delivery.durationMilliseconds.map { "\($0) ms" },
+                  delivery.state == "succeeded"
+                    ? "Delivered" : delivery.state == "pending" ? "Trying again" : "Failed",
+                  delivery.statusCode.map { "HTTP \($0)" },
+                  delivery.durationMilliseconds.map { "\($0) ms" },
                   delivery.attempt > 1 ? "attempt \(delivery.attempt)" : nil, delivery.error,
                   IOSAdminFormat.relative(delivery.at),
                 ].compactMap { $0 }.joined(separator: " · ")
               )
-              .font(.caption).foregroundStyle(delivery.state == "succeeded" ? Color.secondary : Color.orange)
+              .font(.caption).foregroundStyle(
+                delivery.state == "succeeded" ? Color.secondary : Color.orange)
             }
           }
         } footer: {
-          Text("The last 100 deliveries of the past seven days, with how long the receiver took. The events themselves are not kept.")
+          Text(
+            "The last 100 deliveries of the past seven days, with how long the receiver took. The events themselves are not kept."
+          )
         }
       }
       .scrollContentBackground(.hidden)

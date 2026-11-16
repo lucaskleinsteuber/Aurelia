@@ -174,9 +174,10 @@ final class ProfilePhotoCache: ObservableObject {
   /// Set by the app model: fetches a profile's photo (JPEG) from the connected server.
   var loader: (@MainActor (UUID, Int64) async throws -> Data)?
 
-  init(folder: URL? = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
-    .appendingPathComponent("Aurelia Profile Photos", isDirectory: true))
-  {
+  init(
+    folder: URL? = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+      .appendingPathComponent("Aurelia Profile Photos", isDirectory: true)
+  ) {
     self.folder = folder
   }
 
@@ -223,7 +224,8 @@ final class ProfilePhotoCache: ObservableObject {
     try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     try? data.write(to: file, options: .atomic)
     let earlier = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
-    for name in earlier where name.hasPrefix(id.uuidString + "-") && name != file.lastPathComponent {
+    for name in earlier where name.hasPrefix(id.uuidString + "-") && name != file.lastPathComponent
+    {
       try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
     }
   }

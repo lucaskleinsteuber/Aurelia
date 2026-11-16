@@ -10,12 +10,14 @@ struct SiriKeyStore {
     AppEdition.isTest ? "com.lucas.aurelia.media.test.siri" : "com.lucas.aurelia.media.siri"
 
   func load(server: UUID) -> String? {
-    AureliaKeychain.migrate(service: Self.service, accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)
+    AureliaKeychain.migrate(
+      service: Self.service, accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)
     var query = AureliaKeychain.item(Self.query(server))
     query[kSecReturnData as String] = true
     query[kSecMatchLimit as String] = kSecMatchLimitOne
     var result: CFTypeRef?
-    guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data,
+    guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+      let data = result as? Data,
       let key = String(data: data, encoding: .utf8), Self.isKey(key)
     else { return nil }
     return key
@@ -27,13 +29,16 @@ struct SiriKeyStore {
     var query = AureliaKeychain.item(Self.query(server))
     query[kSecValueData as String] = Data(key.utf8)
     query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-    guard SecItemAdd(query as CFDictionary, nil) == errSecSuccess else { throw APIClientError.invalidResponse }
+    guard SecItemAdd(query as CFDictionary, nil) == errSecSuccess else {
+      throw APIClientError.invalidResponse
+    }
   }
 
   func delete(server: UUID) { AureliaKeychain.delete(Self.query(server)) }
 
   static func isKey(_ text: String) -> Bool {
-    text.hasPrefix("aur_it_") && (40...128).contains(text.utf8.count) && !text.contains(where: \.isWhitespace)
+    text.hasPrefix("aur_it_") && (40...128).contains(text.utf8.count)
+      && !text.contains(where: \.isWhitespace)
   }
 
   private static func query(_ server: UUID) -> [String: Any] {
@@ -50,13 +55,20 @@ struct IntegrationClient: Sendable {
   let key: String
 
   func status() async throws -> IntegrationStatus { try await get("/api/v1/integration/status") }
-  func players() async throws -> [IntegrationPlayer] { try await get("/api/v1/integration/players") }
+  func players() async throws -> [IntegrationPlayer] {
+    try await get("/api/v1/integration/players")
+  }
   func search(_ text: String) async throws -> [IntegrationTitle] {
-    let query = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&+=?"))) ?? ""
+    let query =
+      text.addingPercentEncoding(
+        withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&+=?")))
+      ?? ""
     return try await get("/api/v1/integration/search?query=\(query)")
   }
   func episode(of series: UUID, season: Int, episode: Int) async throws -> IntegrationTitle {
-    try await get("/api/v1/integration/titles/\(series.uuidString.lowercased())/episode?season=\(season)&episode=\(episode)")
+    try await get(
+      "/api/v1/integration/titles/\(series.uuidString.lowercased())/episode?season=\(season)&episode=\(episode)"
+    )
   }
   func next(in title: UUID) async throws -> IntegrationTitle {
     try await get("/api/v1/integration/titles/\(title.uuidString.lowercased())/next")
@@ -66,9 +78,13 @@ struct IntegrationClient: Sendable {
       let action: String
       let mediaId: UUID
     }
-    let device = deviceID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? deviceID
+    let device =
+      deviceID.addingPercentEncoding(
+        withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/")))
+      ?? deviceID
     _ = try await APIClient.integrationRequest(
-      profile: profile, key: key, path: "/api/v1/integration/players/\(device)/commands", method: "POST",
+      profile: profile, key: key, path: "/api/v1/integration/players/\(device)/commands",
+      method: "POST",
       body: JSONEncoder().encode(Body(action: "play", mediaId: media)))
   }
   func powerNow(_ action: String) async throws -> String {
@@ -80,12 +96,15 @@ struct IntegrationClient: Sendable {
     return try JSONDecoder().decode(Answer.self, from: data).message
   }
   func answers() async -> Bool {
-    (try? await APIClient.integrationRequest(profile: profile, key: nil, path: "/api/v1/health", method: "GET", body: nil)) != nil
+    (try? await APIClient.integrationRequest(
+      profile: profile, key: nil, path: "/api/v1/health", method: "GET", body: nil)) != nil
   }
 
   private func get<Value: Decodable>(_ path: String) async throws -> Value {
     try JSONDecoder().decode(
-      Value.self, from: await APIClient.integrationRequest(profile: profile, key: key, path: path, method: "GET", body: nil))
+      Value.self,
+      from: await APIClient.integrationRequest(
+        profile: profile, key: key, path: path, method: "GET", body: nil))
   }
 }
 
@@ -144,7 +163,8 @@ enum SiriTitleRequest {
     for pattern in patterns {
       guard let regex = try? NSRegularExpression(pattern: pattern),
         let match = regex.firstMatch(in: spoken, range: NSRange(spoken.startIndex..., in: spoken)),
-        let whole = Range(match.range, in: spoken), let first = Range(match.range(at: 1), in: spoken),
+        let whole = Range(match.range, in: spoken),
+        let first = Range(match.range(at: 1), in: spoken),
         let second = Range(match.range(at: 2), in: spoken)
       else { continue }
       var title = spoken
@@ -156,7 +176,8 @@ enum SiriTitleRequest {
 
   /// The best of several found titles: an exact name first, then a show when an episode was asked.
   static func best(_ titles: [IntegrationTitle], for request: Parsed) -> IntegrationTitle? {
-    let wanted = request.title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+    let wanted = request.title.folding(
+      options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
     let exact = titles.filter {
       $0.title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) == wanted
     }

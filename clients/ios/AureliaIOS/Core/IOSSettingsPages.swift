@@ -166,7 +166,8 @@ enum IOSServerHealthText {
     if let free = health.freeDiskBytes { parts.append("\(IOSAdminText.bytes(free)) free") }
     if !health.recentIssues.isEmpty {
       parts.append(
-        "\(health.recentIssues.count) recent \(health.recentIssues.count == 1 ? "problem" : "problems")")
+        "\(health.recentIssues.count) recent \(health.recentIssues.count == 1 ? "problem" : "problems")"
+      )
     }
     if health.backup?.lastAttemptFailed == true { parts.append("last backup failed") }
     return parts.joined(separator: " · ")

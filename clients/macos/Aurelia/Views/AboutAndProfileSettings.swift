@@ -30,7 +30,8 @@ struct AboutAureliaSections: View {
 
       AureliaSettingsSection(
         "What's New in This Version", symbol: "list.bullet.rectangle",
-        description: "The changes in version \(updater.currentVersion). Every version is in the release notes on GitHub."
+        description:
+          "The changes in version \(updater.currentVersion). Every version is in the release notes on GitHub."
       ) {
         VStack(alignment: .leading, spacing: 8) {
           if ReleaseNotes.current.isEmpty {
@@ -97,7 +98,6 @@ struct AboutAureliaSections: View {
         }
       }
 
-
       AureliaSettingsSection(
         "Source Code", symbol: "chevron.left.forwardslash.chevron.right",
         description:
@@ -119,11 +119,16 @@ struct AboutAureliaSections: View {
             }
             if let others = MacLicense.otherNotices {
               Button("Other Components…") { NSWorkspace.shared.open(others) }
-                .help("The licenses and notices of .NET, SQLite, SkiaSharp and the other parts of the server")
+                .help(
+                  "The licenses and notices of .NET, SQLite, SkiaSharp and the other parts of the server"
+                )
             }
           }
           .accessibilityIdentifier("about-licenses")
-          Link("Privacy Policy", destination: URL(string: "https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/PRIVACY.md")!)
+          Link(
+            "Privacy Policy",
+            destination: URL(
+              string: "https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/PRIVACY.md")!)
           Text(
             "Movie and series details and pictures can come from TMDB when the server's owner turns it on; subtitles can come from OpenSubtitles. This product uses the TMDB API but is not endorsed or certified by TMDB, and Aurelia is not endorsed by OpenSubtitles."
           )
@@ -147,7 +152,9 @@ struct MacLicense: Identifiable {
   static var all: [MacLicense] {
     let resources = Bundle.main.resourceURL
     return [
-      resources.map { MacLicense(title: "Aurelia (MIT)", file: $0.appendingPathComponent("LICENSE"), source: nil) },
+      resources.map {
+        MacLicense(title: "Aurelia (MIT)", file: $0.appendingPathComponent("LICENSE"), source: nil)
+      },
       resources.map {
         MacLicense(
           title: "VLCKit (LGPL)", file: $0.appendingPathComponent("VLCKit-COPYING.txt"),
@@ -182,9 +189,12 @@ private struct MacLicenseSheet: View {
         if let source = license.source { Link("Source Code", destination: source) }
       }
       ScrollView {
-        Text((try? String(contentsOf: license.file, encoding: .utf8)) ?? "The license text is missing from this build.")
-          .font(.system(.callout, design: .monospaced)).textSelection(.enabled)
-          .frame(maxWidth: .infinity, alignment: .leading)
+        Text(
+          (try? String(contentsOf: license.file, encoding: .utf8))
+            ?? "The license text is missing from this build."
+        )
+        .font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
       HStack {
         Spacer()

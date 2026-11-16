@@ -373,9 +373,11 @@ struct MetadataEditorSheet: View {
         }
       }
       if draft.values.credits.count > Self.peoplePage {
-        TextField("Find a Person", text: $personQuery, prompt: Text("Find a person by name or role"))
-          .textFieldStyle(.roundedBorder)
-          .accessibilityIdentifier("metadata-person-search")
+        TextField(
+          "Find a Person", text: $personQuery, prompt: Text("Find a person by name or role")
+        )
+        .textFieldStyle(.roundedBorder)
+        .accessibilityIdentifier("metadata-person-search")
       }
       ForEach(shownPeople, id: \.element.id) { index, person in
         HStack(alignment: .top, spacing: 16) {
@@ -443,7 +445,9 @@ struct MetadataEditorSheet: View {
         let rest = draft.values.credits.count - peopleShown
         HStack(spacing: 12) {
           Button("Show \(min(rest, Self.peoplePage)) More") { peopleShown += Self.peoplePage }
-          Button("Show All \(draft.values.credits.count)") { peopleShown = draft.values.credits.count }
+          Button("Show All \(draft.values.credits.count)") {
+            peopleShown = draft.values.credits.count
+          }
           Text("\(rest) more not shown").font(.callout).foregroundStyle(.secondary)
         }
       }

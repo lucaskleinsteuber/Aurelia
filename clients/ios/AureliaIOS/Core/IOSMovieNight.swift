@@ -100,7 +100,9 @@ enum IOSMovieNightRules {
   static let swipeDistance: Double = 110
 
   /// The vote for a card let go `offset` points to the side, moving at `velocity` points per second.
-  static func choice(offset: Double, velocity: Double = 0, width: Double = 360) -> IOSMovieNightChoice? {
+  static func choice(offset: Double, velocity: Double = 0, width: Double = 360)
+    -> IOSMovieNightChoice?
+  {
     let limit = min(swipeDistance, max(60, width * 0.3))
     if offset >= limit || (velocity > 600 && offset > 30) { return .like }
     if offset <= -limit || (velocity < -600 && offset < -30) { return .nope }
@@ -188,7 +190,9 @@ final class IOSMovieNightSession: ObservableObject {
 
   func join(_ night: IOSMovieNightSummary, voting: Bool = true) async {
     let name = deviceName
-    await run { [api] in try await api.joinMovieNight(id: night.id, deviceName: name, voting: voting) }
+    await run { [api] in
+      try await api.joinMovieNight(id: night.id, deviceName: name, voting: voting)
+    }
   }
 
   func settings(_ program: IOSMovieNightProgram) async {
@@ -220,7 +224,8 @@ final class IOSMovieNightSession: ObservableObject {
         receive(try await api.voteMovieNight(id: id, mediaID: card.mediaId, like: like))
       } catch {
         pending[card.mediaId] = nil
-        errorText = Self.message(error, fallback: "That swipe didn't reach the server. Try it again.")
+        errorText = Self.message(
+          error, fallback: "That swipe didn't reach the server. Try it again.")
       }
     }
   }
@@ -266,7 +271,8 @@ final class IOSMovieNightSession: ObservableObject {
         guard let self, let state = self.state else { return }
         do {
           let next = try await self.api.movieNight(
-            id: state.id, after: state.revision, deckVersion: state.deckVersion, waitMilliseconds: 20_000)
+            id: state.id, after: state.revision, deckVersion: state.deckVersion,
+            waitMilliseconds: 20_000)
           failures = 0
           guard !Task.isCancelled else { return }
           self.receive(next)
@@ -292,7 +298,9 @@ final class IOSMovieNightSession: ObservableObject {
   }
 
   private static func message(_ error: Error, fallback: String) -> String {
-    if case IOSCoreError.server(_, _, let message, _) = error, let message, !message.isEmpty { return message }
+    if case IOSCoreError.server(_, _, let message, _) = error, let message, !message.isEmpty {
+      return message
+    }
     return fallback
   }
 }
@@ -311,15 +319,18 @@ extension IOSAPIClient: IOSMovieNightAPI {
       let deviceName: String
       let isVoting: Bool
     }
-    return try await postWatchTogether("/api/v1/movie-night", Body(deviceName: deviceName, isVoting: voting))
+    return try await postWatchTogether(
+      "/api/v1/movie-night", Body(deviceName: deviceName, isVoting: voting))
   }
 
-  func joinMovieNight(id: UUID, deviceName: String, voting: Bool) async throws -> IOSMovieNightState {
+  func joinMovieNight(id: UUID, deviceName: String, voting: Bool) async throws -> IOSMovieNightState
+  {
     struct Body: Encodable {
       let deviceName: String
       let isVoting: Bool
     }
-    return try await postWatchTogether(Self.night(id, "/join"), Body(deviceName: deviceName, isVoting: voting))
+    return try await postWatchTogether(
+      Self.night(id, "/join"), Body(deviceName: deviceName, isVoting: voting))
   }
 
   func movieNight(id: UUID, after: Int64?, deckVersion: Int?, waitMilliseconds: Int) async throws
@@ -331,7 +342,9 @@ extension IOSAPIClient: IOSMovieNightAPI {
         URLQueryItem(name: "after", value: String(after)),
         URLQueryItem(name: "waitMs", value: String(waitMilliseconds)),
       ]
-      if let deckVersion { query.append(URLQueryItem(name: "deckVersion", value: String(deckVersion))) }
+      if let deckVersion {
+        query.append(URLQueryItem(name: "deckVersion", value: String(deckVersion)))
+      }
     }
     return try await getWatchTogether(Self.night(id), query: query)
   }

@@ -133,7 +133,8 @@ struct IOSPlaybackPreferences: Codable, Equatable, Sendable {
       ?? (legacy ? .standard : .off)
     dialogueBoost = try values.decodeIfPresent(DialogueBoost.self, forKey: .dialogueBoost) ?? .off
     streamingQuality =
-      (try? values.decodeIfPresent(IOSStreamingQuality.self, forKey: .streamingQuality)) ?? .original
+      (try? values.decodeIfPresent(IOSStreamingQuality.self, forKey: .streamingQuality))
+      ?? .original
     introSkipping =
       (try? values.decodeIfPresent(IOSIntroSkipping.self, forKey: .introSkipping)) ?? .button
     upNextAtCredits = try values.decodeIfPresent(Bool.self, forKey: .upNextAtCredits) ?? true

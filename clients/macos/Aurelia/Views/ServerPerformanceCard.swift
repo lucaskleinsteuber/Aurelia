@@ -21,7 +21,8 @@ struct ServerPerformanceCard: View {
           VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 24) {
               metric("Requests", performance.requests.formatted())
-              metric("95 % Answered Within", ServerPerformanceText.duration(performance.p95Milliseconds))
+              metric(
+                "95 % Answered Within", ServerPerformanceText.duration(performance.p95Milliseconds))
               metric("Slow Queries", "\(performance.slowQueries.filter { !$0.warmUp }.count)")
               Spacer()
               Button("Reset Measurements") { Task { await reset() } }
@@ -68,8 +69,10 @@ struct ServerPerformanceCard: View {
                   ForEach(performance.slowQueries.prefix(50)) { query in
                     VStack(alignment: .leading, spacing: 2) {
                       HStack {
-                        Text("\(ServerPerformanceText.duration(query.milliseconds)) · \(query.kind)")
-                          .font(.caption.weight(.semibold))
+                        Text(
+                          "\(ServerPerformanceText.duration(query.milliseconds)) · \(query.kind)"
+                        )
+                        .font(.caption.weight(.semibold))
                         if query.warmUp {
                           Text("while starting").font(.caption2).foregroundStyle(.secondary)
                         }

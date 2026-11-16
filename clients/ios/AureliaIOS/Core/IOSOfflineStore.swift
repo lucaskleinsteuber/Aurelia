@@ -84,9 +84,11 @@ final class IOSOfflineStore: ObservableObject {
   var totalBytes: Int64 { titles.reduce(0) { $0 + $1.bytes } }
 
   var availableBytes: Int64 {
-    let probe = FileManager.default.fileExists(atPath: root.path)
+    let probe =
+      FileManager.default.fileExists(atPath: root.path)
       ? root : root.deletingLastPathComponent()
-    return (try? probe.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+    return
+      (try? probe.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
       .volumeAvailableCapacityForImportantUsage) ?? Int64.max
   }
 
@@ -129,7 +131,8 @@ final class IOSOfflineStore: ObservableObject {
       var title = IOSOfflineTitle(
         id: item.id, serverID: connection.serverID, profileID: session.user.id, title: item.title,
         subtitle: IOSOfflineRules.subtitle(for: item), kind: item.kind.rawValue,
-        fileName: quality == nil ? "title.\(IOSOfflineRules.fileExtension(ticket.contentType))" : "title.mp4",
+        fileName: quality == nil
+          ? "title.\(IOSOfflineRules.fileExtension(ticket.contentType))" : "title.mp4",
         contentType: quality == nil ? ticket.contentType : "video/mp4",
         bytes: quality == nil ? ticket.contentLength : (expectedBytes ?? 0), downloadedAt: Date(),
         positionMilliseconds: ticket.progress.positionMilliseconds,
@@ -141,7 +144,8 @@ final class IOSOfflineStore: ObservableObject {
         episodeNumber: item.episodeNumber)
       title.quality = quality
       title.subtitles = await Self.subtitles(ticket: ticket, into: folder, api: api)
-      title.posterFile = await Self.keep(item.poster, width: 640, as: "poster.image", in: folder, api: api)
+      title.posterFile = await Self.keep(
+        item.poster, width: 640, as: "poster.image", in: folder, api: api)
       title.backdropFile = await Self.keep(
         item.backdrop, width: 1920, as: "backdrop.image", in: folder, api: api)
       title.seriesPosterFile = await Self.keep(
@@ -244,9 +248,12 @@ final class IOSOfflineStore: ObservableObject {
 
   /// Fetches a converted copy segment by segment, continuing where it stopped.
   private func startConverted(_ id: UUID) {
-    guard let entry = pending(id), let converted = entry.converted, convertedTasks[id] == nil else { return }
+    guard let entry = pending(id), let converted = entry.converted, convertedTasks[id] == nil else {
+      return
+    }
     guard let api = convertedClients[id] else {
-      transferFailed(id, message: "Open Aurelia at home to continue this download.", resumeData: nil)
+      transferFailed(
+        id, message: "Open Aurelia at home to continue this download.", resumeData: nil)
       return
     }
     convertedStarted?(id, entry.title.title)
@@ -316,7 +323,8 @@ final class IOSOfflineStore: ObservableObject {
     convertedTasks[id] = nil
     convertedEnded?(id, false)
     guard pending(id) != nil else { return }
-    transferFailed(id, message: message ?? "Paused. Try Again continues where it stopped.", resumeData: nil)
+    transferFailed(
+      id, message: message ?? "Paused. Try Again continues where it stopped.", resumeData: nil)
   }
 
   /// The system ended the time it gave the app in the background: the download pauses.
@@ -491,7 +499,8 @@ final class IOSOfflineStore: ObservableObject {
       }
       guard current.durationMilliseconds > 0,
         let saved = try? await api.saveProgress(
-          mediaID: current.id, position: min(current.positionMilliseconds, current.durationMilliseconds),
+          mediaID: current.id,
+          position: min(current.positionMilliseconds, current.durationMilliseconds),
           duration: current.durationMilliseconds, finished: current.isCompleted,
           expectedRevision: server.revision, mutationID: UUID()),
         let after = titles.firstIndex(where: { $0.id == current.id })
@@ -533,7 +542,8 @@ final class IOSOfflineStore: ObservableObject {
     try? folder.setResourceValues(values)
   }
 
-  private static let damagedListMessage = "The list of downloads was damaged and has been set aside."
+  private static let damagedListMessage =
+    "The list of downloads was damaged and has been set aside."
 
   private func load() {
     let decoder = JSONDecoder()
@@ -613,7 +623,8 @@ final class IOSOfflineStore: ObservableObject {
   private func write(_ value: some Encodable, to url: URL) {
     try? prepareRoot()
     guard let data = try? JSONEncoder().encode(value) else { return }
-    try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    try? data.write(
+      to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
   }
 
@@ -627,7 +638,8 @@ final class IOSOfflineStore: ObservableObject {
     for track in IOSLiveSubtitleTrack.sidecarFiles(tracks) {
       let name = "subtitle-\(track.index).vtt"
       guard
-        let data = try? await api.streamSubtitleFile(streamPath: ticket.streamPath, index: track.index),
+        let data = try? await api.streamSubtitleFile(
+          streamPath: ticket.streamPath, index: track.index),
         (try? data.write(to: folder.appendingPathComponent(name), options: .atomic)) != nil
       else { continue }
       kept.append(
@@ -698,7 +710,8 @@ final class IOSOfflineDownloader: NSObject, URLSessionDownloadDelegate, @uncheck
     let fingerprint: String
   }
 
-  static let identifier = (Bundle.main.bundleIdentifier ?? "com.lucas.aurelia.ios")
+  static let identifier =
+    (Bundle.main.bundleIdentifier ?? "com.lucas.aurelia.ios")
     + ".offline-downloads"
 
   private let root: URL
@@ -773,7 +786,8 @@ final class IOSOfflineDownloader: NSObject, URLSessionDownloadDelegate, @uncheck
 
   func urlSession(
     _ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
-    completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) ->
+    completionHandler:
+      @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) ->
       Void
   ) {
     guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
@@ -815,7 +829,8 @@ final class IOSOfflineDownloader: NSObject, URLSessionDownloadDelegate, @uncheck
   }
 
   func urlSession(
-    _ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL
+    _ session: URLSession, downloadTask: URLSessionDownloadTask,
+    didFinishDownloadingTo location: URL
   ) {
     guard let media = Self.description(of: downloadTask)?.media else { return }
     let status = (downloadTask.response as? HTTPURLResponse)?.statusCode ?? 0

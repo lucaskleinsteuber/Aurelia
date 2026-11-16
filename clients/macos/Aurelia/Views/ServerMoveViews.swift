@@ -28,9 +28,9 @@ struct ServerMoveSection: View {
         .frame(maxWidth: .infinity, alignment: .leading)
       }
       .task { await load() }
-      .sheet(isPresented: $showingSheet, onDismiss: { Task { await load() } }) {
-        ServerMoveSheet(client: client, resuming: status?.isWaiting == true)
-      }
+      .sheet(
+        isPresented: $showingSheet, onDismiss: { Task { await load() } },
+        content: { ServerMoveSheet(client: client, resuming: status?.isWaiting == true) })
     }
   }
 
@@ -207,7 +207,8 @@ struct ServerMoveSheet: View {
         to: .network)
       choice(
         "With a Moving File", symbol: "doc.zipper",
-        detail: "An encrypted file with a passphrase you choose, for when the computers can't reach each other.",
+        detail:
+          "An encrypted file with a passphrase you choose, for when the computers can't reach each other.",
         to: .file)
     }
   }

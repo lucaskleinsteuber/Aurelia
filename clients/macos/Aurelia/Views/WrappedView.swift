@@ -63,14 +63,25 @@ struct WrappedStoryView: View {
     .focusEffectDisabled()
     .focused($focused)
     .onAppear { focused = true }
-    .onKeyPress(.rightArrow) { go(forward: true); return .handled }
-    .onKeyPress(.leftArrow) { go(forward: false); return .handled }
-    .onKeyPress(.space) { held.toggle(); return .handled }
+    .onKeyPress(.rightArrow) {
+      go(forward: true)
+      return .handled
+    }
+    .onKeyPress(.leftArrow) {
+      go(forward: false)
+      return .handled
+    }
+    .onKeyPress(.space) {
+      held.toggle()
+      return .handled
+    }
     .task { await load() }
     .task(id: "\(index)-\(held)-\(wrapped != nil)") { await run() }
   }
 
-  private func content(_ slide: WrappedSlide, accent: WrappedStory.Accent, size: CGSize) -> some View {
+  private func content(_ slide: WrappedSlide, accent: WrappedStory.Accent, size: CGSize)
+    -> some View
+  {
     let wide = size.width >= 900
     // Type grows with the window, within limits that keep a slide on one screen.
     let scale = min(max(size.height / 800, 0.85), 1.5)
@@ -96,7 +107,8 @@ struct WrappedStoryView: View {
           if !wide, let poster {
             posterView(poster, width: 140)
           }
-          Text(slide.headline).font(.system(size: 40 * scale, weight: .black)).tracking(-1).lineLimit(3)
+          Text(slide.headline).font(.system(size: 40 * scale, weight: .black)).tracking(-1)
+            .lineLimit(3)
             .minimumScaleFactor(0.6)
           if let number = slide.bigNumber {
             VStack(alignment: .leading, spacing: 0) {
@@ -105,7 +117,9 @@ struct WrappedStoryView: View {
                 .tracking(-8 * scale)
                 .minimumScaleFactor(0.4)
                 .lineLimit(1)
-              if let unit = slide.unit { Text(unit).font(.system(size: 28 * scale, weight: .heavy)) }
+              if let unit = slide.unit {
+                Text(unit).font(.system(size: 28 * scale, weight: .heavy))
+              }
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel([number, slide.unit].compactMap { $0 }.joined(separator: " "))
@@ -155,7 +169,8 @@ struct WrappedStoryView: View {
   private func posterGrid(_ slide: WrappedSlide, width: CGFloat) -> some View {
     if let posters = slide.posters, !posters.isEmpty {
       LazyVGrid(
-        columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: posters.count == 1 ? 1 : 2),
+        columns: Array(
+          repeating: GridItem(.flexible(), spacing: 10), count: posters.count == 1 ? 1 : 2),
         spacing: 10
       ) {
         ForEach(Array(posters.prefix(4).enumerated()), id: \.offset) { _, poster in
@@ -181,8 +196,11 @@ struct WrappedStoryView: View {
           }
           .frame(height: 3)
         }
-        Button { close() } label: {
-          Image(systemName: "xmark").font(.headline).frame(width: 44, height: 44).contentShape(Rectangle())
+        Button {
+          close()
+        } label: {
+          Image(systemName: "xmark").font(.headline).frame(width: 44, height: 44).contentShape(
+            Rectangle())
         }
         .buttonStyle(AureliaPressableButtonStyle())
         .keyboardShortcut(.cancelAction)
@@ -218,7 +236,9 @@ struct WrappedStoryView: View {
 
   private func go(forward: Bool) {
     guard let count = wrapped?.slides.count else { return }
-    guard let next = WrappedStory.step(from: index, count: count, forward: forward) else { return close() }
+    guard let next = WrappedStory.step(from: index, count: count, forward: forward) else {
+      return close()
+    }
     progress = 0
     index = next
   }
@@ -227,7 +247,9 @@ struct WrappedStoryView: View {
   private func run() async {
     guard let slides = wrapped?.slides, slides.indices.contains(index) else { return }
     let slide = slides[index]
-    if progress == 0, !reduceMotion, let target = WrappedStory.countTarget(slide.bigNumber), target > 1 {
+    if progress == 0, !reduceMotion, let target = WrappedStory.countTarget(slide.bigNumber),
+      target > 1
+    {
       let start = Date()
       while !Task.isCancelled {
         let fraction = Date().timeIntervalSince(start) / 1.1
@@ -278,7 +300,9 @@ struct MonthlyWrappedButton: View {
       }
       .foregroundStyle(Color(wrappedHex: 0x22000F))
       .padding(14)
-      .background(Color(wrappedHex: 0xFF4D88), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+      .background(
+        Color(wrappedHex: 0xFF4D88), in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+      )
       .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
     .buttonStyle(AureliaPressableButtonStyle())
@@ -306,7 +330,10 @@ struct MonthlyWrappedArchive: View {
         }
         .frame(width: 160)
         .accessibilityIdentifier("wrapped-archive-year")
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 116, maximum: 160), spacing: 10)], alignment: .leading, spacing: 10) {
+        LazyVGrid(
+          columns: [GridItem(.adaptive(minimum: 116, maximum: 160), spacing: 10)],
+          alignment: .leading, spacing: 10
+        ) {
           ForEach(Array(months), id: \.self) { month in
             Button {
               model.wrappedLaunch = WrappedLaunch(year: shownYear, month: month)
@@ -319,11 +346,16 @@ struct MonthlyWrappedArchive: View {
               .frame(maxWidth: .infinity, alignment: .leading)
               .padding(12)
               .foregroundStyle(Color(wrappedHex: 0x22000F))
-              .background(Color(wrappedHex: 0xFF4D88).opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+              .background(
+                Color(wrappedHex: 0xFF4D88).opacity(0.92),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+              )
               .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(AureliaPressableButtonStyle())
-            .accessibilityLabel("Play \(WrappedStory.monthName(month)) \(String(shownYear)) Wrapped")
+            .accessibilityLabel(
+              "Play \(WrappedStory.monthName(month)) \(String(shownYear)) Wrapped"
+            )
             .accessibilityIdentifier("wrapped-month-\(month)")
           }
         }

@@ -331,7 +331,9 @@ struct IOSStatisticsView: View {
             }
             .foregroundStyle(.white)
             .padding(14)
-            .background(Color(wrappedHex: 0x6A4CFF), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(
+              Color(wrappedHex: 0x6A4CFF),
+              in: RoundedRectangle(cornerRadius: 14, style: .continuous))
           }
           .buttonStyle(.plain)
           .padding(.horizontal, IOSDesign.margin)
@@ -510,7 +512,9 @@ struct IOSMonthlyWrappedButton: View {
       }
       .foregroundStyle(Color(wrappedHex: 0x22000F))
       .padding(14)
-      .background(Color(wrappedHex: 0xFF4D88), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+      .background(
+        Color(wrappedHex: 0xFF4D88), in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+      )
       .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
     .buttonStyle(.plain)
@@ -554,7 +558,10 @@ struct IOSMonthlyWrappedArchive: View {
               .foregroundStyle(Color(wrappedHex: 0x22000F))
               .frame(width: 96, alignment: .leading)
               .padding(12)
-              .background(Color(wrappedHex: 0xFF4D88), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+              .background(
+                Color(wrappedHex: 0xFF4D88),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+              )
               .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)

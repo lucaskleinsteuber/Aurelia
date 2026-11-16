@@ -1120,7 +1120,9 @@ struct AureliaSheetHeader: View {
   var body: some View {
     HStack(spacing: 14) {
       Image(systemName: symbol).font(.title2).frame(width: 42, height: 42)
-        .background(.white.opacity(0.075), in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius))
+        .background(
+          .white.opacity(0.075), in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius)
+        )
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 3) {
         Text(title).font(.title2.bold())
@@ -1187,7 +1189,8 @@ struct AureliaSheet<Content: View, Leading: View>: View {
           .keyboardShortcut(.defaultAction)
           .disabled(primary.isDisabled || primary.isBusy)
         } else {
-          AureliaSheetDoneButton(title: cancelTitle == "Cancel" ? "Done" : cancelTitle, action: onCancel)
+          AureliaSheetDoneButton(
+            title: cancelTitle == "Cancel" ? "Done" : cancelTitle, action: onCancel)
         }
       }
       .padding(16)

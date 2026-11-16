@@ -129,12 +129,16 @@ final class SpeechSubtitleJobs: ObservableObject {
     } else {
       let offset = segments[0].offset
       let amount = String(format: "%.1f", abs(offset))
-      if abs(offset) >= 0.1 { parts.append("Moved \(amount) s \(offset > 0 ? "later" : "earlier")") }
+      if abs(offset) >= 0.1 {
+        parts.append("Moved \(amount) s \(offset > 0 ? "later" : "earlier")")
+      }
     }
     if result.timing.scale != 1 {
-      parts.append(parts.isEmpty ? "Adjusted for another frame rate" : "adjusted for another frame rate")
+      parts.append(
+        parts.isEmpty ? "Adjusted for another frame rate" : "adjusted for another frame rate")
     }
-    let fit = "Fits \(Int(result.fitAfter * 100)) % of the speech (was \(Int(result.fitBefore * 100)) %)."
+    let fit =
+      "Fits \(Int(result.fitAfter * 100)) % of the speech (was \(Int(result.fitBefore * 100)) %)."
     return parts.joined(separator: ", ") + ". " + fit
   }
 

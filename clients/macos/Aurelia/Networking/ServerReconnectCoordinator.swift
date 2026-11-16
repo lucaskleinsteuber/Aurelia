@@ -72,7 +72,8 @@ final class ServerReconnectCoordinator {
 
   /// Looks for the server until it answers. With `wakes` it also sends a wake packet before each
   /// attempt; Aurelia's background search passes false, so only an explicit wake starts it.
-  func reconnect(_ stored: StoredServerProfile, wakes: Bool = true) async throws -> InspectedServer {
+  func reconnect(_ stored: StoredServerProfile, wakes: Bool = true) async throws -> InspectedServer
+  {
     cancel()
     let run = generation
     browser.start()

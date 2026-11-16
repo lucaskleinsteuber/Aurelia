@@ -3,7 +3,9 @@ import SwiftUI
 /// Settings › Power: what the server does when nobody uses Aurelia.
 struct IOSAdminPowerView: View {
   var body: some View {
-    IOSAdminLoader { try await $0.serverPower() } content: { power, _ in
+    IOSAdminLoader {
+      try await $0.serverPower()
+    } content: { power, _ in
       IOSAdminPowerForm(power: power)
     }
     .navigationTitle("Power")
@@ -33,7 +35,8 @@ private struct IOSAdminPowerForm: View {
     Form {
       IOSAdminPageHeader(
         page: .power,
-        text: "What the server computer does when nobody uses Aurelia, and how devices wake it again.")
+        text:
+          "What the server computer does when nobody uses Aurelia, and how devices wake it again.")
       if !power.available {
         Section {
           Label(IOSUnavailableReason.power(hosting: power.hosting), systemImage: "info.circle")
@@ -57,8 +60,12 @@ private struct IOSAdminPowerForm: View {
               ForEach(
                 Array(Set(IOSPowerRules.idleChoices + [draft.idleMinutes])).sorted(), id: \.self
               ) { minutes in
-                Text(minutes < 60 ? "\(minutes) minutes" : minutes % 60 == 0 ? "\(minutes / 60) h" : "\(minutes) minutes")
-                  .tag(minutes)
+                Text(
+                  minutes < 60
+                    ? "\(minutes) minutes"
+                    : minutes % 60 == 0 ? "\(minutes / 60) h" : "\(minutes) minutes"
+                )
+                .tag(minutes)
               }
             }
             Toggle(
@@ -187,7 +194,9 @@ private struct IOSAdminPowerForm: View {
 /// Settings › Server Updates: a Linux server installed from the package updates itself.
 struct IOSAdminUpdatesView: View {
   var body: some View {
-    IOSAdminLoader { try await $0.serverUpdates() } content: { status, reload in
+    IOSAdminLoader {
+      try await $0.serverUpdates()
+    } content: { status, reload in
       IOSAdminUpdatesForm(status: status, reload: reload)
     }
     .navigationTitle("Server Updates")
@@ -205,10 +214,12 @@ private struct IOSAdminUpdatesForm: View {
     Form {
       IOSAdminPageHeader(
         page: .updates,
-        text: "Install a newer Aurelia Server. Your library, profiles and settings stay as they are.")
+        text:
+          "Install a newer Aurelia Server. Your library, profiles and settings stay as they are.")
       if !status.available {
         Section {
-          Label(IOSUnavailableReason.updates, systemImage: "info.circle").foregroundStyle(.secondary)
+          Label(IOSUnavailableReason.updates, systemImage: "info.circle").foregroundStyle(
+            .secondary)
         }
       }
       Section {
@@ -232,7 +243,11 @@ private struct IOSAdminUpdatesForm: View {
               message: "The server restarts once it is installed. Playback stops for a moment.",
               action: "Install"
             ) {
-              Task { await admin.perform("Starting the update…") { _ = try await $0.installServerUpdate() } }
+              Task {
+                await admin.perform("Starting the update…") {
+                  _ = try await $0.installServerUpdate()
+                }
+              }
             }
           }
           .disabled(status.state != "idle" && status.state != "failed")
@@ -256,7 +271,9 @@ private struct IOSAdminUpdatesForm: View {
 /// Settings › Danger Zone: resets the library catalog. Media files are never touched.
 struct IOSAdminDangerZoneView: View {
   var body: some View {
-    IOSAdminLoader { try await $0.libraries() } content: { libraries, _ in
+    IOSAdminLoader {
+      try await $0.libraries()
+    } content: { libraries, _ in
       IOSAdminResetForm(libraries: libraries)
     }
     .navigationTitle("Reset Library")
@@ -276,10 +293,15 @@ private struct IOSAdminResetForm: View {
     Form {
       Section {
         ForEach(libraries) { library in
-          Toggle(isOn: Binding(
-            get: { selected.contains(library.id) },
-            set: { if $0 { selected.insert(library.id) } else { selected.remove(library.id) }; preview = nil }
-          )) {
+          Toggle(
+            isOn: Binding(
+              get: { selected.contains(library.id) },
+              set: {
+                if $0 { selected.insert(library.id) } else { selected.remove(library.id) }
+                preview = nil
+              }
+            )
+          ) {
             VStack(alignment: .leading, spacing: 2) {
               Text(library.name)
               Text(library.path).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -296,7 +318,9 @@ private struct IOSAdminResetForm: View {
       Section {
         Button("Show What Would Be Removed") {
           let ids = libraries.map(\.id).filter(selected.contains)
-          Task { preview = await admin.value("Counting…") { try await $0.previewReset(libraries: ids) } }
+          Task {
+            preview = await admin.value("Counting…") { try await $0.previewReset(libraries: ids) }
+          }
         }
         .disabled(selected.isEmpty)
         if let preview {
@@ -309,13 +333,16 @@ private struct IOSAdminResetForm: View {
           Button("Reset Library", role: .destructive) {
             let chosen = preview
             Task {
-              if var mutation = await admin.value("Resetting…", { try await $0.resetLibrary(chosen) }) {
+              if var mutation = await admin.value(
+                "Resetting…", { try await $0.resetLibrary(chosen) })
+              {
                 // A large reset finishes in the background; follow it until it is done.
                 while mutation.state == "queued" || mutation.state == "running" {
                   result = "Removing… \(mutation.removedItems) titles so far."
                   try? await Task.sleep(for: .seconds(2))
                   let id = mutation.id
-                  guard let next = try? await admin.run({ try await $0.libraryMutation(id: id) }) else { break }
+                  guard let next = try? await admin.run({ try await $0.libraryMutation(id: id) })
+                  else { break }
                   mutation = next
                 }
                 result =

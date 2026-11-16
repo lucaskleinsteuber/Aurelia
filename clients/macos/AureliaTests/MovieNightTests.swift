@@ -10,8 +10,10 @@ struct MovieNightTests {
   static let ids = (1...3).map { UUID(uuidString: "00000000-0000-4000-8000-0000000000a\($0)")! }
   static let deck = ids.enumerated().map { index, id in
     MovieNightCard(
-      mediaId: id, kind: .movie, title: "Invented Film \(index + 1)", year: 2020 + index, overview: nil,
-      genres: ["Comedy", "Crime", "Drama"], runtimeMinutes: 95 + index * 25, poster: nil, backdrop: nil)
+      mediaId: id, kind: .movie, title: "Invented Film \(index + 1)", year: 2020 + index,
+      overview: nil,
+      genres: ["Comedy", "Crime", "Drama"], runtimeMinutes: 95 + index * 25, poster: nil,
+      backdrop: nil)
   }
 
   static func night(
@@ -19,14 +21,17 @@ struct MovieNightTests {
     votes: [MovieNightVote] = [], voting: Bool = true
   ) -> MovieNightState {
     MovieNightState(
-      id: UUID(uuidString: "00000000-0000-4000-8000-0000000000b1")!, phase: phase, revision: revision,
+      id: UUID(uuidString: "00000000-0000-4000-8000-0000000000b1")!, phase: phase,
+      revision: revision,
       round: round, deckVersion: round, kinds: "movies", genre: nil, genreOptions: ["Comedy"],
       members: [
         MovieNightMember(
-          id: UUID(), name: "Invented Mac", deviceName: "Mac", isVoting: voting, isHost: true, isYou: true,
+          id: UUID(), name: "Invented Mac", deviceName: "Mac", isVoting: voting, isHost: true,
+          isYou: true,
           swiped: votes.count),
         MovieNightMember(
-          id: UUID(), name: "Mia", deviceName: "Browser", isVoting: true, isHost: false, isYou: false, swiped: 1),
+          id: UUID(), name: "Mia", deviceName: "Browser", isVoting: true, isHost: false,
+          isYou: false, swiped: 1),
       ],
       deck: deck, yourVotes: votes, result: nil, lastAction: nil, lastActionBy: nil)
   }
@@ -40,9 +45,12 @@ struct MovieNightTests {
     await session.start()
     await session.settings { $0.genre = "Comedy" }
     let sent = await api.programs
-    #expect(sent == [MovieNightProgram(kinds: "movies", genre: "Comedy", era: "2010s", length: "short")])
+    #expect(
+      sent == [MovieNightProgram(kinds: "movies", genre: "Comedy", era: "2010s", length: "short")])
     #expect(MovieNightProgram(lobby).summary == "Movies · 2010s · Short")
-    #expect(MovieNightProgram(kinds: "all", genre: "Drama", era: "any", length: "standard").summary == "Movies and Shows · Drama · Up to 2h 10m")
+    #expect(
+      MovieNightProgram(kinds: "all", genre: "Drama", era: "any", length: "standard").summary
+        == "Movies and Shows · Drama · Up to 2h 10m")
     // A server before eras and lengths sends neither; the app treats them as any.
     #expect(MovieNightProgram(Self.night(phase: "lobby")) == MovieNightProgram())
     await session.leave()
@@ -69,7 +77,10 @@ struct MovieNightTests {
     #expect(MovieNightRules.runtime(120) == "2h")
     #expect(MovieNightRules.runtime(nil) == nil)
     #expect(Self.deck[0].meta == "2020 · 1h 35m · Comedy · Crime")
-    #expect(MovieNightRules.slowpokes(Self.night(votes: Self.deck.map { .init(mediaId: $0.mediaId, like: true) }), deckSize: 3).map(\.name) == ["Mia"])
+    #expect(
+      MovieNightRules.slowpokes(
+        Self.night(votes: Self.deck.map { .init(mediaId: $0.mediaId, like: true) }), deckSize: 3
+      ).map(\.name) == ["Mia"])
   }
 
   @Test func aSwipeCountsAtOnceAndTheDeckIsKeptBetweenPolls() async {
@@ -84,7 +95,9 @@ struct MovieNightTests {
 
     session.vote(Self.deck[0], like: true)
     #expect(session.remaining.map(\.mediaId) == Array(Self.ids[1...]))
-    for _ in 0..<50 where session.state?.revision != 3 { try? await Task.sleep(for: .milliseconds(10)) }
+    for _ in 0..<50 where session.state?.revision != 3 {
+      try? await Task.sleep(for: .milliseconds(10))
+    }
     #expect(session.state?.revision == 3)
     #expect(session.deck.count == 3)
     #expect(session.pending.isEmpty)
@@ -140,8 +153,11 @@ struct MovieNightTests {
     #expect(WrappedStory.readyMonths(year: 2026, today: today, calendar: calendar) == Array(1...10))
     #expect(WrappedStory.readyMonths(year: 2025, today: today, calendar: calendar) == Array(1...12))
     #expect(WrappedStory.readyMonths(year: 2027, today: today, calendar: calendar).isEmpty)
-    #expect(WrappedStory.wrappedYears(activityYears: [2024, 2026, 2027], today: today, calendar: calendar) == [2026, 2024])
-    #expect(WrappedStory.wrappedYears(activityYears: [], today: today, calendar: calendar) == [2026])
+    #expect(
+      WrappedStory.wrappedYears(
+        activityYears: [2024, 2026, 2027], today: today, calendar: calendar) == [2026, 2024])
+    #expect(
+      WrappedStory.wrappedYears(activityYears: [], today: today, calendar: calendar) == [2026])
   }
 
   @Test func wrappedSlidesDecodeTheServersFields() throws {
@@ -169,8 +185,12 @@ private actor FakeMovieNightAPI: MovieNightAPI {
   }
 
   func movieNights() async throws -> [MovieNightSummary] { [] }
-  func createMovieNight(deviceName: String, voting: Bool) async throws -> MovieNightState { try next() }
-  func joinMovieNight(id: UUID, deviceName: String, voting: Bool) async throws -> MovieNightState { try next() }
+  func createMovieNight(deviceName: String, voting: Bool) async throws -> MovieNightState {
+    try next()
+  }
+  func joinMovieNight(id: UUID, deviceName: String, voting: Bool) async throws -> MovieNightState {
+    try next()
+  }
   func movieNight(id: UUID, after: Int64?, deckVersion: Int?, waitMilliseconds: Int) async throws
     -> MovieNightState
   {

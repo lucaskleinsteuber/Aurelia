@@ -24,7 +24,8 @@ final class IOSLibraryActions: ObservableObject {
   @Published private(set) var busy = false
   @Published var addToCollectionTarget: AddCollectionTarget?
 
-  func requestAddToCollection(item: IOSCatalogItem, seasonNumber: Int? = nil, title: String? = nil) {
+  func requestAddToCollection(item: IOSCatalogItem, seasonNumber: Int? = nil, title: String? = nil)
+  {
     addToCollectionTarget = AddCollectionTarget(
       mediaId: item.id,
       seasonNumber: seasonNumber,

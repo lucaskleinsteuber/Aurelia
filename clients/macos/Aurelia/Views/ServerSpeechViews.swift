@@ -23,7 +23,8 @@ struct ServerSpeechEditor: View {
               Text(
                 "whisper.cpp isn't installed on this server. On Debian or Ubuntu: sudo apt install whisper.cpp. This Mac then still writes subtitles itself."
               )
-              .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+              .font(.callout).foregroundStyle(.secondary).fixedSize(
+                horizontal: false, vertical: true)
             } else if let download = settings.downloading {
               ProgressView(
                 value: Double(download.receivedBytes), total: Double(max(download.totalBytes, 1))
@@ -43,7 +44,9 @@ struct ServerSpeechEditor: View {
                   "\(settings.models.first { $0.name == current }?.label ?? current) · \(ByteCountFormatter.string(fromByteCount: settings.modelBytes, countStyle: .file))"
               )
               Button("Remove Model…", role: .destructive) { confirmRemove = true }
-                .help("Deletes the model from the server's data folder. Subtitles already written stay.")
+                .help(
+                  "Deletes the model from the server's data folder. Subtitles already written stay."
+                )
             } else {
               Picker("Model", selection: $choice) {
                 ForEach(settings.models) { option in
@@ -52,7 +55,9 @@ struct ServerSpeechEditor: View {
               }
               .pickerStyle(.radioGroup)
               Button("Download Model") { Task { await download() } }
-                .help("Downloads the chosen model once from whisper.cpp's model page into the server's data folder.")
+                .help(
+                  "Downloads the chosen model once from whisper.cpp's model page into the server's data folder."
+                )
                 .accessibilityIdentifier("server-speech-download")
             }
             if let error = settings.downloadError { ErrorBanner(message: error, inline: true) }
@@ -78,7 +83,10 @@ struct ServerSpeechEditor: View {
     .task(id: model.administrationGeneration) {
       while !Task.isCancelled {
         await load()
-        try? await Task.sleep(for: .seconds(settings?.downloading != nil || settings?.jobs.contains(where: \.isRunning) == true ? 2 : 10))
+        try? await Task.sleep(
+          for: .seconds(
+            settings?.downloading != nil || settings?.jobs.contains(where: \.isRunning) == true
+              ? 2 : 10))
       }
     }
   }
@@ -103,7 +111,9 @@ struct ServerSpeechEditor: View {
 
   private func cancel(_ job: ServerSpeechJob) async {
     do {
-      try await model.currentAdministration { try await client.cancelServerSpeech(mediaId: job.mediaId) }
+      try await model.currentAdministration {
+        try await client.cancelServerSpeech(mediaId: job.mediaId)
+      }
       await load()
     } catch {
       message = error.localizedDescription
@@ -136,8 +146,10 @@ struct ServerSpeechJobRow: View {
       ProgressView(value: job.progress)
       Text(
         job.pausedForPlayback
-          ? "Paused while someone watches." : job.state == .waiting ? "Waiting for the server…"
-          : "\(Int((job.progress * 100).rounded())) % heard"
+          ? "Paused while someone watches."
+          : job.state == .waiting
+            ? "Waiting for the server…"
+            : "\(Int((job.progress * 100).rounded())) % heard"
       )
       .font(.caption).foregroundStyle(.secondary)
     }

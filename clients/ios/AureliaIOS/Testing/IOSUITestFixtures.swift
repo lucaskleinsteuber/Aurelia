@@ -218,7 +218,8 @@
       if scenario == .admin,
         let answer = IOSAdminFixture.answer(
           path: path, method: request.httpMethod ?? "GET",
-          query: Dictionary(query.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { first, _ in first }))
+          query: Dictionary(
+            query.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { first, _ in first }))
       {
         return IOSHTTPResponse(
           statusCode: 200, headers: ["Content-Type": "application/json"],

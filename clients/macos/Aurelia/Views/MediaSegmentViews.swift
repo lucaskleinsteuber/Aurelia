@@ -56,16 +56,21 @@ struct MediaSegmentsPanel: View {
       if !isSeries, let times {
         HStack(spacing: 10) {
           Button("Edit Intro…") { editing = .intro }
-            .help("Opens the title's beginning with a film strip: drag the yellow handles to where the intro begins and ends, play it to check, then save.")
+            .help(
+              "Opens the title's beginning with a film strip: drag the yellow handles to where the intro begins and ends, play it to check, then save."
+            )
             .accessibilityIdentifier("segments-edit-intro")
           Button("Edit Credits…") { editing = .credits }
-            .help("Opens the title's ending with a film strip: drag the handle to where the credits begin, play it to check, then save.")
+            .help(
+              "Opens the title's ending with a film strip: drag the handle to where the credits begin, play it to check, then save."
+            )
             .accessibilityIdentifier("segments-edit-credits")
         }
         .disabled(working || model.profile == nil)
         .sheet(item: $editing) { part in
           if let profile = model.profile {
-            SegmentTrimEditor(profile: profile, mediaId: mediaId, part: part, times: times) { saved in
+            SegmentTrimEditor(profile: profile, mediaId: mediaId, part: part, times: times) {
+              saved in
               apply(saved)
               message = "Saved. These times are used the next time the episode starts."
             }
@@ -89,9 +94,13 @@ struct MediaSegmentsPanel: View {
             Text("Intro Starts")
             TextField("0:00", text: $introStart).textFieldStyle(.roundedBorder).frame(width: 110)
               .accessibilityIdentifier("segments-intro-start")
-            Text(times.map { MediaSegmentTimeText.origin($0.introSource, confidence: $0.introConfidence) } ?? "")
-              .font(.caption).foregroundStyle(.secondary)
-              .accessibilityIdentifier("segments-intro-source")
+            Text(
+              times.map {
+                MediaSegmentTimeText.origin($0.introSource, confidence: $0.introConfidence)
+              } ?? ""
+            )
+            .font(.caption).foregroundStyle(.secondary)
+            .accessibilityIdentifier("segments-intro-source")
           }
           GridRow {
             Text("Intro Ends")
@@ -105,7 +114,9 @@ struct MediaSegmentsPanel: View {
               .frame(width: 110)
               .accessibilityIdentifier("segments-credits-start")
             Text(
-              times.map { MediaSegmentTimeText.origin($0.creditsSource, confidence: $0.creditsConfidence) }
+              times.map {
+                MediaSegmentTimeText.origin($0.creditsSource, confidence: $0.creditsConfidence)
+              }
                 ?? ""
             )
             .font(.caption).foregroundStyle(.secondary)
@@ -125,17 +136,22 @@ struct MediaSegmentsPanel: View {
             .accessibilityIdentifier("segments-save")
           Button("Reset to Detected") { Task { await reset() } }
             .disabled(times?.hasManualPart != true)
-            .help("Removes the times set by hand; the server examines the episode again and fills in what it finds.")
+            .help(
+              "Removes the times set by hand; the server examines the episode again and fills in what it finds."
+            )
             .accessibilityIdentifier("segments-reset")
         }
         if isSeries || times?.canAnalyze == true {
-          Button(isSeries ? "Re-analyze All Seasons" : isMovie ? "Re-analyze Movie" : "Re-analyze Season") {
+          Button(
+            isSeries ? "Re-analyze All Seasons" : isMovie ? "Re-analyze Movie" : "Re-analyze Season"
+          ) {
             Task { await reanalyze() }
           }
           .help(
             isMovie
               ? "Has the server look for this movie's credits again in the background. Times set by hand stay."
-              : "Has the server compare this season's episodes again in the background. Times set by hand stay.")
+              : "Has the server compare this season's episodes again in the background. Times set by hand stay."
+          )
           .accessibilityIdentifier("segments-reanalyze")
         }
         if working { ProgressView().controlSize(.small) }
@@ -292,7 +308,9 @@ struct ServerMediaSegmentsEditor: View {
               if stored.movieCount != nil {
                 Button("Re-analyze Movies") { run { try await client.reanalyzeMovieSegments() } }
                   .disabled(!stored.enabled || !stored.available)
-                  .help("Looks for every movie's credits again; episodes and times set by hand stay")
+                  .help(
+                    "Looks for every movie's credits again; episodes and times set by hand stay"
+                  )
                   .accessibilityIdentifier("server-media-segments-reanalyze-movies")
               }
               if working { ProgressView().controlSize(.small) }
@@ -320,7 +338,9 @@ struct ServerMediaSegmentsEditor: View {
 
   @ViewBuilder
   private func progress(_ settings: MediaSegmentSettings) -> some View {
-    let total = max(settings.totalCount ?? 0, settings.pendingCount + settings.analyzedCount + settings.noResultCount)
+    let total = max(
+      settings.totalCount ?? 0,
+      settings.pendingCount + settings.analyzedCount + settings.noResultCount)
     VStack(alignment: .leading, spacing: 6) {
       if total > 0 {
         ProgressView(value: settings.progress) {
@@ -341,9 +361,10 @@ struct ServerMediaSegmentsEditor: View {
       if settings.running, let title = settings.currentTitle {
         Label(
           [title, settings.currentStep].compactMap { $0 }.joined(separator: " · "),
-          systemImage: "waveform")
-          .font(.caption).foregroundStyle(.secondary)
-          .accessibilityIdentifier("server-media-segments-current")
+          systemImage: "waveform"
+        )
+        .font(.caption).foregroundStyle(.secondary)
+        .accessibilityIdentifier("server-media-segments-current")
       }
     }
   }
@@ -369,7 +390,8 @@ struct ServerMediaSegmentsEditor: View {
   }
 
   static func seriesSummary(_ item: MediaSegmentSeriesStatus) -> String {
-    var text = "Intro \(item.withIntro)/\(item.episodeCount) · Credits \(item.withCredits)/\(item.episodeCount)"
+    var text =
+      "Intro \(item.withIntro)/\(item.episodeCount) · Credits \(item.withCredits)/\(item.episodeCount)"
     if item.pendingCount > 0 { text += " · \(item.pendingCount) to examine" }
     return text
   }
@@ -378,7 +400,9 @@ struct ServerMediaSegmentsEditor: View {
   static func movieSummary(_ settings: MediaSegmentSettings) -> String? {
     guard let count = settings.movieCount, count > 0 else { return nil }
     var text = "Movies: \(settings.moviesWithCredits ?? 0) of \(count) with credits"
-    if let pending = settings.moviesPendingCount, pending > 0 { text += " · \(pending) still to examine" }
+    if let pending = settings.moviesPendingCount, pending > 0 {
+      text += " · \(pending) still to examine"
+    }
     return text
   }
 

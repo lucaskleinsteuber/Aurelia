@@ -27,7 +27,8 @@ struct TVPlaybackSettingsView: View {
             id: "settings-next"
           ) { value.automaticallyPlayNextEpisode.toggle() }
           row("Intros", value: value.introSkipping.title, id: "settings-intros") {
-            value.introSkipping = Self.next(after: value.introSkipping, in: TVIntroSkipping.allCases)
+            value.introSkipping = Self.next(
+              after: value.introSkipping, in: TVIntroSkipping.allCases)
           }
           row(
             "Offer Next Episode When Credits Begin", value: value.upNextAtCredits ? "On" : "Off",
@@ -57,7 +58,8 @@ struct TVPlaybackSettingsView: View {
               row(
                 "Trailers",
                 value: value.cinemaTrailers == 0
-                  ? "None" : value.cinemaTrailers == 1 ? "1 Trailer" : "\(value.cinemaTrailers) Trailers",
+                  ? "None"
+                  : value.cinemaTrailers == 1 ? "1 Trailer" : "\(value.cinemaTrailers) Trailers",
                 id: "settings-cinema-trailers"
               ) { value.cinemaTrailers = (value.cinemaTrailers + 1) % 4 }
               Text(
@@ -76,8 +78,12 @@ struct TVPlaybackSettingsView: View {
               after: value.volumeLeveling, in: VolumeLeveling.allCases)
           }
           if model.supportsAdaptiveStreaming {
-            row("Streaming Quality", value: value.streamingQuality.title, id: "settings-streaming-quality") {
-              value.streamingQuality = Self.next(after: value.streamingQuality, in: TVStreamingQuality.allCases)
+            row(
+              "Streaming Quality", value: value.streamingQuality.title,
+              id: "settings-streaming-quality"
+            ) {
+              value.streamingQuality = Self.next(
+                after: value.streamingQuality, in: TVStreamingQuality.allCases)
             }
           }
           Spacer().frame(height: 18)

@@ -114,8 +114,8 @@ struct KeychainOfflineProfileStore: OfflineProfileStoring {
       return data as? Data
     }
     .compactMap { try? JSONDecoder().decode(OfflineProfileCard.self, from: $0) }
-      .filter { $0.serverId == serverId }
-      .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    .filter { $0.serverId == serverId }
+    .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
   }
 
   func remember(_ card: OfflineProfileCard) {

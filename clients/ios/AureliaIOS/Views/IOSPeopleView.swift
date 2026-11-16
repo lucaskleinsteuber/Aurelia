@@ -36,7 +36,8 @@ struct IOSPeopleView: View {
             description: Text(
               search.isEmpty
                 ? "People appear here once TMDB has identified the titles in your library."
-                : "No one in your library matches “\(search.trimmingCharacters(in: .whitespacesAndNewlines))”.")
+                : "No one in your library matches “\(search.trimmingCharacters(in: .whitespacesAndNewlines))”."
+            )
           )
           .padding(.top, 40)
         } else {
@@ -97,7 +98,10 @@ struct IOSPeopleView: View {
       error = nil
       loaded = true
     } catch {
-      if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+      if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
+      {
+        return
+      }
       guard request == generation else { return }
       self.error = error.localizedDescription
       loaded = true
@@ -113,7 +117,8 @@ private struct IOSPeopleCard: View {
         .frame(width: 84, height: 84).clipShape(Circle())
         .overlay(Circle().stroke(.white.opacity(0.08), lineWidth: 0.5))
       Text(person.name).font(.caption.weight(.semibold)).lineLimit(1)
-      Text(IOSPeoplePresentation.role(person)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+      Text(IOSPeoplePresentation.role(person)).font(.caption2).foregroundStyle(.secondary)
+        .lineLimit(1)
     }
     .frame(maxWidth: .infinity)
     .accessibilityElement(children: .combine)

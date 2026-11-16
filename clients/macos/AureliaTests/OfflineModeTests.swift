@@ -15,7 +15,8 @@ struct OfflineModeTests {
 
   @Test
   func aCardOpensOnlyWithItsPinAndKeepsNoPin() throws {
-    let card = try #require(OfflineProfileCard.make(serverId: server, profile: profile(pin: true), pin: "2468"))
+    let card = try #require(
+      OfflineProfileCard.make(serverId: server, profile: profile(pin: true), pin: "2468"))
     #expect(card.accepts("2468"))
     #expect(!card.accepts("2469"))
     #expect(!card.accepts(""))
@@ -26,7 +27,8 @@ struct OfflineModeTests {
 
   @Test
   func aProfileWithoutPinOpensWithoutOne() throws {
-    let card = try #require(OfflineProfileCard.make(serverId: server, profile: profile(pin: false), pin: ""))
+    let card = try #require(
+      OfflineProfileCard.make(serverId: server, profile: profile(pin: false), pin: ""))
     #expect(card.accepts(""))
     #expect(card.check == nil)
   }
@@ -35,8 +37,11 @@ struct OfflineModeTests {
   func cardsStayWithTheirServerUntilItIsForgotten() throws {
     let store = MemoryOfflineProfileStore()
     let other = UUID()
-    store.remember(try #require(OfflineProfileCard.make(serverId: server, profile: profile(pin: false), pin: "")))
-    store.remember(try #require(OfflineProfileCard.make(serverId: other, profile: profile(pin: false), pin: "")))
+    store.remember(
+      try #require(OfflineProfileCard.make(serverId: server, profile: profile(pin: false), pin: ""))
+    )
+    store.remember(
+      try #require(OfflineProfileCard.make(serverId: other, profile: profile(pin: false), pin: "")))
     #expect(store.cards(serverId: server).count == 1)
     store.forget(serverId: server)
     #expect(store.cards(serverId: server).isEmpty)
@@ -49,7 +54,8 @@ struct OfflineModeTests {
   ) -> OfflineTitle {
     var title = OfflineTitle(
       id: UUID(), serverId: server, userId: UUID(), title: name,
-      subtitle: episode.map { "\($0.series) · S\($0.season) E\($0.number)" }, kind: episode == nil ? "movie" : "episode",
+      subtitle: episode.map { "\($0.series) · S\($0.season) E\($0.number)" },
+      kind: episode == nil ? "movie" : "episode",
       fileName: "title.mkv", contentType: "video/x-matroska", bytes: 1, downloadedAt: Date(),
       positionMilliseconds: position, durationMilliseconds: 1_000_000, isCompleted: false,
       progressSavedAt: savedAt, progressDirty: false, subtitles: [])

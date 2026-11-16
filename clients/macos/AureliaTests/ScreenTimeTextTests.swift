@@ -37,7 +37,8 @@ final class ScreenTimeTextTests: XCTestCase {
 
   func testPickerAndTodayLines() {
     XCTAssertEqual(
-      ScreenTimeText.closedLabel("2027-11-10T07:30:00Z", timeZone: utc), "Good night · back at 07:30")
+      ScreenTimeText.closedLabel("2027-11-10T07:30:00Z", timeZone: utc),
+      "Good night · back at 07:30")
     XCTAssertNil(ScreenTimeText.closedLabel(nil))
     XCTAssertEqual(
       ScreenTimeText.todaySummary(status(.closed, .limit), timeZone: utc),

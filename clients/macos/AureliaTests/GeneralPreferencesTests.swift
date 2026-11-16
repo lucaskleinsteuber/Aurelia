@@ -7,7 +7,8 @@ import Testing
 struct GeneralPreferencesTests {
   @Test func fillingTheScreenCropsThePictureToTheWindowShape() throws {
     #expect(VideoFill.cropGeometry(fills: false, size: CGSize(width: 1470, height: 956)) == nil)
-    #expect(VideoFill.cropGeometry(fills: true, size: CGSize(width: 1469.6, height: 956.2)) == "1470:956")
+    #expect(
+      VideoFill.cropGeometry(fills: true, size: CGSize(width: 1469.6, height: 956.2)) == "1470:956")
     #expect(VideoFill.cropGeometry(fills: true, size: .zero) == nil)
     var preferences = PlaybackPreferences.defaultValue
     preferences.fillsScreen = true
@@ -128,7 +129,8 @@ struct GeneralPreferencesTests {
     #expect(!restored.upNextAtCredits)
 
     // 2.8 and 2.9 saved a single switch; "on" becomes Skip Automatically.
-    var old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(PlaybackPreferences.defaultValue))
+    var old =
+      try JSONSerialization.jsonObject(with: JSONEncoder().encode(PlaybackPreferences.defaultValue))
       as! [String: Any]
     old.removeValue(forKey: "introSkipping")
     old.removeValue(forKey: "upNextAtCredits")
@@ -156,10 +158,14 @@ struct GeneralPreferencesTests {
 
   @Test func suggestionsAppearAfterAMovieOrALastEpisodeWithoutACountdown() throws {
     let duration: Int64 = 6_000_000
-    #expect(!SuggestionPolicy.wantsSuggestions(position: 2_000_000, duration: duration, hasNext: false))
-    #expect(SuggestionPolicy.wantsSuggestions(position: 3_000_000, duration: duration, hasNext: false))
-    #expect(!SuggestionPolicy.wantsSuggestions(position: 5_000_000, duration: duration, hasNext: true))
-    #expect(!SuggestionPolicy.wantsSuggestions(position: 400_000, duration: 500_000, hasNext: false))
+    #expect(
+      !SuggestionPolicy.wantsSuggestions(position: 2_000_000, duration: duration, hasNext: false))
+    #expect(
+      SuggestionPolicy.wantsSuggestions(position: 3_000_000, duration: duration, hasNext: false))
+    #expect(
+      !SuggestionPolicy.wantsSuggestions(position: 5_000_000, duration: duration, hasNext: true))
+    #expect(
+      !SuggestionPolicy.wantsSuggestions(position: 400_000, duration: 500_000, hasNext: false))
     // From the credits on; without credits in the last seconds.
     #expect(
       SuggestionPolicy.showsCard(
@@ -173,7 +179,8 @@ struct GeneralPreferencesTests {
       SuggestionPolicy.showsCard(
         position: 5_985_000, duration: duration, hasNext: false, hasSuggestion: true,
         dismissed: false, creditsStart: nil))
-    for (next, has, dismissed) in [(true, true, false), (false, false, false), (false, true, true)] {
+    for (next, has, dismissed) in [(true, true, false), (false, false, false), (false, true, true)]
+    {
       #expect(
         !SuggestionPolicy.showsCard(
           position: 5_500_000, duration: duration, hasNext: next, hasSuggestion: has,
@@ -187,7 +194,8 @@ struct GeneralPreferencesTests {
       "isFavorite":false,"addedAt":"2026-11-12T10:00:00Z"}}]}
       """.utf8)
     let response = try JSONDecoder().decode(MediaSuggestionsResponse.self, from: json)
-    #expect(SuggestionPolicy.caption(response.suggestions[0]) == "Next in Toy Tale Collection · 1999")
+    #expect(
+      SuggestionPolicy.caption(response.suggestions[0]) == "Next in Toy Tale Collection · 1999")
     #expect(!PlaybackPreferences.defaultValue.playSuggestionsAutomatically)
   }
 
@@ -264,11 +272,19 @@ struct GeneralPreferencesTests {
   @Test func trimEditorShowsTheRightStretchAndKeepsHandlesApart() {
     // A 45-minute episode: the intro strip covers its first 12 minutes, or a minute past a late intro.
     let duration: Int64 = 2_700_000
-    #expect(SegmentTrimRange.span(part: .intro, duration: duration, start: 255_000, end: 271_000) == 0...720_000)
-    #expect(SegmentTrimRange.span(part: .intro, duration: duration, start: 700_000, end: 760_000) == 0...820_000)
+    #expect(
+      SegmentTrimRange.span(part: .intro, duration: duration, start: 255_000, end: 271_000)
+        == 0...720_000)
+    #expect(
+      SegmentTrimRange.span(part: .intro, duration: duration, start: 700_000, end: 760_000)
+        == 0...820_000)
     // The credits strip covers the last ten minutes, or a minute before credits found earlier.
-    #expect(SegmentTrimRange.span(part: .credits, duration: duration, start: 2_400_000, end: nil) == 2_100_000...2_700_000)
-    #expect(SegmentTrimRange.span(part: .credits, duration: duration, start: 1_900_000, end: nil) == 1_840_000...2_700_000)
+    #expect(
+      SegmentTrimRange.span(part: .credits, duration: duration, start: 2_400_000, end: nil)
+        == 2_100_000...2_700_000)
+    #expect(
+      SegmentTrimRange.span(part: .credits, duration: duration, start: 1_900_000, end: nil)
+        == 1_840_000...2_700_000)
     let span: ClosedRange<Int64> = 0...720_000
     #expect(SegmentTrimRange.initial(part: .intro, span: span) == (0, 30_000))
     #expect(SegmentTrimRange.clamp(start: 50_000, end: 40_000, span: span) == (39_000, 40_000))
@@ -289,7 +305,8 @@ struct GeneralPreferencesTests {
       MediaSegmentTimeText.request(introStart: "", introEnd: "", creditsStart: "")
         == SetMediaSegmentsRequest(
           introStartMilliseconds: nil, introEndMilliseconds: nil, creditsStartMilliseconds: nil))
-    #expect(MediaSegmentTimeText.request(introStart: "soon", introEnd: "1:30", creditsStart: "") == nil)
+    #expect(
+      MediaSegmentTimeText.request(introStart: "soon", introEnd: "1:30", creditsStart: "") == nil)
     // Older servers send no times; the ticket still decodes.
     let ticket = Data(
       """
@@ -346,7 +363,8 @@ struct GeneralPreferencesTests {
     defer { SidebarPreferences.resetToDefaults() }
     #expect(!SidebarPreferences.isVisible(.history))
     #expect(!SidebarPreferences.isVisible(.statistics))
-    #expect(SidebarPreferences.loadOrder().contains(.history), "They stay in the customizer's list.")
+    #expect(
+      SidebarPreferences.loadOrder().contains(.history), "They stay in the customizer's list.")
     SidebarPreferences.setVisible(.statistics, isVisible: true)
     #expect(SidebarPreferences.isVisible(.statistics))
     #expect(!SidebarPreferences.isVisible(.history))
@@ -354,8 +372,12 @@ struct GeneralPreferencesTests {
 
   @Test func draggingASidebarItemMovesOnlyThatItem() {
     let items: [LibraryDestination] = [.home, .library, .collections, .watchlist]
-    #expect(SidebarReorder.moving(.watchlist, to: 0, in: items) == [.watchlist, .home, .library, .collections])
-    #expect(SidebarReorder.moving(.home, to: 2, in: items) == [.library, .collections, .home, .watchlist])
+    #expect(
+      SidebarReorder.moving(.watchlist, to: 0, in: items) == [
+        .watchlist, .home, .library, .collections,
+      ])
+    #expect(
+      SidebarReorder.moving(.home, to: 2, in: items) == [.library, .collections, .home, .watchlist])
     #expect(SidebarReorder.moving(.library, to: 1, in: items) == items)
     #expect(SidebarReorder.moving(.library, to: 9, in: items) == items)
   }

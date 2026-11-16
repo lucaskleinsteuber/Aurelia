@@ -31,14 +31,16 @@ final class StreamingQualityTests: XCTestCase {
 
   func testSettingsSavedBeforeTheChoiceExistedKeepTheOriginalAndTheChoiceIsSaved() throws {
     var preferences = PlaybackPreferences.defaultValue
-    var old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(preferences)) as! [String: Any]
+    var old =
+      try JSONSerialization.jsonObject(with: JSONEncoder().encode(preferences)) as! [String: Any]
     old.removeValue(forKey: "streamingQuality")
     let decoded = try JSONDecoder().decode(
       PlaybackPreferences.self, from: JSONSerialization.data(withJSONObject: old))
     XCTAssertEqual(decoded.streamingQuality, .original)
 
     preferences.streamingQuality = .p480
-    let saved = try JSONDecoder().decode(PlaybackPreferences.self, from: JSONEncoder().encode(preferences))
+    let saved = try JSONDecoder().decode(
+      PlaybackPreferences.self, from: JSONEncoder().encode(preferences))
     XCTAssertEqual(saved.streamingQuality, .p480)
 
     old["streamingQuality"] = "8k"
@@ -53,14 +55,20 @@ final class StreamingQualityTests: XCTestCase {
         Data("GET \(path) HTTP/1.1\r\nHost: 127.0.0.1:50123\r\n\r\n".utf8), secret: "secret")
     }
     XCTAssertEqual(try request("/stream/secret/hls/master.m3u8").hlsPath, "hls/master.m3u8")
-    XCTAssertEqual(try request("/stream/secret/hls/720p/index.m3u8?audio=2").hlsPath, "hls/720p/index.m3u8?audio=2")
+    XCTAssertEqual(
+      try request("/stream/secret/hls/720p/index.m3u8?audio=2").hlsPath,
+      "hls/720p/index.m3u8?audio=2")
     XCTAssertEqual(try request("/stream/secret/hls/720p/init.mp4").hlsPath, "hls/720p/init.mp4")
-    XCTAssertEqual(try request("/stream/secret/hls/1080p/1234.m4s?audio=1").hlsPath, "hls/1080p/1234.m4s?audio=1")
+    XCTAssertEqual(
+      try request("/stream/secret/hls/1080p/1234.m4s?audio=1").hlsPath, "hls/1080p/1234.m4s?audio=1"
+    )
     XCTAssertNil(try request("/stream/secret").hlsPath)
 
     for refused in [
-      "/stream/other/hls/master.m3u8", "/stream/secret/hls/../../users", "/stream/secret/hls/720p/x.m4s",
-      "/stream/secret/hls/720p/index.m3u8?audio=1&video=copy", "/stream/secret/live", "/stream/secret/hls/720p/%2e%2e/init.mp4",
+      "/stream/other/hls/master.m3u8", "/stream/secret/hls/../../users",
+      "/stream/secret/hls/720p/x.m4s",
+      "/stream/secret/hls/720p/index.m3u8?audio=1&video=copy", "/stream/secret/live",
+      "/stream/secret/hls/720p/%2e%2e/init.mp4",
       "/stream/secret/hls/0p/index.m3u8", "/stream/secret/subtitles/1",
     ] {
       XCTAssertThrowsError(try request(refused), refused)
@@ -90,6 +98,8 @@ final class TranscodingStatusTests: XCTestCase {
       """.utf8)
     let status = try JSONDecoder().decode(TranscodingStatus.self, from: json)
     XCTAssertEqual(status.encoderSummary, "VA-API (renderD128) · decodes on the chip")
-    XCTAssertEqual(status.sessions.map(TranscodingStatus.sessionSummary), ["720p · 4.2× real time", "480p · ready"])
+    XCTAssertEqual(
+      status.sessions.map(TranscodingStatus.sessionSummary),
+      ["720p · 4.2× real time", "480p · ready"])
   }
 }

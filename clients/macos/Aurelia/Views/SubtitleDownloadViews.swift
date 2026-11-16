@@ -123,7 +123,7 @@ struct SubtitleDownloadSettingsSection: View {
         "Every six hours the server looks for matched movies and episodes without subtitles in these languages, in the file or beside it. Each title is checked at most once a week."
       )
       .font(.caption).foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
+      .fixedSize(horizontal: false, vertical: true)
       Divider()
       account(status)
       Divider()
@@ -174,7 +174,9 @@ struct SubtitleDownloadSettingsSection: View {
   }
 
   static var defaultLanguages: [String] {
-    let preferred = Locale.preferredLanguages.compactMap { Locale(identifier: $0).language.languageCode?.identifier }
+    let preferred = Locale.preferredLanguages.compactMap {
+      Locale(identifier: $0).language.languageCode?.identifier
+    }
     var languages = Array(NSOrderedSet(array: preferred).compactMap { $0 as? String }.prefix(2))
     if !languages.contains("en") { languages.append("en") }
     return Array(languages.prefix(3))
@@ -213,7 +215,9 @@ struct SubtitleDownloadSettingsSection: View {
 
   /// True when the server accepted the change.
   @discardableResult
-  private func run(_ action: @escaping @MainActor (APIClient) async throws -> SubtitleProviderStatus)
+  private func run(
+    _ action: @escaping @MainActor (APIClient) async throws -> SubtitleProviderStatus
+  )
     async -> Bool
   {
     guard let profile = model.profile else { return false }
@@ -255,7 +259,9 @@ struct SubtitleDownloadPanel: View {
   @State private var serverSpeech: MediaSpeechInfo?
 
   /// The server listens when it has whisper.cpp and a model; this Mac's recognizer is the fallback.
-  private var serverListens: Bool { serverSpeech?.available == true && serverSpeech?.modelReady == true }
+  private var serverListens: Bool {
+    serverSpeech?.available == true && serverSpeech?.modelReady == true
+  }
 
   private var syncPossible: Bool {
     serverListens || model.libraryCapabilities.contains("subtitle-sync-v1")
@@ -369,15 +375,16 @@ struct SubtitleDownloadPanel: View {
         HStack {
           Label(
             job.message ?? (job.state == .done ? "Saved." : "Stopped."),
-            systemImage: job.state == .failed ? "exclamationmark.triangle.fill" : "checkmark.circle")
-            .foregroundStyle(job.state == .failed ? .orange : .primary)
+            systemImage: job.state == .failed ? "exclamationmark.triangle.fill" : "checkmark.circle"
+          )
+          .foregroundStyle(job.state == .failed ? .orange : .primary)
           Spacer()
           Button("Done") { Task { await cancelServer() } }
         }
         Button(
           syncPossible ? "Create or Sync Subtitles from Speech…" : "Create Subtitles from Speech…"
         ) { Task { await loadSpeechTracks() } }
-          .disabled(working != nil)
+        .disabled(working != nil)
       } else if let job = speech.job(mediaId) {
         speechJob(job)
       } else if let tracks = speechTracks {
@@ -429,8 +436,8 @@ struct SubtitleDownloadPanel: View {
         Button(
           syncPossible ? "Create or Sync Subtitles from Speech…" : "Create Subtitles from Speech…"
         ) { Task { await loadSpeechTracks() } }
-          .disabled(working != nil)
-          .accessibilityIdentifier("subtitle-speech")
+        .disabled(working != nil)
+        .accessibilityIdentifier("subtitle-speech")
       }
     }
   }
@@ -519,10 +526,12 @@ struct SubtitleDownloadPanel: View {
       }
       speechLanguages =
         serverListens
-        ? SubtitleLanguages.choices : SpeechLanguages.choices(await SpeechRecognizer.supportedLocales())
+        ? SubtitleLanguages.choices
+        : SpeechLanguages.choices(await SpeechRecognizer.supportedLocales())
       let chosen = tracks.first(where: \.isDefault) ?? tracks.first
       speechTrack = chosen?.index ?? 0
-      let preferred = SpeechLanguages.code(forTrack: chosen?.language)
+      let preferred =
+        SpeechLanguages.code(forTrack: chosen?.language)
         ?? Locale.current.language.languageCode?.identifier ?? "en"
       speechLanguage =
         speechLanguages.contains(preferred) ? preferred : speechLanguages.first ?? "en"
@@ -532,7 +541,8 @@ struct SubtitleDownloadPanel: View {
 
   private func startSpeech() {
     if serverListens {
-      startOnServer(StartServerSpeechRequest(kind: .create, language: speechLanguage, audioIndex: speechTrack))
+      startOnServer(
+        StartServerSpeechRequest(kind: .create, language: speechLanguage, audioIndex: speechTrack))
       return
     }
     guard let profile = model.profile else { return }
@@ -575,12 +585,15 @@ struct SubtitleDownloadPanel: View {
   private func cancelServer() async {
     guard let client else { return }
     await perform("speech") {
-      try await model.currentAdministration { try await client.cancelServerSpeech(mediaId: mediaId) }
+      try await model.currentAdministration {
+        try await client.cancelServerSpeech(mediaId: mediaId)
+      }
       serverSpeech = try await client.mediaSpeech(mediaId: mediaId)
     }
   }
 
-  private func syncSaver(language: String) -> @MainActor (String) async throws -> DownloadedSubtitle {
+  private func syncSaver(language: String) -> @MainActor (String) async throws -> DownloadedSubtitle
+  {
     let mediaId = mediaId
     return { [model] subRip in
       guard let profile = model.profile else { throw CancellationError() }

@@ -63,7 +63,8 @@ final class SpeechAudioReader: NSObject, URLSessionDataDelegate, @unchecked Send
 
   func urlSession(
     _ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
-    completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) ->
+    completionHandler:
+      @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) ->
       Void
   ) {
     guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
@@ -116,7 +117,8 @@ final class SpeechAudioReader: NSObject, URLSessionDataDelegate, @unchecked Send
   func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
     let (continuation, status, body) = lock.withLock { (self.continuation, self.status, errorBody) }
     if let error {
-      continuation?.finish(throwing: (error as? URLError)?.code == .cancelled ? CancellationError() : error)
+      continuation?.finish(
+        throwing: (error as? URLError)?.code == .cancelled ? CancellationError() : error)
     } else if status != 200 {
       continuation?.finish(
         throwing: APIClient.responseError(status: status, retryAfter: nil, data: body))

@@ -57,7 +57,8 @@ struct LibraryHealthView: View {
   var body: some View {
     AureliaSheet(
       title: "Library Health & Maintenance",
-      subtitle: "Find duplicate, missing, unmatched and damaged titles, and bring back excluded ones.",
+      subtitle:
+        "Find duplicate, missing, unmatched and damaged titles, and bring back excluded ones.",
       symbol: "stethoscope",
       onCancel: { dismiss() }
     ) {

@@ -409,7 +409,8 @@ struct SetupFinishView: View {
             }
             .padding(12)
             .background(
-              AureliaDesign.surface, in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius))
+              AureliaDesign.surface, in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius)
+            )
           }
         }
       }

@@ -187,7 +187,8 @@ struct IOSSettingsRoot: View {
       selection?.wrappedValue == page
         ? RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white.opacity(0.14))
           .padding(.horizontal, 8)
-        : nil)
+        : nil
+    )
     .badge(page == .wishes ? model.wishBadgeCount : 0)
     .accessibilityIdentifier("settings-\(page.rawValue)")
   }
@@ -212,7 +213,9 @@ struct IOSSettingsRowLabel: View {
         .font(.system(size: 15, weight: .semibold))
         .foregroundStyle(.white)
         .frame(width: 30, height: 30)
-        .background(Self.tint(page.group), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .background(
+          Self.tint(page.group), in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+        )
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
         Text(page.title)
@@ -270,13 +273,17 @@ struct IOSDeviceSettingsView: View {
     IOSAdminForm(title: "Notifications and Storage") {
       IOSAdminPageHeader(
         page: .device,
-        text: "What this \(IOSDesign.deviceName) tells you, and what it keeps so Aurelia opens quickly.")
+        text:
+          "What this \(IOSDesign.deviceName) tells you, and what it keeps so Aurelia opens quickly."
+      )
       if model.supportsWishes {
         Section {
-          Toggle(isOn: Binding(
-            get: { model.wishNotificationsEnabled },
-            set: { enabled in Task { await model.setWishNotificationsEnabled(enabled) } }
-          )) {
+          Toggle(
+            isOn: Binding(
+              get: { model.wishNotificationsEnabled },
+              set: { enabled in Task { await model.setWishNotificationsEnabled(enabled) } }
+            )
+          ) {
             IOSAdminToggleLabel(
               "Family Wish Notifications",
               "Tells you when a wish arrives in the library or someone adds “Me Too”.")
@@ -324,7 +331,9 @@ struct IOSConnectionSettingsView: View {
     IOSAdminForm(title: "Connection") {
       IOSAdminPageHeader(
         page: .connection,
-        text: "The server this \(IOSDesign.deviceName) uses. Everyone on it shares the library; each profile keeps its own progress.")
+        text:
+          "The server this \(IOSDesign.deviceName) uses. Everyone on it shares the library; each profile keeps its own progress."
+      )
       Section("Server") {
         LabeledContent("Name", value: model.connection?.name ?? "Aurelia Server")
         LabeledContent("Version", value: serverVersion ?? "…")
@@ -346,7 +355,9 @@ struct IOSConnectionSettingsView: View {
         }
         .accessibilityIdentifier("settings-disconnect")
       } footer: {
-        Text("Signs this \(IOSDesign.deviceName) out of the server. Connecting again needs a code from the owner.")
+        Text(
+          "Signs this \(IOSDesign.deviceName) out of the server. Connecting again needs a code from the owner."
+        )
       }
     }
     .task { serverVersion = (try? await model.client?.serverInfo())?.version ?? "—" }

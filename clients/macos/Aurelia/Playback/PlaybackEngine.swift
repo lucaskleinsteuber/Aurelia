@@ -312,7 +312,9 @@ final class VLCPlaybackEngine: PlaybackEngine {
     observeCurrentPlayer()
     let media = VLCMedia(url: url)
     media.addOption(":http-reconnect")
-    if let networkCachingMilliseconds, !additionalMediaOptions.contains(where: { $0.hasPrefix(":network-caching=") }) {
+    if let networkCachingMilliseconds,
+      !additionalMediaOptions.contains(where: { $0.hasPrefix(":network-caching=") })
+    {
       media.addOption(":network-caching=\(networkCachingMilliseconds)")
     }
     for option in additionalMediaOptions { media.addOption(option) }

@@ -46,15 +46,21 @@ enum TVRemoteCommandEffect: Equatable {
     position: Int64?, isPlaying: Bool?
   ) -> TVRemoteCommandEffect {
     switch action.lowercased() {
-    case "play": return mediaId.map(TVRemoteCommandEffect.play) ?? (isPlaying == false ? .togglePlayPause : .nothing)
+    case "play":
+      return mediaId.map(TVRemoteCommandEffect.play)
+        ?? (isPlaying == false ? .togglePlayPause : .nothing)
     case "stop": return .stop
     case "pause": return isPlaying == true ? .togglePlayPause : .nothing
     case "resume": return isPlaying == false ? .togglePlayPause : .nothing
     case "seek":
-      guard let position, let target = positionSeconds, target.isFinite, target >= 0 else { return .nothing }
+      guard let position, let target = positionSeconds, target.isFinite, target >= 0 else {
+        return .nothing
+      }
       return .seek(by: Int64(target * 1_000) - position)
     case "skip":
-      guard position != nil, let skip = skipSeconds, skip.isFinite, abs(skip) <= 3_600 else { return .nothing }
+      guard position != nil, let skip = skipSeconds, skip.isFinite, abs(skip) <= 3_600 else {
+        return .nothing
+      }
       return .seek(by: Int64(skip * 1_000))
     default: return .nothing
     }

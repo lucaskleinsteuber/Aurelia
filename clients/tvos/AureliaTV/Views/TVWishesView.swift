@@ -217,7 +217,8 @@ struct TVWishesView: View {
     }
     .padding(36)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(TVDesign.surface, in: RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous))
+    .background(
+      TVDesign.surface, in: RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous))
   }
 
   private func load(reset: Bool) async {
@@ -318,7 +319,8 @@ private struct TVWishCard: View {
     }
     .padding(24)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(TVDesign.surface, in: RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous))
+    .background(
+      TVDesign.surface, in: RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous))
   }
 
   private var supportersSummary: String {
@@ -385,7 +387,9 @@ private struct TVWishPosterThumbnail: View {
         image = cached
         return
       }
-      guard let data = await model.wishPosterBytes.data(posterPath: posterPath, width: 342, client: api),
+      guard
+        let data = await model.wishPosterBytes.data(
+          posterPath: posterPath, width: 342, client: api),
         !Task.isCancelled
       else { return }
       let decoded = await Task.detached(priority: .utility) {

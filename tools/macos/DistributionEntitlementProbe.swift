@@ -16,7 +16,8 @@ var item = query
 item[kSecValueData as String] = Data("synthetic, not an application token".utf8)
 let added = SecItemAdd(item as CFDictionary, nil)
 if added == errSecSuccess { SecItemDelete(query as CFDictionary) }
-let available = FileManager.default.containerURL(
-  forSecurityApplicationGroupIdentifier: group) != nil
+let available =
+  FileManager.default.containerURL(
+    forSecurityApplicationGroupIdentifier: group) != nil
 print("syntheticKeychainWriteStatus=\(added)")
 print("syntheticAppGroupAvailable=\(available)")

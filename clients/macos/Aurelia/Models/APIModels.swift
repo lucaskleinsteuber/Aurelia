@@ -28,7 +28,9 @@ struct ServerMoveTarget: Codable, Equatable, Sendable {
 
   func followable(for serverId: UUID, tried: Set<URL>) -> [URL] {
     guard self.serverId == serverId else { return [] }
-    return addresses.filter { $0.scheme?.lowercased() == "https" && $0.host != nil && !tried.contains($0) }
+    return addresses.filter {
+      $0.scheme?.lowercased() == "https" && $0.host != nil && !tried.contains($0)
+    }
   }
 }
 
@@ -701,7 +703,8 @@ struct CollectionMember: Codable, Identifiable, Equatable, Sendable {
   var memberId: UUID { id }
 
   enum CodingKeys: String, CodingKey {
-    case id, memberId, mediaId, kind, title, seasonNumber, item, episodes, watchedCount, itemCount, totalRuntimeSeconds
+    case id, memberId, mediaId, kind, title, seasonNumber, item, episodes, watchedCount, itemCount,
+      totalRuntimeSeconds
   }
 
   init(from decoder: Decoder) throws {
@@ -719,7 +722,8 @@ struct CollectionMember: Codable, Identifiable, Equatable, Sendable {
     episodes = try container.decodeIfPresent([CatalogItemSummary].self, forKey: .episodes)
     watchedCount = try container.decodeIfPresent(Int.self, forKey: .watchedCount) ?? 0
     itemCount = try container.decodeIfPresent(Int.self, forKey: .itemCount) ?? 1
-    totalRuntimeSeconds = try container.decodeIfPresent(Int64.self, forKey: .totalRuntimeSeconds) ?? 0
+    totalRuntimeSeconds =
+      try container.decodeIfPresent(Int64.self, forKey: .totalRuntimeSeconds) ?? 0
   }
 
   func encode(to encoder: Encoder) throws {
@@ -836,7 +840,8 @@ enum BoxSetLogic {
       let totalMinutes = Int((detail.totalRuntimeSeconds + 30) / 60)
       let hours = totalMinutes / 60
       let minutes = totalMinutes % 60
-      parts.append(hours > 0 ? (minutes > 0 ? "\(hours) h \(minutes) min" : "\(hours) h") : "\(minutes) min")
+      parts.append(
+        hours > 0 ? (minutes > 0 ? "\(hours) h \(minutes) min" : "\(hours) h") : "\(minutes) min")
     }
     return parts.joined(separator: "  ·  ")
   }
@@ -856,7 +861,8 @@ enum BoxSetLogic {
     var ordered: [CatalogItemSummary] = []
     for member in members {
       let units = (member.episodes?.isEmpty == false) ? (member.episodes ?? []) : [member.item]
-      for item in units where (item.kind == .movie || item.kind == .episode) && seen.insert(item.id).inserted {
+      for item in units
+      where (item.kind == .movie || item.kind == .episode) && seen.insert(item.id).inserted {
         ordered.append(item)
       }
     }
@@ -1405,7 +1411,8 @@ struct MediaSegments: Codable, Equatable, Sendable {
 
   /// The intro when both ends are known and in order.
   var intro: (start: Int64, end: Int64)? {
-    guard let start = introStartMilliseconds, let end = introEndMilliseconds, start >= 0, end > start
+    guard let start = introStartMilliseconds, let end = introEndMilliseconds, start >= 0,
+      end > start
     else { return nil }
     return (start, end)
   }
@@ -1886,7 +1893,8 @@ struct SpeechAudioTrack: Codable, Identifiable, Equatable, Sendable {
     } else {
       parts.append("Sound Track \(index)")
     }
-    parts.append(channels >= 6 ? "5.1" : channels == 2 ? "Stereo" : channels == 1 ? "Mono" : "\(channels) ch")
+    parts.append(
+      channels >= 6 ? "5.1" : channels == 2 ? "Stereo" : channels == 1 ? "Mono" : "\(channels) ch")
     if let title, !title.isEmpty { parts.append(title) }
     return parts.joined(separator: " · ")
   }
@@ -2078,7 +2086,8 @@ enum WrappedStory {
 
   /// The number to count up to, when the big text is a plain number ("143", not "02:47").
   static func countTarget(_ text: String?) -> Int? {
-    guard let text, !text.isEmpty, text.count <= 6, text.allSatisfy(\.isASCII), text.allSatisfy(\.isNumber)
+    guard let text, !text.isEmpty, text.count <= 6, text.allSatisfy(\.isASCII),
+      text.allSatisfy(\.isNumber)
     else { return nil }
     return Int(text)
   }

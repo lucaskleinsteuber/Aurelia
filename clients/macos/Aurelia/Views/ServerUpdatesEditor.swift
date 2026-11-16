@@ -156,7 +156,8 @@ struct ServerUpdatesEditor: View {
       do {
         let answer = try await model.currentAdministration {
           try await scope.request {
-            kind == .install ? try await client.installServerUpdate() : try await client.checkServerUpdates()
+            kind == .install
+              ? try await client.installServerUpdate() : try await client.checkServerUpdates()
           }
         }
         status = answer
@@ -197,7 +198,8 @@ struct ServerUpdatesEditor: View {
           return
         }
         if current.timedOut {
-          result = current.kind == .install
+          result =
+            current.kind == .install
             ? .notFinished : .unanswered
           operation = nil
           return
@@ -237,7 +239,8 @@ struct ServerUpdateOperation: Identifiable, Equatable {
       if reconnecting {
         return "Aurelia Server is restarting with the new version… This takes about a minute."
       }
-      return "Downloading and installing \(status.newest ?? "the update")… The server restarts by itself."
+      return
+        "Downloading and installing \(status.newest ?? "the update")… The server restarts by itself."
     }
   }
 
@@ -254,7 +257,9 @@ struct ServerUpdateOperation: Identifiable, Equatable {
     switch kind {
     case .install:
       if status.installed != installedBefore { return .installed(status.installed) }
-      if status.state == "idle", now.timeIntervalSince(startedAt) > 20 { return .notInstalled(status.installed) }
+      if status.state == "idle", now.timeIntervalSince(startedAt) > 20 {
+        return .notInstalled(status.installed)
+      }
       return timedOut(at: now) ? .notFinished : nil
     case .check:
       guard status.state == "idle" else { return timedOut(at: now) ? .unanswered : nil }
@@ -277,12 +282,14 @@ enum ServerUpdateResult: Equatable {
   var text: String {
     switch self {
     case .installed(let version): "Done. Aurelia Server \(version) is installed and running."
-    case .notInstalled(let version): "The update was not installed. Aurelia Server stays on \(version)."
+    case .notInstalled(let version):
+      "The update was not installed. Aurelia Server stays on \(version)."
     case .notFinished: "The update did not finish in ten minutes. Check the server, then try again."
     case .available(let version): "Aurelia Server \(version) is ready to install."
     case .upToDate(let version): "No new version found. Aurelia Server \(version) is up to date."
     case .unanswered: "The server did not answer the check. Try again later."
-    case .failed(let reason): reason ?? "The update did not work. Aurelia Server keeps its previous version."
+    case .failed(let reason):
+      reason ?? "The update did not work. Aurelia Server keeps its previous version."
     }
   }
 

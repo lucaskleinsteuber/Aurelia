@@ -279,7 +279,8 @@ final class OfflineDownloads: ObservableObject {
   func syncProgress(profile: StoredServerProfile) async {
     guard let userId = profile.user?.id else { return }
     let api = APIClient(profile: profile)
-    for title in titles where title.progressDirty && title.serverId == profile.serverId
+    for title in titles
+    where title.progressDirty && title.serverId == profile.serverId
       && title.userId == userId
     {
       do {
@@ -352,8 +353,10 @@ final class OfflineDownloads: ObservableObject {
       let temporary: URL
       if let quality {
         temporary = folder.appendingPathComponent("title.mp4.part")
-        _ = try await ConvertedFileDownload(api: api, mediaId: item.id, quality: quality, audio: audio)
-          .run(ticket: ticket, into: temporary, progress: report) { tickets.add($0) }
+        _ = try await ConvertedFileDownload(
+          api: api, mediaId: item.id, quality: quality, audio: audio
+        )
+        .run(ticket: ticket, into: temporary, progress: report) { tickets.add($0) }
       } else {
         temporary = try await OfflineFileDownload.run(from: local, into: folder, progress: report)
       }
@@ -441,7 +444,8 @@ final class OfflineDownloads: ObservableObject {
     return formatter.date(from: text)
   }
 
-  private static let damagedListMessage = "The list of downloads was damaged and has been set aside."
+  private static let damagedListMessage =
+    "The list of downloads was damaged and has been set aside."
 
   private func load() {
     var readable = true
@@ -582,7 +586,8 @@ final class OfflineFileDownload: NSObject, URLSessionDownloadDelegate, @unchecke
   }
 
   func urlSession(
-    _ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL
+    _ session: URLSession, downloadTask: URLSessionDownloadTask,
+    didFinishDownloadingTo location: URL
   ) {
     if let status = (downloadTask.response as? HTTPURLResponse)?.statusCode, status != 200 {
       finish(.failure(OfflineDownloadError.failed(status)))

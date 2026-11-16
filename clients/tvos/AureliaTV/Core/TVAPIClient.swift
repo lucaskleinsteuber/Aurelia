@@ -223,7 +223,8 @@ struct TVAPIClient: Sendable {
   }
 
   func collectionDetail(id: UUID) async throws -> TVCollectionDetail {
-    let detail: TVCollectionDetail = try await get("/api/v1/collections/\(id.uuidString.lowercased())")
+    let detail: TVCollectionDetail = try await get(
+      "/api/v1/collections/\(id.uuidString.lowercased())")
     guard detail.id == id else { throw TVCoreError.invalidResponse }
     return detail
   }
@@ -699,7 +700,9 @@ enum TVInstallation {
   static let defaultsKey = "AureliaTVInstallationId"
 
   static func identifier(defaults: UserDefaults = .standard) -> String {
-    if let saved = defaults.string(forKey: defaultsKey), UUID(uuidString: saved) != nil { return saved }
+    if let saved = defaults.string(forKey: defaultsKey), UUID(uuidString: saved) != nil {
+      return saved
+    }
     let created = UUID().uuidString
     defaults.set(created, forKey: defaultsKey)
     return created
@@ -707,7 +710,8 @@ enum TVInstallation {
 
   /// "tvos/2.6.0".
   static var clientHeader: String {
-    let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+    let version =
+      Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     return "tvos/" + version.filter { $0.isNumber || $0 == "." }
   }
 }

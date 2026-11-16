@@ -335,7 +335,10 @@ struct IOSAboutView: View {
             title: "MobileVLCKit", resource: "MobileVLCKit-COPYING.txt",
             source: URL(string: "https://code.videolan.org/videolan/VLCKit"))
         }
-        Link("Privacy Policy", destination: URL(string: "https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/PRIVACY.md")!)
+        Link(
+          "Privacy Policy",
+          destination: URL(
+            string: "https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/PRIVACY.md")!)
       } header: {
         Text("Legal")
       } footer: {
@@ -708,8 +711,10 @@ struct IOSPhotoCropSheet: View {
             .offset(live)
           Rectangle().fill(.black.opacity(0.55))
             .mask {
-              Rectangle().overlay { Circle().frame(width: side, height: side).blendMode(.destinationOut) }
-                .compositingGroup()
+              Rectangle().overlay {
+                Circle().frame(width: side, height: side).blendMode(.destinationOut)
+              }
+              .compositingGroup()
             }
             .allowsHitTesting(false)
           Circle().strokeBorder(.white, lineWidth: 2).frame(width: side, height: side)
