@@ -122,7 +122,7 @@ private struct IOSAdminServerContent: View {
           IOSAdminToggleLabel("Intros and Credits", "Finds them so players can offer Skip Intro.")
         }
         NavigationLink {
-          IOSAdminSpeechView()
+          IOSAdminSpeechView(platform: overview.capabilities?.platform)
         } label: {
           IOSAdminToggleLabel("Speech Recognition", "Writes and syncs subtitles from speech.")
         }
@@ -666,11 +666,13 @@ private struct IOSAdminSegmentsForm: View {
 
 /// Speech recognition: the model the server uses to write and sync subtitles.
 private struct IOSAdminSpeechView: View {
+  let platform: String?
+
   var body: some View {
     IOSAdminLoader {
       try await $0.serverSpeech()
     } content: { speech, reload in
-      IOSAdminSpeechForm(speech: speech, reload: reload)
+      IOSAdminSpeechForm(speech: speech, platform: platform, reload: reload)
     }
     .navigationTitle("Speech Recognition")
     .navigationBarTitleDisplayMode(.inline)
@@ -680,6 +682,7 @@ private struct IOSAdminSpeechView: View {
 private struct IOSAdminSpeechForm: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   let speech: IOSServerSpeech
+  let platform: String?
   let reload: @MainActor @Sendable () async -> Void
   @State private var confirmation: IOSAdminConfirmation?
 
@@ -688,7 +691,8 @@ private struct IOSAdminSpeechForm: View {
       if !speech.available {
         Section {
           Text(
-            "This server has no speech recognition. On Linux, install whisper.cpp from your distribution."
+            "Speech recognition isn’t available on this server."
+              + (platform == "linux" ? " Install whisper.cpp on the Linux server." : "")
           )
           .foregroundStyle(.secondary)
         }

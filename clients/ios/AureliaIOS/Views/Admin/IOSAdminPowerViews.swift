@@ -240,29 +240,31 @@ private struct IOSAdminUpdatesForm: View {
         }
         if let message = status.message { Text(message).foregroundStyle(.secondary) }
       }
-      Section {
-        Button("Check for Updates") {
-          Task { await admin.perform("Checking…") { _ = try await $0.checkServerUpdates() } }
-        }
-        .disabled(status.state != "idle" && status.state != "failed")
-        if status.updateAvailable {
-          Button("Install \(status.newest ?? "Update")…") {
-            confirmation = IOSAdminConfirmation(
-              title: "Install the update?",
-              message: "The server restarts once it is installed. Playback stops for a moment.",
-              action: "Install"
-            ) {
-              Task {
-                await admin.perform("Starting the update…") {
-                  _ = try await $0.installServerUpdate()
+      if status.available {
+        Section {
+          Button("Check for Updates") {
+            Task { await admin.perform("Checking…") { _ = try await $0.checkServerUpdates() } }
+          }
+          .disabled(status.state != "idle" && status.state != "failed")
+          if status.updateAvailable {
+            Button("Install \(status.newest ?? "Update")…") {
+              confirmation = IOSAdminConfirmation(
+                title: "Install the update?",
+                message: "The server restarts once it is installed. Playback stops for a moment.",
+                action: "Install"
+              ) {
+                Task {
+                  await admin.perform("Starting the update…") {
+                    _ = try await $0.installServerUpdate()
+                  }
                 }
               }
             }
+            .disabled(status.state != "idle" && status.state != "failed")
           }
-          .disabled(status.state != "idle" && status.state != "failed")
+        } footer: {
+          Text("Your library, profiles and settings stay as they are.")
         }
-      } footer: {
-        Text("Your library, profiles and settings stay as they are.")
       }
     }
     .scrollContentBackground(.hidden)
