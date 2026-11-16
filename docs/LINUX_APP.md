@@ -98,7 +98,9 @@ of the Mac's colored ones, placed where the desktop puts them. KDE Plasma's `But
 `ButtonsOnRight` in kwinrc are read first, then GNOME's `button-layout` (also used by Cinnamon, Budgie
 and MATE), otherwise they sit on the right. Pressing on empty space in the top 52 pixels moves the
 window and a double click maximizes it (`Controls/AppWindowBehavior.cs`); F11 switches full screen,
-F9 the sidebar, Ctrl+Q quits. Opening Aurelia from the application launcher again brings back
+F9 the sidebar, Ctrl+Q quits. Ctrl+F, Ctrl+/, Alt+Left and Esc work wherever the focus is in the
+library, also right after a profile opens. The window opens with its last size and maximized again
+if it was (never in full screen). Opening Aurelia from the application launcher again brings back
 the existing window, including a host running in the background; it does not start a second host. The sidebar can be dragged between 210 and 300 pixels wide.
 
 ## Screens and settings
@@ -219,8 +221,11 @@ Download & Install asks first, checks the owner's minisign signature of the rele
 list, and only then stops playback and this PC's server. Native packages use `pkexec` with
 `apt-get`, `dnf`/`zypper` or `pacman`; the desktop shows the administrator prompt. Flatpak uses the
 host's per-user Flatpak installation. A cancelled or failed install can be retried; a stopped
-host is started again on failure. After success, Quit Aurelia closes even a background host, so
-reopening starts the newly installed version. The package manager replaces app files and leaves
+host is started again on failure. The download shows its progress, and the release notes appear as
+text, not as Markdown marks. After success, Restart Aurelia (native packages) quits, even a background
+host, and opens the newly installed version; the new process waits until the old one has quit
+(`--after-quit <pid>`). A Flatpak update offers Quit Aurelia instead. Aurelia Test's Reset App Data
+restarts the same way. The package manager replaces app files and leaves
 the user's data, settings and keyring entries in place.
 
 ## Server management

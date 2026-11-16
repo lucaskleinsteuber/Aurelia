@@ -23,7 +23,7 @@ public sealed class RecommendationRefresh(LibraryStore store, TimeProvider? time
                 catch (OperationCanceledException) when (!cancellation.IsCancellationRequested) { continue; }
                 finally { waiting = null; }
                 cancellation.ThrowIfCancellationRequested();
-                await store.RefreshHomeAsync(cancellation);
+                using (Aurelia.Linux.Core.Api.AureliaApi.Background()) await store.RefreshHomeAsync(cancellation);
                 // A stale deadline or failed request must not turn into a tight request loop.
                 if (store.Home is null || store.Home.RecommendationChangesAt <= clock.GetUtcNow())
                     await Task.Delay(TimeSpan.FromSeconds(30), clock, cancellation);

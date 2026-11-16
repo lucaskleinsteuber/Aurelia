@@ -45,6 +45,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         Controls.Motion.ReduceMotion = () => Session?.Preferences.ReduceMotion == true;
         AppWindowBehavior.Attach(this);
         Flow = new AppFlow(services.Settings);
+        RestorePlacement();
         discovery = new DiscoveryCache(services.CreateDiscovery());
         var api = new AureliaApi(services.Transport);
         var wishPosters = new WishPosterCache(services.ArtworkDirectory is { } dir
@@ -80,6 +81,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.Q, KeyModifiers.Control), Command = new RelayCommand(Quit) });
         Closing += (_, e) =>
         {
+            SavePlacement();
             // With "Also when Aurelia is closed", closing only hides the window; the server keeps running.
             if (quitting || !KeepsRunning) return;
             e.Cancel = true;
@@ -252,7 +254,59 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         if (!KeepsRunning && tray is not null) tray.IsVisible = false;
     }
 
+    /// <summary>
+    /// Starts the version just installed and quits this one; the new one waits until this one has
+    /// ended (audit Linux S2: "Quit and reopen" was left to the person).
+    /// </summary>
+    public void RestartAfterUpdate() => Restart(edition: null);
+
+    /// <summary>
+    /// Quits and opens Aurelia again; the new process waits until this one has quit, so it never meets
+    /// this instance and hands over to it.
+    /// </summary>
+    private void Restart(string? edition)
+    {
+        if (Environment.ProcessPath is { Length: > 0 } program)
+        {
+            var start = new System.Diagnostics.ProcessStartInfo(program) { UseShellExecute = false };
+            if (edition is not null) start.Environment["AURELIA_EDITION"] = edition;
+            start.ArgumentList.Add("--after-quit");
+            start.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            try
+            {
+                System.Diagnostics.Process.Start(start)?.Dispose();
+            }
+            catch (Exception failure) when (failure is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
+            {
+                // Quitting still works; the person opens Aurelia again.
+            }
+        }
+        Quit();
+    }
+
     /// <summary>Quits Aurelia and stops this computer's server.</summary>
+    // The size the window had while neither maximized nor full screen, kept as it changes.
+    private Avalonia.Size normalSize;
+
+    private void RestorePlacement()
+    {
+        normalSize = new Avalonia.Size(Width, Height);
+        if (Core.Settings.WindowPlacement.Read(services.Settings) is { } saved)
+        {
+            Width = saved.Width;
+            Height = saved.Height;
+            normalSize = new Avalonia.Size(saved.Width, saved.Height);
+            if (saved.Maximized) WindowState = WindowState.Maximized;
+        }
+        PropertyChanged += (_, change) =>
+        {
+            if (change.Property == ClientSizeProperty && WindowState == WindowState.Normal) normalSize = ClientSize;
+        };
+    }
+
+    private void SavePlacement() =>
+        new Core.Settings.WindowPlacement(normalSize.Width, normalSize.Height, WindowState == WindowState.Maximized).Save(services.Settings);
+
     public void Quit()
     {
         quitting = true;
@@ -344,6 +398,8 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
     private LibraryShell NewShell()
     {
         var created = new LibraryShell { LeadingInset = Chrome.LeadingWidth, Session = Session, Engines = services.Engines };
+        // Settings, the player and other layers over the library keep their own keys.
+        created.IsCovered = () => settings is not null || Player is not null;
         if (Remote is not null) created.AttachRemote(Remote);
         created.PlayRequested += (item, resume) => _ = PlayAsync(item, resume);
         created.PlayCollectionRequested += (playlist, target, resume) => _ = PlayAsync(target, resume, playlist: playlist);
@@ -371,7 +427,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
             open.Category = category;
             return open;
         }
-        var created = new Settings.SettingsView(Session, shell, services, category) { InstallUpdate = InstallUpdateAsync, QuitAfterUpdate = Quit };
+        var created = new Settings.SettingsView(Session, shell, services, category) { InstallUpdate = InstallUpdateAsync, QuitAfterUpdate = Quit, RestartAfterUpdate = RestartAfterUpdate };
         settings = created;
         created.Closed += (_, _) =>
         {
@@ -579,7 +635,6 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         _ = Task.Run(() => downloads.DownloadAsync(client, item, subtitle, series, quality, quality is null ? null : options?.AudioTrack, expected));
     }
 
-    /// <summary>Plays a download; it works while the server is asleep or out of reach.</summary>
     /// <summary>
     /// Aurelia Test's Reset App Data: stops its own test server, erases the test edition's folders and keyring
     /// entry, and starts Aurelia Test again from the beginning.
@@ -590,13 +645,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         if (!TestEdition.MayErase(paths, AppInfo.IsTestEdition)) return;
         if (hosting is not null) await hosting.Host.StopAsync();
         await TestEdition.EraseAsync(paths, services.Credentials, AppInfo.IsTestEdition, CancellationToken.None);
-        if (Environment.ProcessPath is { } program)
-        {
-            var start = new System.Diagnostics.ProcessStartInfo(program) { UseShellExecute = false };
-            start.Environment["AURELIA_EDITION"] = "test";
-            System.Diagnostics.Process.Start(start)?.Dispose();
-        }
-        Quit();
+        Restart(edition: "test");
     }
 
     /// <summary>The longest side of the largest connected screen in device pixels; 0 when unknown.</summary>
@@ -821,6 +870,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
                 hostStarted = false;
                 await local.UseAnotherServerAsync();
             });
+        view.SettingsRequested += () => OpenSettings();
         _ = model.LoadAsync();
         return view;
     }

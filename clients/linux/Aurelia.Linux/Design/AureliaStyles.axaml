@@ -133,7 +133,7 @@
     <Setter Property="FontWeight" Value="Bold" />
     <Setter Property="LetterSpacing" Value="1.4" />
   </Style>
-  <Style Selector="TextBlock.subdued">
+  <Style Selector=":is(TextBlock).subdued">
     <Setter Property="Foreground" Value="{StaticResource AureliaSubduedTextBrush}" />
   </Style>
 
@@ -534,6 +534,33 @@
   <Style Selector="ToggleButton.chip:checked:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="#FFFFFF" />
     <Setter Property="Foreground" Value="#111316" />
+  </Style>
+
+  <!-- On a card, a chip is lighter than the card so its shape shows; it had the card's own
+       color and looked like loose text (audit Linux D2). -->
+  <Style Selector="Border.card Button.chip, Border.card ToggleButton.chip">
+    <Setter Property="Background" Value="#24FFFFFF" />
+  </Style>
+  <Style Selector="Border.card Button.chip:pointerover /template/ ContentPresenter#PART_ContentPresenter, Border.card ToggleButton.chip:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#36FFFFFF" />
+  </Style>
+
+  <!-- Check boxes are rounded squares, so a list of choices never looks like round option
+       buttons (audit Linux D2). -->
+  <Style Selector="CheckBox">
+    <Setter Property="CornerRadius" Value="5" />
+  </Style>
+  <!-- Expanders look like the cards they sit in, not like black bars (audit Linux D2). -->
+  <Style Selector="Expander /template/ ToggleButton#ExpanderHeader">
+    <Setter Property="Background" Value="#14FFFFFF" />
+    <Setter Property="CornerRadius" Value="10" />
+  </Style>
+  <Style Selector="Expander /template/ ToggleButton#ExpanderHeader:pointerover /template/ Border#ToggleButtonBackground">
+    <Setter Property="Background" Value="#22FFFFFF" />
+  </Style>
+  <Style Selector="Expander">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
   </Style>
 
   <!-- A round action next to the hero's main button (favorite, watchlist, more). -->

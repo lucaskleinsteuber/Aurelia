@@ -26,6 +26,8 @@ public sealed class ProfilePickerView : UserControl
     private readonly AppSession session;
     private readonly WrapPanel grid = new() { HorizontalAlignment = HorizontalAlignment.Center, ItemSpacing = 18, LineSpacing = 18 };
     private readonly StackPanel picker;
+    private readonly StackPanel heading;
+    private readonly StackPanel serverChoice;
     private readonly StackPanel pinEntry = new() { Spacing = 22, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly StackPanel setup;
     private readonly TextBox pin = new() { PasswordChar = '•', MaxLength = 8, FontSize = 20, Classes = { "pinField" }, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
@@ -38,6 +40,9 @@ public sealed class ProfilePickerView : UserControl
 
     /// <param name="forgotOwnerPin">On this computer's own server: resets the owner's PIN with the Server Password.</param>
     /// <param name="useAnotherServer">On this computer's own server: stops it and connects elsewhere.</param>
+    /// <summary>The gear in the corner was clicked.</summary>
+    public event Action? SettingsRequested;
+
     public ProfilePickerView(ProfilePickerModel model, AppSession session, Action? forgotOwnerPin = null, Func<Task>? useAnotherServer = null)
     {
         this.forgotOwnerPin = forgotOwnerPin;
@@ -90,19 +95,33 @@ public sealed class ProfilePickerView : UserControl
             if (useAnotherServer is null) await session.DisconnectAsync();
             else await useAnotherServer();
         };
+        heading = new StackPanel { Spacing = 8, Children = { new TextBlock { Text = "Who's watching?", FontSize = 40, FontWeight = FontWeight.Bold, LetterSpacing = -0.5, HorizontalAlignment = HorizontalAlignment.Center }, ScreenParts.Detail(model.ServerName) } };
+        serverChoice = new StackPanel { Spacing = 34, Children = { otherServer, confirmOther } };
         picker = new StackPanel
         {
             Spacing = 34,
             Children =
             {
-                new StackPanel { Spacing = 8, Children = { new TextBlock { Text = "Who's watching?", FontSize = 40, FontWeight = FontWeight.Bold, LetterSpacing = -0.5, HorizontalAlignment = HorizontalAlignment.Center }, ScreenParts.Detail(model.ServerName) } },
+                heading,
                 loading,
                 grid,
-                otherServer,
-                confirmOther,
+                serverChoice,
             },
         };
         setup = SetupForm();
+        // Settings (Updates, About) before a profile opens, as the Mac's gear: only Ctrl+, reached
+        // them here (audit Linux W6).
+        var settingsButton = new Button
+        {
+            Classes = { "heroAction" },
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(24),
+            Content = new PathIcon { Data = Application.Current?.FindResource("IconSettings") as Geometry, Width = 18, Height = 18 },
+        };
+        AutomationProperties.SetName(settingsButton, "Settings");
+        ToolTip.SetTip(settingsButton, "Settings (Ctrl+,)");
+        settingsButton.Click += (_, _) => SettingsRequested?.Invoke();
         Content = new Panel
         {
             Children =
@@ -118,6 +137,7 @@ public sealed class ProfilePickerView : UserControl
                 Children = { picker, pinEntry, setup, error },
             },
                 },
+                settingsButton,
             },
         };
         model.PropertyChanged += OnModelChanged;
@@ -135,7 +155,9 @@ public sealed class ProfilePickerView : UserControl
 
     private StackPanel SetupForm()
     {
-        var password = new TextBox { PasswordChar = '•', PlaceholderText = "Server Password", Width = 320 };
+        // Right after this app set up its own server the password was just chosen: it is not asked again.
+        var knowsPassword = model.KnowsServerPassword;
+        var password = new TextBox { PasswordChar = '•', PlaceholderText = "Server Password", Width = 320, IsVisible = !knowsPassword };
         var newPin = new TextBox { PasswordChar = '•', PlaceholderText = "Owner PIN (4–8 digits)", MaxLength = 8, Width = 320 };
         var confirm = new TextBox { PasswordChar = '•', PlaceholderText = "Confirm PIN", MaxLength = 8, Width = 320 };
         AutomationProperties.SetName(password, "Server Password");
@@ -151,7 +173,9 @@ public sealed class ProfilePickerView : UserControl
             {
                 ScreenParts.Symbol("IconPerson", 46),
                 ScreenParts.Title("Set Up Viewing Profiles"),
-                ScreenParts.Detail("Enter the server password and choose a PIN for the owner's profile. Everyone who watches gets their own profile."),
+                ScreenParts.Detail(knowsPassword
+                    ? "Choose a PIN for the owner's profile. Everyone who watches gets their own profile."
+                    : "Enter the server password and choose a PIN for the owner's profile. Everyone who watches gets their own profile."),
                 password,
                 newPin,
                 confirm,
@@ -167,6 +191,8 @@ public sealed class ProfilePickerView : UserControl
     private void Update()
     {
         picker.IsVisible = !model.NeedsSetup && !model.IsEnteringPin;
+        // While the first answer loads only the spinner shows, never "Who's watching?" that a setup form may replace.
+        heading.IsVisible = serverChoice.IsVisible = !(model.IsLoading && model.Profiles.Count == 0);
         setup.IsVisible = model.NeedsSetup;
         pinEntry.IsVisible = model.IsEnteringPin;
         loading.IsVisible = model.IsLoading;

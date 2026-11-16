@@ -40,7 +40,7 @@ public sealed class PeoplePage : StackPanel
             Note("Everyone who watches gets a profile. Choose what each profile can see; owners always see everything."),
             profiles,
             Button("Create Profile…", () => EditAsync(null), "primary"),
-            Note("New profiles start without access to any titles until you choose them."))));
+            Note("A new profile sees only the titles you choose for it; a children's profile sees the whole library up to its age."))));
         Children.Add(Section("Devices", Block(Note("Connect another computer, an Apple TV or a web browser to this server, and sign out devices you no longer use."), devices)));
         if (scope.IsOwner && scope.Session.Capabilities.Contains(ServerFeatures.Security)) Children.Add(new SecuritySection(scope));
         DetachedFromVisualTree += (_, _) => codeTimer?.Stop();
@@ -59,8 +59,17 @@ public sealed class PeoplePage : StackPanel
             users = await Client.UsersAsync();
             sessions = await Client.DevicesAsync();
         }, message);
+        // Whether the server is open to the home network, for the browser address (audit Linux W1).
+        ServerInfoResponse? info = null;
+        try
+        {
+            info = await scope.Session.Api.ServerInfoAsync(Client.Library.Server, CancellationToken.None, TimeSpan.FromSeconds(5));
+        }
+        catch (Exception failure) when (failure is AureliaApiException or HttpRequestException or TaskCanceledException or IOException)
+        {
+        }
         FillProfiles();
-        FillDevices(sessions);
+        FillDevices(sessions, info);
     }
 
     private void FillProfiles()
@@ -70,7 +79,8 @@ public sealed class PeoplePage : StackPanel
         {
             var user = access.User;
             var pin = user.NeedsPinSetup ? "PIN setup required" : user.PinProtectionEnabled ? "PIN protected" : "No PIN";
-            var content = user.Role == UserRole.Owner || user.AccessMode == ProfileAccessMode.EntireLibrary ? "Entire Library"
+            var content = user.AgeLimit is { } age && user.Role != UserRole.Owner ? $"Up to FSK {age}"
+                : user.Role == UserRole.Owner || user.AccessMode == ProfileAccessMode.EntireLibrary ? "Entire Library"
                 : user.AccessMode == ProfileAccessMode.SelectedTitles ? "Selected Titles" : "Existing Storage Grants";
             var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
             var edit = Button("Edit Profile…", () => EditAsync(access));
@@ -102,7 +112,7 @@ public sealed class PeoplePage : StackPanel
                                 Children =
                                 {
                                     new TextBlock { Text = ProfileVisuals.ShownName(user), FontWeight = FontWeight.SemiBold },
-                                    new TextBlock { Text = $"{RoleName(user.Role)} · {(access.IsEnabled ? "Enabled" : "Disabled")}", Classes = { "subdued" }, FontSize = 12 },
+                                    new TextBlock { Text = $"{(user.AgeLimit is not null && user.Role != UserRole.Owner ? "Children's Profile" : RoleName(user.Role))} · {(access.IsEnabled ? "Enabled" : "Disabled")}", Classes = { "subdued" }, FontSize = 12 },
                                     new TextBlock { Text = $"{pin} · {content}", Classes = { "subdued" }, FontSize = 12 },
                                 },
                             },
@@ -149,7 +159,7 @@ public sealed class PeoplePage : StackPanel
         if (await scope.Sheets.ShowAsync(editor)) await ReloadAsync();
     }
 
-    private void FillDevices(IReadOnlyList<DeviceSessionSummary> sessions)
+    private void FillDevices(IReadOnlyList<DeviceSessionSummary> sessions, ServerInfoResponse? info)
     {
         devices.Children.Clear();
         var capabilities = scope.Session.Capabilities;
@@ -178,7 +188,7 @@ public sealed class PeoplePage : StackPanel
         }
         else
         {
-            var address = BrowserAddress.Resolve(Client.Library.Server.Address, null, null);
+            var address = BrowserAddress.Resolve(Client.Library.Server.Address, info?.LanAccessEnabled, info?.LanHttpsPort);
             devices.Children.Add(Note(address.ThisComputerOnly
                 ? "Open this address in a browser on this computer. To use Aurelia in browsers on other devices, turn on home network access for this server."
                 : "Open this address in a browser on any device at home. The browser asks for a code; create one above."));

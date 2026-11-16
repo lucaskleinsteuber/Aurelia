@@ -160,7 +160,7 @@ public sealed class ServerPage : StackPanel
                     Spacing = 4,
                     Children =
                     {
-                        new TextBlock { Text = "Your Server", FontSize = 18, FontWeight = FontWeight.Bold },
+                        SectionHeading("Your Server"),
                         new TextBlock { Text = string.Join(" · ", new[] { name, ServerHostingKind.Location(Hosting) }.Where(part => part is not null)), Classes = { "subdued" } },
                     },
                 },
@@ -232,7 +232,7 @@ public sealed class ServerPage : StackPanel
         grid.Children.Add(Fact("Last Scan", current.LastScan is { } scan ? $"{Capitalize(scan.State)} (+{scan.AddedFiles}, -{scan.MissingFiles})" : "None", small: true));
         grid.Children.Add(Fact("Database Backups", backup, small: true));
         grid.Children.Add(Fact("Background Jobs", jobs == 0 ? "Idle" : $"{jobs} active", small: true));
-        var stack = new StackPanel { Spacing = 14, Children = { new TextBlock { Text = "Server Health", FontSize = 18, FontWeight = FontWeight.Bold }, grid } };
+        var stack = new StackPanel { Spacing = 14, Children = { SectionHeading("Server Health"), grid } };
         if (current.OfflineMediaCount > 0)
         {
             stack.Children.Add(Note($"{current.OfflineMediaCount} {(current.OfflineMediaCount == 1 ? "title is" : "titles are")} offline. Their details and progress stay."));
@@ -332,6 +332,16 @@ public sealed class ServerPage : StackPanel
         var panel = Block();
         var checkPanel = Block();
         var checkSection = Section("Wake-on-LAN Check", checkPanel);
+        Button? save = null;
+        var saved = new TextBlock { Text = "Saved", Classes = { "subdued" }, IsVisible = false, VerticalAlignment = VerticalAlignment.Center };
+        // Like every form with typed values, Power saves with one button that is active only while something changed.
+        bool Dirty() => (mode, idle, from, until, wakeOnAccess, afterSleepTimer)
+            != (power.Mode, power.IdleMinutes, power.AwakeFrom, power.AwakeUntil, power.WakeOnAccess, power.AfterSleepTimer);
+        void Changed()
+        {
+            if (save is not null) save.IsEnabled = Dirty();
+            saved.IsVisible = false;
+        }
         void Build()
         {
             BuildWakeCheck(checkPanel, checkSection, power, mode);
@@ -346,10 +356,10 @@ public sealed class ServerPage : StackPanel
             {
                 var choices = IdleChoices.Contains(idle) ? IdleChoices : [.. IdleChoices.Append(idle).Order()];
                 panel.Children.Add(Choice("After", "Without anyone watching, browsing or changing settings on any device. An app that is only open doesn't count, and nothing happens while a title plays.",
-                    [.. choices.Select(m => (m, IdleLabel(m)))], idle, value => idle = value).Also(r => r.Margin = new Thickness(0)));
+                    [.. choices.Select(m => (m, IdleLabel(m)))], idle, value => { idle = value; Changed(); }).Also(r => r.Margin = new Thickness(0)));
                 panel.Children.Add(Toggle("Also After a Sleep Timer Ends",
                     "When a player's sleep timer ends and nothing plays for five more minutes, it happens right away, at any time of day.",
-                    afterSleepTimer, enabled => afterSleepTimer = enabled).Also(r => r.Margin = new Thickness(0)));
+                    afterSleepTimer, enabled => { afterSleepTimer = enabled; Changed(); }).Also(r => r.Margin = new Thickness(0)));
                 panel.Children.Add(Toggle("Keep Running at Set Hours", null, from is not null, enabled =>
                 {
                     from = enabled ? "17:00" : null;
@@ -362,8 +372,8 @@ public sealed class ServerPage : StackPanel
                     var untilBox = new TextBox { Text = until, Width = 90, PlaceholderText = "23:00" };
                     AutomationProperties.SetName(fromBox, "From");
                     AutomationProperties.SetName(untilBox, "Until");
-                    fromBox.TextChanged += (_, _) => from = fromBox.Text;
-                    untilBox.TextChanged += (_, _) => until = untilBox.Text;
+                    fromBox.TextChanged += (_, _) => { from = fromBox.Text; Changed(); };
+                    untilBox.TextChanged += (_, _) => { until = untilBox.Text; Changed(); };
                     panel.Children.Add(new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -378,10 +388,10 @@ public sealed class ServerPage : StackPanel
                 {
                     panel.Children.Add(Toggle("Wake When a Device Connects",
                         "Opening Aurelia in a browser wakes the server too, from a device that reached it within the last minutes. Other devices still use Wake-on-LAN. Stray network traffic can wake it now and then; it powers down again after five unused minutes.",
-                        wakeOnAccess, enabled => wakeOnAccess = enabled).Also(r => r.Margin = new Thickness(0)));
+                        wakeOnAccess, enabled => { wakeOnAccess = enabled; Changed(); }).Also(r => r.Margin = new Thickness(0)));
                 }
             }
-            panel.Children.Add(Button("Save Power Settings", async () =>
+            save = Button("Save Changes", async () =>
             {
                 if (from is not null && (!IsTime(from) || !IsTime(until) || from == until))
                 {
@@ -389,9 +399,16 @@ public sealed class ServerPage : StackPanel
                     note.IsVisible = true;
                     return;
                 }
-                await scope.RunAsync(async () => power = await Client.SavePowerAsync(new UpdateServerPowerSettingsRequest(mode, idle, from, until,
-                    !byApp && (power.WakeSupport ?? "").Contains('u', StringComparison.Ordinal) ? wakeOnAccess : null, afterSleepTimer)), note);
-            }, "primary"));
+                if (await scope.RunAsync(async () => power = await Client.SavePowerAsync(new UpdateServerPowerSettingsRequest(mode, idle, from, until,
+                    !byApp && (power.WakeSupport ?? "").Contains('u', StringComparison.Ordinal) ? wakeOnAccess : null, afterSleepTimer)), note))
+                {
+                    Changed();
+                    saved.IsVisible = true;
+                }
+            }, "primary");
+            save.IsEnabled = Dirty();
+            if (saved.Parent is Panel old) old.Children.Remove(saved);
+            panel.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Children = { save, saved } });
             panel.Children.Add(note);
         }
         Build();
@@ -626,7 +643,7 @@ public sealed class ServerPage : StackPanel
                 }
             }, "destructive");
             delete.IsEnabled = stored.StoredTitleCount > 0 || stored.StoredBytes > 0;
-            panel.Children.Add(Buttons(Button("Save Scrub Preview Settings", async () =>
+            panel.Children.Add(Buttons(SaveButton("Scrub Preview Settings", async () =>
             {
                 if (await scope.RunAsync(async () => stored = await Client.SaveScrubPreviewsAsync(new UpdateScrubPreviewSettingsRequest(mode, interval, cap)), note)) Build();
             }, "primary"), delete));
@@ -766,7 +783,7 @@ public sealed class ServerPage : StackPanel
             Row("Maintenance until", "Hour of the day", end),
             Row("Maximum waiting tasks", null, queue),
             Block(Note("Maintenance hours use the server's local time. Manual scans remain available. Media is read directly; Aurelia does not copy videos."),
-                Buttons(Button("Save Maintenance Settings", () => SaveAsync(settings =>
+                Buttons(SaveButton("Maintenance Settings", () => SaveAsync(settings =>
                 {
                     settings["monitoringEnabled"] = monitoring.IsChecked == true;
                     settings["reconciliationMinutes"] = (int)check.Value!;
@@ -888,7 +905,7 @@ public sealed class ServerPage : StackPanel
             Row("Automatic backup every", "Hours", interval),
             Row("Keep daily backups", null, daily),
             Row("Keep weekly backups", null, weekly),
-            Block(Buttons(Button("Save Backup Settings", () => SaveAsync(settings =>
+            Block(Buttons(SaveButton("Backup Settings", () => SaveAsync(settings =>
                 {
                     settings["backupIntervalHours"] = (int)interval.Value!;
                     settings["dailyBackupsRetained"] = (int)daily.Value!;
@@ -922,7 +939,7 @@ public sealed class ServerPage : StackPanel
             Row("Keep events for", "Days", retention),
             Row("Maximum events", null, maximum),
             Block(Buttons(
-                    Button("Save Diagnostic Settings", () => SaveAsync(settings =>
+                    SaveButton("Diagnostic Settings", () => SaveAsync(settings =>
                     {
                         settings["eventRetentionDays"] = (int)retention.Value!;
                         settings["maximumEvents"] = (int)maximum.Value!;

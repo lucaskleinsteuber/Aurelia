@@ -395,6 +395,8 @@ public sealed partial class LibraryStore(LibraryClient client, ArtworkCache artw
     /// <summary>Applies changes reported by the sync loop: a full reload, or Home plus the changed titles.</summary>
     public async Task ApplyChangesAsync(SyncChangesResponse changes)
     {
+        // Reloads because the server reported a change are the app's own (audit Linux P1).
+        using var quiet = Aurelia.Linux.Core.Api.AureliaApi.Background();
         var areas = changes.ChangedAreas;
         var full = changes.ResetRequired || areas.Contains(SyncChangeArea.Catalog) || areas.Contains(SyncChangeArea.Libraries)
             || changes.ChangedMediaIds.Count > 32

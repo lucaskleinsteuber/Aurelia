@@ -31,13 +31,14 @@ public sealed class ArtworkImage : Border
     private readonly double displayWidth;
     private bool requested;
 
-    public ArtworkImage(LibraryStore? store, ArtworkSummary? artwork, double displayWidth)
+    /// <param name="seeThrough">No placeholder of its own: what lies beneath (a poster's title) shows until the picture arrives.</param>
+    public ArtworkImage(LibraryStore? store, ArtworkSummary? artwork, double displayWidth, bool seeThrough = false)
     {
         this.store = store;
         this.artwork = artwork;
         this.displayWidth = displayWidth;
         ClipToBounds = true;
-        Background = Placeholder;
+        Background = seeThrough ? Brushes.Transparent : Placeholder;
         Child = image;
         // A picture this window already decoded shows at once.
         if (artwork is not null && DecodedArtwork.Find(artwork.Id, ArtworkCache.WidthFor(displayWidth)) is { } known)

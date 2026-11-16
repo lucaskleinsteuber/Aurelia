@@ -35,6 +35,13 @@ public sealed class WindowChrome : Panel
     /// <summary>How much room the buttons take at the window's left edge (0 when they are on the right).</summary>
     public double LeadingWidth => ClusterWidth(Layout.Left);
 
+    /// <summary>
+    /// The top margin that keeps a full-window view's own Close button clear of the window
+    /// buttons, wherever the desktop puts them (audit Linux D1: Movie Night's × sat on the
+    /// window's close button, so leaving Movie Night quit Aurelia).
+    /// </summary>
+    public const double ClearTop = Inset + ButtonSize + 18;
+
     public void Attach(Window owner, WindowButtonLayout layout)
     {
         window = owner;

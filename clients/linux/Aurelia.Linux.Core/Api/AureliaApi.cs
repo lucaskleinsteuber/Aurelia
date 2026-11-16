@@ -205,6 +205,37 @@ public sealed partial class AureliaApi : IDisposable
         }
     }
 
+    /// <summary>
+    /// Marks a read the app makes by itself (since server 2.21.0): a page that refreshes its
+    /// progress every few seconds, or a page reloaded because the server reported a change. The
+    /// server doesn't count it as use, so it can still rest. Only reads carry it.
+    /// </summary>
+    public const string BackgroundHeader = "X-Aurelia-Background";
+
+    private static readonly AsyncLocal<bool> InBackground = new();
+
+    /// <summary>
+    /// The GET requests made until the returned scope ends are the app's own, not the person's
+    /// (audit Linux P1: management pages asking every 2 to 5 seconds kept the server awake).
+    /// </summary>
+    public static IDisposable Background()
+    {
+        var previous = InBackground.Value;
+        InBackground.Value = true;
+        return new BackgroundScope(previous);
+    }
+
+    private sealed class BackgroundScope(bool previous) : IDisposable
+    {
+        public void Dispose() => InBackground.Value = previous;
+    }
+
+    /// <summary>Runs reads the app makes by itself; see <see cref="Background"/>.</summary>
+    public static async Task<T> InBackgroundAsync<T>(Func<Task<T>> read)
+    {
+        using (Background()) return await read();
+    }
+
     internal static async Task<T> SendAsync<T>(HttpClient client, HttpMethod method, string path, string? token, object? body,
         bool inspecting, CancellationToken cancellation)
     {
@@ -218,6 +249,7 @@ public sealed partial class AureliaApi : IDisposable
     internal static async Task<T> SendRequestAsync<T>(HttpClient client, HttpRequestMessage request, bool inspecting, CancellationToken cancellation)
     {
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        if (InBackground.Value && request.Method == HttpMethod.Get) request.Headers.TryAddWithoutValidation(BackgroundHeader, "1");
         HttpResponseMessage response;
         try
         {

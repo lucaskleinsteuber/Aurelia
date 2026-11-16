@@ -102,7 +102,7 @@ public sealed class ServerMoveScreenTests
         var window = FakeLibrary.ShowLibrary(server);
         var settings = window.OpenSettings(SettingsCategory.Server);
         var page = settings.Page!;
-        FakeLibrary.Pump(() => Shows(page, "Move this server, with its library"), rounds: 400);
+        FakeLibrary.Pump(() => Shows(page, "Not moved. Start a move"), rounds: 400);
         Click(NamedButton(page, "Move to a New Server"));
         var sheet = Assert.IsType<MoveServerSheet>(Sheet(settings));
         Click(NamedButton(sheet, "Over the Network"));

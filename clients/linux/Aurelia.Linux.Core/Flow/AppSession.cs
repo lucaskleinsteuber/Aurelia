@@ -164,6 +164,12 @@ public sealed class AppSession : ObservableObject
     /// </summary>
     public bool NeedsInitialLibrarySetup { get; set; }
 
+    /// <summary>
+    /// The Server Password the owner chose a moment ago in this app's own setup, held in memory only until
+    /// the owner's PIN is set, so the next step doesn't ask for it again.
+    /// </summary>
+    public string? FreshServerPassword { get; set; }
+
     /// <summary>This computer's own server no longer accepts the saved owner credential.</summary>
     public event Action? LocalSignInNeeded;
 
@@ -428,6 +434,7 @@ public sealed class AppSession : ObservableObject
     /// <summary>Forgets the server: removes the pairing here and, when it answers, on the server too.</summary>
     public async Task DisconnectAsync()
     {
+        FreshServerPassword = null;
         CancelNetworkConfirmation();
         var saved = Server;
         await EndProfileAsync();

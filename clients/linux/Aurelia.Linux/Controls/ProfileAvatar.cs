@@ -40,11 +40,15 @@ public sealed class ProfileAvatar : Border
             Child = Symbol(builtin.Symbol, size);
             return;
         }
-        Background = Gradient(ProfileVisuals.Palettes[ProfileVisuals.PaletteIndex(id)]);
+        // A profile that isn't saved yet has no id, and the id picks the color: a neutral gray until then,
+        // never a color that changes once it is saved.
+        Background = Gradient(id is null ? UnsavedPalette : ProfileVisuals.Palettes[ProfileVisuals.PaletteIndex(id)]);
         // While a photo loads only the plain gradient shows, never the initial it then replaces.
         if (pictureKey == ProfilePictures.PhotoKey && id is { } profile) ShowPhoto(profile, pictureRevision, name, size);
         else Child = Initial(name, size);
     }
+
+    internal static readonly (string Top, string Bottom) UnsavedPalette = ("#6B7080", "#43464F");
 
     public ProfileAvatar(UserSummary user, double size)
         : this(user.Id, ProfileVisuals.ShownName(user), size, user.PictureKey, user.PictureRevision)

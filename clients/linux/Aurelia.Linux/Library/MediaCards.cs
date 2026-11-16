@@ -22,7 +22,10 @@ internal static class MediaCards
             Height = width * 1.5,
             Children =
             {
-                Rounded(new ArtworkImage(context.Store, item.Poster ?? item.Backdrop, width), 12),
+                // Under the picture: its title, for a title without artwork or while it loads, as
+                // on the Mac; an empty grey box said nothing (audit Linux D4).
+                PosterFallback(item.Title, item.Kind),
+                Rounded(new ArtworkImage(context.Store, item.Poster ?? item.Backdrop, width, seeThrough: true), 12),
                 Badges(item),
                 ProgressBar(item, 10),
             },
@@ -38,6 +41,7 @@ internal static class MediaCards
             },
         };
         var card = Card(new StackPanel { Spacing = 8, Children = { picture, caption } }, item.Title);
+        card.Classes.Add("titleCard");
         card.Click += (_, _) => context.OpenDetail(item);
         MediaMenu.Attach(card, context, item);
         PrepareOnFocus(card, context, item);
@@ -74,6 +78,7 @@ internal static class MediaCards
             },
         };
         var card = Card(picture, item.Title);
+        card.Classes.Add("titleCard");
         card.Click += (_, _) =>
         {
             if (plays && LibraryPresentation.IsPlayable(item)) context.Play(item, resume: true);
@@ -217,6 +222,40 @@ internal static class MediaCards
         card.Click += (_, _) => context.OpenPerson(name, personKey);
         return card;
     }
+
+    /// <summary>A poster's stand-in: a quiet symbol and the title on the card's color.</summary>
+    internal static Border PosterFallback(string title, MediaKind kind) => new()
+    {
+        CornerRadius = new CornerRadius(12),
+        Background = Application.Current?.FindResource("AureliaSurfaceBrush") as IBrush,
+        Padding = new Thickness(12),
+        Child = new StackPanel
+        {
+            Spacing = 10,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                new PathIcon
+                {
+                    Data = Application.Current?.FindResource(kind == MediaKind.Series ? "IconTvShows" : "IconMovies") as Geometry,
+                    Width = 26,
+                    Height = 26,
+                    Foreground = new SolidColorBrush(Color.FromArgb(0x66, 0xFF, 0xFF, 0xFF)),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                },
+                new TextBlock
+                {
+                    Text = title,
+                    FontWeight = FontWeight.SemiBold,
+                    TextAlignment = TextAlignment.Center,
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxLines = 3,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    Foreground = new SolidColorBrush(Color.FromArgb(0xB3, 0xFF, 0xFF, 0xFF)),
+                },
+            },
+        },
+    };
 
     public static string Subtitle(CatalogItemSummary item)
     {

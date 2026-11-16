@@ -235,6 +235,17 @@ public sealed class AdminScope
         return panel;
     }
 
+    /// <summary>
+    /// "Save Changes", as every form with typed values saves; screen readers hear what it saves
+    /// ("Save Backup Settings"), since a page may have several.
+    /// </summary>
+    public static Button SaveButton(string what, Func<Task> action, string classes = "primary")
+    {
+        var button = Button("Save Changes", action, classes);
+        Avalonia.Automation.AutomationProperties.SetName(button, "Save " + what);
+        return button;
+    }
+
     public static Button Button(string label, Func<Task> action, string classes = "chip")
     {
         var button = new Button { Content = label, Classes = { classes } };

@@ -14,6 +14,8 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        // Restarted after an update: the old version first finishes quitting (audit Linux S2).
+        WaitForQuittingInstance(args);
         using var instance = new AppInstance(AppPaths.FromEnvironment().ConfigDirectory);
         if (!instance.IsOwner)
         {
@@ -29,6 +31,26 @@ public static class Program
             && !StartsBackgroundServer(new JsonFileSettingsStore(AppPaths.FromEnvironment().SettingsFile))) return 0;
         App.Instance = instance;
         return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    }
+
+    /// <summary>"--after-quit &lt;process id&gt;": waits up to 20 seconds until that process has ended.</summary>
+    internal static void WaitForQuittingInstance(string[] args)
+    {
+        var index = Array.IndexOf(args, "--after-quit");
+        if (index < 0 || index + 1 >= args.Length
+            || !int.TryParse(args[index + 1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id)) return;
+        try
+        {
+            using var previous = System.Diagnostics.Process.GetProcessById(id);
+            previous.WaitForExit(TimeSpan.FromSeconds(20));
+        }
+        catch (ArgumentException)
+        {
+            // Already gone.
+        }
+        catch (InvalidOperationException)
+        {
+        }
     }
 
     /// <summary>

@@ -99,7 +99,11 @@ public sealed class WatchlistPage : LibraryPageBase
     protected override Control Build()
     {
         var page = new StackPanel { Spacing = 26, Margin = new Thickness(0, 64, 0, 48) };
-        page.Children.Add(new StackPanel { Margin = Inset(), Children = { PageTitle("Watchlist") } });
+        var heading = new StackPanel { Margin = Inset(), Orientation = Orientation.Horizontal, Spacing = 12, Children = { PageTitle("Watchlist") } };
+        // The count beside the title, as on every other page with a list.
+        if (loaded && items.Count > 0)
+            heading.Children.Add(new TextBlock { Text = items.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), Classes = { "subdued" }, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 8) });
+        page.Children.Add(heading);
         if (!loaded) return page;
         page.Children.Add(items.Count == 0
             ? EmptyState("Your Watchlist Is Empty", "Add movies and shows you want to watch later from their page or with a right click.")

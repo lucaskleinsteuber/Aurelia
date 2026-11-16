@@ -20,9 +20,12 @@ public sealed class Rail : Panel
     private readonly Panel row;
     private readonly Button previous;
     private readonly Button next;
+    private bool restored;
 
     /// <summary>A rail of <paramref name="count"/> cards; beyond <see cref="LazyCards.Threshold"/> only those near the view are made.</summary>
-    public Rail(string title, int count, Func<int, Control> card, double leadingInset)
+    /// <param name="startOffset">Where a rebuilt rail continues, so a library change doesn't send it back to its start.</param>
+    /// <param name="scrolled">Told each new offset, to keep for the next build.</param>
+    public Rail(string title, int count, Func<int, Control> card, double leadingInset, double startOffset = 0, Action<double>? scrolled = null)
     {
         if (count > LazyCards.Threshold) row = new LazyCards(count, card, wrap: false, Spacing);
         else
@@ -49,7 +52,24 @@ public sealed class Rail : Panel
         Children.Add(next);
         PointerEntered += (_, _) => UpdateArrows(visible: true);
         PointerExited += (_, _) => UpdateArrows(visible: IsKeyboardFocusWithin);
-        scroller.ScrollChanged += (_, _) => UpdateArrows(visible: IsPointerOver || IsKeyboardFocusWithin);
+        scroller.ScrollChanged += (_, _) =>
+        {
+            UpdateArrows(visible: IsPointerOver || IsKeyboardFocusWithin);
+            if (restored) scrolled?.Invoke(scroller.Offset.X);
+        };
+        if (startOffset > 0)
+        {
+            // The extent is known only after the first layout; until then the rail keeps its old offset.
+            void Restore(object? sender, EventArgs e)
+            {
+                if (scroller.Extent.Width <= 0) return;
+                scroller.LayoutUpdated -= Restore;
+                scroller.Offset = new Vector(Math.Min(startOffset, Math.Max(0, scroller.Extent.Width - scroller.Viewport.Width)), 0);
+                restored = true;
+            }
+            scroller.LayoutUpdated += Restore;
+        }
+        else restored = true;
         KeyDown += (_, e) =>
         {
             if (e.Key is Key.Left or Key.Right && e.KeyModifiers == KeyModifiers.None)

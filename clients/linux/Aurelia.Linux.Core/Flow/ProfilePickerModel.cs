@@ -136,6 +136,9 @@ public sealed class ProfilePickerModel : ObservableObject
     }
 
     /// <summary>Sets up the server's profiles with the server password and the owner's new PIN.</summary>
+    /// <summary>True right after this app set up its server: the password the owner just chose is used.</summary>
+    public bool KnowsServerPassword => session.FreshServerPassword is not null;
+
     public async Task SetUpAsync(string password, string newPin, string confirmation)
     {
         if (!ProfilePin.IsValid(newPin))
@@ -153,7 +156,8 @@ public sealed class ProfilePickerModel : ObservableObject
         Error = null;
         try
         {
-            await session.Api.InitializeProfilesAsync(server, password, newPin, CancellationToken.None);
+            await session.Api.InitializeProfilesAsync(server, session.FreshServerPassword ?? password, newPin, CancellationToken.None);
+            session.FreshServerPassword = null;
             await LoadAsync();
             // The owner just chose this PIN: open the owner's profile without asking for it again.
             if (Profiles.FirstOrDefault(profile => profile.Role == UserRole.Owner) is { } owner)

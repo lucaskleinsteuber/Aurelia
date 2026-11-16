@@ -77,6 +77,9 @@ public sealed class SettingsView : UserControl
 
     public System.Action? QuitAfterUpdate { get; set; }
 
+    /// <summary>Starts the installed version and quits this one.</summary>
+    public System.Action? RestartAfterUpdate { get; set; }
+
     private readonly TextBox search = new TextBox { PlaceholderText = "Search settings…", Margin = new Thickness(12, 0, 12, 10) }.WithGlass();
 
     public SettingsView(AppSession session, LibraryShell? shell, AppServices services, SettingsCategory category = SettingsCategory.General)
@@ -157,7 +160,10 @@ public sealed class SettingsView : UserControl
         set => categories.SelectedItem = categories.Items.OfType<ListBoxItem>().FirstOrDefault(item => (SettingsCategory)item.Tag! == value);
     }
 
-    internal Control? Page => content.Content as Control;
+    internal Control? Page => CurrentPage ?? content.Content as Control;
+
+    /// <summary>The panel the open category's sections are in.</summary>
+    private StackPanel? CurrentPage => (content.Content as Grid)?.Children.OfType<StackPanel>().FirstOrDefault();
 
     internal SheetHost Sheets => sheets;
 
@@ -227,7 +233,9 @@ public sealed class SettingsView : UserControl
         detachUpdater?.Invoke();
         detachUpdater = null;
         if (categories.SelectedItem is not ListBoxItem { Tag: SettingsCategory category }) return;
-        var page = new StackPanel { Spacing = 22, Margin = new Thickness(36, 58, 36, 40), MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Left };
+        // Every page has the same reading width: up to 720 points from the left, narrower only when
+        // the window is. Sized to its content, each page had another width (audit Linux D2).
+        var page = new StackPanel { Spacing = 22, HorizontalAlignment = HorizontalAlignment.Stretch };
         page.Children.Add(PageTitle(CategoryName(category)));
         switch (category)
         {
@@ -244,8 +252,17 @@ public sealed class SettingsView : UserControl
             case SettingsCategory.About: About(page); break;
             default: Advanced(page); break;
         }
-        content.Content = page;
+        content.Content = new Grid
+        {
+            Margin = new Thickness(36, 58, 36, 40),
+            ColumnDefinitions = { new ColumnDefinition(GridLength.Star) { MaxWidth = PageWidth } },
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Children = { page },
+        };
     }
+
+    /// <summary>The width of every settings page, as the Mac's settings column.</summary>
+    public const double PageWidth = 720;
 
     private GeneralPreferences Prefs => session.Preferences;
 
@@ -299,7 +316,7 @@ public sealed class SettingsView : UserControl
                 problem.IsVisible = true;
                 // Rebuild from saved values after a denied desktop permission request.
                 ShowSelected();
-                if (content.Content is StackPanel page)
+                if (CurrentPage is { } page)
                 {
                     var failureMessage = AdminScope.Message();
                     failureMessage.Text = failure.Message;
@@ -370,12 +387,8 @@ public sealed class SettingsView : UserControl
     {
         var prefs = Prefs;
         var layout = prefs.Sidebar();
-        var rows = new List<Control>
-        {
-            Choice("Startup Screen", null,
-                [("lastScreen", "Last Screen Used"), ("home", "Home"), ("library", "Library"), ("movies", "Movies"), ("series", "TV Shows"), ("collections", "Collections"), ("watchlist", "Watchlist"), ("recentlyAdded", "Recently Added")],
-                prefs.StartScreen, value => prefs.StartScreen = value),
-        };
+        // The start page is chosen once, under General › Default Start Screen.
+        var rows = new List<Control>();
         var order = layout.Order.ToList();
         var pageRows = new List<Control>();
         for (var index = 0; index < order.Count; index++)
@@ -623,10 +636,14 @@ public sealed class SettingsView : UserControl
         var name = new TextBox { Text = ProfileVisuals.ShownName(profile.User), Width = 260, MaxLength = 40, HorizontalAlignment = HorizontalAlignment.Left };
         AutomationProperties.SetName(name, "Your Name");
         var picture = new ProfilePicturePicker(profile.User.Id, () => string.IsNullOrWhiteSpace(name.Text) ? "?" : name.Text, profile.User.PictureKey, profile.User.PictureRevision);
-        name.TextChanged += (_, _) => picture.Refresh();
         var problem = new TextBlock { Foreground = new SolidColorBrush(Color.Parse("#FF8A8A")), IsVisible = false, TextWrapping = TextWrapping.Wrap };
         var saved = new TextBlock { Text = "Saved", Classes = { "subdued" }, IsVisible = false, VerticalAlignment = VerticalAlignment.Center };
-        var save = new Button { Content = "Save", Classes = { "primary" } };
+        name.TextChanged += (_, _) =>
+        {
+            picture.Refresh();
+            saved.IsVisible = false;
+        };
+        var save = new Button { Content = "Save Changes", Classes = { "primary" } };
         AutomationProperties.SetName(save, "Save Name and Picture");
         save.Click += async (_, _) =>
         {
@@ -710,9 +727,9 @@ public sealed class SettingsView : UserControl
         page.Children.Add(Section("Name and Picture", OwnProfileEditor(profile, server)));
         var mandatory = profile.User.Role is UserRole.Owner or UserRole.Admin;
         var protectedNow = mandatory || profile.User.PinProtectionEnabled;
-        var currentPin = new TextBox { PasswordChar = '•', PlaceholderText = "Current PIN", MaxLength = 8, Width = 220, IsVisible = protectedNow };
-        var newPin = new TextBox { PasswordChar = '•', PlaceholderText = "New PIN (4–8 digits)", MaxLength = 8, Width = 220 };
-        var confirm = new TextBox { PasswordChar = '•', PlaceholderText = "Confirm New PIN", MaxLength = 8, Width = 220 };
+        var currentPin = new TextBox { PasswordChar = '•', PlaceholderText = "Current PIN", MaxLength = 8, Width = 260, HorizontalAlignment = HorizontalAlignment.Left, IsVisible = protectedNow };
+        var newPin = new TextBox { PasswordChar = '•', PlaceholderText = "New PIN (4–8 digits)", MaxLength = 8, Width = 260, HorizontalAlignment = HorizontalAlignment.Left };
+        var confirm = new TextBox { PasswordChar = '•', PlaceholderText = "Confirm New PIN", MaxLength = 8, Width = 260, HorizontalAlignment = HorizontalAlignment.Left };
         AutomationProperties.SetName(currentPin, "Current PIN");
         AutomationProperties.SetName(newPin, "New PIN");
         AutomationProperties.SetName(confirm, "Confirm New PIN");
@@ -779,20 +796,38 @@ public sealed class SettingsView : UserControl
             Toggle("Check for Updates Automatically", "Once a day, Aurelia looks for a newer version.",
                 Prefs.Store.Read<bool?>("automaticUpdateChecks") ?? true, value => Prefs.Store.Write("automaticUpdateChecks", value))));
         var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Classes = { "subdued" } };
-        var notes = new TextBlock { TextWrapping = TextWrapping.Wrap, MaxHeight = 220 };
-        var check = new Button { Content = "Check for Updates", Classes = { "chip" } };
+        // The release's notes as text, not as Markdown marks (audit Linux S2).
+        var notes = new StackPanel { Spacing = 6 };
+        var progress = new ProgressBar { Minimum = 0, Maximum = 1, Height = 6, MaxWidth = 360, HorizontalAlignment = HorizontalAlignment.Left, IsVisible = false };
+        string? shownNotes = null;
+        var check = new Button { Content = "Check for Updates", Classes = { "cardAction" } };
         var install = new Button { Content = "Download & Install…", Classes = { "primary" }, IsVisible = false };
         if (services.Updater is { } updater)
         {
             void RefreshUpdate()
             {
                 status.Text = updater.Status;
-                notes.Text = updater.Available?.Notes;
-                notes.IsVisible = !string.IsNullOrWhiteSpace(notes.Text);
+                progress.IsVisible = updater.DownloadProgress is not null;
+                progress.Value = updater.DownloadProgress ?? 0;
+                if (updater.Available?.Notes != shownNotes)
+                {
+                    shownNotes = updater.Available?.Notes;
+                    notes.Children.Clear();
+                    foreach (var block in Aurelia.Linux.Core.Updates.ReleaseNotesText.Blocks(shownNotes))
+                    {
+                        notes.Children.Add(block.Kind switch
+                        {
+                            Aurelia.Linux.Core.Updates.ReleaseNotesBlockKind.Heading => new TextBlock { Text = block.Text, FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 6, 0, 0), TextWrapping = TextWrapping.Wrap },
+                            Aurelia.Linux.Core.Updates.ReleaseNotesBlockKind.Bullet => new TextBlock { Text = "•  " + block.Text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(8, 0, 0, 0) },
+                            _ => new TextBlock { Text = block.Text, TextWrapping = TextWrapping.Wrap, Classes = { "subdued" } },
+                        });
+                    }
+                }
+                notes.IsVisible = notes.Children.Count > 0;
                 check.IsEnabled = !updater.IsBusy && !updater.RestartRequired;
                 install.IsEnabled = !updater.IsBusy;
                 install.IsVisible = updater.Available is not null || updater.RestartRequired;
-                install.Content = updater.RestartRequired ? "Quit Aurelia" : "Download & Install…";
+                install.Content = !updater.RestartRequired ? "Download & Install…" : updater.CanRestart ? "Restart Aurelia" : "Quit Aurelia";
             }
             System.ComponentModel.PropertyChangedEventHandler changed = (_, _) => Dispatcher.UIThread.Post(RefreshUpdate);
             updater.PropertyChanged += changed;
@@ -801,9 +836,14 @@ public sealed class SettingsView : UserControl
             check.Click += async (_, _) => await updater.CheckAsync(userInitiated: true);
             install.Click += async (_, _) =>
             {
-                if (updater.RestartRequired) { QuitAfterUpdate?.Invoke(); return; }
+                if (updater.RestartRequired)
+                {
+                    if (updater.CanRestart && RestartAfterUpdate is { } restart) restart();
+                    else QuitAfterUpdate?.Invoke();
+                    return;
+                }
                 if (updater.Available is not { } release || !await sheets.ConfirmAsync("Install Aurelia " + release.Version + "?",
-                    "Aurelia downloads the package and checks its SHA-256 checksum. Your package manager then asks for authorization. Playback and this computer's server stop before installation; your library and settings stay. Quit and reopen Aurelia afterwards.", "Install Update", false)) return;
+                    "Aurelia downloads the package and checks its SHA-256 checksum. Your package manager then asks for authorization. Playback and this computer's server stop before installation; your library and settings stay. Afterwards Aurelia starts again.", "Install Update", false)) return;
                 if (InstallUpdate is { } action) await action();
                 else await updater.InstallAsync();
             };
@@ -814,6 +854,7 @@ public sealed class SettingsView : UserControl
             check.IsEnabled = false;
         }
         page.Children.Add(status);
+        page.Children.Add(progress);
         page.Children.Add(notes);
         page.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { check, install } });
         if (services.Updater is { } betaUpdater)
@@ -845,13 +886,25 @@ public sealed class SettingsView : UserControl
                     Children =
                     {
                         new TextBlock { Text = "Aurelia for Linux", FontSize = 18, FontWeight = FontWeight.SemiBold },
-                        new TextBlock { Text = $"Version {AppInfo.CurrentVersion.ToString(3)} (Build {AppInfo.Build})", Classes = { "subdued" } },
+                        new TextBlock { Text = $"Version {AppInfo.DisplayVersion}", Classes = { "subdued" } },
                     },
                 },
             },
         });
         var changes = new StackPanel { Spacing = 8 };
-        if (AppInfo.WhatsNew.Count == 0) changes.Children.Add(new TextBlock { Text = "No notes for this version.", Classes = { "subdued" } });
+        if (AppInfo.WhatsNew.Count == 0)
+        {
+            // A beta's notes are only on its release page; the changelog lists stable versions
+            // (audit Linux S3: About said "No notes" for every beta).
+            changes.Children.Add(new TextBlock { Text = "This version's notes are on its release page.", Classes = { "subdued" }, TextWrapping = TextWrapping.Wrap });
+            var notesPage = CardButton("Open Release Notes");
+            notesPage.Click += async (_, _) =>
+            {
+                if (TopLevel.GetTopLevel(this)?.Launcher is { } launcher)
+                    await launcher.LaunchUriAsync(new Uri($"{AppInfo.RepositoryUrl}/releases/tag/linux-app-{AppInfo.CurrentVersion.ToString(3)}-{AppInfo.Build}"));
+            };
+            changes.Children.Add(notesPage);
+        }
         foreach (var change in AppInfo.WhatsNew)
             changes.Children.Add(new DockPanel
             {

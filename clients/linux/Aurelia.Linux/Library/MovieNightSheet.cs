@@ -50,19 +50,7 @@ public sealed class MovieNightSheet : UserControl, IDisposable
             EndPoint = new RelativePoint(0.5, 1, RelativeUnit.Relative),
             GradientStops = { new GradientStop(Color.Parse("#2A2D33"), 0), new GradientStop(Color.Parse("#202326"), 0.6) },
         };
-        var leave = new Button
-        {
-            Content = "✕",
-            Classes = { "chip" },
-            Width = 38,
-            Height = 38,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Top,
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(0, 16, 20, 0),
-        };
-        Avalonia.Automation.AutomationProperties.SetName(leave, "Leave Movie Night");
-        leave.Click += (_, _) => host.Close(false);
+        var leave = Aurelia.Linux.Controls.OverlayClose.Create("Leave Movie Night", () => host.Close(false));
         body.MaxWidth = 720;
         body.Margin = new Thickness(32, 64, 32, 40);
         Content = new Grid
@@ -486,6 +474,13 @@ public sealed class MovieNightSheet : UserControl, IDisposable
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
+        // Esc leaves Movie Night, as the Close button does (audit Linux L2).
+        if (e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None)
+        {
+            host.Close(false);
+            e.Handled = true;
+            return;
+        }
         if (session.Screen != MovieNightScreen.Swipe || session.Remaining is not { Count: > 0 } remaining) return;
         var card = remaining[0];
         if (e.Key is Key.Right or Key.Left)

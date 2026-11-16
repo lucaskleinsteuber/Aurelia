@@ -223,7 +223,8 @@ public sealed class WrappedSheet : UserControl
         areas.Children.Add(forward);
         frame.Children.Add(areas);
 
-        var top = new DockPanel { VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(14, 12, 8, 0) };
+        // Below the window buttons, so Close never sits on the window's own close button (audit Linux D1).
+        var top = new DockPanel { VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(14, Aurelia.Linux.Controls.WindowChrome.ClearTop - 14, 14, 0) };
         var close = new Button { Content = "✕", Foreground = ink, Background = Brushes.Transparent, FontSize = 16, IsCancel = true };
         AutomationProperties.SetName(close, "Close Wrapped");
         close.Click += (_, _) => host.Close(true);

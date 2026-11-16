@@ -51,30 +51,49 @@ internal static class SettingsRows
     }
 
     /// <summary>A symbol for a section, where one fits; others show their title alone.</summary>
+    /// <summary>
+    /// The symbol of every section, so no section stands without one beside others that have one
+    /// (audit Linux D2). A new section title needs an entry here; the test lists them.
+    /// </summary>
     internal static string? SectionIcon(string title) => title switch
     {
         "Playing" => "IconPlay",
         "Sound and Controls" => "IconVolume",
-        "Languages" or "Subtitle Downloads" => "IconSubtitles",
-        "Motion and Appearance" => "IconSparkle",
-        "Library" or "Storage Locations" or "Library Maintenance" or "Library Health & Maintenance" or "Catalog Visibility" => "IconLibrary",
-        "Server" or "Server Details" or "Server Connection" or "Hosting" or "When the Server Runs" or "Move to a New Server" => "IconServer",
-        "Server Updates" or "Beta" => "IconDownload",
-        "Network" or "Sign-In & Streaming Limits" => "IconNetwork",
-        "Power Saving" => "IconSleep",
-        "Profile" or "Profiles" or "Current Profile" or "PIN" or "PIN Protection" or "Content Access" => "IconPerson",
-        "Devices" or "Devices & Backups" or "Backup Details" => "IconComputer",
+        "Languages" or "Subtitle Downloads" or "Speech Recognition" => "IconSubtitles",
+        "Motion and Appearance" or "What's New in This Version" or "Getting Started" => "IconSparkle",
         "Movie & TV Information" or "Trailer Reviews" => "IconSparkle",
-        "Scrub Previews" => "IconMovies",
-        "Diagnostics" or "Scan Activity" => "IconStatistics",
+        "Library" or "Storage Locations" or "Library Maintenance" or "Library Health & Maintenance" or "Catalog Visibility" => "IconLibrary",
+        "Server" or "Server Details" or "Server Connection" or "Hosting" or "When the Server Runs" or "Move to a New Server" or "Your Server" => "IconServer",
+        "Server Updates" or "Beta" => "IconDownload",
+        "Network" or "Sign-In & Streaming Limits" or "Streaming" or "Wake-on-LAN Check" => "IconNetwork",
+        "Power Saving" or "When Nobody Uses Aurelia" => "IconSleep",
+        "Profile" or "Profiles" or "Current Profile" or "PIN" or "PIN Protection" or "Content Access" or "Name and Picture" or "Picture" or "Children's Profile" => "IconPerson",
+        "Devices" or "Devices & Backups" or "Backup Details" or "Source Code" => "IconComputer",
+        "Scrub Previews" or "Video Conversion" or "Cinema Mode" or "Movies" => "IconMovies",
+        "Intros and Credits" => "IconNextTrack",
+        "File Watch" => "IconCheck",
+        "Diagnostics" or "Scan Activity" or "Performance" or "Server Health" or "Last 12 Weeks" => "IconStatistics",
         "Continue Watching" or "Recently Added" => "IconRecentlyAdded",
+        "Screen Time" => "IconHistory",
         "Favorites" => "IconFavorite",
         "Collections" or "Franchises in Library" => "IconCollections",
-        "Advanced" => "IconSliders",
-        "What's New in This Version" or "Getting Started" => "IconSparkle",
-        "Source Code" => "IconComputer",
+        "Smart Home" => "IconHome",
+        "Security" => "IconLock",
+        "Notifications" => "IconWishes",
+        "Advanced" or "Test Tools" => "IconSliders",
+        "Legal" => "IconNote",
         _ => null,
     };
+
+    /// <summary>A section's title with its symbol, for sections built outside <see cref="Section"/>.</summary>
+    public static StackPanel SectionHeading(string title)
+    {
+        var heading = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        if (SectionIcon(title) is { } icon)
+            heading.Children.Add(new PathIcon { Data = Application.Current?.FindResource(icon) as Geometry, Width = 15, Height = 15, Foreground = new SolidColorBrush(Color.FromArgb(0x99, 0xFF, 0xFF, 0xFF)), VerticalAlignment = VerticalAlignment.Center });
+        heading.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+        return heading;
+    }
 
     public static DockPanel Row(string label, string? detail, Control control)
     {

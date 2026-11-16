@@ -508,8 +508,9 @@ public static class ServerSegmentsSection
         var movies = Note("");
         var series = new StackPanel { Spacing = 6 };
         var expander = new Expander { Header = "Series", Content = series, HorizontalAlignment = HorizontalAlignment.Stretch };
-        var enabled = new CheckBox { Content = "Find Intros and Credits" };
-        var pictures = new CheckBox { Content = "Look at Pictures Too" };
+        // Switches like every other setting that turns something on (audit Linux D2).
+        var enabled = new ToggleSwitch { OnContent = "", OffContent = "" };
+        var pictures = new ToggleSwitch { OnContent = "", OffContent = "" };
         ToolTip.SetTip(enabled, "Compares the sound of a season's episodes in the background, only while nobody watches.");
         ToolTip.SetTip(pictures, "Also reads small grey pictures of the episodes, for credits with changing music and intros under narration. Slower, more accurate.");
         var updating = false;
@@ -583,8 +584,8 @@ public static class ServerSegmentsSection
         });
         ToolTip.SetTip(reanalyzeMovies, "Has the server look for every movie's credits again. Episodes and times set by hand stay.");
         panel.Children.Add(Note("The server finds where episodes' intros and credits are, in the background and only while nobody watches. Only the times are stored."));
-        panel.Children.Add(enabled);
-        panel.Children.Add(pictures);
+        panel.Children.Add(Row("Find Intros and Credits", "Compares the sound of a season's episodes in the background, only while nobody watches.", enabled));
+        panel.Children.Add(Row("Look at Pictures Too", "Also reads small grey pictures, for credits with changing music and intros under narration. Slower, more accurate.", pictures));
         panel.Children.Add(bar);
         panel.Children.Add(status);
         panel.Children.Add(movies);
@@ -596,7 +597,7 @@ public static class ServerSegmentsSection
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
         timer.Tick += async (_, _) =>
         {
-            try { Render(await scope.Client.ServerMediaSegmentsAsync()); }
+            try { Render(await Core.Api.AureliaApi.InBackgroundAsync(() => scope.Client.ServerMediaSegmentsAsync())); }
             catch (Core.Api.AureliaApiException) { }
         };
         var section = Section("Intros and Credits", panel);

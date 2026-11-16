@@ -103,8 +103,7 @@ public sealed class AutomationSection : StackPanel
             : "Home Assistant's Wake on LAN integration (wake_on_lan.send_magic_packet) starts the server with this MAC address, as every Aurelia app does."));
         if (current.PowerActions.Count == 0)
             power.Children.Add(Note("This server can't turn itself off; it runs as a service that something else starts and stops."));
-        var buttons = Buttons(current.PowerActions.Select(action => (Control)Button(AutomationText.PowerTitle(action), () => PowerAsync(action),
-            action == PowerNowActions.Stop ? "chip" : "destructive")).ToArray());
+        var buttons = Buttons(current.PowerActions.Select(action => (Control)Button(AutomationText.PowerTitle(action), () => PowerAsync(action), "destructive")).ToArray());
         power.Children.Add(buttons);
     }
 

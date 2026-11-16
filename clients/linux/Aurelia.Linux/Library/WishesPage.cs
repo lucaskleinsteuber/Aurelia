@@ -31,9 +31,10 @@ public sealed class WishesPage : LibraryPageBase, IDisposable
     private readonly LinkedList<string> decodedPosterOrder = new();
 
     private readonly TextBox searchBox = new TextBox { PlaceholderText = "Search for a movie or TV show…", Width = 320 }.WithGlass();
-    private readonly TextBox freeTitleBox = new TextBox { PlaceholderText = "Title", Width = 280 }.WithGlass();
-    private readonly TextBox freeYearBox = new TextBox { PlaceholderText = "Year (optional)", Width = 140 }.WithGlass();
-    private readonly TextBox noteBox = new TextBox { PlaceholderText = "Optional note for the family (e.g. director's cut)…", Width = 440 }.WithGlass();
+    // Only the search field carries a magnifying glass; the fields of a wish are plain entries.
+    private readonly TextBox freeTitleBox = new() { PlaceholderText = "Title", Width = 280 };
+    private readonly TextBox freeYearBox = new() { PlaceholderText = "Year (optional)", Width = 150 };
+    private readonly TextBox noteBox = new() { PlaceholderText = "Optional note for the family (e.g. director's cut)…", Width = 440 };
 
     private WishState? stateFilter = WishState.Open;
     private MediaKind composerKind = MediaKind.Movie;
@@ -382,10 +383,10 @@ public sealed class WishesPage : LibraryPageBase, IDisposable
         {
             var subtitle = stateFilter switch
             {
-                WishState.Open => "No open wishes yet.",
-                WishState.Fulfilled => "No added wishes yet.",
-                WishState.Declined => "No declined wishes.",
-                _ => "No wishes yet.",
+                WishState.Open => "No Open Wishes",
+                WishState.Fulfilled => "No Added Wishes Yet",
+                WishState.Declined => "No Declined Wishes",
+                _ => "No Wishes Yet",
             };
             return EmptyState(subtitle, "Make a wish above when you'd like to see a movie or TV show added.");
         }

@@ -2,6 +2,7 @@ using Aurelia.Contracts;
 using Aurelia.Linux.Controls;
 using Aurelia.Linux.Core;
 using Aurelia.Linux.Core.Api;
+using Aurelia.Linux.Core.Connection;
 using Aurelia.Linux.Core.Flow;
 using Aurelia.Linux.Core.Management;
 using Aurelia.Linux.Library;
@@ -135,6 +136,12 @@ public sealed class SetupFinishView : UserControl
         {
             if (admin.IsChecked == true) child.IsChecked = false;
         };
+        var next = new Button { Content = "Continue", Classes = { "primary" }, HorizontalAlignment = HorizontalAlignment.Center, MinWidth = 180, IsVisible = added.Count > 0 };
+        AutomationProperties.SetName(next, "Continue");
+        next.Click += (_, _) => ShowDone();
+        // One way on: Skip for Now until someone is added, then Continue.
+        var skip = new Button { Content = "Skip for Now", Classes = { "link" }, HorizontalAlignment = HorizontalAlignment.Center, IsVisible = added.Count == 0 };
+        skip.Click += (_, _) => ShowDone();
         var problem = AdminScope.Message();
         var add = new Button { Content = "Add Person", Classes = { "primary" } };
         AutomationProperties.SetName(add, "Add Person");
@@ -168,14 +175,13 @@ public sealed class SetupFinishView : UserControl
             if (created is null) return;
             added.Add(created);
             FillList();
+            next.IsVisible = true;
+            skip.IsVisible = false;
+            next.BringIntoView();
             name.Text = pin.Text = "";
             child.IsChecked = admin.IsChecked = false;
         };
-        var next = new Button { Content = "Continue", Classes = { "primary" }, HorizontalAlignment = HorizontalAlignment.Center, MinWidth = 180 };
-        AutomationProperties.SetName(next, "Continue");
-        next.Click += (_, _) => ShowDone();
-        var skip = new Button { Content = "Skip for Now", Classes = { "link" }, HorizontalAlignment = HorizontalAlignment.Center };
-        skip.Click += (_, _) => ShowDone();
+        // Name, PIN and switches beside the picture, so the step fits the standard window (audit Linux W5).
         var form = new Border
         {
             Classes = { "card" },
@@ -185,14 +191,28 @@ public sealed class SetupFinishView : UserControl
                 Spacing = 12,
                 Children =
                 {
-                    name,
-                    picture,
-                    pin,
-                    Labeled("Children's Profile", ageSupported ? "Only what is approved for their age." : "Update the server to use children's profiles.", child),
-                    ageRow,
-                    Labeled("Can Manage the Server", "Adds storage, edits details and approves devices. Needs a PIN.", admin),
+                    new Grid
+                    {
+                        ColumnDefinitions = new ColumnDefinitions("*,20,240"),
+                        Children =
+                        {
+                            new StackPanel
+                            {
+                                Spacing = 12,
+                                Children =
+                                {
+                                    name,
+                                    pin,
+                                    Labeled("Children's Profile", ageSupported ? "Only what is approved for their age." : "Update the server to use children's profiles.", child),
+                                    ageRow,
+                                    Labeled("Can Manage the Server", "Adds storage, edits details and approves devices. Needs a PIN.", admin),
+                                },
+                            },
+                            picture.Also(p => Grid.SetColumn(p, 2)),
+                        },
+                    },
                     problem,
-                    add,
+                    add.Also(b => b.HorizontalAlignment = HorizontalAlignment.Left),
                 },
             },
         };
@@ -256,7 +276,14 @@ public sealed class SetupFinishView : UserControl
                 "Create its pairing code here in Settings › Profiles and Devices › Pair a Computer."));
         if (devices.HasFlag(SetupDevices.WebBrowser) && session.Server is { } server)
         {
-            var address = BrowserAddress.Resolve(server.Address, null, null).Url.ToString().TrimEnd('/');
+            // The address other devices reach, once the server said it is open to the home network
+            // (audit Linux W1: the card showed 127.0.0.1, which no other device can open).
+            if (hostInfo is null && !askedHostInfo)
+            {
+                askedHostInfo = true;
+                _ = AskHostInfoAsync(server);
+            }
+            var address = BrowserAddress.Resolve(server.Address, hostInfo?.LanAccessEnabled, hostInfo?.LanHttpsPort).Url.ToString().TrimEnd('/');
             cards.Children.Add(DeviceCard("IconNetwork", "Web Browser", $"Open {address} in a browser at home.", "Accept the security notice once: it is your own server.",
                 "Enter the code it shows here in Settings › Profiles and Devices."));
         }
@@ -308,6 +335,22 @@ public sealed class SetupFinishView : UserControl
             new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 520 },
         },
     };
+
+    private ServerInfoResponse? hostInfo;
+    private bool askedHostInfo;
+
+    private async Task AskHostInfoAsync(StoredServer server)
+    {
+        try
+        {
+            hostInfo = await session.Api.ServerInfoAsync(server, CancellationToken.None, TimeSpan.FromSeconds(5));
+        }
+        catch (Exception failure) when (failure is AureliaApiException or HttpRequestException or TaskCanceledException or IOException)
+        {
+            return;
+        }
+        if (hostInfo.LanAccessEnabled) Avalonia.Threading.Dispatcher.UIThread.Post(ShowDone);
+    }
 
     private static Border DeviceCard(string symbol, string title, params string[] steps)
     {

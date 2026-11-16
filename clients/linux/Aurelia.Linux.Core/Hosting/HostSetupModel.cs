@@ -464,6 +464,7 @@ public sealed class HostSetupModel : ObservableObject
             var owner = await host.SetUpOwnerAsync(ServerName, OwnerName, password, HttpsPort, session.DeviceName, CancellationToken.None);
             // A new server offers its first storage locations once the owner's profile is open.
             session.NeedsInitialLibrarySetup = true;
+            session.FreshServerPassword = password;
             await ConnectAsync(owner);
         });
     }

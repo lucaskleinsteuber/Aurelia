@@ -28,7 +28,8 @@ public static class ServerFileWatchSection
         var status = Note("");
         var current = Note("");
         var depthDetail = Note("");
-        var enabled = new CheckBox { Content = "Watch Files" };
+        // A switch like every other setting that turns something on (audit Linux D2).
+        var enabled = new ToggleSwitch { OnContent = "", OffContent = "" };
         ToolTip.SetTip(enabled, "Off until you turn it on. The first round reads the whole library once.");
         var updating = false;
         void Render(FileCheckSettingsResponse value)
@@ -40,6 +41,8 @@ public static class ServerFileWatchSection
             bar.Value = FileWatchText.Progress(value);
             bar.IsVisible = value.Enabled && value.TotalCount > 0;
             status.Text = FileWatchText.Status(value);
+            // While it is off the switch says so; a lone "Off" below would only repeat it.
+            status.IsVisible = value.Enabled;
             current.Text = FileWatchText.Current(value);
             current.IsVisible = current.Text.Length > 0;
             depthDetail.Text = FileWatchText.DepthDetail(value.Depth)
@@ -58,7 +61,7 @@ public static class ServerFileWatchSection
             FileWatchText.Rhythms, settings.RecheckDays,
             value => _ = Change(new UpdateFileCheckSettingsRequest(settings?.Enabled ?? false, RecheckDays: value)));
         panel.Children.Add(Note(Description));
-        panel.Children.Add(enabled);
+        panel.Children.Add(Row("Watch Files", "Off until you turn it on. The first round reads the whole library once.", enabled));
         panel.Children.Add(depth);
         panel.Children.Add(depthDetail);
         panel.Children.Add(rhythm);
@@ -70,7 +73,7 @@ public static class ServerFileWatchSection
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
         timer.Tick += async (_, _) =>
         {
-            try { Render(await scope.Client.FileChecksAsync()); }
+            try { Render(await Core.Api.AureliaApi.InBackgroundAsync(() => scope.Client.FileChecksAsync())); }
             catch (Core.Api.AureliaApiException) { }
         };
         var section = Section("File Watch", panel);

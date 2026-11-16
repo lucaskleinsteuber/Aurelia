@@ -1,3 +1,4 @@
+using Aurelia.Linux.Controls;
 using System.Globalization;
 using Aurelia.Contracts;
 using Aurelia.Linux.Core.Management;
@@ -296,7 +297,7 @@ public sealed class MetadataEditorSheet : UserControl
 
     internal Task Loading { get; }
 
-    private bool IsDirty => document is not null && (reset.Count > 0 || Values() != document.Values);
+    private bool IsDirty => document is not null && (reset.Count > 0 || !MetadataEditing.Same(Values(), document.Values));
 
     private async Task LoadAsync()
     {
@@ -741,7 +742,7 @@ public sealed class ServerFilePicker : UserControl
         {
             var button = new Button
             {
-                Content = (entry.IsDirectory ? "📁  " : "🎞  ") + entry.Name + (entry.Bytes is { } bytes ? "  ·  " + Bytes(bytes) : ""),
+                Content = FileLabel.Create(entry.Name + (entry.Bytes is { } bytes ? "  ·  " + Bytes(bytes) : ""), entry.IsDirectory, showFileIcon: true),
                 Classes = { "link" },
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Left,
@@ -1205,7 +1206,7 @@ public sealed class LibraryHealthSheet : UserControl
                 Children =
                 {
                     reimport.Also(b => DockPanel.SetDock(b, Dock.Right)),
-                    new TextBlock { Text = (item.IsDirectory ? "📁 " : "") + item.RelativePath, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis },
+                    FileLabel.Create(item.RelativePath, item.IsDirectory).Also(l => l.VerticalAlignment = VerticalAlignment.Center),
                 },
             });
         }

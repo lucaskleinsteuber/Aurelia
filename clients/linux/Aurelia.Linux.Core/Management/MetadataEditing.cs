@@ -65,6 +65,17 @@ public static class MetadataEditing
         return [.. fields.Order(StringComparer.Ordinal)];
     }
 
+    /// <summary>
+    /// Whether the editor still shows what was loaded. The record's own equality compares its lists
+    /// by reference, so an untouched editor asked to discard changes (audit Linux S1).
+    /// </summary>
+    public static bool Same(MediaEditorValues left, MediaEditorValues right) =>
+        left.Title == right.Title && left.ReleaseYear == right.ReleaseYear && (left.Overview ?? "") == (right.Overview ?? "")
+        && left.RuntimeMinutes == right.RuntimeMinutes && left.FskAge == right.FskAge
+        && left.Genres.SequenceEqual(right.Genres) && left.Studios.SequenceEqual(right.Studios)
+        && (left.Country ?? "") == (right.Country ?? "") && SameCredits(left.Credits, right.Credits)
+        && left.Poster == right.Poster && left.Backdrop == right.Backdrop;
+
     private static bool SameCredits(IReadOnlyList<EditorCredit> left, IReadOnlyList<EditorCredit> right) =>
         left.Count == right.Count && left.Zip(right).All(pair => pair.First.Name == pair.Second.Name && pair.First.Department == pair.Second.Department
             && pair.First.Job == pair.Second.Job && pair.First.Character == pair.Second.Character && pair.First.Profile == pair.Second.Profile);

@@ -1,3 +1,4 @@
+using Aurelia.Linux.Controls;
 using Aurelia.Contracts;
 using Aurelia.Linux.Core.Management;
 using Aurelia.Linux.Core.Settings;
@@ -76,7 +77,11 @@ public sealed class LibraryPage : StackPanel
             Toggle("Hide Offline Titles", "On this computer, hides titles whose file or drive is unavailable. Their details and progress stay.",
                 preferences.HideOfflineTitles, value => { preferences.HideOfflineTitles = value; refreshLibrary(); })));
         Children.Add(DangerZone());
-        poll = new DispatcherTimer(TimeSpan.FromSeconds(3), DispatcherPriority.Background, async (_, _) => await ShowScansAsync());
+        poll = new DispatcherTimer(TimeSpan.FromSeconds(3), DispatcherPriority.Background, async (_, _) =>
+        {
+            // The page's own reads; they must not keep the server awake (audit Linux P1).
+            using (Core.Api.AureliaApi.Background()) await ShowScansAsync();
+        });
         AttachedToVisualTree += (_, _) => poll.Start();
         DetachedFromVisualTree += (_, _) => poll.Stop();
         ShowDrafts();
@@ -113,7 +118,8 @@ public sealed class LibraryPage : StackPanel
             var moved = Button("Location Moved…", () => RelocateAsync(library));
             AutomationProperties.SetName(moved, "Storage Location Moved " + library.Name);
             moved.IsVisible = scope.IsOwner;
-            var monitoring = new CheckBox { Content = "Automatically detect changes in this storage location", IsChecked = library.MonitoringEnabled, FontSize = 12 };
+            // A switch like every other setting that turns something on (audit Linux D2).
+            var monitoring = new ToggleSwitch { OnContent = "", OffContent = "", IsChecked = library.MonitoringEnabled };
             monitoring.IsCheckedChanged += async (_, _) =>
             {
                 if (!await scope.RunAsync(() => Client.SetMonitoringAsync(library.Id, monitoring.IsChecked == true), message)) monitoring.IsChecked = library.MonitoringEnabled;
@@ -122,26 +128,23 @@ public sealed class LibraryPage : StackPanel
             {
                 Spacing = 4,
                 Margin = new Thickness(0, 6),
+                // Name and path first, its actions below them: four buttons beside a long path left
+                // the path cut short and the buttons crammed (audit Linux D2).
                 Children =
                 {
+                    new TextBlock { Text = library.Name, FontWeight = FontWeight.SemiBold },
+                    new TextBlock { Text = library.Path, Classes = { "subdued" }, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis },
+                    new TextBlock { Text = $"{KindName(library.Kind)} · {state}", Classes = { "subdued" }, FontSize = 12 },
                     new DockPanel
                     {
+                        Margin = new Thickness(0, 6, 0, 0),
                         Children =
                         {
-                            Buttons(preview, scan, moved, remove).Also(b => { DockPanel.SetDock(b, Dock.Right); b.VerticalAlignment = VerticalAlignment.Center; }),
-                            new StackPanel
-                            {
-                                Spacing = 2,
-                                Children =
-                                {
-                                    new TextBlock { Text = library.Name, FontWeight = FontWeight.SemiBold },
-                                    new TextBlock { Text = library.Path, Classes = { "subdued" }, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis },
-                                    new TextBlock { Text = $"{KindName(library.Kind)} · {state}", Classes = { "subdued" }, FontSize = 12 },
-                                },
-                            },
+                            monitoring.Also(m => { DockPanel.SetDock(m, Dock.Right); m.Margin = new Thickness(12, 0, -12, 0); }),
+                            new TextBlock { Text = "Detect Changes Automatically", FontSize = 13, VerticalAlignment = VerticalAlignment.Center },
                         },
                     },
-                    monitoring,
+                    Buttons(preview, scan, moved, remove).Also(b => b.Margin = new Thickness(0, 4, 0, 0)),
                 },
             });
         }
@@ -497,7 +500,7 @@ public sealed class ServerFolderPicker : UserControl
         list.Children.Clear();
         foreach (var folder in next.Folders)
         {
-            var open = new Button { Content = "📁  " + folder.Name, Classes = { "link" }, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left };
+            var open = new Button { Content = FileLabel.Create(folder.Name, isDirectory: true), Classes = { "link" }, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left };
             AutomationProperties.SetName(open, folder.Name);
             open.Click += async (_, _) => await OpenAsync(folder.Path);
             list.Children.Add(open);
@@ -673,7 +676,7 @@ public sealed class ImportPreviewSheet : UserControl
                     {
                         Children =
                         {
-                            new TextBlock { Text = (item.IsDirectory ? "📁 " : "") + item.Title, TextTrimming = TextTrimming.CharacterEllipsis },
+                            FileLabel.Create(item.Title, item.IsDirectory),
                             new TextBlock { Text = detail, Classes = { "subdued" }, FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis },
                         },
                     },

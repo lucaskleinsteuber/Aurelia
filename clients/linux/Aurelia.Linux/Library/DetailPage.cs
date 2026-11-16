@@ -78,11 +78,19 @@ public sealed class DetailPage : LibraryPageBase
 
     public CatalogItemSummary Item => detail?.Item ?? initial;
 
-    protected override void OnStoreChanged() => _ = LoadAsync();
+    protected override void OnStoreChanged()
+    {
+        // Reloaded because the library changed: the app's own read (audit Linux P1).
+        using (AureliaApi.Background()) _ = LoadAsync();
+    }
+
+    /// <summary>Counts loads; an older answer never replaces a newer one (audit Linux P2).</summary>
+    private int loads;
 
     private async Task LoadAsync()
     {
         var client = Context.Store.Client;
+        var mine = ++loads;
         try
         {
             var detailTask = client.DetailAsync(initial.Id, CancellationToken.None);
@@ -90,6 +98,7 @@ public sealed class DetailPage : LibraryPageBase
                 ? client.PlaybackPlanAsync(initial.Id, CancellationToken.None)
                 : Task.FromResult<PlaybackPlanResponse>(null!);
             await Task.WhenAll(detailTask, planTask);
+            if (mine != loads) return;
             detail = detailTask.Result;
             plan = planTask.Result;
             ChooseSeason();
@@ -97,6 +106,7 @@ public sealed class DetailPage : LibraryPageBase
         }
         catch (AureliaApiException failure)
         {
+            if (mine != loads) return;
             if (failure.IsAuthenticationFailure) Context.Store.Report(failure);
             error = failure.Status == 404 ? "This title is no longer in the library." : failure.Message;
         }

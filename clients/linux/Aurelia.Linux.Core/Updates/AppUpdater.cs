@@ -228,6 +228,15 @@ public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installe
     public AppRelease? Available { get; private set; }
     public string Status { get; private set; } = "Check for a newer version of Aurelia for Linux.";
     public bool IsBusy { get; private set; }
+
+    /// <summary>How much of the package arrived, 0 to 1, while it downloads; null otherwise.</summary>
+    public double? DownloadProgress { get; private set; }
+
+    /// <summary>
+    /// Whether Aurelia can start the new version by itself after installing: a native package
+    /// replaces the program in place. A Flatpak is started again by the desktop.
+    /// </summary>
+    public bool CanRestart => installer.Kind != LinuxPackageKind.Flatpak;
     public bool RestartRequired { get; private set; }
     public bool PublicUpdateTestEnabled => UpdateFeed.IsPublicTest(settings);
     public const string BetaUpdatesKey = "betaUpdates";
@@ -317,7 +326,14 @@ public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installe
             await using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
             {
                 if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-                await source.DownloadAsync(release, file, cancellation);
+                DownloadProgress = 0;
+                Notify();
+                await source.DownloadAsync(release, new ProgressStream(file, release.Bytes, value =>
+                {
+                    DownloadProgress = value;
+                    Notify();
+                }), cancellation);
+                DownloadProgress = null;
                 if (file.Length != release.Bytes) throw new IOException("The package download is incomplete.");
                 file.Position = 0;
                 var actual = Convert.ToHexStringLower(await SHA256.HashDataAsync(file, cancellation));
@@ -337,7 +353,7 @@ public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installe
             Status = "Waiting for the package manager…";
             Notify();
             await installer.InstallAsync(path, cancellation);
-            Status = "The update is installed. Quit and reopen Aurelia to use it.";
+            Status = installer.Kind == LinuxPackageKind.Flatpak ? "The update is installed. Quit and reopen Aurelia to use it." : "The update is installed. Restart Aurelia to use it.";
             Available = null;
             RestartRequired = true;
             return true;
@@ -363,6 +379,7 @@ public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installe
                 // The download remains private in the app cache. Cleanup must not hide the install
                 // result or leave the updater permanently busy after a package-manager transaction.
             }
+            DownloadProgress = null;
             IsBusy = false;
             Notify();
         }

@@ -101,10 +101,13 @@ public sealed class HostingScreenTests
 
         server.Replace("GET", "/api/v1/profiles", Json(new ProfilePickerResponse(2, "1.0", false,
             [new WatchingProfile(FakeLibrary.OwnerId, "Lucas", UserRole.Owner, false, true)])));
-        Field(window, "Server Password").Text = Password;
+        // The password chosen a moment ago is not asked again (audit Linux W4).
+        Assert.DoesNotContain(Visible<TextBox>(window), box => AutomationProperties.GetName(box) == "Server Password");
         Field(window, "Owner PIN").Text = "2468";
         Field(window, "Confirm PIN").Text = "2468";
         Click(Button(window, "Set Up Profiles"));
+        Assert.Contains(Password, server.Bodies["POST /api/v1/profiles/initialize"], StringComparison.Ordinal);
+        Assert.Null(window.Session.FreshServerPassword);
         Assert.Equal(AppScreen.InitialLibrarySetup, window.Flow.Screen);
         Assert.Equal(FakeLibrary.OwnerId, window.Session.Profile?.User.Id);
         Assert.Contains("\"pin\":\"2468\"", server.Bodies[$"POST /api/v1/profiles/{FakeLibrary.OwnerId}/unlock"], StringComparison.Ordinal);

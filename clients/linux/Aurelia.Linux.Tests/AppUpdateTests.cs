@@ -127,7 +127,9 @@ public sealed class AppUpdateTests
         var settings = window.OpenSettings(SettingsCategory.Updates);
         FakeLibrary.Pump(() => settings.GetVisualDescendants().OfType<Button>().Any(), rounds: 20);
         var quit = false;
+        var restarted = false;
         settings.QuitAfterUpdate = () => quit = true;
+        settings.RestartAfterUpdate = () => restarted = true;
         settings.InstallUpdate = () => updater.InstallAsync(() => { installer.Prepared = true; return Task.CompletedTask; });
         void Click(Control root, string label) => root.GetVisualDescendants().OfType<Button>().Single(b => b.Content as string == label)
             .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
@@ -141,9 +143,11 @@ public sealed class AppUpdateTests
             Click(settings.Sheets, "Install Update");
             FakeLibrary.Pump(() => installer.Installed);
             Assert.True(installer.Installed);
-            FakeLibrary.Pump(() => settings.GetVisualDescendants().OfType<Button>().Any(b => b.Content as string == "Quit Aurelia"));
-            Click(settings, "Quit Aurelia");
-            Assert.True(quit);
+            // A native package restarts Aurelia on the new version; only a Flatpak asks to quit.
+            FakeLibrary.Pump(() => settings.GetVisualDescendants().OfType<Button>().Any(b => b.Content as string == "Restart Aurelia"));
+            Click(settings, "Restart Aurelia");
+            Assert.True(restarted);
+            Assert.False(quit);
         }
         finally { settings.Close(); if (Directory.Exists(cache)) Directory.Delete(cache, true); }
     }

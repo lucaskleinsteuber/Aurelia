@@ -43,6 +43,7 @@ public sealed class SpotlightTour : Panel
     private readonly TextBlock text = new() { Classes = { "subdued" }, TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock counter = new() { Classes = { "subdued" }, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
     private readonly Button next = new() { Content = "Next", Classes = { "primary" } };
+    private readonly Button skip = new() { Content = "Skip Tour", Classes = { "link" } };
     private Control? target;
     private int index = -1;
 
@@ -51,7 +52,6 @@ public sealed class SpotlightTour : Panel
         this.stops = stops;
         this.finished = finished;
         AutomationProperties.SetName(this, "Library Tour");
-        var skip = new Button { Content = "Skip Tour", Classes = { "link" } };
         skip.Click += (_, _) => End();
         next.Click += (_, _) => Advance();
         AutomationProperties.SetName(next, "Next Tour Step");
@@ -112,6 +112,8 @@ public sealed class SpotlightTour : Panel
         text.Text = stop.Text;
         counter.Text = $"{index + 1} of {stops.Count}";
         next.Content = index == stops.Count - 1 ? "Done" : "Next";
+        // On the last step Done ends the tour; Skip Tour beside it would say the same.
+        skip.IsVisible = index < stops.Count - 1;
         // Using the lit place counts as "Next", after the app handled the click.
         target?.AddHandler(PointerReleasedEvent, OnTargetUsed, RoutingStrategies.Bubble, handledEventsToo: true);
         Place();

@@ -33,7 +33,10 @@ public sealed class SpeechPanel : StackPanel
         Spacing = 8;
         spoken.ItemsSource = SubtitleLanguages.Choices.Select(SubtitleLanguages.Name).ToList();
         spoken.SelectedIndex = Math.Max(0, SubtitleLanguages.Choices.ToList().IndexOf("en"));
-        poll.Tick += async (_, _) => await RefreshAsync();
+        poll.Tick += async (_, _) =>
+        {
+            using (Core.Api.AureliaApi.Background()) await RefreshAsync();
+        };
         DetachedFromVisualTree += (_, _) => poll.Stop();
         Children.Add(Note("Checking the server's speech recognition…"));
         _ = StartAsync();
@@ -90,7 +93,7 @@ public sealed class SpeechPanel : StackPanel
         if (!state.Available)
         {
             poll.Stop();
-            Children.Add(Note("The server needs whisper.cpp to listen (on Debian or Ubuntu: sudo apt install whisper.cpp)."));
+            Children.Add(Note("The server needs whisper.cpp to listen. " + ServerSpeechSection.WhisperInstallHint));
             return;
         }
         if (!state.ModelReady)
@@ -142,6 +145,11 @@ public sealed class SpeechPanel : StackPanel
 /// <summary>Server › Speech Recognition for the owner: whisper.cpp, the model to download or remove, and jobs.</summary>
 public static class ServerSpeechSection
 {
+    /// <summary>How to add whisper.cpp with the server computer's own package manager.</summary>
+    internal const string WhisperInstallHint =
+        "Install it with the server computer's package manager: Debian or Ubuntu sudo apt install whisper.cpp, "
+        + "Fedora sudo dnf install whisper-cpp, Arch or CachyOS the whisper.cpp package from the AUR.";
+
     public static async Task<Control> BuildAsync(AdminScope scope)
     {
         var problem = Message();
@@ -163,7 +171,7 @@ public static class ServerSpeechSection
             panel.Children.Add(Note("The server writes subtitles from what is said and moves existing subtitles onto the speech, with whisper.cpp. Sound stays in memory; only the finished subtitles are kept."));
             if (!value.Available)
             {
-                panel.Children.Add(Note("whisper.cpp isn't installed on this server. On Debian or Ubuntu: sudo apt install whisper.cpp."));
+                panel.Children.Add(Note("whisper.cpp isn't installed on this server. " + WhisperInstallHint));
             }
             else if (value.Downloading is { } download)
             {
@@ -216,7 +224,7 @@ public static class ServerSpeechSection
         Render(settings);
         timer.Tick += async (_, _) =>
         {
-            try { Render(await scope.Client.ServerSpeechAsync()); }
+            try { Render(await Core.Api.AureliaApi.InBackgroundAsync(() => scope.Client.ServerSpeechAsync())); }
             catch (Core.Api.AureliaApiException) { }
         };
         var section = Section("Speech Recognition", panel);

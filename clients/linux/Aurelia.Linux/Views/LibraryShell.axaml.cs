@@ -109,7 +109,20 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
             context.Store.ClearError();
             await context.Store.RefreshAsync();
         };
-        KeyDown += OnKeyDown;
+        // The shortcuts listen on the whole window: right after signing in, or after a click on an
+        // empty part of a page, nothing in the library has focus, and Ctrl+F, Alt+Left and Esc did
+        // nothing (audit Linux L1). Keys typed in Settings or another layer stay theirs.
+        TopLevel? listening = null;
+        AttachedToVisualTree += (_, _) =>
+        {
+            listening = TopLevel.GetTopLevel(this);
+            listening?.AddHandler(KeyDownEvent, OnWindowKeyDown);
+        };
+        DetachedFromVisualTree += (_, _) =>
+        {
+            listening?.RemoveHandler(KeyDownEvent, OnWindowKeyDown);
+            listening = null;
+        };
         RemoteBack.Click += (_, _) => _ = remote?.SendAsync("skip", -10);
         RemoteForward.Click += (_, _) => _ = remote?.SendAsync("skip", 10);
         RemotePlayPause.Click += (_, _) => _ = remote?.SendAsync(remote.Device?.IsPaused == true ? "resume" : "pause");
@@ -344,7 +357,6 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
         foreach (var page in details) page.Rebuild();
     }
 
-    /// <summary>Ctrl+F: from Home or a detail page it opens Library; otherwise it focuses the page's search.</summary>
     /// <summary>The tour shown over the library, if one runs.</summary>
     internal SpotlightTour? Tour { get; private set; }
 
@@ -355,7 +367,7 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
         var stops = new TourStop[]
         {
             new(FirstTitle, "Open a Title", "Click a poster to see its details. Play starts it, and the ••• button has everything else."),
-            new(() => SidebarList, "Your Library", "Home, Movies, TV Shows, Collections and your Watchlist. Click any page to open it."),
+            new(() => SidebarList, "Your Library", "Home, Movies, TV Shows, Collections, your Watchlist, the People in your titles and the family's Wishes. Click any page to open it."),
             new(() => ProfileButton, "Switch Profiles", "Everyone has a profile with their own progress, favorites and watchlist."),
             new(() => SettingsButton, "Settings", "Playback, your profile, the server and About Aurelia are here."),
             new(() => null, "Enjoy Watching", "Search anytime with Ctrl+F, and press F11 for full screen. Have fun!"),
@@ -372,7 +384,8 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
 
     /// <summary>The first title card that is on screen, for the tour.</summary>
     private Button? FirstTitle() => PageHost.GetVisualDescendants().OfType<Button>()
-        .FirstOrDefault(button => button.Classes.Contains("card") && button.IsEffectivelyVisible
+        // A title, not the Movie Night card or another button styled as a card (audit Linux W3).
+        .FirstOrDefault(button => button.Classes.Contains("titleCard") && button.IsEffectivelyVisible
             && button.TranslatePoint(new Point(0, 0), PageHost) is { } at && at.X >= 0 && at.Y >= 0
             && at.X + button.Bounds.Width <= PageHost.Bounds.Width && at.Y + button.Bounds.Height <= PageHost.Bounds.Height);
 
@@ -386,6 +399,17 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
         ShowCurrentPage();
         if (CurrentPage is BrowsePage browse) Avalonia.Threading.Dispatcher.UIThread.Post(browse.FocusSearch);
         if (CurrentPage is PeopleBrowsePage people) Avalonia.Threading.Dispatcher.UIThread.Post(people.FocusSearch);
+    }
+
+    /// <summary>Whether Settings, the player or another layer covers the library; it then leaves the keys alone.</summary>
+    public Func<bool> IsCovered { get; set; } = () => false;
+
+    private void OnWindowKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Handled || !IsEffectivelyVisible || IsCovered()) return;
+        // Only keys meant for the library: focus inside it, or on nothing (the window itself).
+        if (e.Source is Visual source && !ReferenceEquals(source, sender) && !this.IsVisualAncestorOf(source)) return;
+        OnKeyDown(sender, e);
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)

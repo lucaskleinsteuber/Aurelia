@@ -127,7 +127,7 @@ public static class ServerMoveText
                 var when = status.MovedAt is { } at ? " on " + at.ToLocalTime().ToString("d MMM yyyy, HH:mm", CultureInfo.InvariantCulture) : "";
                 return new("moved", $"This server moved to {name}{when}. Devices switch there on their own.", [ServerMoveAction.Undo]);
             default:
-                return new("none", "Move this server, with its library, profiles and sign-ins, to another computer. Media files stay where they are.",
+                return new("none", "Not moved. Start a move when the new computer is ready.",
                     [ServerMoveAction.Start]);
         }
     }

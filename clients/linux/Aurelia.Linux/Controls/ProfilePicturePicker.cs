@@ -23,6 +23,13 @@ public sealed class ProfilePicturePicker : StackPanel
     private readonly WrapPanel symbols = new() { Orientation = Orientation.Horizontal };
     private readonly WrapPanel palettes = new() { Orientation = Orientation.Horizontal };
     private readonly TextBlock problem = new() { Foreground = new SolidColorBrush(Color.Parse("#FF8A8A")), FontSize = 12, IsVisible = false, TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock unsavedColor = new()
+    {
+        Text = "The initial gets its color when the profile is saved.",
+        Classes = { "subdued" },
+        FontSize = 12,
+        TextWrapping = TextWrapping.Wrap,
+    };
     private readonly string? original;
     private readonly long revision;
     private string symbol = "star";
@@ -71,6 +78,7 @@ public sealed class ProfilePicturePicker : StackPanel
         });
         Children.Add(symbols);
         Children.Add(palettes);
+        Children.Add(unsavedColor);
         Children.Add(problem);
         Refresh();
     }
@@ -86,6 +94,7 @@ public sealed class ProfilePicturePicker : StackPanel
     /// <summary>Repaints the preview, for example after the name changed.</summary>
     public void Refresh()
     {
+        unsavedColor.IsVisible = id is null && Key is null;
         adjust.IsVisible = Key == ProfilePictures.PhotoKey && (chosenOriginal is not null || (Photo is null && id is not null && ProfileAvatar.PhotoSource is not null));
         if (photoPreview?.Parent is Border shown) shown.Child = null;
         preview.Child = photoPreview is not null && Key == ProfilePictures.PhotoKey && Photo is not null
