@@ -23,6 +23,7 @@ import { movedDestination } from "./server-move.js";
 import { adScene, cinemaActs, cinemaWanted, comingUp, curtain, nextAd, AD_SECONDS, CURTAIN_EARLIEST, CURTAIN_LONGEST_WAIT, CURTAIN_OPENING, LAST_AD_KEY, TRAILER_LONGEST_SECONDS, TRAILER_START_SECONDS } from "./cinema.js";
 import { loadPreferences } from "./player.js";
 import { applyAppearance, loadGeneral, sidebarShows, startPath, visibleTitles } from "./preferences.js";
+import { confirmSheet } from "./sheet.js";
 
 const SVG = "http://www.w3.org/2000/svg";
 
@@ -34,7 +35,9 @@ const api = createApi(undefined, { onChange: (path) => {
   if (path.endsWith("/player/heartbeat")) return;
   reads.clear();
   prefetches.forget();
-}, onMoved: (error) => showServerMoved(movedDestination(error)) });
+}, onMoved: (error) => showServerMoved(movedDestination(error)),
+  // A page reloaded because the server reported a change is the page's own read (audit L4).
+  isBackground: () => state.quietRefresh === true });
 const remembered = (name, key, load) => reads.read(`${name}:${key}`, load, () => refreshSoon());
 const cached = {
   home: () => remembered("home", "", () => api.home()),
@@ -87,6 +90,8 @@ async function start() {
   clearTimeout(state.retryTimer);
   state.knockChain++;
   showConnecting();
+  // Who is signed in is asked at the same time as the server's info, not after it (audit P4).
+  const signedIn = api.request("/api/v1/auth/me").then((user) => ({ user }), (error) => ({ error }));
   try {
     state.server = await api.serverInfo();
     state.offSince = null;
@@ -99,13 +104,10 @@ async function start() {
   if (state.server?.moved) return showServerMoved(movedDestination(state.server));
   // A page reload keeps the open profile. A new tab, or the browser opened again, asks for the
   // profile (and its PIN) again, unless Settings › General keeps it open.
-  try {
-    const user = await api.request("/api/v1/auth/me");
-    if (user?.id && (tabKeepsProfile() || loadGeneral().keepProfileOpen)) return enterProfile(user);
-    if (user?.id) await api.endProfile().catch(() => {});
-  } catch (error) {
-    if (error instanceof ApiError && error.offline) return showServerOff(error);
-  }
+  const { user, error } = await signedIn;
+  if (error instanceof ApiError && error.offline) return showServerOff(error);
+  if (user?.id && (tabKeepsProfile() || loadGeneral().keepProfileOpen)) return enterProfile(user);
+  if (user?.id) await api.endProfile().catch(() => {});
   await showProfiles();
 }
 
@@ -167,7 +169,7 @@ function showServerOff() {
 }
 
 // Settings needs these app functions; they are declarations, so they exist already.
-const settings = createSettings({ api, state, navigate, toast, handleError, profilePicture, switchProfile, confirmSignOut,
+const settings = createSettings({ api, state, navigate, toast, handleError, profilePicture, switchProfile, confirmSignOut, closeSettings: () => closeSettings(),
   rememberPhoto, updateProfile, pictureAddress, startTour: () => { navigate({ name: "home" }); setTimeout(() => startTour(), 400); } });
 
 const catalog = createCatalogView({ api, navigate, artwork: (...args) => artwork(...args), progressBar: (progress) => progressBar(progress), posterCard, collectionCard, emptyState, openMenu, menuOption, handleError, toast,
@@ -237,6 +239,24 @@ function updateWishBadges() {
 function settingsScreen(route) {
   return settings.settingsScreen(route);
 }
+
+/** Done (or Esc) in Settings: back to the page it was opened from. */
+function closeSettings() {
+  const back = state.beforeSettings ?? "/";
+  const [pathname, search] = back.split("?");
+  navigate(logic.parseRoute(pathname, search ?? ""));
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || event.defaultPrevented || state.route.name !== "settings" || !state.profile || state.player) return;
+  if (document.querySelector("dialog[open], .popup-menu")) return;
+  const target = event.target;
+  // Esc in the search field clears it first, as on the Mac.
+  if (target instanceof HTMLInputElement && target.classList.contains("settings-search-input") && target.value) return;
+  if (target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && target.type !== "checkbox" && !target.classList.contains("settings-search-input"))) return;
+  event.preventDefault();
+  closeSettings();
+});
 
 function screenFrame(...children) {
   return h("div", { class: "screen ambient" }, h("div", { class: "glow one" }), h("div", { class: "glow two" }), h("main", { class: "screen-content" }, children));
@@ -806,6 +826,10 @@ function handleError(error) {
 function navigate(route, { replace = false, quiet = false } = {}) {
   settings.closeEditors();
   endTour();
+  state.settingsDirty = false;
+  // Settings is a layer over the page it was opened from; Done goes back there.
+  if (route.name === "settings" && state.route.name !== "settings") state.beforeSettings = logic.routePath(state.route) || "/";
+  if (route.name !== "settings" && state.route.name === "settings") settings.endSearch();
   const currentPath = logic.routePath(state.route) || (location.pathname + location.search);
   const path = logic.routePath(route);
   // The page that is already open, chosen again: it only scrolls back to the top, as in the Mac app.
@@ -822,11 +846,13 @@ function navigate(route, { replace = false, quiet = false } = {}) {
 }
 
 window.addEventListener("popstate", () => {
+  // Back closes whatever sheet is open; it never stays over the page returned to (audit S19).
+  document.querySelectorAll("dialog[open]").forEach((dialog) => dialog.close());
   settings.closeEditors();
   if (!state.profile) return;
   closePlayer();
   state.route = logic.parseRoute(location.pathname, location.search);
-  renderRoute({ restoreScroll: true, direction: "back" });
+  renderRoute({ restoreScroll: true });
 });
 
 // Links inside the app change the screen without reloading the page.
@@ -834,14 +860,6 @@ document.addEventListener("click", (event) => {
   const link = event.target.closest?.("a[data-route]");
   if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
   event.preventDefault();
-  // The clicked poster grows into the title's picture on the next page.
-  const art = link.matches(".poster-card, .continue-card") ? link.querySelector("img.loaded") : null;
-  const titleId = link.getAttribute("href").startsWith("/title/") ? link.getAttribute("href").slice(7).split(/[?#/]/)[0] : null;
-  if (art && titleId) {
-    art.style.viewTransitionName = "title-art";
-    art.dataset.morph = "1";
-    state.morphFrom = titleId;
-  }
   navigate(logic.parseRoute(link.getAttribute("href").split("?")[0], link.getAttribute("href").split("?")[1] ?? ""));
 });
 
@@ -861,79 +879,128 @@ document.addEventListener("pointerover", (event) => {
 /** Starts loading a title's big picture, so its page can open with it. */
 function warmBackdrop(detail) {
   const item = detail?.item;
-  const url = logic.artworkUrl(item?.backdrop ?? detail?.metadata?.backdrop ?? item?.poster, 1920);
+  const url = logic.artworkUrl(item?.backdrop ?? detail?.metadata?.backdrop ?? item?.poster, heroWidth());
   if (!url || shownArtwork.has(url)) return;
   const image = new Image();
   image.decoding = "async";
   image.src = url;
 }
 
-/** Rails rise in once as they come into view; a quiet refresh shows them as they were. */
-let revealObserver = null;
-let revealInstantly = false;
-function revealWhenSeen(element) {
-  if (revealInstantly || typeof IntersectionObserver !== "function" || !motionAllowed()) {
-    element.classList.add("revealed");
-    return element;
-  }
-  revealObserver ??= new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (!entry.isIntersecting) continue;
-      entry.target.classList.add("revealed");
-      revealObserver.unobserve(entry.target);
-    }
-  }, { rootMargin: "0px 0px -6% 0px" });
-  revealObserver.observe(element);
-  return element;
-}
 
+// The sidebar's look in this browser: hidden or shown, and how wide (210–300, as on the Mac).
+const SIDEBAR_KEY = "aurelia.sidebar";
+function sidebarLayout() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SIDEBAR_KEY) ?? "{}");
+    return { hidden: saved.hidden === true, width: Math.min(300, Math.max(210, Number(saved.width) || 236)) };
+  } catch { return { hidden: false, width: 236 }; }
+}
+function saveSidebarLayout(layout) {
+  try { localStorage.setItem(SIDEBAR_KEY, JSON.stringify(layout)); } catch { /* Kept for this visit only. */ }
+}
+document.documentElement.style.setProperty("--sidebar", `${sidebarLayout().width}px`);
+
+const SIDEBAR_SYMBOLS = { home: "home", search: "search", library: "library", watchlist: "bookmark", recent: "clock", shows: "tv", movies: "film",
+  collections: "collections", wishes: "gift", history: "history", statistics: "chart", "movie-night": "people" };
+
+/**
+ * The Mac app's sidebar (audit D1): Search and Home, the library's sections in the order chosen in
+ * Settings › General, Wishes, then History, Statistics and Movie Night; the profile and Settings at
+ * its foot. Below 760 px it is a drawer that the round button at the top left opens.
+ */
 function shell(content) {
-  // The Mac app's sidebar: Home, then the library's sections.
-  // Home first, then the sections in the order chosen in Settings › General.
   const labels = Object.fromEntries(logic.TOP_BAR_SECTIONS);
-  const tabs = [["home", "Home", "/"], ...loadGeneral().sectionOrder.map((name) => [name, labels[name], `/${name}`])]
-    .filter(([name]) => sidebarShows(name));
+  const general = loadGeneral();
+  const places = [["search", "Search", "/search"], ["home", "Home", "/"], ...general.sectionOrder.map((name) => [name, labels[name], `/${name}`])]
+    .filter(([name]) => sidebarShows(name, general));
   const hasWishes = supportsWishes(state.server);
-  if (hasWishes) tabs.push(["wishes", "Wishes", "/wishes"]);
+  if (hasWishes) places.push(["wishes", "Wishes", "/wishes"]);
+  const yours = [["history", "History", "/history"], ["statistics", "Statistics", "/statistics"], ["movie-night", "Movie Night", "/movie-night"]];
   const badgeCount = hasWishes ? wishBadgeCount(state.wishSummary, state.profile) : 0;
   const wishBadge = () => h("span", { class: "nav-badge", "data-wish-badge": true, hidden: badgeCount <= 0 }, badgeCount > 0 ? String(badgeCount) : "");
-  const current = state.route.name;
-  const menu = h("div", { class: "profile-menu", hidden: true },
+  const current = state.route.name === "person" || state.route.name === "title" || state.route.name === "collection" ? null : state.route.name;
+  const layout = sidebarLayout();
+  const frame = h("div", { class: `app-shell${layout.hidden ? " sidebar-hidden" : ""}` });
+  const closeDrawer = () => frame.classList.remove("drawer-open");
+  const item = ([name, label, href]) => h("a", { class: `sidebar-item${current === name ? " selected" : ""}`, href, "data-route": true,
+    "aria-current": current === name ? "page" : null, onclick: closeDrawer },
+    icon(SIDEBAR_SYMBOLS[name] ?? "library", { size: 17 }), h("span", {}, label), name === "wishes" ? wishBadge() : null);
+
+  const menu = h("div", { class: "profile-menu", role: "menu", hidden: true, "aria-label": "Profile" },
     h("div", { class: "menu-header" }, profilePicture(state.profile), h("span", {}, logic.shownName(state.profile))),
-    h("a", { class: "menu-item", href: "/history", "data-route": true }, "Watch History"),
-    h("a", { class: "menu-item", href: "/statistics", "data-route": true }, "Statistics"),
-    h("a", { class: "menu-item", href: "/movie-night", "data-route": true }, "Movie Night"),
-    hasWishes ? h("a", { class: "menu-item", href: "/wishes", "data-route": true }, h("span", {}, "Wishes"), wishBadge()) : null,
-    h("a", { class: "menu-item", href: "/settings", "data-route": true }, "Settings…"),
-    h("button", { class: "menu-item", onclick: () => showShortcutsDialog() }, "Keyboard Shortcuts"),
-    h("button", { class: "menu-item", onclick: () => switchProfile() }, "Switch Profile"),
-    h("button", { class: "menu-item danger", onclick: () => confirmSignOut() }, "Sign Out of This Browser"));
-  const toggleMenu = (event) => {
-    event.stopPropagation();
-    menu.hidden = !menu.hidden;
-    if (!menu.hidden) {
-      menu.querySelector("button")?.focus();
-      document.addEventListener("click", () => (menu.hidden = true), { once: true });
+    h("button", { class: "menu-item", role: "menuitem", onclick: () => { closeMenu(); showShortcutsDialog(); } }, "Keyboard Shortcuts"),
+    h("button", { class: "menu-item", role: "menuitem", onclick: () => { closeMenu(); switchProfile(); } }, "Switch Profile"),
+    h("button", { class: "menu-item danger", role: "menuitem", onclick: () => { closeMenu(); confirmSignOut(); } }, "Sign Out of This Browser"));
+  const profileButton = h("button", { class: "sidebar-profile", "aria-haspopup": "menu", "aria-expanded": "false",
+    "aria-label": `${logic.shownName(state.profile)}, profile menu` }, profilePicture(state.profile), h("span", {}, logic.shownName(state.profile)));
+  // Esc and any click outside close the menu; focus returns to its button (audit L10, W9).
+  const outside = (event) => { if (!menu.contains(event.target) && event.target !== profileButton) closeMenu(); };
+  const keys = (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeMenu(); profileButton.focus(); }
+    else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const entries = [...menu.querySelectorAll(".menu-item")];
+      const at = entries.indexOf(document.activeElement);
+      entries[(at + (event.key === "ArrowDown" ? 1 : entries.length - 1)) % entries.length]?.focus();
     }
   };
-  const header = h("header", { class: "top-bar" },
-    h("a", { class: "brand", href: "/", "data-route": true, "aria-label": "Go to Home" }, h("img", { src: "/web/icon.svg", alt: "" }), h("span", {}, "Aurelia")),
-    h("nav", { class: "tabs", "aria-label": "Library" }, tabs.map(([name, label, href]) =>
-      h("a", { class: `tab ${current === name ? "selected" : ""}`, href, "data-route": true, "aria-current": current === name ? "page" : null },
-        label, name === "wishes" ? wishBadge() : null))),
-    h("div", { class: "top-actions" },
-      h("a", { class: `icon-button ${current === "search" ? "selected" : ""}`, href: "/search", "data-route": true, "aria-label": "Search" }, icon("search")),
-      h("div", { class: "menu-anchor" },
-        h("button", { class: "avatar-button", "aria-label": `${logic.shownName(state.profile)}, profile menu`, "aria-haspopup": "menu", onclick: toggleMenu },
-          profilePicture(state.profile)), menu)));
-  return h("div", { class: "app-shell" }, header, h("main", { class: "page", id: "page" }, content));
+  function closeMenu() {
+    if (menu.hidden) return;
+    menu.hidden = true;
+    profileButton.setAttribute("aria-expanded", "false");
+    document.removeEventListener("click", outside, true);
+    document.removeEventListener("keydown", keys, true);
+  }
+  profileButton.addEventListener("click", () => {
+    if (!menu.hidden) return closeMenu();
+    menu.hidden = false;
+    profileButton.setAttribute("aria-expanded", "true");
+    menu.querySelector(".menu-item")?.focus();
+    document.addEventListener("click", outside, true);
+    document.addEventListener("keydown", keys, true);
+  });
+
+  const setHidden = (hidden) => {
+    frame.classList.toggle("sidebar-hidden", hidden);
+    saveSidebarLayout({ ...sidebarLayout(), hidden });
+  };
+  const narrow = () => window.matchMedia?.("(max-width: 760px)")?.matches;
+  const hide = h("button", { class: "sidebar-toggle", "aria-label": "Hide Sidebar", title: "Hide Sidebar", onclick: () => setHidden(true) }, icon("sidebar", { size: 16 }));
+  const show = h("button", { class: "sidebar-toggle sidebar-show", "aria-label": "Show Sidebar", title: "Show Sidebar",
+    onclick: () => narrow() ? frame.classList.add("drawer-open") : setHidden(false) }, icon("sidebar", { size: 16 }));
+  // Dragging the sidebar's edge sets its width, as on the Mac.
+  const handle = h("div", { class: "sidebar-resize", role: "separator", "aria-orientation": "vertical", "aria-label": "Sidebar Width" });
+  handle.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    const move = (moved) => document.documentElement.style.setProperty("--sidebar", `${Math.min(300, Math.max(210, Math.round(moved.clientX)))}px`);
+    const end = () => {
+      handle.removeEventListener("pointermove", move);
+      saveSidebarLayout({ ...sidebarLayout(), width: parseInt(getComputedStyle(document.documentElement).getPropertyValue("--sidebar"), 10) || 236 });
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", end, { once: true });
+    handle.addEventListener("pointercancel", end, { once: true });
+  });
+  const sidebar = h("aside", { class: "sidebar", "aria-label": "Library" },
+    h("div", { class: "sidebar-head" }, hide),
+    h("nav", { class: "sidebar-list", "aria-label": "Library" },
+      places.map(item),
+      h("div", { class: "sidebar-heading" }, "Yours"),
+      yours.map(item)),
+    h("div", { class: "sidebar-foot" },
+      h("div", { class: "menu-anchor", style: { flex: "1", minWidth: "0", display: "flex" } }, profileButton, menu),
+      h("a", { class: `sidebar-gear${state.route.name === "settings" ? " selected" : ""}`, href: "/settings", "data-route": true, "aria-label": "Settings", title: "Settings", onclick: closeDrawer }, icon("gear", { size: 17 }))),
+    handle);
+  frame.append(sidebar, h("div", { class: "sidebar-backdrop", onclick: closeDrawer }), show, h("main", { class: "page", id: "page" }, content));
+  return frame;
 }
 
-/** Waits up to a short moment for the page's big picture, so it can arrive with its page. */
+/** Waits a very short moment for the page's big picture, so it usually arrives with its page. */
 function heroReady(content) {
   const art = content?.querySelector?.(".detail-hero img.hero-art, .hero img.hero-art");
   if (!art || art.classList.contains("loaded") || typeof art.decode !== "function") return Promise.resolve();
-  return Promise.race([art.decode().catch(() => {}), new Promise((resolve) => setTimeout(resolve, 450))]);
+  return Promise.race([art.decode().catch(() => {}), new Promise((resolve) => setTimeout(resolve, 150))]);
 }
 
 /** Whether pages may move: the system's and this browser's Reduce Motion both keep them still. */
@@ -941,48 +1008,52 @@ function motionAllowed() {
   return !window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches && document.body.dataset.heroMotion !== "reduced";
 }
 
-/**
- * Replaces the page. With motion, the browser blends the old page into the new one (a poster
- * that was clicked grows into the title's picture); without, the page simply changes.
- */
-/**
- * Replaces the page. One animation at most: a page change plays as a view transition (the page's
- * own rise is taken off then, or it would play again when the transition ends), and a quiet
- * refresh, for example on returning to the window, doesn't move at all. Only a browser without
- * view transitions lets the page rise by itself.
- */
-function swapPage(update, { animate, direction, still = false }) {
-  const settled = () => {
-    update();
-    for (const element of root.querySelectorAll(".page-enter")) element.classList.remove("page-enter");
-  };
-  if (still) {
-    // The same page again, for example on returning to the tab: nothing rises or fades in again.
-    settled();
-    root.querySelector(".app-shell")?.classList.add("still");
-    return;
-  }
-  if (!animate || typeof document.startViewTransition !== "function" || !motionAllowed()) {
-    update();
-    return;
-  }
-  document.documentElement.dataset.navigation = direction;
-  document.documentElement.classList.add("page-transition");
-  try {
-    const transition = document.startViewTransition(settled);
-    // A hidden tab skips the animation; the page still changes, so nothing is reported.
-    transition.ready?.catch(() => {});
-    transition.updateCallbackDone?.catch(() => {});
-    transition.finished.catch(() => {}).finally(() => {
-      document.documentElement.classList.remove("page-transition");
-      document.querySelectorAll("[data-morph]").forEach((element) => { element.style.viewTransitionName = ""; delete element.dataset.morph; });
-    });
-  } catch {
-    update();
-  }
+/** The horizontal rails' positions, so a page built again in place keeps them (audit L4). */
+function railPositions() {
+  return [...root.querySelectorAll(".rail-track, .hrail-track")].map((track) => track.scrollLeft);
+}
+function restoreRails(positions) {
+  const tracks = root.querySelectorAll(".rail-track, .hrail-track");
+  positions.forEach((left, index) => { if (tracks[index] && left) tracks[index].scrollLeft = left; });
 }
 
-async function renderRoute({ quiet = false, restoreScroll = false, resetScroll = false, direction = "forward", inPlace = false } = {}) {
+/**
+ * Whether a page may be built again in place now. Not while someone types or has changed
+ * something not yet saved (Settings), not in a hidden tab (it catches up when shown), and not on
+ * pages whose lists grow as you scroll (they show the change when opened next) (audit L4, S3).
+ */
+function mayRefreshInPlace() {
+  if (document.hidden) return false;
+  const active = document.activeElement;
+  if (active && (active.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName) && active.type !== "range" && active.type !== "checkbox")) return false;
+  if (state.route.name === "settings" && state.settingsDirty) return false;
+  if (["library", "recent", "movies", "shows", "search", "collections"].includes(state.route.name) && window.scrollY > 200) return false;
+  return true;
+}
+
+/** Puts the page in place: the library pages in the sidebar's shell, Settings as its own layer. */
+function placePage(route, content) {
+  // Sheets that belong to the page that leaves close with it (audit S19).
+  dispatchEvent(new Event("aurelia:page"));
+  clear(root);
+  if (route.name === "settings") {
+    const layer = h("div", { class: "settings-layer", id: "page" }, content);
+    // Something typed or chosen and not saved yet keeps the page from being built again.
+    layer.addEventListener("input", (event) => { if (!event.target.closest?.(".settings-search-input")) state.settingsDirty = true; });
+    root.append(layer);
+    return;
+  }
+  root.append(shell(content));
+}
+
+/**
+ * Builds the route's page and puts it in place. A page that answers within 200 ms replaces the old
+ * one directly; a slower one shows a small turning ring first (audit D9). There is no page
+ * animation beyond a short fade (audit P1). A quiet refresh (the server reported a change, the tab
+ * came back) builds the same page again where it was: scroll position, rails and the chosen
+ * season stay.
+ */
+async function renderRoute({ quiet = false, restoreScroll = false, resetScroll = false, inPlace = false } = {}) {
   catalog.close();
   if (!state.profile) return;
   isRenderingRoute = true;
@@ -991,19 +1062,20 @@ async function renderRoute({ quiet = false, restoreScroll = false, resetScroll =
   const path = logic.routePath(route) || (location.pathname + location.search);
   const targetScroll = restoreScroll ? scrollMemory.recall(path) : null;
   const scroll = quiet ? window.scrollY : (targetScroll ?? 0);
-  revealInstantly = quiet;
+  const rails = quiet ? railPositions() : [];
+  if (route.name !== "settings") state.settingsDirty = false;
+  // A series opened anew shows the season of what plays next; built again or returned to, the
+  // season chosen there.
+  if (route.name === "title" && !quiet && !restoreScroll && !inPlace) seasonChoice.delete(route.id);
+  if (quiet) state.quietRefresh = true;
   // Some screens are built at once, others load first; both count the same here.
   const loading = Promise.resolve().then(() => screenFor(route, token)).then((content) => ({ content }), (error) => ({ error }));
-  // A page that answers quickly (remembered or near) replaces the old one directly; a slower one
-  // shows its shape first.
-  let outcome = quiet || inPlace ? await loading : await Promise.race([loading, new Promise((resolve) => setTimeout(resolve, 140))]);
+  let outcome = quiet || inPlace ? await loading : await Promise.race([loading, new Promise((resolve) => setTimeout(resolve, 200))]);
+  if (quiet) state.quietRefresh = false;
   if (!outcome) {
     if (token !== state.renderToken) return;
-    swapPage(() => {
-      clear(root);
-      root.append(shell(skeletonFor(route)));
-      if (resetScroll || restoreScroll) window.scrollTo(0, 0);
-    }, { animate: true, direction });
+    placePage(route, h("div", { class: "page-loading", role: "status", "aria-label": "Loading" }, h("div", { class: "spinner visible" })));
+    if (resetScroll || restoreScroll) window.scrollTo(0, 0);
     outcome = await loading;
   }
   let content = outcome.content;
@@ -1011,14 +1083,14 @@ async function renderRoute({ quiet = false, restoreScroll = false, resetScroll =
     if (token !== state.renderToken) return;
     isRenderingRoute = false;
     if (handleError(outcome.error)) return;
+    // A quiet refresh that fails keeps the page as it was.
+    if (quiet && root.querySelector("#page")) return;
     content = emptyState("warning", "Couldn’t Load This Page", outcome.error.message, h("button", { class: "secondary-button", onclick: () => renderRoute() }, "Try Again"));
   }
   if (token !== state.renderToken || !content) {
     isRenderingRoute = false;
     return;
   }
-  // A page with a big picture waits a moment for it, so it arrives with the page instead of
-  // popping in after the page has moved.
   if (!quiet && !inPlace) {
     await heroReady(content);
     if (token !== state.renderToken) {
@@ -1026,31 +1098,23 @@ async function renderRoute({ quiet = false, restoreScroll = false, resetScroll =
       return;
     }
   }
-  const morph = state.morphFrom;
-  state.morphFrom = null;
-  swapPage(() => {
-    clear(root);
-    root.append(shell(content));
-    if (morph && route.name === "title" && route.id === morph) {
-      const art = root.querySelector(".detail-hero .hero-art");
-      if (art) { art.style.viewTransitionName = "title-art"; art.dataset.morph = "1"; art.classList.remove("settle"); }
-    }
-    if (quiet || restoreScroll) {
-      window.scrollTo(0, scroll);
-      if (typeof requestAnimationFrame === "function") {
-        requestAnimationFrame(() => window.scrollTo(0, scroll));
-      }
-    } else if (resetScroll) {
-      window.scrollTo(0, 0);
-    }
-    // Another settings page fades in where the last one was; the sidebar stays still.
-    if (inPlace) root.querySelector(".settings-content")?.classList.add("swap-in");
-  }, { animate: !quiet && !inPlace && !root.querySelector(".page-skeleton"), direction, still: quiet || inPlace });
-  revealInstantly = false;
+  placePage(route, content);
+  if (quiet || inPlace) root.querySelector(".app-shell")?.classList.add("still");
+  if (quiet || restoreScroll) {
+    window.scrollTo(0, scroll);
+    restoreRails(rails);
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => { window.scrollTo(0, scroll); restoreRails(rails); });
+  } else if (resetScroll) {
+    window.scrollTo(0, 0);
+  }
+  // Another settings page fades in where the last one was; the list stays still.
+  if (inPlace) root.querySelector(".settings-content")?.classList.add("swap-in");
   isRenderingRoute = false;
   if (route.name === "home" && !quiet && logic.tourPending(safeStorage())) setTimeout(() => startTour(), 600);
+  // The tab's title is set only for the page that is really shown (audit L13).
   const label = { home: "Home", library: "Library", watchlist: "Watchlist", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", history: "Watch History", statistics: "Statistics", settings: "Settings", "movie-night": "Movie Night", wishes: "Wishes" }[route.name];
-  if (label) document.title = `${label} · Aurelia`;
+  const named = content.dataset?.pageTitle ?? label;
+  if (named) document.title = `${named} · Aurelia`;
 }
 
 // MARK: Tour
@@ -1097,7 +1161,7 @@ function startTour() {
   const place = () => {
     const stop = logic.TOUR_STOPS[index];
     const candidates = [...document.querySelectorAll(stop.target)];
-    const topInset = document.querySelector(".top-bar")?.getBoundingClientRect().bottom ?? 0;
+    const topInset = 0;
     const viewport = { width: window.innerWidth, height: window.innerHeight };
     target = candidates[logic.visibleTourTarget(candidates.map((element) => element.getBoundingClientRect()), viewport, topInset)] ?? null;
     if (target) {
@@ -1230,7 +1294,7 @@ function rail(title, cards, kind = "poster", allHref) {
   const track = h("div", { class: `rail-track ${kind}` }, cards);
   const scrollBehavior = () => window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth";
   const scroll = (direction) => track.scrollBy({ left: direction * track.clientWidth * 0.85, behavior: scrollBehavior() });
-  return revealWhenSeen(h("section", { class: "rail reveal" },
+  return (h("section", { class: "rail" },
     h("div", { class: "section-header" }, h("h2", {}, title), h("span", { class: "count" }, String(cards.length)),
       allHref ? h("a", { class: "text-button", href: allHref, "data-route": true }, "See All") : null,
       h("div", { class: "rail-arrows" },
@@ -1241,33 +1305,25 @@ function rail(title, cards, kind = "poster", allHref) {
 
 const shownArtwork = new Set();
 
+/** The width a full-window picture needs on this screen: a phone gets less than a 5K display (audit P5). */
+function heroWidth() {
+  return Math.min(1920, Math.round((window.innerWidth || 1440) * Math.min(2, window.devicePixelRatio || 1)));
+}
+
 function artwork(image, width, className, alt) {
-  const url = logic.artworkUrl(image, width);
-  if (!url) return h("div", { class: `${className} artwork-missing` });
   // A page's big picture loads first; posters further down load when they come near.
   const hero = /\bhero-art\b/.test(className);
-  const element = h("img", { class: `${className} img-fade`, src: url, alt, loading: hero ? "eager" : "lazy", decoding: "async", fetchpriority: hero ? "high" : null });
+  const url = logic.artworkUrl(image, hero ? heroWidth() : width);
+  if (!url) return h("div", { class: `${className} artwork-missing` });
+  // Posters and thumbnails come twice as large for sharp 2× screens (audit P5).
+  const sharp = !hero && width <= 640 ? logic.artworkUrl(image, width * 2) : "";
+  const element = h("img", { class: `${className} img-fade`, src: url, srcset: sharp && sharp !== url ? `${url} 1x, ${sharp} 2x` : null, alt,
+    loading: hero ? "eager" : "lazy", decoding: "async", fetchpriority: hero ? "high" : null });
   // A picture already shown on this visit shows at once; a new one fades in when it's ready.
   if (shownArtwork.has(url) || (element.complete && element.naturalWidth)) element.classList.add("loaded");
   element.addEventListener("load", () => { shownArtwork.add(url); element.classList.add("loaded"); }, { once: true });
   element.addEventListener("error", () => element.classList.add("artwork-missing"), { once: true });
   return element;
-}
-
-/** The page's shape while it loads: the hero and rails of Home, a title's header, or a poster grid. */
-function skeletonFor(route) {
-  const block = (name) => h("div", { class: `skeleton ${name}` });
-  const rail = (count = 8) => h("div", { class: "skeleton-rail" }, block("skeleton-heading"),
-    h("div", { class: "skeleton-row" }, Array.from({ length: count }, () => block("skeleton-poster"))));
-  const frame = (...children) => h("div", { class: "page-skeleton", role: "status", "aria-label": "Loading" }, ...children);
-  switch (route.name) {
-    case "home": return frame(block("skeleton-hero"), rail(), rail());
-    case "title": return frame(block("skeleton-detail"), rail(4));
-    case "library": case "recent": case "movies": case "shows": case "watchlist": case "collections": case "collection": case "person":
-      return frame(h("div", { class: "skeleton-page-header" }, block("skeleton-title")),
-        h("div", { class: "skeleton-grid" }, Array.from({ length: 18 }, () => block("skeleton-poster"))));
-    default: return h("div", { class: "page-loading" }, h("div", { class: "spinner visible" }));
-  }
 }
 
 function titleHref(item) {
@@ -1364,17 +1420,20 @@ function openMenu(anchor, items) {
   const close = () => {
     menu.remove();
     document.removeEventListener("click", close);
-    document.removeEventListener("keydown", escape);
+    document.removeEventListener("keydown", escape, true);
   };
+  // Esc closes only this menu, also over the player (audit X9): it is heard first and taken.
   const escape = (event) => {
     if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
       close();
       anchor.focus();
     }
   };
   setTimeout(() => {
     document.addEventListener("click", close);
-    document.addEventListener("keydown", escape);
+    document.addEventListener("keydown", escape, true);
   }, 0);
   menu.querySelector("[aria-checked=true], button:not(:disabled)")?.focus();
 }
@@ -1382,15 +1441,16 @@ function openMenu(anchor, items) {
 // MARK: Title details (the Mac app's detail page)
 
 async function titleScreen(id) {
-  const [detail, plan, watchlistSnapshot] = await Promise.all([
+  // Parties are asked for together with the title, not after it (audit L5).
+  const [detail, plan, watchlistSnapshot, parties] = await Promise.all([
     cached.detail(id),
     cached.playbackPlan(id).catch(() => null),
     cached.watchlist().catch(() => null),
+    watchPartiesNow(),
   ]);
   if (watchlistSnapshot?.mediaIds) state.watchlistIds = new Set(watchlistSnapshot.mediaIds);
   const item = detail.item;
   const metadata = detail.metadata ?? {};
-  document.title = `${metadata.title ?? item.title} · Aurelia`;
   const seasons = detail.seasons ?? [];
   const target = plan?.target ?? (item.kind === "series" ? null : item);
 
@@ -1428,7 +1488,6 @@ async function titleScreen(id) {
 
   // Parties others started for this title or one of its episodes, to join with one click.
   const partyIds = new Set([item.id, ...seasons.flatMap((season) => (season.episodes ?? []).map((episode) => episode.item.id))]);
-  const parties = (await api.watchParties().catch(() => [])) ?? [];
   const joinButtons = parties.filter((party) => partyIds.has(party.mediaId) && party.id !== state.watchParty?.state?.id).map((party) =>
     h("button", { class: "secondary-button large", title: `Watch ${party.title} together with ${party.hostName}`, onclick: () => joinWatchTogether(party) },
       icon("people", { size: 17 }), `Join ${party.hostName}`));
@@ -1476,7 +1535,8 @@ async function titleScreen(id) {
   const moreButton = h("button", { class: "player-round glass detail-more", "aria-label": "More Actions", "aria-haspopup": "menu" }, icon("more", { size: 20 }));
   moreButton.addEventListener("click", (event) => {
     event.stopPropagation();
-    const actions = catalog.mediaMenu(item, { seasons, seasonNumber: seasons[0]?.number });
+    // The season chosen on the page, not always the first (audit L11).
+    const actions = catalog.mediaMenu(item, { seasons, seasonNumber: seasonChoice.get(item.id) ?? seasons[0]?.number });
     openMenu(moreButton, actions);
   });
 
@@ -1505,20 +1565,38 @@ async function titleScreen(id) {
     supplementRails(detail.supplements, item.kind === "series" ? "Series " : "", item.title),
     castRail(metadata.credits),
     aboutSection(detail));
-  return h("div", { class: "detail page-enter" }, hero, body);
+  return h("div", { class: "detail page-enter", dataset: { pageTitle: metadata.title ?? item.title } }, hero, body);
 }
+
+// Parties are asked for at most every 15 seconds while titles are opened one after another.
+let partiesRead = null;
+function watchPartiesNow() {
+  if (partiesRead && Date.now() - partiesRead.at < 15_000) return partiesRead.answer;
+  const answer = api.watchParties().then((list) => list ?? [], () => []);
+  partiesRead = { at: Date.now(), answer };
+  return answer;
+}
+
+/** The season each series' page shows, so a page built again keeps it (audit L4). */
+const seasonChoice = new Map();
 
 function franchiseRail(franchise) {
   const cards = (franchise.items ?? []).map((film) => posterCard(film));
-  const saveButton = state.profile?.isOwner || state.profile?.isAdmin
+  // Owners and administrators can keep the franchise as a collection (audit L3), once per click.
+  const saveButton = logic.managementPermissions(state.profile).administrator
     ? h("button", {
         class: "text-button",
-        onclick: async () => {
+        onclick: async (event) => {
+          const button = event.currentTarget;
+          if (button.disabled) return;
+          button.disabled = true;
           try {
             await api.createCollectionFromFranchise(franchise.id);
-            toast(`Created collection “${franchise.name}”`);
-          } catch (e) {
-            toast(e.message);
+            toast(`Created the collection “${franchise.name}”.`);
+            button.remove();
+          } catch (error) {
+            button.disabled = false;
+            if (!handleError(error)) toast(error.message);
           }
         }
       }, "Save as Collection")
@@ -1559,20 +1637,21 @@ function hrail(cards, { label, className = "" } = {}) {
 }
 
 function seasonsSection(item, seasons, target) {
-  let current = seasons.find((season) => season.episodes.some((entry) => entry.item.id === target?.id)) ?? seasons[0];
+  let current = seasons.find((season) => season.number === seasonChoice.get(item.id))
+    ?? seasons.find((season) => season.episodes.some((entry) => entry.item.id === target?.id)) ?? seasons[0];
   const titleButton = h("button", { class: "season-menu", "aria-haspopup": "menu" });
   const count = h("span", { class: "muted" });
   const watched = h("span", { class: "watched-label small" });
   const holder = h("div", { class: "season-body" });
   const show = (season, animate) => {
-    const backwards = seasons.indexOf(season) < seasons.indexOf(current);
     current = season;
+    seasonChoice.set(item.id, season.number);
     titleButton.replaceChildren(icon("chevronUpDown", { size: 15 }), h("span", {}, logic.seasonTitle(season.number)), icon("chevronDown", { size: 13 }));
     count.textContent = `${season.episodes.length} episode${season.episodes.length === 1 ? "" : "s"}`;
     const allWatched = season.episodes.length > 0 && season.episodes.every((entry) => entry.item.watchState === "completed");
     watched.replaceChildren(...(allWatched ? [icon("checkCircle", { size: 14 }), "Watched"] : []));
     const rail = hrail(season.episodes.map((entry) => episodeCard(entry, seasons, season.number)), { label: "Episodes", className: "episodes" });
-    if (animate) rail.classList.add("slide-in", ...(backwards ? ["back"] : []));
+    if (animate) rail.classList.add("slide-in");
     holder.replaceChildren(...[rail, supplementRails(season.supplements, "", `${item.title} · ${logic.seasonTitle(season.number)}`)].filter(Boolean));
   };
   titleButton.addEventListener("click", (event) => {
@@ -1656,17 +1735,17 @@ async function watchlistScreen() {
   if (!items.length) {
     return emptyState("bookmark", "Your Watchlist Is Empty", "Save movies and TV shows you want to watch later from their detail page or context menu.");
   }
+  const shown = visibleTitles(items, loadGeneral(), { keepWatched: true });
   return h("div", { class: "library page-enter" },
-    h("div", { class: "page-header" }, h("h1", {}, "Watchlist"), h("span", { class: "count" }, String(items.length))),
-    h("div", { class: "poster-grid" }, visibleTitles(items, loadGeneral(), { keepWatched: true }).map((item, index) => posterCard(item, index))));
+    h("div", { class: "page-header" }, h("h1", {}, "Watchlist"), h("span", { class: "count" }, String(shown.length))),
+    h("div", { class: "poster-grid" }, shown.map((item, index) => posterCard(item, index))));
 }
 
 async function personScreen(route) {
   const detail = await cached.person({ name: route.personName, key: route.personKey });
   const items = detail?.items ?? [];
   const name = detail?.name ?? route.personName ?? "Person";
-  document.title = `${name} · Aurelia`;
-  return h("div", { class: "library person-page page-enter" },
+  return h("div", { class: "library person-page page-enter", dataset: { pageTitle: name } },
     h("div", { class: "person-header" },
       h("button", { class: "player-round glass", "aria-label": "Back", onclick: () => history.length > 1 ? history.back() : navigate({ name: "home" }) }, icon("back", { size: 20 })),
       h("div", { class: "person-photo large" },
@@ -1684,33 +1763,34 @@ async function personScreen(route) {
 // MARK: Watch History
 
 async function historyScreen() {
-  let offset = 0;
   const limit = 50;
   let items = [];
   let total = 0;
 
   const container = h("div", { class: "history-page library page-enter" });
   const listContainer = h("div", { class: "history-list" });
+  const failed = (error) => { if (!handleError(error)) toast(error.message); };
 
+  // Clearing everything, or one entry, asks first (audit L7).
   const clearButton = h("button", {
     class: "secondary-button danger",
-    onclick: async () => {
-      if (!confirm("Clear your entire watch history? This cannot be undone.")) return;
-      try {
-        await api.clearHistory();
-        toast("Watch history cleared.");
-        items = [];
-        total = 0;
-        renderList();
-      } catch (e) {
-        toast(e.message);
-      }
-    }
+    onclick: () => confirmSheet({
+      symbol: "trash", title: "Clear Watch History?", confirm: "Clear History",
+      message: "Every title leaves your history. Progress and favorites stay. This can't be undone.",
+      work: () => api.clearHistory(),
+    }).then((done) => {
+      if (!done) return;
+      toast("Watch history cleared.");
+      items = [];
+      total = 0;
+      renderList();
+    }, failed),
   }, "Clear History…");
 
   const header = h("div", { class: "page-header" },
     h("h1", {}, "Watch History"),
-    h("div", { class: "button-row" }, clearButton));
+    h("span", { class: "spacer" }),
+    clearButton);
 
   function renderList() {
     clear(listContainer);
@@ -1727,22 +1807,24 @@ async function historyScreen() {
         h("div", { class: "history-item-info" },
           h("a", { class: "history-item-title", href: `/title/${item.mediaId}`, "data-route": true }, item.title),
           h("div", { class: "history-item-meta muted small" },
-            [item.eyebrow, new Date(item.watchedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
+            [item.eyebrow, new Date(item.watchedAt).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }),
               `Watched ${logic.watchTime(item.secondsWatched)}`]
               .filter(Boolean).join(" · ")),
           progressBar(item)),
         h("button", {
           class: "icon-button danger",
           "aria-label": `Remove ${item.title} from history`,
-          onclick: async () => {
-            try {
-              await api.deleteHistoryItem(item.id);
-              items = items.filter((x) => x.id !== item.id);
-              renderList();
-            } catch (e) {
-              toast(e.message);
-            }
-          }
+          title: "Remove from History",
+          onclick: () => confirmSheet({
+            symbol: "trash", title: `Remove “${item.title}” from History?`, confirm: "Remove",
+            message: "Only this entry leaves your history; progress and favorites stay.",
+            work: () => api.deleteHistoryItem(item.id),
+          }).then((done) => {
+            if (!done) return;
+            items = items.filter((entry) => entry.id !== item.id);
+            total = Math.max(0, total - 1);
+            renderList();
+          }, failed),
         }, icon("trash", { size: 16 })));
       listContainer.append(row);
     }
@@ -1752,13 +1834,15 @@ async function historyScreen() {
         onclick: async () => {
           loadMoreBtn.disabled = true;
           try {
-            offset += limit;
-            const res = await api.history({ offset, limit });
-            items.push(...res.items);
-            total = res.total;
+            // The next page starts after what is shown, also after entries were removed (audit L7).
+            const res = await api.history({ offset: items.length, limit });
+            const known = new Set(items.map((entry) => entry.id));
+            items.push(...(res.items ?? []).filter((entry) => !known.has(entry.id)));
+            total = res.total ?? total;
             renderList();
-          } catch (e) {
-            toast(e.message);
+          } catch (error) {
+            loadMoreBtn.disabled = false;
+            failed(error);
           }
         }
       }, "Load More");
@@ -1767,11 +1851,12 @@ async function historyScreen() {
   }
 
   try {
-    const res = await api.history({ offset, limit });
+    const res = await api.history({ offset: 0, limit });
     items = res.items ?? [];
     total = res.total ?? 0;
-  } catch (e) {
-    return emptyState("warning", "Couldn’t Load History", e.message);
+  } catch (error) {
+    if (handleError(error)) return null;
+    return emptyState("warning", "Couldn’t Load History", error.message, h("button", { class: "secondary-button", onclick: () => renderRoute() }, "Try Again"));
   }
 
   renderList();
@@ -1787,8 +1872,9 @@ async function statisticsScreen() {
   let stats;
   try {
     stats = await api.statistics();
-  } catch (e) {
-    return emptyState("warning", "Couldn’t Load Statistics", e.message);
+  } catch (error) {
+    if (handleError(error)) return null;
+    return emptyState("warning", "Couldn’t Load Statistics", error.message, h("button", { class: "secondary-button", onclick: () => renderRoute() }, "Try Again"));
   }
   if (!(stats.totalHoursWatched > 0)) {
     return emptyState("star", "No Viewing Activity Yet",
@@ -1849,10 +1935,14 @@ async function statisticsScreen() {
   const yearContainer = h("div", { class: "year-in-review-content" });
   const yearSelect = h("select", { class: "select-input", "aria-label": "Year in Review" },
     years.map((year) => h("option", { value: String(year) }, String(year))));
+  // Switching years quickly shows the year last chosen, never a late answer (audit L14).
+  let yearTurn = 0;
   async function loadYear(year) {
+    const turn = ++yearTurn;
     clear(yearContainer);
     try {
       const review = await api.yearInReview(year);
+      if (turn !== yearTurn) return;
       const busiest = review.busiestDay
         ? new Date(`${review.busiestDay}T12:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })
         : null;
@@ -1870,8 +1960,12 @@ async function statisticsScreen() {
           review.topGenre ? [h("dt", {}, "Favorite Genre"), h("dd", {}, review.topGenre)] : null,
           review.topTitle ? [h("dt", {}, "Most Watched"), h("dd", {}, review.topTitle)] : null,
           busiest ? [h("dt", {}, "Busiest Day"), h("dd", {}, [busiest, review.busiestDayHours != null ? logic.watchHours(review.busiestDayHours) : null].filter(Boolean).join(" · "))] : null));
-    } catch {
-      yearContainer.append(h("p", { class: "muted" }, "No activity recorded for this year."));
+    } catch (error) {
+      if (turn !== yearTurn || handleError(error)) return;
+      yearContainer.append(error instanceof ApiError && error.status === 404
+        ? h("p", { class: "muted" }, "No activity recorded for this year.")
+        : h("div", { class: "error-banner" }, icon("warning", { size: 16 }), h("span", {}, error.message),
+          h("button", { class: "secondary-button small", onclick: () => loadYear(year) }, "Try Again")));
     }
   }
   yearSelect.addEventListener("change", () => loadYear(Number(yearSelect.value)));
@@ -2033,12 +2127,25 @@ function showMiniRemote(device, target) {
 
   closeBtn.addEventListener("click", () => close(true));
 
+  // It asks every 2.5 s while this tab is visible, as the page's own background read, and ends
+  // when the other device stopped playing, went away, or doesn't answer (audit L6).
+  let stoppedPolls = 0;
+  let failedPolls = 0;
   pollTimer = setInterval(async () => {
+    if (document.hidden) return;
     try {
-      const status = await api.playerStatus(device.deviceId);
+      const status = await api.background(() => api.playerStatus(device.deviceId));
+      failedPolls = 0;
       if (status) {
         isPlaying = status.isPlaying && !status.isPaused;
         playBtn.replaceChildren(icon(isPlaying ? "pause" : "play", { size: 18 }));
+        playBtn.setAttribute("aria-label", isPlaying ? "Pause" : "Play");
+        stoppedPolls = status.isPlaying || status.isPaused ? 0 : stoppedPolls + 1;
+        if (stoppedPolls >= 3) {
+          toast(`${device.deviceName} stopped playing.`);
+          close(false);
+          return;
+        }
         if (status.durationSeconds && status.durationSeconds > 0) {
           duration = status.durationSeconds;
           if (status.positionSeconds !== undefined && status.positionSeconds !== null) {
@@ -2057,6 +2164,9 @@ function showMiniRemote(device, target) {
         close(false);
       } else if (error?.status === 401 || error?.status === 403) {
         // A refused session never answers again; asking every few seconds only adds load.
+        close(false);
+      } else if (++failedPolls >= 5) {
+        toast(`${device.deviceName} isn’t answering.`);
         close(false);
       }
     }
@@ -2083,6 +2193,10 @@ async function playTitle(item, seasons, { intent = "play", skipCinema = false, o
     if (!handleError(error)) toast(error.message);
     return;
   }
+  // The next title of a party (N, Up Next, the end of an episode) keeps the party: the party lets
+  // go of the old player before it closes, and follows the new one, which tells the others
+  // (audit X1). Only closing the player leaves it.
+  if (state.player && state.watchParty?.isFollowing(state.player.partyPlayer)) state.watchParty.detach();
   closePlayer();
   if (!skipCinema && !onFinished && cinemaWanted({ item: target, intent, preferences: loadPreferences(),
     capabilities: state.server?.capabilities ?? [], watchingTogether: Boolean(state.watchParty) })) {
@@ -2101,8 +2215,9 @@ async function playTitle(item, seasons, { intent = "play", skipCinema = false, o
     onShowShortcuts: () => showShortcutsDialog(),
     onClose: () => {
       if (state.player === player) state.player = null;
-      // Progress and Continue Watching changed; show them without jumping to the top.
-      if (state.profile) renderRoute({ quiet: true });
+      // Progress and Continue Watching changed; show them without jumping to the top. The next
+      // episode opening right away waits with it until the last player closes.
+      if (state.profile) refreshSoon();
     },
     onSessionEnded: () => sessionEnded(),
     profileName: logic.shownName(state.profile),
@@ -2303,6 +2418,8 @@ function closePlayer() {
 }
 
 function toast(text) {
+  // One message at a time; a new one replaces the last instead of stacking above it (audit D8).
+  document.querySelectorAll(".toast").forEach((old) => old.remove());
   const element = h("div", { class: "toast", role: "status" }, text);
   document.body.append(element);
   setTimeout(() => element.classList.add("visible"), 10);
@@ -2368,19 +2485,42 @@ function refreshSoon({ forget = false } = {}) {
     reads.clear();
     prefetches.forget();
   }
-  // While a title plays, the page refreshes when the player closes.
+  // While a title plays, the page refreshes when the player closes; an open sheet, a hidden tab or
+  // someone typing waits too, and the page catches up afterwards (audit L4, S3).
+  state.pendingRefresh = true;
   if (state.player || document.querySelector("dialog[open]")) return;
   clearTimeout(state.refreshTimer);
   state.refreshTimer = setTimeout(() => {
-    if (state.route.name !== "search") renderRoute({ quiet: true });
+    if (!state.profile || state.player || document.querySelector("dialog[open]")) return;
+    if (!mayRefreshInPlace()) return;
+    state.pendingRefresh = false;
+    renderRoute({ quiet: true });
   }, 400);
 }
 
+/** A refresh that had to wait happens once the page is free again. */
+function catchUp() {
+  if (state.pendingRefresh && state.profile && !state.player) refreshSoon();
+}
+
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && state.profile && !state.player) refreshSoon();
+  if (document.visibilityState === "visible") catchUp();
 });
+// Leaving a field (or closing a sheet) lets a refresh that waited for it happen.
+document.addEventListener("focusout", () => setTimeout(catchUp, 0));
+document.addEventListener("close", () => setTimeout(catchUp, 0), true);
 
 document.addEventListener("keydown", (event) => {
+  // "/" anywhere starts a search, as the tour says (audit L12).
+  if (event.key === "/" && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.altKey && state.profile && !state.player) {
+    const target = event.target;
+    if (target?.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target?.tagName === "SELECT") return;
+    if (document.querySelector("dialog[open]")) return;
+    event.preventDefault();
+    if (state.route.name === "search") document.querySelector(".search .search-field")?.focus();
+    else navigate({ name: "search" });
+    return;
+  }
   if (event.key === "?" && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.altKey) {
     const target = event.target;
     if (target?.isContentEditable || target?.tagName === "SELECT") return;

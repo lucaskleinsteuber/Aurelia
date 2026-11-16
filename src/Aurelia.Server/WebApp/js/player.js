@@ -259,6 +259,8 @@ export class Player {
   }
 
   async open(parent) {
+    // Focus goes back where it was when the player closes (audit X10).
+    this.returnFocus = document.activeElement;
     parent.append(this.element);
     document.body.classList.add("playing");
     this.bind();
@@ -288,18 +290,30 @@ export class Player {
     this.scheduleRenewal();
     this.loadNotes();
     void this.updateEpisodeButtons();
-    if (this.canConvert && (!triesDirectPlay(this.source.contentType) || this.quality !== "original")) {
+    // Automatic plays a file the browser can play by itself directly, as Original does; only a
+    // chosen quality converts it (audit, player performance).
+    if (this.canConvert && (!triesDirectPlay(this.source.contentType) || (this.quality !== "original" && this.quality !== "auto"))) {
       const at = this.resumeAt;
       this.resumeAt = 0;
       await this.startLive(at);
       return;
     }
     this.video.src = this.source.streamPath;
-    this.api.streamSubtitles?.(this.source.id).then((tracks) => {
-      if (this.closed || !Array.isArray(tracks)) return;
-      this.embeddedSubtitles = tracks;
-      this.restoreTrackChoices();
-    }).catch(() => {});
+    // The file's own subtitles are asked for once the first picture shows, so pulling the
+    // default language out of the file doesn't compete with it (audit, player performance).
+    const subtitles = () => {
+      if (this.closed || subtitlesAsked) return;
+      subtitlesAsked = true;
+      this.api.streamSubtitles?.(this.source.id).then((tracks) => {
+        if (this.closed || !Array.isArray(tracks)) return;
+        this.embeddedSubtitles = tracks;
+        this.restoreTrackChoices();
+      }).catch(() => {});
+    };
+    let subtitlesAsked = false;
+    this.video.addEventListener?.("playing", subtitles, { once: true });
+    const subtitleTimer = setTimeout(subtitles, 4000);
+    this.timers?.add?.(subtitleTimer);
     await this.play();
   }
 
@@ -307,9 +321,14 @@ export class Player {
     this.video.playbackRate = this.preferences.defaultPlaybackRate;
     try {
       await this.video.play();
+      // Safari starts a sound graph made without a tap suspended; the next tap wakes it (audit X15).
+      if (this.audioGraph?.context.state === "suspended") this.audioGraph.context.resume().catch(() => {});
     } catch {
-      // Autoplay can be refused until the viewer taps; the play button stays ready.
+      // Autoplay can be refused until the viewer taps (an iPhone after the next episode starts by
+      // itself): the turning ring gives way to the paused picture and its Play button (audit X15).
+      this.startScreen.hidden = true;
       this.updatePlayState();
+      this.showControls();
     }
   }
 
@@ -446,12 +465,23 @@ export class Player {
     if (!paused && !this.closed) await this.play();
   }
 
-  liveFailed(status, code) {
+  async liveFailed(status, code) {
     if (this.closed) return;
     if (sessionRefused(status, code)) {
       this.close();
       this.onSessionEnded?.(new ApiError(status, code, "The profile session ended."));
       return;
+    }
+    // Bedtime ends a converted stream too; that is the good-night screen, not a broken file (audit X5).
+    if (isScreenTimeCode(code)) {
+      const own = await this.api.ownScreenTime?.().catch(() => null);
+      if (!this.closed) this.showGoodNight(own?.status ?? null);
+      return;
+    }
+    if (this.screenTime) {
+      await this.refreshScreenTime();
+      if (this.closed) return;
+      if (this.screenTime?.state === "closed") return this.showGoodNight();
     }
     this.showNotice(liveProblem(status, code) ?? UNPLAYABLE, true);
   }
@@ -490,6 +520,12 @@ export class Player {
       this.updatePlayState();
       this.saveNow();
       this.reportState("pause");
+      // Pausing during a stall ends the waiting: the ring goes, the stall timer stops (a pause is
+      // not a slow connection) and a party stops waiting for this viewer (audit X11).
+      this.element.classList.remove("waiting");
+      this.waitingSince = null;
+      clearTimeout(this.stallTimer);
+      this.together?.session()?.playerChanged();
     });
     on(video, "playing", () => {
       this.reportState("playing");
@@ -552,8 +588,15 @@ export class Player {
     on(this.element, "pointermove", () => this.showControls());
     on(this.element, "pointerdown", () => this.showControls());
     on(this.element, "focusin", () => this.showControls());
+    // On a touch screen, the tap that brings back hidden controls only shows them; the next tap
+    // pauses (audit X4).
+    on(this.element, "pointerdown", () => { if (this.audioGraph?.context.state === "suspended") this.audioGraph.context.resume().catch(() => {}); });
+    on(video, "pointerdown", (event) => {
+      this.tapRevealsControls = event.pointerType === "touch" && !video.paused && !this.element.classList.contains("controls-visible");
+    });
     on(video, "click", () => {
       if (!this.popover.hidden) return this.closePopover();
+      if (this.tapRevealsControls) { this.tapRevealsControls = false; return; }
       this.toggle();
     });
     on(video, "dblclick", () => this.toggleFullscreen());
@@ -591,6 +634,27 @@ export class Player {
       return;
     }
     if (/^[np]$/i.test(event.key) && (this.popover?.hidden === false || target?.closest?.('[role="menu"]'))) return;
+    // Tab stays inside the player, as in a full-window layer (audit X10).
+    if (event.key === "Tab") {
+      const focusable = [...this.element.querySelectorAll("button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])")]
+        .filter((node) => node.offsetParent !== null || node === document.activeElement);
+      if (!focusable.length) return;
+      const at = focusable.indexOf(document.activeElement);
+      const next = event.shiftKey ? (at <= 0 ? focusable.length - 1 : at - 1) : (at === focusable.length - 1 ? 0 : at + 1);
+      event.preventDefault();
+      focusable[next].focus();
+      return;
+    }
+    // In an open menu the arrows choose an entry; they don't seek (audit X10).
+    if (this.popover?.hidden === false && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key) && this.popover.contains(target)) {
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        const entries = [...this.popover.querySelectorAll("button:not([disabled])")];
+        const at = entries.indexOf(target);
+        entries[(at + (event.key === "ArrowDown" ? 1 : entries.length - 1)) % entries.length]?.focus();
+        event.preventDefault();
+      }
+      return;
+    }
     if (target?.isContentEditable || target?.tagName === "SELECT") return;
     if ((target instanceof HTMLInputElement && target.type !== "range") || target instanceof HTMLTextAreaElement) return;
     const seconds = this.preferences.seekInterval;
@@ -924,6 +988,11 @@ export class Player {
 
   async chooseQuality(quality) {
     if (quality === this.quality || this.closed) return;
+    // While a converted title still starts, a new quality would leave its ring turning (audit X8).
+    if (this.liveStarting) {
+      this.showNotice("The title is still starting. Choose the quality again once it plays.", false);
+      return;
+    }
     const previous = this.quality;
     this.quality = quality;
     writeQuality(quality);
@@ -1034,6 +1103,7 @@ export class Player {
     try {
       if (!this.audioGraph) {
         const context = new AudioContext();
+        if (context.state === "suspended") context.resume().catch(() => {});
         const source = context.createMediaElementSource(this.video);
         this.audioGraph = { context, source, nodes: [] };
       }
@@ -1407,6 +1477,23 @@ export class Player {
    */
   reportState(event) {
     const state = playerStateFor(event);
+    if (!state) return;
+    clearTimeout(this.bufferingReport);
+    this.timers.delete(this.bufferingReport);
+    // A seek waits a moment for its picture; only waiting that lasts is reported, so a light
+    // doesn't flicker with every jump (audit, player performance).
+    if (state === "buffering") {
+      this.bufferingReport = setTimeout(() => {
+        this.timers.delete(this.bufferingReport);
+        this.sendState(state);
+      }, 1500);
+      this.timers.add(this.bufferingReport);
+      return;
+    }
+    this.sendState(state);
+  }
+
+  sendState(state) {
     if (!this.source || this.closed || !shouldReport(this.reportedState, state)) return;
     this.reportedState = state;
     const position = Number.isFinite(this.video.currentTime) ? Math.round(this.video.currentTime * 10) / 10 : undefined;
@@ -1519,15 +1606,22 @@ export class Player {
   checkAudio() {
     if (this.audioChecked || this.live || !("webkitAudioDecodedByteCount" in this.video)) return;
     this.audioChecked = true;
-    this.after(() => {
+    this.after(async () => {
       const video = this.video;
-      if (!this.closed && !this.live && !video.paused && video.webkitAudioDecodedByteCount === 0 && video.webkitVideoDecodedByteCount > 0
-        && !this.switchToLive())
-        this.showNotice("No sound: this file’s audio format can’t play in a browser yet.", false);
+      if (this.closed || this.live || video.paused || video.webkitAudioDecodedByteCount !== 0 || !(video.webkitVideoDecodedByteCount > 0)) return;
+      // A file without any sound track is silent on purpose: it neither converts nor warns (audit X13).
+      if (this.canConvert) {
+        const plan = await this.api.conversionPlan(this.item.id, codecSupport((type) => MediaSourceType.isTypeSupported(type), [])).catch(() => null);
+        if (this.closed || this.live) return;
+        if (plan && !(plan.audioTracks?.length)) return;
+      }
+      if (!this.switchToLive()) this.showNotice("No sound: this file’s audio format can’t play in a browser yet.", false);
     }, 4000);
   }
 
   showNotice(text, blocking, symbol = "warning") {
+    // A short note's timer never hides a later notice, above all not a blocking one (audit X12).
+    const turn = (this.noticeTurn = (this.noticeTurn ?? 0) + 1);
     clear(this.notice);
     this.notice.append(icon(symbol, { size: 22 }), h("span", {}, text));
     if (blocking) {
@@ -1539,7 +1633,7 @@ export class Player {
       this.notice.append(h("button", { class: "secondary-button", onclick: () => this.close() }, "Back"));
       this.element.classList.add("failed");
     } else {
-      this.after(() => (this.notice.hidden = true), 8000);
+      this.after(() => { if (turn === this.noticeTurn && !this.element.classList?.contains?.("failed")) this.notice.hidden = true; }, 8000);
     }
     this.notice.hidden = false;
   }
@@ -1633,9 +1727,23 @@ export class Player {
   // MARK: Lifetime
 
   saveNow(options = {}) {
-    const video = this.video;
-    if (!this.saver || !Number.isFinite(video.duration) || video.duration <= 0 || this.resumeAt > 0) return;
-    this.saver.save(video.currentTime * 1000, video.duration * 1000, false, options);
+    const duration = this.progressDuration();
+    if (!this.saver || !duration || this.resumeAt > 0) return;
+    this.saver.save(this.video.currentTime * 1000, duration * 1000, false, options);
+  }
+
+  /**
+   * The title's length for its progress. A live stream whose length the server couldn't tell
+   * grows with what arrived; that is not the title's end (audit X14), so the length saved last
+   * time or the runtime stands in, or nothing is saved before the end.
+   */
+  progressDuration() {
+    if (this.live && !(this.live.plan?.durationSeconds > 0)) {
+      const known = (this.source?.progress?.durationMilliseconds ?? 0) / 1000 || (this.item.runtimeMinutes ?? 0) * 60;
+      return known > 0 ? known : null;
+    }
+    const duration = this.video.duration;
+    return Number.isFinite(duration) && duration > 0 ? duration : null;
   }
 
   /** Tickets last hours; a very long session gets a fresh one before the old one ends. */
@@ -1655,8 +1763,9 @@ export class Player {
         const old = this.source;
         this.source = renewed;
         if (this.live) {
-          // The running stream continues; the next seek or track change uses the new ticket.
-          this.live.streamPath = renewed.streamPath;
+          // The running stream continues; the next seek, segment or track change uses the new ticket.
+          if (typeof this.live.useStreamPath === "function") this.live.useStreamPath(renewed.streamPath);
+          else this.live.streamPath = renewed.streamPath;
           for (const [index, element] of this.subtitleElements) {
             // Loaded cues are already in memory; a pending or failed fetch needs the fresh ticket.
             if (element.readyState !== 2) element.src = subtitleUrl(renewed.streamPath, index);
@@ -1733,6 +1842,7 @@ export class Player {
     this.element.remove();
     document.body.classList.remove("playing");
     this.onClose?.();
+    if (this.returnFocus?.isConnected && document.activeElement === document.body) this.returnFocus.focus?.({ preventScroll: true });
   }
 }
 

@@ -64,12 +64,20 @@ test("filtered search preserves section filters and immediately cancels a stale 
   assert.deepEqual(searches, [{ query: "Quiet Harbor", kind: "series", favorite: "true", genre: "Drama", offset: 0, limit: 100 }]);
   assert.equal(f.routes.at(-1).filters.query, "Quiet Harbor");
 });
-test("search exposes Load More and navigation aborts a pending read", async (t) => {
-  let signal; const pending = deferred();
-  const f = fixture(t, { search: async (q, o) => { if (q.offset) { signal = o.signal; return pending.promise; } return { items: items(0, 100), total: 101, revision: "search1" }; } });
-  const page = await f.view.search({ name: "search", query: "Invented" }); button(page, "Load More").click(); await flush();
-  f.view.close(); assert.equal(signal.aborted, true); pending.resolve({ items: items(100, 1), total: 101, revision: "search1" }); await flush();
-  assert.equal(f.cards.length, 100); assert.equal(f.messages.length, 0);
+test("search groups shows, movies and episodes, exposes Load More and navigation aborts a pending read", async (t) => {
+  let signal; const pending = deferred(); const kinds = [];
+  const f = fixture(t, { search: async (q, o) => {
+    kinds.push(q.kind);
+    if (q.kind !== "series") return { items: [], total: 0, revision: "search1" };
+    if (q.offset) { signal = o.signal; return pending.promise; }
+    return { items: items(0, 30), total: 31, revision: "search1" };
+  } });
+  const page = await f.view.search({ name: "search", query: "Invented" });
+  assert.deepEqual([...kinds].sort(), ["episode", "movie", "series"]);
+  assert.deepEqual(all(page).filter((n) => n.tagName === "H2").map((n) => n.textContent), ["TV Shows", "Movies", "Episodes"]);
+  button(page, "Load More").click(); await flush();
+  f.view.close(); assert.equal(signal.aborted, true); pending.resolve({ items: items(30, 1), total: 31, revision: "search1" }); await flush();
+  assert.equal(f.cards.length, 30); assert.equal(f.messages.length, 0);
 });
 test("release year offers both bounds, normalizes reversed bounds and clears the range", async (t) => {
   const f = fixture(t); const page = await f.view.browse({ name: "movies", filters: {} }); button(page, "Release Year").click();

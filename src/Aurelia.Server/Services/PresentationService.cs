@@ -104,7 +104,7 @@ public sealed class PresentationService(
         }
 
         return new CatalogDetailPresentation(
-            ToCatalog(item, userId), MetadataPresentation.ToSummary(item), seasons, supplements, franchiseSummary);
+            ToCatalog(item, userId), MetadataPresentation.ForPage(MetadataPresentation.ToSummary(item)), seasons, supplements, franchiseSummary);
     }
 
     public async Task<CatalogItemSummary> SummaryAsync(Guid userId, Guid mediaId, CancellationToken cancellationToken)

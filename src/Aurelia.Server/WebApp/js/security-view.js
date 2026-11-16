@@ -3,7 +3,9 @@
 // signs in, and "Confirm on Another Device" when Face ID or Touch ID is required for administrators.
 // Face ID itself lives in the iPhone, iPad and Mac apps: the browser keeps no keys.
 
-import { h, clear } from "./dom.js";
+import { h, icon, clear } from "./dom.js";
+import { confirmSheet } from "./sheet.js";
+import { unlocked } from "./automation-view.js";
 import {
   SECURITY_LOG_FILTERS, newDeviceNote, remoteUnlockState, securityDeviceLine, securityEventText, securityEventsQuery,
   unansweredDevices
@@ -13,18 +15,13 @@ const when = (value) => (value ? new Date(value).toLocaleString() : "");
 
 /** Asks the owner before blocking: the device is signed out at once and can't come back. */
 function confirmBlock(device) {
-  return new Promise((resolve) => {
-    const dialog = h("dialog", { class: "sheet" },
-      h("h2", {}, `Block “${device.deviceName}”?`),
-      h("p", {}, "It is signed out at once and can’t sign in or pair again until you unblock it."),
-      h("div", { class: "button-row end" },
-        h("button", { class: "secondary-button", onclick: () => { dialog.close(); resolve(false); } }, "Cancel"),
-        h("button", { class: "danger-button", onclick: () => { dialog.close(); resolve(true); } }, "Block")));
-    dialog.addEventListener("cancel", () => resolve(false));
-    dialog.addEventListener("close", () => dialog.remove());
-    document.body.append(dialog);
-    dialog.showModal();
-  });
+  return confirmSheet({ symbol: "lock", title: `Block “${device.deviceName}”?`, confirm: "Block",
+    message: "It is signed out at once and can’t sign in or pair again until you unblock it." });
+}
+
+function confirmSignOutDevice(device) {
+  return confirmSheet({ symbol: "lock", title: `Sign Out “${device.deviceName}”?`, confirm: "Sign Out",
+    message: "It needs a new code to use Aurelia again." });
 }
 
 /**
@@ -33,7 +30,7 @@ function confirmBlock(device) {
  */
 export function remoteUnlockPanel({ api, onUnlocked, delay = 2000 }) {
   const status = h("p", { class: "muted small", role: "status", "aria-live": "polite" });
-  const code = h("div", { class: "pairing-code", hidden: true });
+  const code = h("div", { class: "code-display", hidden: true });
   const ask = h("button", { type: "button", class: "primary-button" }, "Confirm on Another Device");
   const panel = h("div", { class: "remote-unlock" },
     h("p", {}, "Face ID or Touch ID is required to manage this server. Confirm on an iPhone, iPad or Mac where you set it up."),
@@ -46,7 +43,7 @@ export function remoteUnlockPanel({ api, onUnlocked, delay = 2000 }) {
     try {
       const request = await api.startRemoteUnlock();
       code.hidden = false;
-      code.className = "pairing-code";
+      code.className = "code-display";
       code.textContent = request.code;
       status.textContent = remoteUnlockState({ state: "pending" }).text + " Check that it shows this code.";
       const poll = async () => {
@@ -58,7 +55,7 @@ export function remoteUnlockPanel({ api, onUnlocked, delay = 2000 }) {
           status.textContent = shown.text;
           ask.disabled = false;
           ask.textContent = "Ask Again";
-          if (!shown.unlocked) code.className = "pairing-code expired";
+          if (!shown.unlocked) code.className = "code-display expired";
           else onUnlocked?.();
         } catch (error) {
           if (!panel.isConnected) return;
@@ -128,14 +125,16 @@ export function securitySection({ api, app, kit, refresh }) {
   const devices = h("div", { class: "settings-card-list" }, h("p", { class: "muted small" }, "Loading…"));
   const blocked = h("div", { class: "settings-card-list" });
   const settingsRows = h("div", {});
+  // A locked management asks for the Server Password and runs the change again (audit S6).
   const run = async (work, done) => {
     try {
-      await work();
+      let cancelled = false;
+      await unlocked(api, work, () => { cancelled = true; });
+      if (cancelled) return;
       if (done) app.toast(done);
       refresh();
     } catch (error) {
-      if (error?.code === "management_locked") app.toast("Unlock Server Management first, in Settings › Server.");
-      else if (!app.handleError(error)) app.toast(error.message);
+      if (!app.handleError(error)) app.toast(error.message);
     }
   };
   const element = section("Security", "lock",
@@ -146,8 +145,9 @@ export function securitySection({ api, app, kit, refresh }) {
     h("div", { class: "button-row" }, h("button", { type: "button", class: "secondary-button", onclick: () => openSecurityLog({ api, toast: app.toast }) }, "Show Security Log…")));
 
   (async () => {
+    let devicesFailed = null;
     const [settings, deviceList, blockedList] = await Promise.all([
-      api.securitySettings().catch(() => null), api.securityDevices().catch(() => []), api.blockedDevices().catch(() => []),
+      api.securitySettings().catch(() => null), api.securityDevices().catch((error) => { devicesFailed = error; return []; }), api.blockedDevices().catch(() => []),
     ]);
     if (settings) {
       settingsRows.append(
@@ -168,11 +168,17 @@ export function securitySection({ api, app, kit, refresh }) {
           h("div", { class: "muted small" }, [device.userName, line, `last used ${when(device.lastSeenAt)}`].filter(Boolean).join(" · "))),
         h("div", { class: "settings-card-actions" },
           device.isNew ? h("button", { type: "button", class: "secondary-button", onclick: () => run(() => api.acknowledgeDevice(device.id)) }, "That Was Me") : null,
+          !device.isCurrent ? h("button", { type: "button", class: "secondary-button", onclick: async () => {
+            if (await confirmSignOutDevice(device)) run(() => api.approved(`/api/v1/auth/sessions/${device.id}`, { method: "DELETE" }), `${device.deviceName} is signed out.`);
+          } }, "Sign Out…") : null,
           device.canBlock ? h("button", { type: "button", class: "secondary-button danger", onclick: async () => {
             if (await confirmBlock(device)) run(() => api.blockDevice(device.id), `${device.deviceName} is blocked and signed out.`);
           } }, "Block…") : null)));
     }
-    if (!devices.children.length) devices.append(h("p", { class: "muted small" }, "No devices are signed in."));
+    // A failed read says so; it isn't "no devices" (audit S7).
+    if (devicesFailed) devices.append(h("div", { class: "error-banner", role: "alert" }, icon("warning", { size: 16 }), h("span", {}, `Couldn’t load the devices: ${devicesFailed.message}`),
+      h("button", { type: "button", class: "secondary-button small", onclick: () => refresh() }, "Try Again")));
+    else if (!devices.children.length) devices.append(h("p", { class: "muted small" }, "No devices are signed in."));
     if (blockedList?.length) {
       blocked.append(h("h3", { class: "settings-subheading" }, "Blocked Devices"));
       for (const device of blockedList) {
@@ -181,7 +187,7 @@ export function securitySection({ api, app, kit, refresh }) {
             h("div", { class: "settings-card-title" }, device.deviceName),
             h("div", { class: "muted small" }, [securityDeviceLine(device.platform, device.ipAddress), `blocked ${when(device.blockedAt)}`].filter(Boolean).join(" · "))),
           h("div", { class: "settings-card-actions" },
-            h("button", { type: "button", class: "secondary-button", onclick: () => run(() => api.unblockDevice(device.id), `${device.deviceName} is unblocked.`) }, "Unblock"))));
+            h("button", { type: "button", class: "secondary-button", onclick: (event) => { event.currentTarget.disabled = true; run(() => api.unblockDevice(device.id), `${device.deviceName} is unblocked.`); } }, "Unblock"))));
       }
     }
   })();

@@ -2,7 +2,7 @@
 // the title's video file, its downloaded subtitles and removing the title. Pictures are uploaded
 // to the server's editor drafts; the crop is saved with the rest of the form.
 
-import { h, clear } from "./dom.js";
+import { h, icon, clear } from "./dom.js";
 import { cropFrame, speechJobRunning, speechJobText, SPEECH_FEATURE } from "./logic.js";
 
 const PICTURES = [
@@ -143,7 +143,7 @@ export function createMetadataExtras({ api, app, kit }) {
           h("div", { class: "credit-actions" },
             h("button", { type: "button", class: "icon-button", "aria-label": `Move ${person.name || "person"} up`, disabled: index === 0, onclick: () => move(-1) }, "↑"),
             h("button", { type: "button", class: "icon-button", "aria-label": `Move ${person.name || "person"} down`, disabled: index === list.length - 1, onclick: () => move(1) }, "↓"),
-            h("button", { type: "button", class: "icon-button danger", "aria-label": `Remove ${person.name || "person"}`, onclick: () => { list.splice(index, 1); commit(); draw(); } }, "✕"))));
+            h("button", { type: "button", class: "icon-button danger", "aria-label": `Remove ${person.name || "person"}`, onclick: () => { list.splice(index, 1); commit(); draw(); } }, icon("close", { size: 15 })))));
       });
       if (!list.length) people.append(h("li", { class: "muted small" }, "No cast or crew listed."));
     };

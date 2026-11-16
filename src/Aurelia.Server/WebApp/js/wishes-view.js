@@ -1,6 +1,7 @@
 // Family Wishes page (/wishes): browse, search via server TMDB proxy, "Me Too", and admin actions.
 
 import { h, icon, clear } from "./dom.js";
+import { confirmSheet } from "./sheet.js";
 import {
   BoundedFailureCache,
   describeWishError,
@@ -431,8 +432,15 @@ export function createWishesView({ api, profile, navigate, toast, handleError, o
     }
   }
 
-  async function withdrawWish(wishId) {
+  // Withdrawing or deleting a wish asks first (audit L9).
+  async function withdrawWish(wishId, { title = "this wish", deleting = false } = {}) {
     actionError = null;
+    const sure = await confirmSheet({
+      symbol: "trash", confirm: deleting ? "Delete" : "Withdraw",
+      title: deleting ? `Delete the Wish for “${title}”?` : `Withdraw Your Wish for “${title}”?`,
+      message: deleting ? "It leaves the list for everyone who wished for it too." : "Others who wished for it too keep their wish.",
+    });
+    if (!sure) return;
     try {
       await api.deleteWish(wishId);
       toast?.("Wish removed.");
@@ -486,10 +494,10 @@ export function createWishesView({ api, profile, navigate, toast, handleError, o
         actions.push(h("button", {
           class: `chip ${wish.supportedByCaller ? "selected" : ""}`,
           onclick: () => void toggleSupport(wish.id, !wish.supportedByCaller),
-        }, wish.supportedByCaller ? "Me Too ✓" : "Me Too"));
+        }, wish.supportedByCaller ? [icon("check", { size: 14 }), "Me Too"] : "Me Too"));
       }
       if (isMine) {
-        actions.push(h("button", { class: "secondary-button small", onclick: () => void withdrawWish(wish.id) }, "Withdraw"));
+        actions.push(h("button", { class: "secondary-button small", onclick: () => void withdrawWish(wish.id, { title: wish.title }) }, "Withdraw…"));
       }
       if (admin) {
         actions.push(h("button", { class: "primary-button small", onclick: () => void setWishState(wish.id, "fulfilled") }, "Mark Added"));
@@ -501,7 +509,7 @@ export function createWishesView({ api, profile, navigate, toast, handleError, o
       }
       if (admin) {
         actions.push(h("button", { class: "secondary-button small", onclick: () => void setWishState(wish.id, "open") }, "Reopen"));
-        actions.push(h("button", { class: "secondary-button small", onclick: () => void withdrawWish(wish.id) }, "Delete"));
+        actions.push(h("button", { class: "secondary-button small", onclick: () => void withdrawWish(wish.id, { title: wish.title, deleting: true }) }, "Delete…"));
       }
     }
 

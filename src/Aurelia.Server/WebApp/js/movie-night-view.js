@@ -294,12 +294,15 @@ export function createMovieNightView({ api, artwork, playTitle, navigate, device
       return strip;
     }
     fill("Can’t decide what to watch?", "Start a Movie Night and let everyone swipe.");
-    api.movieNights().then((nights) => {
+    // Asked at most every 30 seconds while Home opens again and again, as the page's own read (audit P3).
+    if (!nightsRead || Date.now() - nightsRead.at > 30_000) nightsRead = { at: Date.now(), answer: (api.background ? api.background(() => api.movieNights()) : api.movieNights()).catch(() => null) };
+    nightsRead.answer.then((nights) => {
       const night = nights?.[0];
       if (night && strip.isConnected) fill(`${night.hostName}’s Movie Night is on`, "Join and start swiping.");
-    }, () => {});
+    });
     return strip;
   }
+  let nightsRead = null;
 
   return {
     screen,

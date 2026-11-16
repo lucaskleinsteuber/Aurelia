@@ -20,7 +20,7 @@ import { createServerUpdates } from "./server-updates.js";
 import { createAdminTools } from "./settings-admin.js";
 import { createMoveTools } from "./server-move-view.js";
 import { createImportPreview } from "./import-preview.js";
-import { cropPhoto } from "./photo-crop.js";
+import { cropPhoto, PHOTO_UNREADABLE } from "./photo-crop.js";
 import { serverSegmentsSection, SEGMENTS_FEATURE } from "./segments-view.js";
 import { serverSpeechSection } from "./speech-view.js";
 import { supportsFileChecks } from "./file-checks.js";
@@ -28,7 +28,8 @@ import { renderDrives, renderFileProblems, serverFileChecksSection } from "./fil
 import { supportsSecurity } from "./security.js";
 import { remoteUnlockPanel, securitySection } from "./security-view.js";
 import { supportsAutomation } from "./automation.js";
-import { smartHomeSections } from "./automation-view.js";
+import { smartHomeSections, unlocked } from "./automation-view.js";
+import { confirmSheet, openSheet } from "./sheet.js";
 
 const CATEGORIES = [
   { id: "general", label: "General", symbol: "gear", adminOnly: false },
@@ -60,6 +61,8 @@ export function createSettings(app) {
   let updatesView;
   let serverRead = new AbortController();
   let searchQuery = "";
+  // The sections a search filters, built once per search (audit S4).
+  let searchIndex = null;
   // Whether this server has power options (a Linux package server); unknown until first read.
   let powerAvailable = null;
 
@@ -107,8 +110,12 @@ export function createSettings(app) {
     }
     if (owner && sections?.power) powerAvailable = Boolean(sections.power?.available);
     else if (owner && powerAvailable === null) {
+      // A read cut short by leaving Settings says nothing about power; it is asked again (audit S16).
       try { powerAvailable = Boolean((await api.serverPower({ signal: serverRead.signal }))?.available); }
-      catch { powerAvailable = false; }
+      catch (error) {
+        if (serverRead.signal.aborted || error?.name === "AbortError") throw new DOMException("Cancelled", "AbortError");
+        powerAvailable = false;
+      }
     }
     if (page === "power" && !powerAvailable) page = "general";
     const availableCategories = CATEGORIES.filter((c) => (!c.adminOnly || canManage()) && (!c.ownerOnly || owner)
@@ -136,13 +143,28 @@ export function createSettings(app) {
             value: searchQuery,
             "aria-label": "Search Settings",
           });
-          input.addEventListener("input", async () => {
-            searchQuery = input.value.trim().toLowerCase();
-            if (searchQuery && canManage() && !sections) {
-              try {
-                sections = await loadManagementSections(api, state.profile, { signal: serverRead.signal });
-              } catch {}
-            }
+          // Typing waits a moment, and the sections are built once per search and then only
+          // filtered, so a word typed doesn't send a storm of requests (audit S4).
+          let typing = 0;
+          input.addEventListener("input", () => {
+            clearTimeout(typing);
+            typing = setTimeout(async () => {
+              searchQuery = input.value.trim().toLowerCase();
+              if (!searchQuery) searchIndex = null;
+              if (searchQuery && canManage() && !sections) {
+                try {
+                  sections = await loadManagementSections(api, state.profile, { signal: serverRead.signal });
+                } catch {}
+              }
+              renderContent();
+            }, 180);
+          });
+          input.addEventListener("keydown", (event) => {
+            if (event.key !== "Escape" || !input.value) return;
+            event.preventDefault();
+            input.value = "";
+            searchQuery = "";
+            searchIndex = null;
             renderContent();
           });
           return input;
@@ -155,7 +177,9 @@ export function createSettings(app) {
           href: id === "general" ? "/settings" : `/settings/${id}`,
           "data-route": true,
           "aria-current": page === id ? "page" : null,
-        }, icon(symbol, { size: 18 }), label)));
+          // Choosing a category ends a search (audit S13).
+          onclick: () => { searchQuery = ""; searchIndex = null; },
+        }, icon(symbol, { size: 17 }), label)));
 
     const contentContainer = h("div", { class: "settings-content" });
     const heading = h("h1", { class: "settings-heading" });
@@ -178,10 +202,25 @@ export function createSettings(app) {
     // As in the Mac app's Settings window: the categories in a sidebar, the chosen page beside it.
     return h("div", { class: "settings page-enter" },
       h("aside", { class: "settings-sidebar" },
-        h("div", { class: "settings-title" }, "Settings"),
+        h("div", { class: "settings-sidebar-head" },
+          h("button", { type: "button", class: "secondary-button settings-done", onclick: () => app.closeSettings?.(), title: "Done (Esc)" }, "Done"),
+          h("span", { class: "settings-title" }, "Settings")),
         searchWrap,
         nav),
       h("div", { class: "settings-main" }, heading, contentContainer));
+  }
+
+  /** "management_locked" → "Management locked", for codes the server names without a message (audit S18). */
+  function readableCode(code) {
+    const text = String(code ?? "").replace(/[._]+/g, " ").trim();
+    return text ? text.charAt(0).toUpperCase() + text.slice(1) : "Problem";
+  }
+
+  /** A section whose read failed says so with Try Again, instead of looking empty (audit S7). */
+  function failedPart(sections, name, refresh) {
+    const issue = sections?.issues?.find((entry) => entry.section === name);
+    return issue ? h("div", { class: "error-banner", role: "alert" }, icon("warning", { size: 16 }), h("span", {}, `Couldn’t load this: ${issue.message}`),
+      h("button", { type: "button", class: "secondary-button small", onclick: () => refresh() }, "Try Again")) : null;
   }
 
   function section(title, symbol, description, ...children) {
@@ -223,7 +262,8 @@ export function createSettings(app) {
       row("Slow Queries", value(String(summary.slowQueries.length))),
       h("div", { class: "performance-table-wrap" }, table),
       queries,
-      owner ? h("div", { class: "button-row" }, button("Reset Measurements", () => api.resetServerPerformance(), "Measurements reset.", "secondary-button", refresh)) : null);
+      owner ? h("div", { class: "button-row" }, button("Reset Measurements", () => api.resetServerPerformance(), "Measurements reset.", "secondary-button", refresh,
+        { symbol: "refresh", title: "Reset the Measurements?", message: "The server starts measuring again from now. Nothing else changes.", danger: false })) : null);
   }
 
   function dangerSection(title, symbol, description, ...children) {
@@ -262,11 +302,17 @@ export function createSettings(app) {
     return element;
   }
 
+  /**
+   * Runs a change. When server management locked meanwhile (after ten minutes), a sheet asks for
+   * the Server Password and runs the same change again; what was typed stays (audit S6).
+   */
   function act(button, work, done, refresh) {
     button.disabled = true;
     (async () => {
+      let cancelled = false;
       try {
-        await work();
+        await unlocked(api, work, () => { cancelled = true; });
+        if (cancelled) { button.disabled = false; return; }
         if (done) app.toast(done);
         refresh();
       } catch (error) {
@@ -276,10 +322,15 @@ export function createSettings(app) {
     })();
   }
 
-  function button(label, work, done, kind = "secondary-button", refresh) {
+  /** A button that runs `work`; with `ask`, a sheet asks first, for what can't be undone (audit S11). */
+  function button(label, work, done, kind = "secondary-button", refresh, ask) {
     const element = h("button", { class: kind });
-    element.textContent = label;
-    element.addEventListener("click", () => act(element, work, done, refresh));
+    element.textContent = ask ? `${label}…` : label;
+    element.addEventListener("click", async () => {
+      if (element.disabled) return;
+      if (ask && !(await confirmSheet({ symbol: ask.symbol ?? "warning", title: ask.title ?? `${label}?`, message: ask.message, confirm: label, danger: ask.danger ?? true }))) return;
+      act(element, work, done, refresh);
+    });
     return element;
   }
 
@@ -307,7 +358,26 @@ export function createSettings(app) {
   }
 
   function searchResultsPage(sections, refresh) {
-    const allSections = [
+    searchIndex ??= searchableSections(sections, refresh);
+    const query = searchQuery.toLowerCase();
+    const matched = searchIndex.filter((sec) => {
+      const meta = sec._searchMeta;
+      if (!meta) return true;
+      if (meta.title.toLowerCase().includes(query)) return true;
+      if (meta.description.toLowerCase().includes(query)) return true;
+      return sec.textContent.toLowerCase().includes(query);
+    });
+    if (matched.length === 0) {
+      return h("div", { class: "settings-stack" },
+        section("No Settings Found", "search", `No settings matching “${searchQuery}”.`));
+    }
+    return h("div", { class: "settings-stack" }, ...matched);
+  }
+
+  /** Every section a search looks through, built once per search. */
+  function searchableSections(sections, refresh) {
+    const owner = state.profile?.role === "owner";
+    return [
       ...generalSections(refresh),
       ...playbackSections(refresh),
       ...(canManage() && sections ? librarySections(sections, refresh) : []),
@@ -317,25 +387,10 @@ export function createSettings(app) {
       ...(canManage() && sections ? powerSections(sections, refresh) : []),
       ...updatesSections(sections, refresh),
       ...(canManage() && sections ? advancedSections(sections, refresh) : []),
+      // Smart Home too (audit S13).
+      ...(owner && supportsAutomation(state.server?.capabilities) ? smartHomeSections({ api, app, kit: { section, row, value }, refresh }) : []),
       ...aboutSections(),
     ];
-
-    const query = searchQuery.toLowerCase();
-    const matched = allSections.filter((sec) => {
-      const meta = sec._searchMeta;
-      if (!meta) return true;
-      if (meta.title.toLowerCase().includes(query)) return true;
-      if (meta.description.toLowerCase().includes(query)) return true;
-      const text = sec.textContent.toLowerCase();
-      return text.includes(query);
-    });
-
-    if (matched.length === 0) {
-      return h("div", { class: "settings-stack" },
-        section("No Settings Found", "search", `No settings matching “${searchQuery}”.`));
-    }
-
-    return h("div", { class: "settings-stack" }, ...matched);
   }
 
   // MARK: General Sections
@@ -365,31 +420,23 @@ export function createSettings(app) {
         row("Show Watched in Rows", toggle(general.showWatchedInRows, (on) => saveG({ showWatchedInRows: on }), "Show Watched in Rows"),
           "Keep finished titles in Favorites and Recently Added on Home."),
         row("Reduce Motion", toggle(general.reduceHeroMotion, (on) => saveG({ reduceHeroMotion: on }), "Reduce Motion"),
-          "Turns off the moving background and the cards sliding in, as the system setting does.")),
+          "Turns off even the short fades between pages. The system's Reduce Motion does the same by itself.")),
 
-      section("Top Bar", "gear", "Which sections the top bar shows after Home, and in which order.",
+      section("Sidebar", "sidebar", "Which sections the sidebar shows after Search and Home, and in which order.",
         ...general.sectionOrder.map((name, index, order) => {
           const label = Object.fromEntries(TOP_BAR_SECTIONS)[name];
           const key = { movies: "showMoviesInSidebar", shows: "showSeriesInSidebar", watchlist: "showWatchlistInSidebar", collections: "showCollectionsInSidebar" }[name];
           return row(label, h("div", { class: "inline-control" },
-            h("button", { type: "button", class: "icon-button", "aria-label": `Move ${label} earlier`, disabled: index === 0, onclick: () => saveG({ sectionOrder: moveSection(order, name, -1) }) }, "↑"),
-            h("button", { type: "button", class: "icon-button", "aria-label": `Move ${label} later`, disabled: index === order.length - 1, onclick: () => saveG({ sectionOrder: moveSection(order, name, 1) }) }, "↓"),
+            h("button", { type: "button", class: "icon-button", "aria-label": `Move ${label} earlier`, disabled: index === 0, onclick: () => saveG({ sectionOrder: moveSection(order, name, -1) }) }, icon("arrowUp", { size: 15 })),
+            h("button", { type: "button", class: "icon-button", "aria-label": `Move ${label} later`, disabled: index === order.length - 1, onclick: () => saveG({ sectionOrder: moveSection(order, name, 1) }) }, icon("arrowDown", { size: 15 })),
             key ? toggle(general[key], (on) => saveG({ [key]: on }), `Show ${label}`) : null));
         })),
 
-      section("Aurelia in This Browser", "gear", "The browser app comes from your Aurelia Server, so it always has the server's version.",
-        row("Version", value(server.version ? `${server.version}` : "—"), "The same as the server's version."),
+      section("Aurelia in This Browser", "gear", "The browser app comes from your Aurelia Server; its version is under About.",
         row("Server", value(server.name ?? "Aurelia")),
         row("Address", value(location.origin)),
         row("Keep Profile Open", toggle(general.keepProfileOpen, (on) => saveG({ keepProfileOpen: on }), "Keep Profile Open"),
-          "Off: closing this tab or the browser locks the profile, and its PIN is asked again. On: the profile stays open in this browser until you switch or sign out."),
-        row("Live Conversion", value(server.capabilities?.includes("live-conversion-v1") ? "Available" : "Not available"),
-          "Lets this browser play MKV and other formats the server converts while playing.")),
-
-      section("Interface", "gear", null,
-        row("Appearance", value("Dark Cinema")),
-        row("Reduced Motion", value("Follows System Settings")),
-        row("Reduced Transparency", value("Follows System Settings"))),
+          "Off: closing this tab or the browser locks the profile, and its PIN is asked again. On: the profile stays open in this browser until you switch or sign out.")),
     ];
   }
 
@@ -516,11 +563,13 @@ export function createSettings(app) {
         h("div", { class: "settings-divider" }),
         h("div", { class: "button-row" }, h("button", {
           class: "secondary-button",
-          onclick: () => {
+          onclick: () => confirmSheet({ symbol: "refresh", title: "Restore Playback Defaults?", danger: false, confirm: "Restore Defaults",
+            message: "Every playback setting in this browser goes back to how it started." }).then((done) => {
+            if (!done) return;
             savePreferences({ ...PLAYBACK_DEFAULTS });
             refresh();
-          },
-        }, "Restore Playback Defaults"))),
+          }),
+        }, "Restore Playback Defaults…"))),
     ];
   }
 
@@ -562,7 +611,7 @@ export function createSettings(app) {
             openButton("Left Out…", () => admin.exclusions(library, refresh)),
             permissions.owner && typeof api.relocateSuggestions === "function" ? openButton("Storage Location Moved…", () => move.relocate(library, refresh)) : null,
             permissions.owner ? openButton("Remove…", () => editors.removeStorage(library), "secondary-button danger") : null)))
-          : h("p", { class: "muted" }, "No storage locations configured."),
+          : failedPart(sections, "libraries", refresh) ?? h("p", { class: "muted" }, "No storage locations yet. Add the folder with your movies and shows."),
         h("div", { class: "button-row" },
           permissions.owner ? openButton("Add Storage Location…", () => editors.addStorage()) : null,
           libraries.length > 1 ? button("Scan All", () => api.scanAllLibraries(), "Scanning all storage locations…", "secondary-button", refresh) : null))
@@ -611,11 +660,15 @@ export function createSettings(app) {
       permissions.owner ? section("Subtitles", "star", "Find subtitles for titles that have none, from OpenSubtitles.",
         row("OpenSubtitles", value(!subtitles ? "Unknown" : !subtitles.hasApiKey ? "Not set up" : subtitles.enabled ? `On · ${(subtitles.languages ?? []).join(", ") || "no languages"}` : "Turned off")),
         h("div", { class: "button-row" }, openButton("Subtitle Settings…", () => admin.subtitleService(refresh))),
-        h("p", { class: "muted small" }, "Subtitles written from speech are made by Aurelia for Mac, which listens with macOS speech recognition. A browser can’t do that.")) : null,
+        // The server writes subtitles from speech itself when it has whisper.cpp (audit S17).
+        h("p", { class: "muted small" }, state.server?.capabilities?.includes("server-speech-v1")
+          ? "Subtitles from speech are written by the server; see Settings › Server › Speech. Aurelia for Mac can write them too."
+          : "Subtitles from speech are written by Aurelia for Mac, or by a server with whisper.cpp.")) : null,
 
       permissions.owner ? section("Artwork & Search", "star", "Housekeeping for pictures and the search index.",
         h("div", { class: "button-row" },
-          button("Remove Unused Artwork", () => api.pruneArtwork(), "Unused artwork removed.", "secondary-button", refresh),
+          button("Remove Unused Artwork", () => api.pruneArtwork(), "Unused artwork removed.", "secondary-button", refresh,
+            { symbol: "trash", title: "Remove Unused Artwork?", message: "Pictures no title uses any more are deleted from the server. Titles keep theirs." }),
           button("Rebuild Search", () => api.rebuildSearch(), "The search index is being rebuilt.", "secondary-button", refresh))) : null,
     ].filter(Boolean);
   }
@@ -647,13 +700,20 @@ export function createSettings(app) {
           openButton("Create Code…", () => admin.createCode(), "primary-button"),
           openButton("Enter Code from Device…", () => admin.enterCode()))) : null,
 
-      section("Signed-In Devices", "lock", "Devices and browsers signed in to this account.",
+      // The devices show once: in Security for the owner (with Sign Out and Block), here for an
+      // administrator; a profile without management sees none rather than an empty list (audit S7, S19).
+      sections && !(permissions.owner && supportsSecurity(state.server)) ? section("Signed-In Devices", "lock", "Devices and browsers signed in to this account.",
+        failedPart(sections, "devices", refresh),
         (devices ?? []).filter((device) => !device.revokedAt).map((device) => h("div", { class: "settings-card" },
           h("div", { class: "settings-card-main" },
             h("div", { class: "settings-card-title" }, device.deviceName, device.isCurrent ? h("span", { class: "tag" }, "This Browser") : null),
             h("div", { class: "muted small" }, `Last used ${new Date(device.lastSeenAt).toLocaleString()}`)),
           device.isCurrent || !permissions.owner ? null : h("div", { class: "settings-card-actions" },
-            button("Sign Out", () => api.approved(`/api/v1/auth/sessions/${device.id}`, { method: "DELETE" }), `${device.deviceName} is signed out.`, "secondary-button", refresh))))),
+            h("button", { type: "button", class: "secondary-button", onclick: () => confirmSheet({
+              symbol: "lock", title: `Sign Out “${device.deviceName}”?`, confirm: "Sign Out",
+              message: "It needs a new code to use Aurelia again.",
+              work: () => api.approved(`/api/v1/auth/sessions/${device.id}`, { method: "DELETE" }),
+            }).then((done) => { if (done) { app.toast(`${device.deviceName} is signed out.`); refresh(); } }, (error) => { if (!app.handleError(error)) app.toast(error.message); }) }, "Sign Out…"))))) : null,
 
       permissions.owner ? section("User Accounts", "lock", "Choose who can watch and what they can see.",
         users.map((entry) => row(h("span", { class: "inline-control" }, app.profilePicture(entry.user), shownName(entry.user)),
@@ -689,10 +749,10 @@ export function createSettings(app) {
           row("Free Disk Space", value(status.freeDiskBytes != null ? bytes(status.freeDiskBytes) : "—")),
         ] : row("Version", value(state.server?.version))),
 
-      issues?.length ? h("p", { class: "error-text", role: "status" }, issues.map((issue) => `${capitalize(issue.section)}: ${issue.message}`).join(" ")) : null,
+      issues?.length ? h("div", { class: "error-banner", role: "status" }, icon("warning", { size: 16 }), h("span", {}, issues.map((issue) => `${capitalize(issue.section)}: ${issue.message}`).join(" ")),
+        h("button", { type: "button", class: "secondary-button small", onclick: () => refresh() }, "Try Again")) : null,
 
-      health ? section("Server Health", "library", "Diagnostic metrics for server operation, storage, background jobs, and recent issues.",
-        row("Uptime", value(duration(health.uptimeSeconds))),
+      health ? section("Server Health", "library", "Storage, background work and recent problems. How long it runs is under Your Server.",
         row("Storage", value([
           health.freeDiskBytes != null ? `${bytes(health.freeDiskBytes)} free` : null,
           `Database ${bytes(health.databaseBytes)}`,
@@ -700,7 +760,7 @@ export function createSettings(app) {
         health.backup ? row("Database Backups", value(health.backup.lastAttemptFailed
           ? "Last backup failed"
           : (health.backup.lastSucceededAt
-            ? `Last succeeded ${new Date(health.backup.lastSucceededAt).toLocaleTimeString()} · ${health.backup.totalBackups} snapshot${health.backup.totalBackups === 1 ? "" : "s"} (${bytes(health.backup.totalBackupBytes)})`
+            ? `Last succeeded ${new Date(health.backup.lastSucceededAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })} · ${health.backup.totalBackups} snapshot${health.backup.totalBackups === 1 ? "" : "s"} (${bytes(health.backup.totalBackupBytes)})`
             : (health.backup.totalBackups > 0
               ? `${health.backup.totalBackups} snapshot${health.backup.totalBackups === 1 ? "" : "s"} (${bytes(health.backup.totalBackupBytes)})`
               : (health.backup.enabled ? "Scheduled daily when idle" : "Disabled"))))) : null,
@@ -712,7 +772,7 @@ export function createSettings(app) {
           `${health.activeLiveConversions} live conversion${health.activeLiveConversions === 1 ? "" : "s"}`,
         ].join(" · "))),
         row("Library Scan", value(health.lastScan
-          ? `${capitalize(health.lastScan.state)}${health.lastScan.completedAt ? ` · ${new Date(health.lastScan.completedAt).toLocaleTimeString()}` : " (running)"} (${health.lastScan.addedFiles} added, ${health.lastScan.missingFiles} missing)`
+          ? `${capitalize(health.lastScan.state)}${health.lastScan.completedAt ? ` · ${new Date(health.lastScan.completedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}` : " (running)"} (${health.lastScan.addedFiles} added, ${health.lastScan.missingFiles} missing)`
           : "No scans recorded")),
         row("Offline Titles", value(health.offlineMediaCount > 0 ? `${health.offlineMediaCount} title${health.offlineMediaCount === 1 ? "" : "s"} offline` : "All titles available")),
         row("Background Jobs", value([
@@ -726,12 +786,10 @@ export function createSettings(app) {
         health.recentIssues.length ? h("div", { class: "settings-card-list" },
           health.recentIssues.slice(0, 10).map((issue) => h("div", { class: "settings-card small" },
             h("div", { class: "settings-card-main" },
-              h("div", { class: issue.severity === "error" ? "error-text" : "muted" }, issue.code),
+              h("div", { class: issue.severity === "error" ? "error-text" : "muted" }, issue.message ?? readableCode(issue.code)),
               h("div", { class: "muted small" }, new Date(issue.at).toLocaleString()))))) : null) : null,
 
       performance ? performanceSection(performance, permissions.owner, refresh) : null,
-
-      updatesView?.element ?? null,
 
       permissions.owner && scrubPreviews ? scrubPreviewsSection(scrubPreviews, refresh) : null,
 
@@ -835,8 +893,12 @@ export function createSettings(app) {
       intervalSeconds: Number(interval.value),
       storageCapMegabytes: Number(cap.value),
     }), "Scrub preview settings saved.", refresh));
-    const clearButton = h("button", { class: "secondary-button danger", disabled: !scrubPreviews.storedTitleCount && !scrubPreviews.storedBytes }, "Delete All Previews");
-    clearButton.addEventListener("click", () => act(clearButton, () => api.deleteServerScrubPreviews(), "All stored scrub previews deleted.", refresh));
+    const clearButton = h("button", { class: "secondary-button danger", disabled: !scrubPreviews.storedTitleCount && !scrubPreviews.storedBytes }, "Delete All Previews…");
+    clearButton.addEventListener("click", async () => {
+      if (!(await confirmSheet({ symbol: "trash", title: "Delete All Scrub Previews?", confirm: "Delete All Previews",
+        message: "Every stored preview picture is deleted. The server prepares them again over time." }))) return;
+      act(clearButton, () => api.deleteServerScrubPreviews(), "All stored scrub previews deleted.", refresh);
+    });
     const activeTotal = Math.max(scrubPreviews.totalScheduledCount ?? 0, (scrubPreviews.completedCount ?? 0) + (scrubPreviews.pendingCount ?? 0) + (scrubPreviews.activeCount ?? 0));
     const progressText = (scrubPreviews.activeCount > 0 || scrubPreviews.pendingCount > 0)
       ? (scrubPreviews.pausedForPlayback ? `Paused while playback is active (${scrubPreviews.completedCount ?? 0} of ${activeTotal} prepared)` : `Preparing previews… (${scrubPreviews.completedCount ?? 0} of ${activeTotal})`)
@@ -1013,6 +1075,10 @@ export function createSettings(app) {
       }
       // The photo is cropped to a square here, before anything is uploaded.
       const cropped = await cropPhoto(chosen);
+      if (cropped === PHOTO_UNREADABLE) {
+        message.textContent = "This browser can’t open that picture. Choose a JPEG or PNG photo.";
+        return;
+      }
       if (!cropped) return;
       if (cropped.size > MAXIMUM_PHOTO_BYTES) {
         message.textContent = "Choose a photo smaller than 8 MB.";
@@ -1068,12 +1134,10 @@ export function createSettings(app) {
 
   function advancedSections(sections, refresh) {
     return [
-      section("Server Details", "gear", "Internal runtime and environment information.",
-        row("Operating System", value(sections?.status?.platform ?? "macOS / Linux")),
-        row("Process Architecture", value(sections?.status?.architecture ?? "arm64 / x64")),
-        row("Database Engine", value("SQLite (WAL mode)")),
-        row("Debug Logging", toggle(false, (on) => { app.toast(on ? "Debug logging enabled." : "Debug logging disabled."); }, "Debug Logging"),
-          "Write verbose diagnostic details to the server log.")),
+      // Only what the server really reports; no placeholders and no switch that does nothing (audit S5, W10).
+      sections?.status?.platform || sections?.status?.architecture ? section("Server Details", "gear", "What the server runs on.",
+        sections.status.platform ? row("Operating System", value(sections.status.platform)) : null,
+        sections.status.architecture ? row("Process Architecture", value(sections.status.architecture)) : null) : null,
 
       dangerSection("Danger Zone", "warning", "Destructive operations that permanently alter server data. Always requires the Server Password.",
         row("Reset Media Library",
@@ -1086,232 +1150,182 @@ export function createSettings(app) {
     return h("div", { class: "settings-stack" }, ...advancedSections(sections, refresh));
   }
 
-  // MARK: Library Health Dialog
+  // MARK: Library Health
 
+  /**
+   * Library Health as a sheet over Settings (audit S2, W6): tabs for duplicates, offline titles,
+   * unmatched metadata and, with the file watch, file problems and drives. A tab chosen while
+   * another still loads never shows the older answer (audit S12).
+   */
   function openLibraryHealthDialog(refresh) {
-    const dialog = h("div", { class: "modal-backdrop" });
     let activeTab = "duplicates";
     let offlineDays = 0;
-
-    const tabContainer = h("div", { class: "health-tabs" });
-    const contentContainer = h("div", { class: "health-tab-content", style: { minHeight: "260px" } });
-
-    const closeBtn = h("button", { type: "button", class: "secondary-button", onclick: () => dialog.remove() }, "Close");
-
+    let problemsAside = false;
+    let shown = 0;
+    const tabContainer = h("div", { class: "health-tabs", role: "tablist" });
+    const contentContainer = h("div", { class: "health-tab-content" });
+    const sheet = openSheet({
+      symbol: "checkCircle", title: "Library Health", wide: true,
+      subtitle: "Duplicates, missing files, titles without details and, with the file watch, damaged files and drives.",
+      body: [tabContainer, contentContainer], primary: "Done", cancel: null, onClose: () => refresh?.(),
+    });
     const tabs = [
       { id: "duplicates", label: "Duplicates" },
       { id: "offline", label: "Offline Titles" },
       { id: "unmatched", label: "Unmatched Metadata" },
       ...(supportsFileChecks(state.server) ? [{ id: "files", label: "File Problems" }, { id: "drives", label: "Drives" }] : []),
     ];
-    let problemsAside = false;
+    const note = (text) => h("p", { class: "muted small" }, text);
+    const limitNote = (count, limit) => count >= limit ? note(`Showing the first ${limit}. Fix or remove some to see the rest.`) : null;
 
     function renderTabs() {
       clear(tabContainer);
-      for (const t of tabs) {
-        const btn = h("button", {
-          type: "button",
-          class: `health-tab-button ${activeTab === t.id ? "selected" : ""}`,
-          onclick: () => {
-            activeTab = t.id;
-            renderTabs();
-            renderContent();
-          }
-        }, t.label);
-        tabContainer.append(btn);
+      for (const tab of tabs) {
+        tabContainer.append(h("button", {
+          type: "button", role: "tab", "aria-selected": String(activeTab === tab.id),
+          class: `health-tab-button ${activeTab === tab.id ? "selected" : ""}`,
+          onclick: () => { activeTab = tab.id; renderTabs(); renderContent(); },
+        }, tab.label));
       }
     }
 
     async function renderContent() {
+      const turn = ++shown;
+      const current = () => turn === shown && sheet.dialog.isConnected;
       clear(contentContainer);
-      contentContainer.append(h("div", { class: "spinner visible" }));
-
-      if (activeTab === "duplicates") {
-        try {
+      contentContainer.append(h("div", { class: "page-loading small-loading" }, h("div", { class: "spinner visible" })));
+      const fill = (...children) => { if (!current()) return false; clear(contentContainer); contentContainer.append(...children.flat().filter(Boolean)); return true; };
+      try {
+        if (activeTab === "duplicates") {
           const groups = await api.healthDuplicates();
-          clear(contentContainer);
-          contentContainer.append(h("p", { class: "muted" },
-            "Movies and episodes that exist as several files. Aurelia never deletes files: remove an unwanted file yourself, or move the watch data of a missing copy to the one you still have."));
-          if (!groups.length) {
-            contentContainer.append(h("p", { class: "muted" }, "No title exists more than once."));
-            return;
-          }
-          for (const group of groups) {
-            const available = group.items.find((item) => item.availability === "available");
-            contentContainer.append(h("div", { class: "health-group" },
-              h("div", { style: { fontWeight: "600", fontSize: "16px" } }, group.year ? `${group.title} (${group.year})` : group.title),
-              group.items.map((item) => h("div", { class: "health-item-row" },
-                h("div", { style: { display: "flex", flexDirection: "column", gap: "2px", flex: 1, minWidth: 0 } },
-                  h("div", { style: { fontSize: "13px", wordBreak: "break-all" } }, item.fileName),
-                  h("div", { class: "muted small" },
-                    [item.fileSize ? bytes(item.fileSize) : null, item.availability === "available" ? "Available" : "File missing"].filter(Boolean).join(" · "))),
-                item.availability !== "available" && available ? h("button", {
-                  type: "button",
-                  class: "secondary-button small",
-                  onclick: async () => {
-                    if (!confirm(`Move favorites, progress, history and collections of every profile to “${available.fileName}” and remove the missing copy from the library? Files are never touched.`)) return;
-                    try {
-                      await api.mergeHealthDuplicates(item.id, available.id);
-                      app.toast("Watch data moved.");
-                      renderContent();
-                    } catch (e) {
-                      app.toast(e.message);
-                    }
-                  }
-                }, "Move Watch Data") : null))));
-          }
-        } catch (e) {
-          clear(contentContainer);
-          contentContainer.append(h("p", { class: "error-text" }, e.message));
-        }
-      } else if (activeTab === "offline") {
-        try {
-          const filterSelect = h("select", {
-            class: "select-input",
-            "aria-label": "Missing for",
-            onchange: (e) => {
-              offlineDays = Number(e.target.value);
-              renderContent();
-            }
-          },
+          fill(note("Movies and episodes that exist as several files. Aurelia never deletes files: remove an unwanted file yourself, or move the watch data of a missing copy to the one you still have."),
+            groups.length ? groups.map((group) => {
+              const available = group.items.find((item) => item.availability === "available");
+              return h("div", { class: "health-group" },
+                h("div", { class: "health-title" }, group.year ? `${group.title} (${group.year})` : group.title),
+                group.items.map((item) => h("div", { class: "health-item-row" },
+                  h("div", { class: "health-item-text" },
+                    h("div", { class: "health-file" }, item.fileName),
+                    h("div", { class: "muted small" }, [item.fileSize ? bytes(item.fileSize) : null, item.availability === "available" ? "Available" : "File missing"].filter(Boolean).join(" · "))),
+                  item.availability !== "available" && available ? h("button", { type: "button", class: "secondary-button small", onclick: () => confirmSheet({
+                    symbol: "arrow", title: "Move Watch Data?", danger: false, confirm: "Move Watch Data",
+                    message: `Favorites, progress, history and collections of every profile move to “${available.fileName}”, and the missing copy leaves the library. Files are never touched.`,
+                    work: () => api.mergeHealthDuplicates(item.id, available.id),
+                  }).then((done) => { if (done) { app.toast("Watch data moved."); renderContent(); } }) }, "Move Watch Data…") : null)));
+            }) : note("No title exists more than once."));
+        } else if (activeTab === "offline") {
+          const filterSelect = h("select", { class: "select", "aria-label": "Missing for", onchange: (event) => { offlineDays = Number(event.target.value); renderContent(); } },
             h("option", { value: "0", selected: offlineDays === 0 }, "Missing now"),
             h("option", { value: "30", selected: offlineDays === 30 }, "Missing 30+ days"),
             h("option", { value: "90", selected: offlineDays === 90 }, "Missing 90+ days"));
-
           const items = await api.healthOffline({ days: offlineDays });
-          clear(contentContainer);
-          contentContainer.append(h("div", { style: { marginBottom: "16px" } }, filterSelect));
-          if (!items.length) {
-            contentContainer.append(h("p", { class: "muted" }, "No missing titles match this filter."));
-            return;
-          }
-
-          for (const item of items) {
-            contentContainer.append(h("div", { class: "health-item-row" },
-              h("div", { style: { display: "flex", flexDirection: "column", gap: "2px", flex: 1, minWidth: 0 } },
-                h("div", { style: { fontWeight: "600" } }, item.title),
-                h("div", { style: { fontSize: "13px", wordBreak: "break-all" } }, item.fileName),
+          fill(h("div", { class: "health-filter" }, filterSelect),
+            items.length ? items.map((item) => h("div", { class: "health-item-row" },
+              h("div", { class: "health-item-text" },
+                h("div", { class: "health-title" }, item.title),
+                h("div", { class: "health-file" }, item.fileName),
                 h("div", { class: "muted small" }, `${item.libraryName} · last seen ${new Date(item.lastSeenAt).toLocaleDateString()} (${item.daysOffline} days ago)`)),
-              h("button", {
-                type: "button",
-                class: "secondary-button danger small",
-                onclick: async () => {
-                  if (!confirm(`Remove “${item.title}” from the library? Its details, favorites, progress and history are deleted for every profile. The file is never touched.`)) return;
-                  try {
-                    await api.removeHealthEntry(item.id);
-                    app.toast("Removed from the library.");
-                    renderContent();
-                  } catch (e) {
-                    app.toast(e.message);
-                  }
-                }
-              }, "Remove…")));
-          }
-        } catch (e) {
-          clear(contentContainer);
-          contentContainer.append(h("p", { class: "error-text" }, e.message));
-        }
-      } else if (activeTab === "files" || activeTab === "drives") {
-        try {
+              h("button", { type: "button", class: "secondary-button danger small", onclick: () => confirmSheet({
+                symbol: "trash", title: `Remove “${item.title}”?`, confirm: "Remove",
+                message: "Its details, favorites, progress and history are deleted for every profile. The file is never touched.",
+                work: () => api.removeHealthEntry(item.id),
+              }).then((done) => { if (done) { app.toast("Removed from the library."); renderContent(); } }) }, "Remove…"))) : note("No missing titles match this filter."),
+            limitNote(items.length, 100));
+        } else if (activeTab === "files" || activeTab === "drives") {
+          const holder = h("div", {});
           if (activeTab === "files") {
-            const rerender = (aside) => { problemsAside = aside; renderContent(); };
             await renderFileProblems({
-              api, container: contentContainer, app, ignored: problemsAside, rerender,
-              onEdit: (problem) => { dialog.remove(); editors.editMetadata({ id: problem.mediaId, kind: problem.kind, title: problem.title }); },
+              api, container: holder, app, ignored: problemsAside, rerender: (aside) => { problemsAside = aside; renderContent(); },
+              onEdit: (problem) => { sheet.close(); editors.editMetadata({ id: problem.mediaId, kind: problem.kind, title: problem.title }); },
             });
           } else {
-            await renderDrives({ api, container: contentContainer, app });
+            await renderDrives({ api, container: holder, app });
           }
-        } catch (e) {
-          clear(contentContainer);
-          contentContainer.append(h("p", { class: "error-text" }, e.message));
-        }
-      } else if (activeTab === "unmatched") {
-        try {
+          fill(holder);
+        } else if (activeTab === "unmatched") {
           const items = await api.healthUnmatched();
-          clear(contentContainer);
-          if (!items.length) {
-            contentContainer.append(h("p", { class: "muted" }, "Every movie and series has its details."));
-            return;
-          }
-          for (const item of items) {
-            contentContainer.append(h("div", { class: "health-item-row" },
-              h("div", { style: { display: "flex", flexDirection: "column", gap: "2px", flex: 1, minWidth: 0 } },
-                h("div", { style: { fontWeight: "600" } }, item.title),
-                h("div", { style: { fontSize: "13px", wordBreak: "break-all" } }, item.fileName),
-                h("div", { class: "muted small" }, item.issueReason)),
-              h("button", {
-                type: "button",
-                class: "secondary-button small",
-                onclick: () => {
-                  dialog.remove();
-                  editors.editMetadata({ id: item.id, kind: item.kind, title: item.title });
-                }
-              }, "Edit Metadata…")));
-          }
-        } catch (e) {
-          clear(contentContainer);
-          contentContainer.append(h("p", { class: "error-text" }, e.message));
+          fill(items.length ? items.map((item) => h("div", { class: "health-item-row" },
+            h("div", { class: "health-item-text" },
+              h("div", { class: "health-title" }, item.title),
+              h("div", { class: "health-file" }, item.fileName),
+              h("div", { class: "muted small" }, item.issueReason)),
+            h("button", { type: "button", class: "secondary-button small", onclick: () => { sheet.close(); editors.editMetadata({ id: item.id, kind: item.kind, title: item.title }); } }, "Edit Metadata…")))
+            : note("Every movie and series has its details."), limitNote(items.length, 100));
         }
+      } catch (error) {
+        if (app.handleError(error)) return sheet.close();
+        fill(h("div", { class: "error-banner" }, icon("warning", { size: 16 }), h("span", {}, error.message),
+          h("button", { type: "button", class: "secondary-button small", onclick: () => renderContent() }, "Try Again")));
       }
     }
 
-    const modal = h("div", { class: "editor-form", style: { maxWidth: "800px", width: "90vw", maxHeight: "85vh", overflowY: "auto" } },
-      h("h2", {}, "Library Health & Maintenance"),
-      tabContainer,
-      contentContainer,
-      h("div", { class: "button-row end", style: { marginTop: "20px" } }, closeBtn));
-
-    dialog.append(modal);
-    document.body.append(dialog);
     renderTabs();
     renderContent();
   }
 
-  // MARK: Reset Library Dialog
+  // MARK: Reset Library
 
+  /**
+   * Reset Library, as on the Mac (audit S1): choose the storage locations, see what the server
+   * would remove, then confirm with the Server Password, which is really checked. Media files are
+   * never touched.
+   */
   function openResetDialog(sections, refresh) {
-    const dialog = h("div", { class: "modal-backdrop" });
-    const passwordInput = h("input", {
-      type: "password", class: "text-field", placeholder: "Server Password", autocomplete: "current-password", "aria-label": "Server Password",
-    });
-    const errorMsg = h("p", { class: "error-text", role: "alert" });
-    const cancelBtn = h("button", { type: "button", class: "secondary-button", onclick: () => dialog.remove() }, "Cancel");
-    const confirmBtn = h("button", { type: "submit", class: "primary-button danger" }, "Reset Library");
-
-    const form = h("form", { class: "editor-form" },
-      h("h2", {}, "Reset Media Library"),
-      h("p", { class: "muted" }, "This will delete all movie and TV metadata, collections, and library assignments from the database. Media files on your disk will never be altered or moved."),
-      h("p", { class: "muted small" }, "Enter the Server Password to confirm this irreversible action:"),
-      passwordInput,
-      errorMsg,
-      h("div", { class: "button-row" }, cancelBtn, confirmBtn));
-
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!passwordInput.value) return;
-      confirmBtn.disabled = true;
+    const libraries = sections?.libraries ?? [];
+    const chosen = new Set(libraries.map((library) => library.id));
+    const previewText = h("p", { class: "muted small", "aria-live": "polite" }, "");
+    let preview = null;
+    let asked = 0;
+    const password = h("input", { type: "password", class: "text-field", autocomplete: "current-password", "aria-label": "Server Password", placeholder: "Server Password" });
+    const loadPreview = async () => {
+      const turn = ++asked;
+      preview = null;
+      if (!chosen.size) { previewText.textContent = "Choose at least one storage location."; return; }
+      previewText.textContent = "Counting what would be removed…";
       try {
-        const libraryRoots = (sections?.libraries ?? []).map((l) => l.id);
-        const preview = await api.request("/api/v1/libraries/reset/preview", {
-          method: "POST", body: libraryRoots,
-        });
-        await api.approved("/api/v1/libraries/reset", {
-          method: "POST",
-          body: { libraryIds: libraryRoots, revision: preview.revision },
-        });
-        dialog.remove();
-        app.toast("Library reset completed.");
-        refresh();
-      } catch (err) {
-        confirmBtn.disabled = false;
-        errorMsg.textContent = err.message ?? "The Server Password was incorrect or the reset failed.";
+        const answer = await api.request("/api/v1/libraries/reset/preview", { method: "POST", body: [...chosen] });
+        if (turn !== asked) return;
+        preview = answer;
+        previewText.textContent = `Removes ${answer.titles} ${answer.titles === 1 ? "title" : "titles"} from ${answer.files} ${answer.files === 1 ? "file" : "files"} and ${answer.artwork} pictures in ${answer.storageLocations} ${answer.storageLocations === 1 ? "storage location" : "storage locations"}, with their favorites, progress and history. The locations stay and are scanned again.`;
+      } catch (error) {
+        if (turn === asked) previewText.textContent = error.message;
       }
+    };
+    const choices = libraries.length
+      ? h("div", { class: "reset-choices" }, libraries.map((library) => {
+          const box = h("input", { type: "checkbox", checked: true, "aria-label": library.name });
+          box.addEventListener("change", () => { if (box.checked) chosen.add(library.id); else chosen.delete(library.id); loadPreview(); });
+          return h("label", { class: "editor-title-option" }, box, h("span", {}, library.name), h("span", { class: "muted small mono" }, library.path ?? ""));
+        }))
+      : h("p", { class: "muted" }, "This server has no storage locations.");
+    openSheet({
+      symbol: "warning", danger: true, title: "Reset Library", primary: "Reset Library", primaryKind: "danger-button",
+      subtitle: "Removes the chosen storage locations' titles, details and collections from the database. Media files are never changed or moved.",
+      body: [h("div", { class: "editor-field-title" }, "Storage Locations"), choices, previewText,
+        h("label", { class: "editor-field" }, h("span", { class: "editor-field-title" }, "Server Password"), password)],
+      onPrimary: async ({ setError }) => {
+        if (!chosen.size) { setError("Choose at least one storage location."); return false; }
+        if (!password.value) { setError("Enter the Server Password to confirm."); return false; }
+        if (!preview) await loadPreview();
+        if (!preview) { setError(previewText.textContent || "The server couldn’t count what it would remove. Try again."); return false; }
+        try {
+          await api.unlockManagement(password.value);
+        } catch (error) {
+          if (error instanceof ApiError && (error.status === 401 || error.code === "invalid_credentials" || error.code === "invalid_password")) {
+            setError("That Server Password is not right.");
+            return false;
+          }
+          // A server that unlocks with a passkey only: the unlock that opened this page confirms it.
+          if (!(error instanceof ApiError && error.code === "passkey_required")) throw error;
+        } finally {
+          password.value = "";
+        }
+        await api.approved("/api/v1/libraries/reset", { method: "POST", body: { libraryIds: preview.libraryIds ?? [...chosen], revision: preview.revision } });
+        app.toast("The library was reset. Its storage locations are scanned again.");
+        refresh();
+      },
     });
-
-    dialog.append(h("div", { class: "modal-dialog" }, form));
-    document.body.append(dialog);
-    setTimeout(() => passwordInput.focus(), 0);
+    loadPreview();
   }
 
   function unlockPage(locked) {
@@ -1329,13 +1343,13 @@ export function createSettings(app) {
       try {
         await api.unlockManagement(password.value);
         password.value = "";
-        app.navigate({ name: "settings", page: "server" }, { replace: true });
+        app.navigate(state.route.name === "settings" ? state.route : { name: "settings", page: "server" }, { replace: true });
       } catch (error) {
         submit.disabled = false;
         password.value = "";
         if (error instanceof ApiError && error.code === "passkey_required") {
           message.textContent = "";
-          form.replaceWith(remoteUnlockPanel({ api, onUnlocked: () => app.navigate({ name: "settings", page: "server" }, { replace: true }) }));
+          form.replaceWith(remoteUnlockPanel({ api, onUnlocked: () => app.navigate(state.route.name === "settings" ? state.route : { name: "settings", page: "server" }, { replace: true }) }));
           return;
         }
         message.textContent = error instanceof ApiError && error.status === 401 ? "The Server Password is incorrect." : error.message;
@@ -1361,7 +1375,7 @@ export function createSettings(app) {
     try { provider = await api.metadataProvider(); } catch { provider = null; }
     try { power = await api.serverPower(); } catch { power = null; }
     const step = (number, title, text, done, ...actions) => h("section", { class: `welcome-step ${done ? "done" : ""}` },
-      h("span", { class: "welcome-number", "aria-hidden": "true" }, done ? "✓" : String(number)),
+      h("span", { class: "welcome-number", "aria-hidden": "true" }, done ? icon("check", { size: 15 }) : String(number)),
       h("div", { class: "welcome-body" }, h("h2", {}, title), h("p", { class: "muted" }, text), h("div", { class: "button-row" }, ...actions)));
     return h("div", { class: "welcome page-enter" },
       h("header", { class: "welcome-header" },
@@ -1387,7 +1401,9 @@ export function createSettings(app) {
         h("p", { class: "muted small" }, "Add Aurelia to your phone’s home screen, or connect other devices with a code from Settings › Profiles and Devices.")));
   }
 
-  return { settingsScreen, welcomeScreen, editMetadata: editors.editMetadata, closeEditors: () => { editors.close(); closeUpdates(); } };
+  return { settingsScreen, welcomeScreen, editMetadata: editors.editMetadata, closeEditors: () => { editors.close(); closeUpdates(); },
+    // Leaving Settings ends a search; it doesn't wait there for the next visit (audit S13).
+    endSearch: () => { searchQuery = ""; searchIndex = null; } };
 }
 
 function roleTitle(role) {

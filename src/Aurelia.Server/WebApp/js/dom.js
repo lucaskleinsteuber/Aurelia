@@ -8,12 +8,19 @@ export function h(tag, attributes = {}, ...children) {
     if (key === "class") element.className = value;
     else if (key === "dataset") Object.assign(element.dataset, value);
     else if (key.startsWith("on") && typeof value === "function") element.addEventListener(key.slice(2), value);
-    else if (key === "style") for (const [name, styleValue] of Object.entries(value)) element.style.setProperty(name, styleValue);
+    // Style keys may be written as in CSS ("min-width", "--fill") or as in scripts ("minWidth");
+    // setProperty knows only the first, and silently dropped the others (audit L2).
+    else if (key === "style") for (const [name, styleValue] of Object.entries(value)) element.style.setProperty(cssName(name), styleValue);
     else if (value === true) element.setAttribute(key, "");
     else element.setAttribute(key, String(value));
   }
   append(element, children);
   return element;
+}
+
+/** "minWidth" → "min-width"; CSS names and custom properties stay as they are. */
+export function cssName(name) {
+  return name.startsWith("--") || name.includes("-") ? name : name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
 }
 
 function append(element, children) {
@@ -78,10 +85,24 @@ const PATHS = {
   arrowUp: ["M12 19V5M6 11l6-6 6 6", "stroke"],
   arrowDown: ["M12 5v14M6 13l6 6 6-6", "stroke"],
   collections: ["M5 7h14v13H5zM7 4h10M9 20V7", "stroke"],
+  home: ["M4 11.5L12 4.5l8 7M6.5 9.5V20h11V9.5M10 20v-5.5h4V20", "stroke"],
+  film: ["M4 5h16v14H4zM8 5v14M16 5v14M4 9.5h4M4 14.5h4M16 9.5h4M16 14.5h4", "stroke"],
+  clock: ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7.5V12l3 2", "stroke"],
+  history: ["M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4.5v3.7h3.7M12 8v4l3 2", "stroke"],
+  chart: ["M5 20v-8M11 20V5M17 20v-6M3 20h18", "stroke"],
+  gift: ["M4.5 10.5h15V20h-15zM3.5 7h17v3.5h-17zM12 7v13M12 7c-1.2-3-5.5-3.4-5 0M12 7c1.2-3 5.5-3.4 5 0", "stroke"],
+  sidebar: ["M3.5 5h17v14h-17zM9.5 5v14M5.5 8.5h2M5.5 11.5h2", "stroke"],
+  trash: ["M5 7h14M10 7V4.5h4V7M7 7l.9 13h8.2L17 7M10.3 11v5.5M13.7 11v5.5", "stroke"],
+  folder: ["M3.5 6.5h6l2 2h9v10.5h-17z", "stroke"],
+  minus: ["M5 12h14", "stroke"],
+  info: ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v5.5M12 7.8h.01", "stroke"],
+  refresh: ["M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v3.7h-3.7", "stroke"],
 };
 
 export function icon(name, { size = 20, label } = {}) {
   const [path, style] = PATHS[name] ?? PATHS.more;
+  // A document without SVG (the logic tests' small DOM) gets an empty placeholder.
+  if (typeof document.createElementNS !== "function") return h("span", { class: "icon", "aria-hidden": label ? null : "true", "aria-label": label ?? null });
   const svg = document.createElementNS(SVG, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("width", String(size));

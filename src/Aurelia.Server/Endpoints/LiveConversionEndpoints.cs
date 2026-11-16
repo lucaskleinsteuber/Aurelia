@@ -243,7 +243,13 @@ public static partial class LiveConversionEndpoints
             while ((read = await output.ReadAsync(buffer, cancellationToken)) > 0);
             await process.WaitForExitAsync(cancellationToken);
             if (process.ExitCode != 0)
+            {
                 LiveConversionService.LogFailed(logger, "ffmpeg", process.ExitCode, await errors, source.SourcePath);
+                // A conversion that broke off (a damaged spot, a drive that went away) must not end
+                // like the title's end: the player would take what arrived as the whole title and
+                // mark it watched. Breaking the connection lets it report the problem instead.
+                context.Abort();
+            }
         }
         catch (Exception exception) when (exception is OperationCanceledException or IOException)
         {

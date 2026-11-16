@@ -896,15 +896,16 @@ public static class ApiEndpointMappings
         long? after,
         int? waitSeconds,
         string? generation,
+        bool? latest,
         SyncChangeService changes,
-        CancellationToken cancellationToken) =>
-        ExecuteAsync(() => changes.ChangesAsync(
-            context.User.RequireUserId(),
-            context.User.IsInRole(UserRole.Owner.ToString()) || context.User.IsInRole(UserRole.Admin.ToString()),
-            after ?? 0,
-            waitSeconds ?? 0,
-            generation,
-            cancellationToken));
+        CancellationToken cancellationToken)
+    {
+        var userId = context.User.RequireUserId();
+        var administrator = context.User.IsInRole(UserRole.Owner.ToString()) || context.User.IsInRole(UserRole.Admin.ToString());
+        // A client that just loaded everything starts at the newest cursor (since server 2.21.0).
+        if (latest == true) return ExecuteAsync(() => changes.LatestAsync(userId, administrator, cancellationToken));
+        return ExecuteAsync(() => changes.ChangesAsync(userId, administrator, after ?? 0, waitSeconds ?? 0, generation, cancellationToken));
+    }
 
     private static Task<IResult> ListMetadataReviewsAsync(MetadataService metadata, CancellationToken cancellationToken) =>
         ExecuteAsync(() => metadata.ReviewsAsync(cancellationToken));

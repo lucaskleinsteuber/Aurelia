@@ -1,6 +1,7 @@
 // Viewer library screens and actions. Each route owns its reads and dialogs; navigation closes
 // them before another profile can use the page. Lists request one bounded page per action.
 import { h, icon, clear } from "./dom.js";
+import { confirmSheet } from "./sheet.js";
 import { cropPicture, cropStyle } from "./metadata-extras.js";
 import {
   browseQuery, browseFacets, BROWSE_SORTS, WATCH_FILTERS, readSmartRules, smartRulesJson, continueWatchingChoice,
@@ -43,8 +44,9 @@ export function createCatalogView({
     if (!handleError(error)) toast(error.message);
   };
 
-  function pagedList(read, parameters, signal, { collection = false, count = () => {}, emptyText = () => "No title matches these filters." } = {}) {
-    const grid = h("div", { class: "poster-grid" });
+  function pagedList(read, parameters, signal, { collection = false, count = () => {}, emptyText = () => "No title matches these filters.", card, gridClass = "poster-grid", pageSize = PAGE_SIZE, onError = () => {} } = {}) {
+    const PAGE_SIZE = pageSize;
+    const grid = h("div", { class: gridClass });
     const message = h("p", { class: "muted", role: "status", "aria-live": "polite" });
     const more = h("button", { class: "secondary-button", onclick: () => load() }, "Load More");
     const footer = h("div", { class: "catalog-footer" }, message, more);
@@ -105,7 +107,7 @@ export function createCatalogView({
           if (!item?.id || seen.has(item.id)) continue;
           if (!collection && !showsTitle(item)) { hidden += 1; continue; }
           seen.add(item.id);
-          grid.append(collection ? collectionCard(item, batchOffset) : posterCard(item, seen.size - 1));
+          grid.append(collection ? collectionCard(item, batchOffset) : card ? card(item) : posterCard(item, seen.size - 1));
         }
         offset += items.length;
         total = collection ? offset : page.total;
@@ -126,6 +128,7 @@ export function createCatalogView({
         message.textContent = error.message;
         more.textContent = "Try Again";
         more.hidden = false;
+        onError(error);
       } finally {
         clearTimeout(slow);
         if (mine === generation) { busy = false; more.disabled = false; }
@@ -172,6 +175,27 @@ export function createCatalogView({
     (genre ? genreInput : from).focus();
   }
 
+  // Every genre of a section's titles, read once per visit in pages of 500 (at most 4,000 titles).
+  const genreReads = new Map();
+  function allGenres(section, signal) {
+    const key = `${section}:${signal ? "" : ""}`;
+    if (genreReads.has(key)) return genreReads.get(key);
+    const read = (async () => {
+      const genres = new Set();
+      const kind = section === "movies" ? "movie" : section === "shows" ? "series" : undefined;
+      for (let offset = 0, page = 0; page < 8; page++) {
+        const answer = await api.catalogPage({ ...(kind ? { kind } : {}), offset, limit: 500 }, { signal });
+        for (const genre of browseFacets(answer?.items ?? []).genres) genres.add(genre);
+        offset += answer?.items?.length ?? 0;
+        if (!answer?.items?.length || offset >= (answer.total ?? 0)) break;
+      }
+      return [...genres];
+    })().catch(() => []);
+    genreReads.set(key, read);
+    signal?.addEventListener("abort", () => genreReads.delete(key), { once: true });
+    return read;
+  }
+
   async function browse(route) {
     const signal = current();
     let filters = { ...route.filters };
@@ -210,9 +234,14 @@ export function createCatalogView({
     chip([icon("starFill", { size: 13 }), "Favorites"], filters.favorites, () => update({ favorites: !filters.favorites })),
     WATCH_FILTERS.map(([value, label]) => chip(label, filters.watch === value, () => update({ watch: filters.watch === value ? undefined : value }))),
     h("span", { class: "filter-divider" }),
-    menuChip(filters.genre ?? "Genre", filters.genre, () => [menuOption("All Genres", !filters.genre, () => update({ genre: undefined })),
-      ...[...new Set([...(filters.genre ? [filters.genre] : []), ...facets.genres])].map((genre) => menuOption(genre, filters.genre === genre, () => update({ genre }))),
-      h("div", { class: "menu-divider" }), h("button", { class: "menu-item", onclick: () => filterDialog(filters, update, { genre: true }) }, "Choose Genre…")]),
+    menuChip(filters.genre ?? "Genre", filters.genre, () => {
+      // The menu lists every genre in the library, not only those of the titles loaded so far
+      // (audit L15); the rest arrive in the background the first time it opens.
+      void allGenres(section, signal).then((genres) => { facets.genres = [...new Set([...facets.genres, ...genres])].sort((a, b) => a.localeCompare(b)); });
+      return [menuOption("All Genres", !filters.genre, () => update({ genre: undefined })),
+        ...[...new Set([...(filters.genre ? [filters.genre] : []), ...facets.genres])].map((genre) => menuOption(genre, filters.genre === genre, () => update({ genre }))),
+        h("div", { class: "menu-divider" }), h("button", { class: "menu-item", onclick: () => filterDialog(filters, update, { genre: true }) }, "Choose Genre…")];
+    }),
     chip([yearLabel, icon("chevronDown", { size: 13 })], filters.yearFrom || filters.yearTo, () => filterDialog(filters, update)),
     hasFilters ? h("button", { class: "text-button", onclick: () => navigate({ name: section, filters: { sort: filters.sort, descending: filters.descending } }, { replace: true }) }, "Clear") : null,
     h("span", { class: "spacer" }),
@@ -227,21 +256,69 @@ export function createCatalogView({
     h("div", { class: "search-bar catalog-search" }, icon("search"), search), bar, list.element);
   }
 
+  /**
+   * Search, as on the Mac: TV Shows first, then Movies, then Episodes, each in its own section,
+   * so a show's own page leads instead of a wall of its episodes with the same poster (audit W8).
+   * Episodes show their own picture. A section without matches leaves the page.
+   */
   async function search(route) {
     const signal = current();
     const input = h("input", { class: "search-field", type: "search", value: route.query ?? "", placeholder: "Movies, shows and episodes", "aria-label": "Search", maxlength: "256", autocomplete: "off", enterkeyhint: "search" });
-    // Nothing typed yet shows nothing, not an empty result.
-    const list = pagedList((query, options) => query.query ? api.search(query, options) : Promise.resolve({ items: [], total: 0 }), { query: route.query?.trim() ?? "" }, signal,
-      { emptyText: (query) => query.query ? `No movies, shows or episodes match “${query.query}”.` : "" });
+    const empty = h("p", { class: "muted search-empty", role: "status" });
+    const kinds = [
+      { kind: "series", title: "TV Shows" },
+      { kind: "movie", title: "Movies" },
+      { kind: "episode", title: "Episodes", card: episodeResult, gridClass: "episode-results", pageSize: 24 },
+    ];
+    const totals = new Map();
+    const showEmpty = (query) => {
+      const settled = totals.size === kinds.length;
+      empty.textContent = settled && query && [...totals.values()].every((total) => total === 0) ? `No movies, shows or episodes match “${query}”.` : "";
+    };
+    const sections = kinds.map((entry) => {
+      const count = h("span", { class: "count" });
+      let list;
+      const section = h("section", { class: "search-section", hidden: true });
+      list = pagedList((query, options) => query.query ? api.search({ ...query, kind: entry.kind }, options) : Promise.resolve({ items: [], total: 0 }),
+        { query: route.query?.trim() ?? "" }, signal, {
+          card: entry.card, gridClass: entry.gridClass, pageSize: entry.pageSize ?? 30, emptyText: () => "",
+          // A search that failed shows its section with the problem and Try Again.
+          onError: () => { section.hidden = false; totals.set(entry.kind, -1); },
+          count: (total) => {
+            count.textContent = String(total);
+            section.hidden = total === 0;
+            totals.set(entry.kind, total);
+            showEmpty(input.value.trim());
+          },
+        });
+      section.append(h("div", { class: "section-header" }, h("h2", {}, entry.title), count), list.element);
+      return { section, list };
+    });
+    const loadAll = (query) => {
+      totals.clear();
+      showEmpty("");
+      return Promise.all(sections.map(({ list }) => list.load(true, { query })));
+    };
     input.addEventListener("input", () => {
       if (signal.aborted) return;
       clearTimeout(debounce);
-      list.invalidate();
+      for (const { list } of sections) list.invalidate();
       replaceRoute({ name: "search", query: input.value });
-      debounce = setTimeout(() => list.load(true, { query: input.value.trim() }), 250);
+      debounce = setTimeout(() => loadAll(input.value.trim()), 250);
     });
-    await list.load(true);
-    return h("div", { class: "search" }, h("div", { class: "page-header" }, h("h1", {}, "Search")), h("div", { class: "search-bar" }, icon("search"), input), list.element);
+    await loadAll(route.query?.trim() ?? "");
+    return h("div", { class: "search page-enter" }, h("div", { class: "page-header" }, h("h1", {}, "Search")), h("div", { class: "search-bar" }, icon("search"), input),
+      empty, sections.map(({ section }) => section));
+  }
+
+  /** An episode found by Search: its own picture, the show, season and episode, its title. */
+  function episodeResult(item) {
+    const card = h("a", { class: "episode-result card-hover", href: `/title/${item.parentId ?? item.id}`, "data-route": true },
+      h("div", { class: "episode-result-art" }, artwork(item.backdrop ?? item.poster, 640, "landscape-art"), progressBar(item.progress)),
+      h("div", { class: "card-title" }, item.title),
+      h("div", { class: "card-subtitle" }, [item.parentTitle, eyebrow({ ...item, parentTitle: null })].filter(Boolean).join(" · ")));
+    card.addEventListener("contextmenu", (event) => { event.preventDefault(); openMenu(card, mediaMenu(item)); });
+    return card;
   }
 
   function memberDisplayTitle(member) {
@@ -409,8 +486,8 @@ export function createCatalogView({
       }
       members.forEach((m, index) => {
         const row = h("div", { class: "box-editor-member", dataset: { dragIndex: String(index) } },
-          h("span", { class: "muted small", style: { minWidth: "24px" } }, String(index + 1)),
-          h("span", { style: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, m.title),
+          h("span", { class: "muted small box-member-number" }, String(index + 1)),
+          h("span", { class: "box-member-title" }, m.title),
           h("button", { type: "button", class: "icon-button", "aria-label": "Move Up", disabled: index === 0, onclick: () => moveMember(index, index - 1) }, icon("arrowUp", { size: 15 })),
           h("button", { type: "button", class: "icon-button", "aria-label": "Move Down", disabled: index === members.length - 1, onclick: () => moveMember(index, index + 1) }, icon("arrowDown", { size: 15 })),
           h("button", { type: "button", class: "icon-button", "aria-label": `Remove ${m.title}`, onclick: () => { members.splice(index, 1); renderMembers(); } }, icon("close", { size: 15 })));
@@ -424,51 +501,52 @@ export function createCatalogView({
     const runPickerSearch = async () => {
       const term = pickerInput.value.trim();
       clear(pickerResults);
-      if (!term || typeof api.catalogPage !== "function") return;
+      if (!term) return;
       try {
-        const res = await api.catalogPage({ search: term, limit: 15 });
+        // The library's search finds the titles (audit L1); the plain list knew no search at all.
+        const res = await api.search({ query: term, limit: 15 });
         if (pickerInput.value.trim() !== term) return;
+        const add = (label, entry) => h("button", { type: "button", class: "secondary-button small", onclick: () => addMemberEntry(entry) }, icon("plus", { size: 14 }), label);
         for (const item of res?.items ?? []) {
           if (!["movie", "series", "episode"].includes(item.kind)) continue;
-          const wrap = h("div", { style: { display: "flex", flexDirection: "column", gap: "4px" } });
+          const wrap = h("div", { class: "box-picker-result" });
           const expandArea = h("div", { class: "box-picker-seasons", hidden: true });
           const row = h("div", { class: "box-editor-member" },
-            h("span", { style: { flex: 1 } }, `${item.title}${item.year ? ` (${item.year})` : ""} · ${item.kind === "series" ? "Series" : item.kind === "episode" ? "Episode" : "Movie"}`),
-            h("button", { type: "button", class: "secondary-button", onclick: () => addMemberEntry({
-              mediaId: item.id, seasonNumber: null, title: item.title, kind: item.kind,
-            }) }, "+ Add"),
+            h("span", { class: "box-member-title" }, `${item.kind === "episode" && item.parentTitle ? `${item.parentTitle} · ` : ""}${item.title}${item.year ? ` (${item.year})` : ""} · ${item.kind === "series" ? "Series" : item.kind === "episode" ? "Episode" : "Movie"}`),
+            add("Add", { mediaId: item.id, seasonNumber: null, title: item.title, kind: item.kind }),
             item.kind === "series" && typeof api.detail === "function" ? h("button", {
-              type: "button", class: "secondary-button",
+              type: "button", class: "secondary-button small",
               onclick: async () => {
                 if (!expandArea.hidden) { expandArea.hidden = true; return; }
                 expandArea.hidden = false;
                 if (expandArea.childElementCount) return;
-                const d = await api.detail(item.id).catch(() => null);
+                let d;
+                try { d = await api.detail(item.id); } catch (error) { expandArea.append(h("p", { class: "error-text" }, error.message)); return; }
+                // One row per season; its episodes appear only when that season is opened, so a
+                // long series doesn't build hundreds of buttons at once (audit L15).
                 for (const season of d?.seasons ?? []) {
-                  expandArea.append(h("button", {
-                    type: "button", class: "secondary-button",
-                    onclick: () => addMemberEntry({
-                      mediaId: item.id, seasonNumber: season.number,
-                      title: `${item.title} · ${seasonTitle(season.number)}`, kind: "series",
-                    }),
-                  }, `+ ${seasonTitle(season.number)}`));
-                  for (const ep of season.episodes ?? []) {
-                    expandArea.append(h("button", {
-                      type: "button", class: "secondary-button",
-                      onclick: () => addMemberEntry({
-                        mediaId: ep.item.id, seasonNumber: null,
-                        title: `${item.title} · S${String(season.number).padStart(2, "0")}E${String(ep.episodeNumber).padStart(2, "0")} ${ep.item.title}`,
-                        kind: "episode",
-                      }),
-                    }, `+ S${String(season.number).padStart(2, "0")}E${String(ep.episodeNumber).padStart(2, "0")}`));
-                  }
+                  const episodes = h("div", { class: "box-picker-episodes", hidden: true });
+                  const toggleEpisodes = h("button", { type: "button", class: "text-button", onclick: () => {
+                    episodes.hidden = !episodes.hidden;
+                    if (episodes.hidden || episodes.childElementCount) return;
+                    for (const ep of season.episodes ?? []) {
+                      const code = `S${String(season.number).padStart(2, "0")}E${String(ep.episodeNumber).padStart(2, "0")}`;
+                      episodes.append(add(code, { mediaId: ep.item.id, seasonNumber: null, title: `${item.title} · ${code} ${ep.item.title}`, kind: "episode" }));
+                    }
+                  } }, `${(season.episodes ?? []).length} Episodes…`);
+                  expandArea.append(h("div", { class: "box-picker-season" },
+                    add(seasonTitle(season.number), { mediaId: item.id, seasonNumber: season.number, title: `${item.title} · ${seasonTitle(season.number)}`, kind: "series" }),
+                    toggleEpisodes, episodes));
                 }
               },
-            }, "Seasons / Episodes…") : null);
+            }, "Seasons and Episodes…") : null);
           wrap.append(row, expandArea);
           pickerResults.append(wrap);
         }
-      } catch {}
+        if (!pickerResults.childElementCount) pickerResults.append(h("p", { class: "muted small" }, `No movies, shows or episodes match “${term}”.`));
+      } catch (error) {
+        if (!handleError(error)) pickerResults.append(h("p", { class: "error-text" }, error.message));
+      }
     };
     pickerInput.addEventListener("input", () => {
       clearTimeout(searchTimer);
@@ -478,7 +556,7 @@ export function createCatalogView({
     const membersSection = h("div", { class: "smart-rules-form", style: { display: isSmart ? "none" : "flex", flexDirection: "column", gap: "10px", marginTop: "12px" } },
       h("h3", {}, "Items in Collection"),
       memberListEl,
-      h("label", { class: "form-row" }, h("span", {}, "Add Title:"), pickerInput),
+      h("label", { class: "form-row" }, h("span", {}, "Add Title"), pickerInput),
       pickerResults);
 
     const kindSelect = h("select", { class: "select-input" },
@@ -500,15 +578,15 @@ export function createCatalogView({
 
     const rulesSection = h("div", { class: "smart-rules-form", style: { display: isSmart ? "flex" : "none", flexDirection: "column", gap: "10px", marginTop: "12px" } },
       h("h3", {}, "Smart List Rules"),
-      h("label", { class: "form-row" }, h("span", {}, "Media Type:"), kindSelect),
-      h("label", { class: "form-row" }, h("span", {}, "Genres:"), genreInput),
+      h("label", { class: "form-row" }, h("span", {}, "Media Type"), kindSelect),
+      h("label", { class: "form-row" }, h("span", {}, "Genres"), genreInput),
       h("div", { class: "form-row-pair", style: { display: "flex", gap: "10px" } },
-        h("label", { style: { flex: 1 } }, h("span", {}, "From Year:"), yearMinInput),
-        h("label", { style: { flex: 1 } }, h("span", {}, "To Year:"), yearMaxInput)),
-      h("label", { class: "form-row" }, h("span", {}, "Watched State:"), watchStateSelect),
-      h("label", { class: "form-row" }, h("span", {}, "Added Within (Days):"), addedDaysInput),
+        h("label", { style: { flex: 1 } }, h("span", {}, "From Year"), yearMinInput),
+        h("label", { style: { flex: 1 } }, h("span", {}, "To Year"), yearMaxInput)),
+      h("label", { class: "form-row" }, h("span", {}, "Watched State"), watchStateSelect),
+      h("label", { class: "form-row" }, h("span", {}, "Added Within (Days)"), addedDaysInput),
       h("label", { class: "checkbox-row", style: { display: "flex", alignItems: "center", gap: "8px" } }, favoritesOnlyCheck, h("span", {}, "Favorites Only")),
-      h("label", { class: "form-row" }, h("span", {}, "Search Contains:"), searchInput),
+      h("label", { class: "form-row" }, h("span", {}, "Title Contains"), searchInput),
       h("label", { class: "checkbox-row", style: { display: "flex", alignItems: "center", gap: "8px" } }, matchAnyCheck, h("span", {}, "Match Any Rule (OR instead of AND)")));
 
     smartToggle.addEventListener("change", () => {
@@ -520,24 +598,35 @@ export function createCatalogView({
       if (isSmart && sortSelect.value === "custom") sortSelect.value = "release";
     });
 
+    const editorMessage = h("p", { class: "error-text", role: "alert" });
+    const saveButton = h("button", { type: "submit", class: "primary-button" }, isEdit ? "Save Changes" : "Create Collection");
     const form = h("form", { class: "editor-form" },
       h("h2", {}, isEdit ? "Edit Collection" : "New Collection"),
-      h("label", { class: "form-row" }, h("span", {}, "Name:"), nameInput),
-      h("label", { class: "form-row" }, h("span", {}, "Description:"), overviewInput),
-      h("label", { class: "form-row" }, h("span", {}, "Sort Order:"), sortSelect),
+      h("label", { class: "form-row" }, h("span", {}, "Name"), nameInput),
+      h("label", { class: "form-row" }, h("span", {}, "Description"), overviewInput),
+      h("label", { class: "form-row" }, h("span", {}, "Sort Order"), sortSelect),
       h("div", { style: { marginTop: "8px" } }, h("h3", {}, "Artwork"), artworkGrid),
       h("label", { class: "checkbox-row", style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" } }, smartToggle, h("span", {}, "Smart List (Rule-based)")),
       canManage() ? h("label", { class: "checkbox-row", style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" } }, sharedToggle, h("span", {}, "Shared Collection (Visible to all profiles)")) : null,
       membersSection,
       rulesSection,
+      editorMessage,
       h("div", { class: "button-row end", style: { marginTop: "16px" } },
         h("button", { type: "button", class: "secondary-button", onclick: () => sheet.close() }, "Cancel"),
-        h("button", { type: "submit", class: "primary-button" }, isEdit ? "Save Changes" : "Create Collection")));
+        saveButton));
 
+    // One save at a time; a collection created before its picture failed is saved again, not
+    // created a second time (audit L8).
+    let saving = false;
+    let created = null;
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const name = nameInput.value.trim();
-      if (!name) return;
+      if (!name) { editorMessage.textContent = "Give the collection a name."; nameInput.focus(); return; }
+      if (saving) return;
+      saving = true;
+      saveButton.disabled = true;
+      editorMessage.textContent = "";
       const overview = overviewInput.value.trim();
       const sortMode = sortSelect.value || (isSmart ? "release" : "custom");
       let rulesJson = null;
@@ -566,9 +655,11 @@ export function createCatalogView({
       };
 
       try {
-        const saved = isEdit
-          ? await api.updateCollection(target.id, payload)
+        const editing = isEdit ? target.id : created?.id;
+        const saved = editing
+          ? await api.updateCollection(editing, payload)
           : await api.createCollection(payload);
+        if (!isEdit) created = saved;
         for (const spec of COLLECTION_PICTURES) {
           const pending = artworkChanges[spec.key];
           if (!pending) continue;
@@ -581,11 +672,15 @@ export function createCatalogView({
             await api.saveCollectionArtwork?.(saved.id, spec.key, { uploadId: uploaded.id, crop: pending.crop });
           }
         }
-        toast(isEdit ? `Updated “${name}”` : `Created collection “${name}”`);
+        toast(isEdit ? `Updated “${name}”.` : `Created the collection “${name}”.`);
         sheet.close();
         onChanged();
       } catch (err) {
-        toast(err.message);
+        if (handleError(err)) { sheet.close(); return; }
+        editorMessage.textContent = created && !isEdit ? `The collection was created, but ${err.message.charAt(0).toLowerCase()}${err.message.slice(1)} Save again to finish.` : err.message;
+      } finally {
+        saving = false;
+        saveButton.disabled = false;
       }
     });
 
@@ -607,33 +702,40 @@ export function createCatalogView({
     let collectionsList = [];
     try {
       collectionsList = (await api.collections({ limit: 100 })) ?? [];
-    } catch (e) {
-      toast("Couldn’t load collections.");
+    } catch (error) {
+      if (!handleError(error)) toast(`Couldn’t load collections: ${error.message}`);
       return;
     }
 
     const editableCollections = collectionsList.filter((c) => !c.isSmart && c.canEdit !== false);
     const label = seasonNumber != null ? `${item.title} · ${seasonTitle(seasonNumber)}` : item.title;
 
+    const addMessage = h("p", { class: "error-text", role: "alert" });
     const sheet = h("dialog", { class: "sheet add-to-collection-dialog" },
       h("h2", {}, `Add “${label}” to Collection`),
       editableCollections.length ? h("div", { class: "collection-picker-list", style: { display: "flex", flexDirection: "column", gap: "8px", maxHeight: "240px", overflowY: "auto", margin: "16px 0" } },
         editableCollections.map((col) => h("button", {
           class: "menu-item",
-          onclick: async () => {
+          onclick: async (event) => {
+            const button = event.currentTarget;
+            if (button.disabled) return;
+            button.disabled = true;
             try {
               await api.addCollectionItem(col.id, item.id, seasonNumber);
-              toast(`Added to “${col.name}”`);
+              toast(`Added to “${col.name}”.`);
               sheet.close();
               onChanged();
             } catch (err) {
-              toast(err.message);
+              button.disabled = false;
+              if (handleError(err)) return sheet.close();
+              addMessage.textContent = err.message;
             }
           }
-        }, col.name))) : h("p", { class: "muted", style: { margin: "16px 0" } }, "No editable collections yet."),
+        }, icon("collections", { size: 16 }), col.name))) : h("p", { class: "muted", style: { margin: "16px 0" } }, "No editable collections yet."),
+      addMessage,
       h("div", { class: "button-row end" },
         h("button", { class: "secondary-button", onclick: () => sheet.close() }, "Cancel"),
-        h("button", { class: "primary-button", onclick: () => { sheet.close(); openCollectionEditor({ initialItem: item, initialSeasonNumber: seasonNumber }); } }, "+ New Collection…")));
+        h("button", { class: "primary-button", onclick: () => { sheet.close(); openCollectionEditor({ initialItem: item, initialSeasonNumber: seasonNumber }); } }, icon("plus", { size: 15 }), "New Collection…")));
 
     dialog = sheet;
     sheet.addEventListener("close", () => { sheet.remove(); if (dialog === sheet) dialog = null; }, { once: true });
@@ -646,7 +748,7 @@ export function createCatalogView({
       h("button", {
         class: "primary-button",
         onclick: () => openCollectionEditor()
-      }, "+ New Collection"));
+      }, icon("plus", { size: 15 }), "New Collection"));
 
     const list = pagedList(api.collections, {}, current(), { collection: true });
     await list.load(true);
@@ -674,7 +776,12 @@ export function createCatalogView({
     const signal = current();
     let value = null;
     if (typeof api.collection === "function") {
-      value = await api.collection(route.id, { signal }).catch(() => null);
+      // Only a missing collection is "not found"; any other problem says so (audit L8).
+      try {
+        value = await api.collection(route.id, { signal });
+      } catch (error) {
+        if (error?.status !== 404) throw error;
+      }
     } else {
       const entries = await api.collections({ offset: route.offset ?? 0, limit: PAGE_SIZE }, { signal });
       if (signal.aborted) return null;
@@ -683,7 +790,6 @@ export function createCatalogView({
     if (signal.aborted) return null;
     const indexLink = h("a", { class: "secondary-button", href: "/collections", "data-route": true }, "All Collections");
     if (!value) return emptyState("search", "Collection Not Found", "It may have moved or been removed. Find it in All Collections.", indexLink);
-    document.title = `${value.name} · Aurelia`;
 
     const editable = value.canEdit !== false;
     const playlist = collectionPlayableItems(value);
@@ -711,13 +817,17 @@ export function createCatalogView({
     const saveAsBtn = value.provider && !editable && typeof api.createCollectionFromFranchise === "function"
       ? h("button", {
           class: "secondary-button large",
-          onclick: async () => {
+          onclick: async (event) => {
+            const button = event.currentTarget;
+            if (button.disabled) return;
+            button.disabled = true;
             try {
               const copied = await api.createCollectionFromFranchise(value.id);
-              toast(`Saved “${copied.name}” to Collections`);
+              toast(`Saved “${copied.name}” to Collections.`);
               navigate({ name: "collection", id: copied.id });
             } catch (err) {
-              toast(err.message);
+              button.disabled = false;
+              report(err, signal);
             }
           },
         }, "Save as Collection")
@@ -726,17 +836,16 @@ export function createCatalogView({
     const editBtn = editable ? h("button", { class: "secondary-button", onclick: () => openCollectionEditor(value) }, "Edit…") : null;
     const deleteBtn = editable ? h("button", {
       class: "secondary-button danger",
-      onclick: async () => {
-        if (!confirm(`Delete collection “${value.name}”? Media files are not affected.`)) return;
-        try {
-          await api.deleteCollection(value.id);
-          toast(`Deleted “${value.name}”`);
-          navigate({ name: "collections" });
-        } catch (err) {
-          toast(err.message);
-        }
-      }
-    }, "Delete") : null;
+      onclick: () => confirmSheet({
+        symbol: "trash", title: `Delete the Collection “${value.name}”?`, confirm: "Delete",
+        message: "The collection is removed for everyone who sees it. Titles and media files stay.",
+        work: () => api.deleteCollection(value.id),
+      }).then((done) => {
+        if (!done) return;
+        toast(`Deleted “${value.name}”.`);
+        navigate({ name: "collections" });
+      }, (error) => report(error, signal)),
+    }, "Delete…") : null;
 
     const watchedRatio = (value.itemCount ?? 0) > 0 && (value.watchedCount ?? 0) > 0
       ? Math.min(1, value.watchedCount / value.itemCount)
@@ -773,6 +882,7 @@ export function createCatalogView({
     }
 
     const canReorder = editable && !value.isSmart && Array.isArray(value.members);
+    let reordering = false;
     let bodyContent;
     if (Array.isArray(value.members) && value.members.length) {
       const memberNodes = value.members.map((member, index) => {
@@ -793,14 +903,22 @@ export function createCatalogView({
         const thumbArt = member.item?.poster ?? member.item?.backdrop;
         const runtimeMinutes = Math.round((member.totalRuntimeSeconds ?? 0) / 60);
         const persistMove = async (from, to) => {
+          if (reordering || to < 0 || to >= value.members.length) return;
+          reordering = true;
           const nextOrder = [...value.members];
           const [moved] = nextOrder.splice(from, 1);
           nextOrder.splice(to, 0, moved);
-          await api.updateCollectionOrder(value.id, {
-            members: nextOrder.map((m) => ({ mediaId: m.mediaId, seasonNumber: m.seasonNumber ?? null })),
-            sortMode: "custom",
-          });
-          onChanged();
+          try {
+            await api.updateCollectionOrder(value.id, {
+              members: nextOrder.map((m) => ({ mediaId: m.mediaId, seasonNumber: m.seasonNumber ?? null })),
+              sortMode: "custom",
+            });
+            onChanged();
+          } catch (error) {
+            report(error, signal);
+          } finally {
+            reordering = false;
+          }
         };
 
         const row = h("div", { class: "box-member-item", dataset: { dragIndex: String(index) } },
@@ -835,10 +953,11 @@ export function createCatalogView({
               canReorder ? h("button", { type: "button", class: "icon-button", "aria-label": "Move Down", disabled: index === value.members.length - 1, onclick: () => persistMove(index, index + 1) }, icon("arrowDown", { size: 15 })) : null,
               canReorder ? h("button", {
                 type: "button", class: "icon-button", "aria-label": `Remove ${memberDisplayTitle(member)}`,
-                onclick: async () => {
-                  await api.removeCollectionItem(value.id, member.mediaId, member.seasonNumber);
-                  onChanged();
-                },
+                onclick: () => confirmSheet({
+                  symbol: "minus", title: `Remove “${memberDisplayTitle(member)}” from This Collection?`, confirm: "Remove",
+                  message: "Only the collection changes; the title stays in your library.",
+                  work: () => api.removeCollectionItem(value.id, member.mediaId, member.seasonNumber),
+                }).then((done) => { if (done) onChanged(); }, (error) => report(error, signal)),
               }, icon("close", { size: 15 })) : null)),
           episodesDrawer);
         if (canReorder) attachDragReorder(row, persistMove);
@@ -850,7 +969,7 @@ export function createCatalogView({
         (value.items ?? []).map((item, index) => posterCard(item, index)));
     }
 
-    return h("div", { class: "library page-enter" }, hero, bodyContent);
+    return h("div", { class: "library page-enter", dataset: { pageTitle: value.name } }, hero, bodyContent);
   }
 
   function confirmWatch(state, watched, signal) {

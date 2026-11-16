@@ -2,6 +2,7 @@
 // download once or remove (kept in the server's data folder with its size), and running jobs.
 
 import { h, clear } from "./dom.js";
+import { confirmSheet } from "./sheet.js";
 import { keepsPolling, speechJobText } from "./logic.js";
 
 function bytes(value) {
@@ -33,7 +34,8 @@ export function serverSpeechSection({ api, section }) {
       const label = settings.models.find((entry) => entry.name === settings.model)?.label ?? settings.model;
       body.append(h("p", {}, `Model: ${label} · ${bytes(settings.modelBytes)}`),
         h("button", { type: "button", class: "secondary-button danger", title: "Deletes the model from the server’s data folder. Subtitles already written stay.",
-          onclick: () => { if (confirm("Remove the speech model? Subtitles from speech then stay off until a model is downloaded again.")) act(() => api.removeSpeechModel()); } }, "Remove Model"));
+          onclick: () => confirmSheet({ symbol: "trash", title: "Remove the Speech Model?", confirm: "Remove Model",
+            message: "Subtitles from speech stay off until a model is downloaded again. Subtitles already written stay." }).then((done) => { if (done) act(() => api.removeSpeechModel()); }) }, "Remove Model…"));
     } else {
       const options = h("div", { class: "settings-choice-list", role: "radiogroup", "aria-label": "Model" });
       for (const entry of settings.models) {
@@ -61,9 +63,11 @@ export function serverSpeechSection({ api, section }) {
     everConnected ||= element.isConnected;
     return keepsPolling({ connected: element.isConnected, everConnected, startedAt, now: Date.now() });
   };
+  // A hidden tab asks nothing; the reads say they are the page's own (audit W7, S15).
   const tick = async () => {
     if (!polling()) return;
-    try { last = render(await api.serverSpeech()); } catch (error) { message.textContent = error.message; }
+    if (globalThis.document?.hidden) { setTimeout(tick, 10000); return; }
+    try { last = render(await api.background(() => api.serverSpeech())); } catch (error) { message.textContent = error.message; }
     const busy = last?.downloading || (last?.jobs ?? []).some((job) => ["waiting", "listening", "saving"].includes(job.state));
     if (polling()) setTimeout(tick, busy ? 2000 : 10000);
   };

@@ -62,9 +62,12 @@ export function serverFileChecksSection({ api, section, row, toggle }) {
     everConnected ||= element.isConnected;
     return keepsPolling({ connected: element.isConnected, everConnected, startedAt, now: Date.now() });
   };
+  // A hidden tab asks nothing; the reads say they are the page's own, so an open page never
+  // keeps the server awake (audit W7, S15).
   const tick = async () => {
     if (!polling()) return;
-    try { render(await api.serverFileChecks()); } catch (error) { message.textContent = error.message; }
+    if (globalThis.document?.hidden) { setTimeout(tick, 5000); return; }
+    try { render(await api.background(() => api.serverFileChecks())); } catch (error) { message.textContent = error.message; }
     if (polling()) setTimeout(tick, 5000);
   };
   tick();

@@ -3,7 +3,8 @@
 // diagnostics and encrypted backups. Every form uses the editors' sheet, so an expired
 // management window asks for the Server Password once and keeps the draft.
 
-import { h, clear, saveBlob } from "./dom.js";
+import { h, icon, clear, saveBlob } from "./dom.js";
+import { confirmSheet } from "./sheet.js";
 import { codeCountdown, folderCrumbs, shownName, subtitleLanguages, SUBTITLE_LANGUAGE_CHOICES } from "./logic.js";
 
 export function createAdminTools({ api, app, editors }) {
@@ -14,7 +15,7 @@ export function createAdminTools({ api, app, editors }) {
   /** An 8-digit code for a new device, with its remaining minutes; a new one replaces it. */
   function createCode() {
     const context = editor("Code for a New Device", null);
-    const code = h("div", { class: "pairing-code", "aria-live": "polite" });
+    const code = h("div", { class: "code-display", "aria-live": "polite" });
     const left = h("p", { class: "muted small" });
     let timer = 0;
     const show = (pairing) => {
@@ -24,9 +25,9 @@ export function createAdminTools({ api, app, editors }) {
         if (!context.alive()) return clearInterval(timer);
         const text = codeCountdown(pairing.expiresAt, Date.now());
         left.textContent = text ?? "This code has expired. Create a new one.";
-        if (!text) { code.className = "pairing-code expired"; clearInterval(timer); }
+        if (!text) { code.className = "code-display expired"; clearInterval(timer); }
       };
-      code.className = "pairing-code";
+      code.className = "code-display";
       tick();
       timer = setInterval(tick, 1000);
     };
@@ -85,12 +86,15 @@ export function createAdminTools({ api, app, editors }) {
         h("div", { class: "settings-card-main" }, h("div", { class: "settings-card-title" }, session.deviceName),
           h("div", { class: "muted small" }, `Last used ${new Date(session.lastSeenAt).toLocaleString()}`)),
         h("div", { class: "settings-card-actions" }, button("Sign Out", () => context.run(async () => {
+          if (!(await confirmSheet({ symbol: "lock", title: `Sign Out “${session.deviceName}”?`, confirm: "Sign Out", message: "It needs a new code to use Aurelia again." }))) return;
           await api.revokeUserSession(session.id);
           app.toast(`${session.deviceName} is signed out.`);
           await load();
         })))));
     };
-    context.body.append(list, h("div", { class: "button-row" }, button("Sign Out Everywhere", () => context.run(async () => {
+    context.body.append(list, h("div", { class: "button-row" }, button("Sign Out Everywhere…", () => context.run(async () => {
+      if (!(await confirmSheet({ symbol: "lock", title: `Sign Out ${shownName(entry.user)} Everywhere?`, confirm: "Sign Out Everywhere",
+        message: "Every device of this profile is signed out at once and needs a new code." }))) return;
       await api.revokeAllUserSessions(entry.user.id);
       app.toast(`${shownName(entry.user)} is signed out on every device.`);
       await load();
@@ -133,7 +137,9 @@ export function createAdminTools({ api, app, editors }) {
       app.toast("Saved.");
       refresh?.();
     });
-    const remove = button("Remove Token", () => context.run(async () => {
+    const remove = button("Remove Token…", () => context.run(async () => {
+      if (!(await confirmSheet({ symbol: "trash", title: "Remove the TMDB Token?", confirm: "Remove Token",
+        message: "New titles get no details from TMDB until a token is saved again. Titles keep the details they already have." }))) return;
       const next = await api.removeMetadataToken();
       hasToken = next.hasToken;
       status.textContent = "The token was removed. Titles keep the details they already have.";
@@ -172,8 +178,14 @@ export function createAdminTools({ api, app, editors }) {
       app.toast("Saved.");
       refresh?.();
     });
-    const removeKey = button("Remove Key", () => context.run(async () => { await api.removeSubtitleKey(); status.textContent = "The key was removed."; }), "secondary-button danger");
-    const removeAccount = button("Remove Account", () => context.run(async () => { await api.removeSubtitleAccount(); status.textContent = "The account was removed."; }), "secondary-button danger");
+    const removeKey = button("Remove Key…", () => context.run(async () => {
+      if (!(await confirmSheet({ symbol: "trash", title: "Remove the OpenSubtitles Key?", confirm: "Remove Key", message: "Subtitles aren't searched any more until a key is saved again." }))) return;
+      await api.removeSubtitleKey(); status.textContent = "The key was removed.";
+    }), "secondary-button danger");
+    const removeAccount = button("Remove Account…", () => context.run(async () => {
+      if (!(await confirmSheet({ symbol: "trash", title: "Remove the OpenSubtitles Account?", confirm: "Remove Account", message: "The key alone allows fewer downloads a day." }))) return;
+      await api.removeSubtitleAccount(); status.textContent = "The account was removed.";
+    }), "secondary-button danger");
     context.body.append(
       h("p", {}, "Finds subtitles for titles that have none. An API key from opensubtitles.com is free; an account allows more downloads a day."),
       h("label", { class: "inline-control" }, enabled, "Search OpenSubtitles"),
@@ -199,6 +211,9 @@ export function createAdminTools({ api, app, editors }) {
   function reviewMatches(refresh) {
     const list = h("div", { class: "review-list" });
     const context = editor("Review Matches", null);
+    // The page behind updates once the sheet closes, so the sheet stays open between matches (audit S10).
+    let changed = false;
+    context.dialog.addEventListener("close", () => { if (changed) refresh?.(); }, { once: true });
     const load = async () => {
       const reviews = await api.metadataReviews({ signal: context.signal });
       if (!context.alive()) return;
@@ -216,8 +231,8 @@ export function createAdminTools({ api, app, editors }) {
             h("div", { class: "settings-card-actions" }, button("Use This", () => context.run(async () => {
               await api.selectMetadataMatch(review.mediaId, { providerMediaId: candidate.providerMediaId, mediaType: candidate.mediaType });
               app.toast(`“${review.title}” is matched.`);
+              changed = true;
               await load();
-              refresh?.();
             }), "primary-button")))))));
       }
     };
@@ -253,7 +268,7 @@ export function createAdminTools({ api, app, editors }) {
       crumbs.append(button("Places", () => open(null), "link-button"),
         ...folderCrumbs(current).map((crumb) => button(crumb.name, () => open(crumb.path), "link-button")));
       clear(list);
-      if (listing.parent) list.append(h("li", {}, h("button", { type: "button", class: "folder-entry up", onclick: () => open(listing.parent) }, "↑ Up one folder")));
+      if (listing.parent) list.append(h("li", {}, h("button", { type: "button", class: "folder-entry up", onclick: () => open(listing.parent) }, [icon("arrowUp", { size: 14 }), "Up One Folder"])));
       for (const folder of listing.folders ?? []) list.append(h("li", {},
         h("button", { type: "button", class: "folder-entry", onclick: () => open(folder.path) }, h("span", { class: "folder-icon", "aria-hidden": "true" }), folder.name)));
       if (!listing.folders?.length) list.append(h("li", { class: "muted small" }, "No folders inside."));
@@ -268,6 +283,8 @@ export function createAdminTools({ api, app, editors }) {
   function exclusions(library, refresh) {
     const list = h("div", { class: "settings-card-list" });
     const context = editor(`Left Out of ${library.name}`, null);
+    let changed = false;
+    context.dialog.addEventListener("close", () => { if (changed) refresh?.(); }, { once: true });
     const load = async () => {
       const entries = await api.libraryExclusions(library.id, { signal: context.signal });
       if (!context.alive()) return;
@@ -279,8 +296,8 @@ export function createAdminTools({ api, app, editors }) {
         h("div", { class: "settings-card-actions" }, button("Bring Back", () => context.run(async () => {
           await api.restoreExclusion(library.id, entry.id);
           app.toast("It comes back with the next scan.");
+          changed = true;
           await load();
-          refresh?.();
         })))));
     };
     context.body.append(h("p", { class: "muted small" }, "When you remove a title, its file is skipped by later scans. Media files are never deleted."), list);

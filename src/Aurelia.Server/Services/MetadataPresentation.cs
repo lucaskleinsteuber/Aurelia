@@ -71,6 +71,44 @@ public static class MetadataPresentation
             ParseFsk(contentRating));
     }
 
+    /// <summary>The most actors a title's page lists (owner, 16.11.2026: "about 50 are enough").</summary>
+    public const int ShownCast = 50;
+
+    /// <summary>The most crew a title's page lists, the key jobs first.</summary>
+    public const int ShownCrew = 12;
+
+    // The crew a page names, in this order; the rest (hundreds for a long series) stays in the editor.
+    private static readonly string[] KeyJobs =
+    [
+        "Creator", "Director", "Screenplay", "Writer", "Novel", "Story", "Original Music Composer",
+        "Director of Photography", "Producer", "Executive Producer",
+    ];
+
+    /// <summary>
+    /// The credits a title's page shows: the first <see cref="ShownCast"/> actors and up to
+    /// <see cref="ShownCrew"/> people with key jobs, each with all their credits. A series from
+    /// TMDB lists everyone who ever worked on it (Better Call Saul: about 600), which made its page
+    /// and every client's rail slow. Everything stays saved; the metadata editor still sees all.
+    /// </summary>
+    public static MediaMetadataSummary ForPage(MediaMetadataSummary metadata)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        var credits = metadata.Credits.Select((credit, index) => (Credit: credit, Index: index,
+            Key: credit.PersonKey ?? credit.Id?.ToString() ?? $"#{index}")).ToList();
+        static bool Acting(CreditSummary credit) => string.Equals(credit.Department, "Acting", StringComparison.OrdinalIgnoreCase);
+        static int JobRank(CreditSummary credit) => credit.Job is { } job
+            ? Array.FindIndex(KeyJobs, key => string.Equals(key, job, StringComparison.OrdinalIgnoreCase)) : -1;
+        var cast = credits.Where(entry => Acting(entry.Credit))
+            .OrderBy(entry => entry.Credit.Order).ThenBy(entry => entry.Index)
+            .Select(entry => entry.Key).Distinct(StringComparer.Ordinal).Take(ShownCast);
+        var crew = credits.Where(entry => !Acting(entry.Credit) && JobRank(entry.Credit) >= 0)
+            .OrderBy(entry => JobRank(entry.Credit)).ThenBy(entry => entry.Credit.Order).ThenBy(entry => entry.Index)
+            .Select(entry => entry.Key).Distinct(StringComparer.Ordinal).Take(ShownCrew);
+        var shown = cast.Concat(crew).ToHashSet(StringComparer.Ordinal);
+        if (shown.Count == credits.Select(entry => entry.Key).Distinct(StringComparer.Ordinal).Count()) return metadata;
+        return metadata with { Credits = [.. credits.Where(entry => shown.Contains(entry.Key)).Select(entry => entry.Credit)] };
+    }
+
     internal static string? PersonKey(MediaMetadata? metadata, string? providerPersonId) =>
         string.IsNullOrWhiteSpace(metadata?.Provider) || string.IsNullOrWhiteSpace(providerPersonId)
             ? null : $"{metadata.Provider.ToLowerInvariant()}:person:{providerPersonId}";

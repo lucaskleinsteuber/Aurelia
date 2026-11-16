@@ -7,9 +7,17 @@ import { loadPreferences } from "./player.js";
 
 const GENERAL_KEY = "aurelia.general";
 
+// The settings read last, so a grid asking for every title doesn't parse them again (audit L15).
+let lastRaw;
+let lastValue;
+
 export function loadGeneral() {
   try {
-    return normalizeGeneralPreferences(JSON.parse(localStorage.getItem(GENERAL_KEY) ?? "null"));
+    const raw = localStorage.getItem(GENERAL_KEY) ?? "null";
+    if (raw === lastRaw && lastValue) return structuredClone(lastValue);
+    lastValue = normalizeGeneralPreferences(JSON.parse(raw));
+    lastRaw = raw;
+    return structuredClone(lastValue);
   } catch {
     return normalizeGeneralPreferences(null);
   }

@@ -198,8 +198,14 @@ F switches full screen, M mutes and Escape closes a menu or the player.
 
 ## Browsing
 
-The top bar has the Mac app's sections: Home, Library, Watchlist, Recently Added, TV Shows,
-Movies and Collections. The library sections have the Mac's filters (kind, Favorites, watch
+The browser has the Mac app's sidebar (since server 2.21.0): a dark, blurred panel at the left
+with Search, Home, the library's sections (Library, Watchlist, Recently Added, TV Shows, Movies,
+Collections, in the order chosen in Settings › General), Wishes, then History, Statistics and
+Movie Night, and the profile and Settings at its foot. It can be hidden, its width dragged
+(210–300) and, below 760 px, it opens as a drawer. Pages change at once with a short fade, a
+slow page shows a small ring after 350 ms, and `/` starts a search. The look follows the Mac's
+design: system blue, rounded rectangles (a capsule only for the main action and the search
+field), no glows, and sheets with a symbol, title, separators and Cancel/Return. The library sections have the Mac's filters (kind, Favorites, watch
 state, genre, release year and sort order); they are part of the address, so Back and
 bookmarks keep them, and each section searches within them. Titles load 100 at a time with
 Load More; a catalog that changes meanwhile restarts paging instead of mixing old and new
@@ -246,10 +252,11 @@ limit, today's exceptions, and a good-night screen in the player when time is up
 Name and Picture crops a chosen photo in the browser: drag the circle and zoom, then Use Photo
 draws a square JPEG that is uploaded on Save.
 
-*Settings* in the profile menu has the Mac's categories; viewers see only their own.
+*Settings* (the gear at the sidebar's foot) is a layer over the whole window with the Mac's
+categories, a search field and Done (Esc); viewers see only their own.
 
 - **General** and **Playback** are kept in this browser: start page, poster size, which sections
-  the top bar shows and in which order, whether watched or offline titles appear, reduced motion, automatic resume,
+  the sidebar shows and in which order, whether watched or offline titles appear, reduced motion, automatic resume,
   starting over when a title was barely started, the next episode and its Up Next countdown,
   default audio and subtitle languages (used until you choose tracks for a series), subtitle
   size and background, Dialogue Boost and Volume Leveling (the apps' presets, through Web Audio),

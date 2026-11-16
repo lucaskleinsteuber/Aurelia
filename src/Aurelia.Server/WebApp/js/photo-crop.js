@@ -7,6 +7,9 @@ import { cropFrame, cropPixels } from "./logic.js";
 /** The edge of the square photo that is uploaded; the server keeps its own small copy. */
 export const PHOTO_EDGE = 1024;
 
+/** What cropPhoto answers for a picture this browser can't open or crop. */
+export const PHOTO_UNREADABLE = Object.freeze({ unreadable: true });
+
 /** Resolves with a square JPEG `File` of the chosen part, or null when cancelled or unreadable. */
 export function cropPhoto(file) {
   return new Promise((resolve) => {
@@ -26,6 +29,9 @@ export function cropPhoto(file) {
       Object.assign(frame.style, { left: `${crop.x * 100}%`, top: `${crop.y * 100}%`, width: `${crop.width * 100}%`, height: `${crop.height * 100}%` });
     };
     image.addEventListener("load", place, { once: true });
+    // A picture the browser can't open closes the sheet and says so (audit S20).
+    let unreadable = false;
+    image.addEventListener("error", () => { unreadable = true; sheet.close(); }, { once: true });
     zoom.addEventListener("input", () => { state.zoom = Number(zoom.value); place(); });
     let drag = null;
     frame.addEventListener("pointerdown", (event) => {
@@ -54,7 +60,7 @@ export function cropPhoto(file) {
       sheet.remove();
       const result = confirmed && crop ? await squarePhoto(image, crop).catch(() => null) : null;
       URL.revokeObjectURL(address);
-      resolve(result);
+      resolve(unreadable || (confirmed && !result) ? PHOTO_UNREADABLE : result);
     }, { once: true });
     document.body.append(sheet);
     sheet.showModal();

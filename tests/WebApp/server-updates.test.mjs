@@ -181,10 +181,11 @@ test("the real Settings hook aborts an update action on navigation without reloa
   api.serverPower = async () => { reads.push("serverPower"); return { available: false }; };
   api.serverUpdates = async () => { reads.push("serverUpdates"); return initial; };
   api.checkForUpdates = async (options) => { signal = options.signal; return pending.promise; };
-  const state = { profile: { id: "synthetic-owner", role: "owner", accessMode: "entireLibrary" }, server: { name: "Synthetic" }, route: { name: "settings", page: "server" } };
+  const state = { profile: { id: "synthetic-owner", role: "owner", accessMode: "entireLibrary" }, server: { name: "Synthetic" }, route: { name: "settings", page: "updates" } };
   const settings = createSettings({ api, state, navigate: () => {}, toast: () => {}, handleError: () => false,
     profilePicture: () => h("span"), switchProfile: () => {}, confirmSignOut: () => {} });
   t.after(() => settings.closeEditors());
+  // Server updates live on the Updates page only, as on the Mac (audit S17).
   const page = await settings.settingsScreen(state.route); document.body.append(page);
   const initialReads = [...reads];
   button(page, "Check for Updates").click(); await flush(); assert.equal(signal.aborted, false);

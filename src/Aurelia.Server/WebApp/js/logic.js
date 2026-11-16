@@ -562,9 +562,9 @@ export const TOUR_SEEN_KEY = "aurelia.tourSeen";
 /** The short tour of the browser app on the first sign-in: the place to light up and one sentence. */
 export const TOUR_STOPS = Object.freeze([
   { target: ".page .continue-card, .page .poster-card", title: "Open a Title", text: "Click a poster to see its details. Play starts it, and its menu has everything else." },
-  { target: ".top-bar .tabs", title: "Your Library", text: "Home, Movies, TV Shows, Collections and your Watchlist." },
-  { target: ".top-actions a[href='/search']", title: "Search", text: "Find titles, people and genres. Press / anywhere to start." },
-  { target: ".avatar-button", title: "Your Profile", text: "Settings, your name and picture, watch history and switching profiles." },
+  { target: ".sidebar-list", title: "Your Library", text: "Home, Movies, TV Shows, Collections, your Watchlist, History and Statistics, as in the Mac app." },
+  { target: ".sidebar a[href='/search']", title: "Search", text: "Find titles, people and genres. Press / anywhere to start." },
+  { target: ".sidebar-foot", title: "Your Profile", text: "Switch profiles here; the gear opens Settings, with your name and picture." },
 ]);
 
 /**
@@ -1502,8 +1502,9 @@ export const KEYBOARD_SHORTCUTS = [
   {
     group: "Navigation & Dialogs",
     items: [
+      { keys: ["/"], action: "Search" },
       { keys: ["?"], action: "Keyboard Shortcuts" },
-      { keys: ["Escape"], action: "Close Dialog or Menu" },
+      { keys: ["Escape"], action: "Close Dialog, Menu or Settings" },
     ],
   },
 ];

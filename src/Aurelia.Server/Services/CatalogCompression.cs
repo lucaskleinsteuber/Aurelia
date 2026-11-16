@@ -9,5 +9,8 @@ public static class CatalogCompression
             || context.Request.Path.StartsWithSegments("/api/v1/home")
             || context.Request.Path.StartsWithSegments("/api/v1/collections")
             || context.Request.Path.StartsWithSegments("/api/v1/watchlist")
-            || context.Request.Path.StartsWithSegments("/api/v1/history"));
+            || context.Request.Path.StartsWithSegments("/api/v1/history")
+            // A series' plan lists every episode (61 KB for Better Call Saul); it holds no ticket.
+            || (context.Request.Path.StartsWithSegments("/api/v1/media")
+                && context.Request.Path.Value?.EndsWith("/playback-plan", StringComparison.Ordinal) == true));
 }

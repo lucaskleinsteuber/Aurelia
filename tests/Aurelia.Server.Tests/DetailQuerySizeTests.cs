@@ -77,7 +77,8 @@ public sealed class DetailQuerySizeTests
 
             Assert.Equal("Synthetic Epic", detail.Metadata.Title);
             Assert.NotNull(detail.Metadata.Poster);
-            Assert.Equal(credits, detail.Metadata.Credits.Count);
+            // The page lists the first 50 actors (owner, 16.11.2026); all 300 are still read once.
+            Assert.Equal(MetadataPresentation.ShownCast, detail.Metadata.Credits.Count);
             Assert.True(rows.Count < pictures + credits + 50, $"The detail page read {rows.Count} rows.");
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }

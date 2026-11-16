@@ -2,6 +2,7 @@
 // for Home Assistant and shortcuts, and turning the server on and off. See docs/AUTOMATION.md.
 
 import { h, clear } from "./dom.js";
+import { confirmSheet } from "./sheet.js";
 import { remoteUnlockPanel } from "./security-view.js";
 import {
   AUTOMATION_PRESETS, INTEGRATION_SCOPES, POWER_ACTIONS, homeAssistantExample, homeAssistantUrl,
@@ -14,7 +15,18 @@ function when(text) {
 
 function sheet(title, ...children) {
   const dialog = h("dialog", { class: "sheet settings-editor automation-sheet", "aria-label": title }, h("h2", {}, title), ...children);
-  dialog.addEventListener("close", () => dialog.remove());
+  // Esc with something typed asks before throwing it away, and the sheet never outlives its page
+  // (audit S19).
+  let dirty = false;
+  dialog.addEventListener("input", () => { dirty = true; });
+  dialog.addEventListener("cancel", async (event) => {
+    if (!dirty) return;
+    event.preventDefault();
+    if (await confirmSheet({ symbol: "warning", title: "Discard Your Changes?", message: "What you typed here isn't saved.", confirm: "Discard" })) dialog.close();
+  });
+  const leave = () => { if (dialog.open) dialog.close(); };
+  globalThis.addEventListener?.("aurelia:page", leave, { once: true });
+  dialog.addEventListener("close", () => { globalThis.removeEventListener?.("aurelia:page", leave); dialog.remove(); });
   document.body.append(dialog);
   dialog.showModal();
   return dialog;
@@ -26,24 +38,16 @@ function copyButton(label, text, toast) {
   } }, label);
 }
 
+/** Asks in the Mac's sheet form before something that can't be undone. */
 function confirm(title, message, action, danger = true) {
-  return new Promise((resolve) => {
-    const dialog = h("dialog", { class: "sheet" }, h("h2", {}, title), h("p", {}, message),
-      h("div", { class: "button-row end" },
-        h("button", { class: "secondary-button", onclick: () => { dialog.close(); resolve(false); } }, "Cancel"),
-        h("button", { class: danger ? "danger-button" : "primary-button", onclick: () => { dialog.close(); resolve(true); } }, action)));
-    dialog.addEventListener("cancel", () => resolve(false));
-    dialog.addEventListener("close", () => dialog.remove());
-    document.body.append(dialog);
-    dialog.showModal();
-  });
+  return confirmSheet({ symbol: danger ? "warning" : "lock", title, message, confirm: action, danger });
 }
 
 /**
  * Runs a change; when server management is locked, asks for the Server Password (or another
  * device's Face ID when that is required) and runs it again. Resolves to undefined if cancelled.
  */
-async function unlocked(api, work) {
+export async function unlocked(api, work, onCancel) {
   try {
     return await work();
   } catch (error) {
@@ -87,6 +91,7 @@ async function unlocked(api, work) {
     dialog.showModal();
     password.focus();
   });
+  if (!ok) onCancel?.();
   return ok ? work() : undefined;
 }
 
@@ -325,14 +330,29 @@ export function smartHomeSections({ api, app, kit, refresh }) {
           h("div", { class: "muted small" }, `${webhookHost(hook.url)} · ${eventTitles.join(", ")}`),
           hook.pausedReason ? h("div", { class: "error-text small" }, hook.pausedReason) : null),
         h("div", { class: "settings-card-actions" },
-          h("button", { type: "button", class: "secondary-button", onclick: () => run(() => api.testWebhook(hook.id),
-            (delivery) => delivery.state === "succeeded" ? `Delivered in ${delivery.durationMilliseconds} ms.` : `Not delivered: ${delivery.error ?? "no answer"}.`) }, "Send Test"),
+          // One test at a time (audit S20).
+          h("button", { type: "button", class: "secondary-button", onclick: (event) => {
+            const button = event.currentTarget;
+            if (button.disabled) return;
+            button.disabled = true;
+            run(() => api.testWebhook(hook.id),
+              (delivery) => delivery.state === "succeeded" ? `Delivered in ${delivery.durationMilliseconds} ms.` : `Not delivered: ${delivery.error ?? "no answer"}.`)
+              .finally(() => { button.disabled = false; });
+          } }, "Send Test"),
           h("button", { type: "button", class: "secondary-button", onclick: () => openDeliveries({ api, webhook: hook, toast: app.toast }) }, "Deliveries…"),
           h("button", { type: "button", class: "secondary-button", onclick: () => openWebhookEditor({ api, overview, webhook: hook, onSaved: refresh, toast: app.toast }) }, "Edit…"),
-          h("button", { type: "button", class: "secondary-button", onclick: () => run(async () => {
-            const result = await api.rotateWebhookSecret(hook.id);
-            showSecret(result.secret, hook, app.toast);
-          }) }, "New Secret…"),
+          // A new secret asks first and runs once; the old one stops working at once (audit S11).
+          h("button", { type: "button", class: "secondary-button", onclick: async (event) => {
+            const button = event.currentTarget;
+            if (button.disabled) return;
+            if (!(await confirm(`New Secret for “${hook.name}”?`, "The old secret stops working at once. Put the new one into Home Assistant (or whatever receives the events).", "New Secret", false))) return;
+            button.disabled = true;
+            await run(async () => {
+              const result = await api.rotateWebhookSecret(hook.id);
+              showSecret(result.secret, hook, app.toast);
+            });
+            button.disabled = false;
+          } }, "New Secret…"),
           h("button", { type: "button", class: "secondary-button danger", onclick: async () => {
             if (await confirm(`Remove “${hook.name}”?`, "It stops getting events at once. Your automation in Home Assistant stays.", "Remove"))
               run(() => api.deleteWebhook(hook.id), "Removed.");

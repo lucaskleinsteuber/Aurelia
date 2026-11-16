@@ -205,6 +205,9 @@ export function createManagementEditors(app) {
       await api.setProfileAgeLimit(userId, { ageLimit: wanted, allowedTitleIds: wanted == null ? [] : current?.allowedTitleIds ?? [],
         hiddenTitleIds: wanted == null ? [] : current?.hiddenTitleIds ?? [], revision: current?.revision ?? 0 }, { signal });
     };
+    // A profile created before its age limit or screen time failed is finished on the next
+    // Save, not created a second time (audit S9).
+    let createdId = null;
     const context = editor(existing ? "Edit Profile" : "Create Profile", existing ? "Save" : "Create Profile", async ({ signal }) => {
       const body = profilePayload(snapshot, collect());
       const age = agesOffered ? collectAge() : undefined;
@@ -216,18 +219,29 @@ export function createManagementEditors(app) {
         if (age != null) await saveAge(existing.user.id, age, signal);
         await saveScreenTime(existing.user.id, screen?.rules, signal);
       } else {
-        const created = await api.createProfile(body, { signal });
-        const createdId = created?.user?.id ?? created?.id;
+        if (!createdId) {
+          const created = await api.createProfile(body, { signal });
+          createdId = created?.user?.id ?? created?.id ?? null;
+        }
         if (age != null && createdId) await saveAge(createdId, age, signal);
         if (screen?.rules?.enabled && createdId) await saveScreenTime(createdId, screen.rules, signal);
       }
       app.toast(existing ? "Profile saved." : "Profile created.");
     });
     const load = async () => {
-      const [loaded, titles, age, screenTime] = await Promise.all([existing ? api.profileEditor(existing.user.id, { signal: context.signal }) : null, profileTitles(context.signal),
+      // The library's titles are read only when "Selected Titles" is chosen (audit S14), and a
+      // screen time that can't be read is left as it is rather than shown as off (audit S8).
+      let screenTimeFailed = false;
+      const [loaded, age, screenTime] = await Promise.all([existing ? api.profileEditor(existing.user.id, { signal: context.signal }) : null,
         existing && agesOffered ? api.profileAgeLimit(existing.user.id, { signal: context.signal }).catch(() => null) : null,
-        existing && screenTimeOffered ? api.profileScreenTime(existing.user.id, { signal: context.signal }).catch(() => null) : null]);
+        existing && screenTimeOffered ? api.profileScreenTime(existing.user.id, { signal: context.signal }).catch((error) => {
+          if (error?.name === "AbortError") throw error;
+          screenTimeFailed = true;
+          return null;
+        }) : null]);
       if (!context.alive()) return;
+      let titles = null;
+      let titlesRead = null;
       snapshot = loaded;
       ageSnapshot = age;
       screenTimeSnapshot = screenTime;
@@ -257,10 +271,26 @@ export function createManagementEditors(app) {
       const ageField = field("Age", ageChoice, "Only titles up to this FSK rating show. Titles without a rating stay hidden until you allow them on the Mac.");
       const childSection = agesOffered ? h("div", {}, h("h3", {}, "Children's Profile"),
         field("Children's Profile", child, "A profile for a child: it sees only titles for its age."), ageField) : null;
-      const screen = screenTimeOffered ? screenTimeSection({ input, field, choice, button }, screenTime,
+      const screen = screenTimeOffered && !screenTimeFailed ? screenTimeSection({ input, field, choice, button }, screenTime,
         existing ? { grant: async (body) => (screenTimeSnapshot = await api.grantScreenTime(existing.user.id, body)) } : {}) : null;
+      const screenNote = screenTimeFailed ? h("p", { class: "error-text" }, "The screen time couldn’t be read, so it stays as it is. Open the profile again to change it.") : null;
       collectScreenTime = () => (screen && role.value === "user" ? screen.collect() : null);
+      const readTitles = () => {
+        if (titles || titlesRead) return;
+        list.replaceChildren(h("p", { class: "muted small" }, "Loading the library’s titles…"));
+        titlesRead = profileTitles(context.signal).then((loadedTitles) => {
+          titles = loadedTitles;
+          if (context.alive()) redraw();
+        }, (error) => {
+          titlesRead = null;
+          if (!context.alive() || error?.name === "AbortError") return;
+          list.replaceChildren(h("p", { class: "error-text" }, error.message), button("Try Again", () => readTitles()));
+        });
+      };
+      // Return in the search field searches; it doesn't save and close the profile (audit S14).
+      query.addEventListener("keydown", (event) => { if (event.key === "Enter") event.preventDefault(); });
       const redraw = () => {
+        if (!titles) return;
         clear(list);
         const matches = titles.filter((item) => item.title.toLocaleLowerCase().includes(query.value.toLocaleLowerCase()));
         count.textContent = `${selected.size} selected${matches.length > 100 ? " · Showing the first 100 matches; refine the search to see more." : ""}`;
@@ -285,6 +315,7 @@ export function createManagementEditors(app) {
         access.disabled = role.value === "owner";
         if (role.value === "owner") access.value = "entireLibrary";
         picker.hidden = access.value !== "selectedTitles";
+        if (!picker.hidden) readTitles();
         accessNote.textContent = access.value === "legacyLibraries" ? "Existing storage grants stay unchanged unless you select another access mode."
           : access.value === "entireLibrary" ? "Includes all existing titles and titles added later." : "Choose the films and series this profile can watch.";
       };
@@ -296,7 +327,7 @@ export function createManagementEditors(app) {
         protectionFields, h("p", { class: "muted small" }, user?.pinProtectionEnabled && !user.needsPinSetup
           ? "Leave both PIN fields empty to keep the current PIN. Changing it locks active sessions."
           : "Use 4–8 digits and enter the same PIN in both fields when protection is enabled."),
-        childSection, screen?.element ?? null, h("h3", {}, "Content Access"), field("Can watch", access), accessNote, picker);
+        childSection, screen?.element ?? screenNote, h("h3", {}, "Content Access"), field("Can watch", access), accessNote, picker);
       collect = () => ({ username: name.value, role: role.value, isEnabled: enabled.checked, pinProtectionEnabled: protection.checked,
         pin: pin.value, pinConfirmation: confirm.value, accessMode: access.value, titleIds: [...selected] });
       redraw(); update(); context.clean(); context.ready();

@@ -95,8 +95,18 @@ export class LiveSource {
     if (!track || track === this.track) return;
     const position = this.video.currentTime;
     const paused = this.video.paused;
+    // A track that fails to open is not taken as chosen, so choosing it again tries again; the
+    // track before it plays on (audit X6).
+    const previous = this.track;
     this.track = track;
-    await this.open(position);
+    try {
+      await this.open(position);
+    } catch (error) {
+      this.track = previous;
+      await this.open(position).catch(() => {});
+      if (!paused) this.video.play().catch(() => {});
+      throw error;
+    }
     if (!paused) this.video.play().catch(() => {});
   }
 
@@ -168,6 +178,14 @@ export class LiveSource {
         if (done) {
           this.streaming = false;
           await this.idle();
+          // A stream that ends well before the title's known end broke off (a damaged spot, a
+          // drive that went away); it continues instead of ending the title (audit X2).
+          const duration = this.plan.durationSeconds;
+          const end = this.buffer ? rules.bufferedEnd(rules.ranges(this.buffer.buffered), this.video.currentTime) : null;
+          if (generation === this.generation && duration > 0 && end != null && end < duration - Math.max(30, duration * 0.02)) {
+            this.interrupted(generation);
+            break;
+          }
           if (generation === this.generation && this.mediaSource.readyState === "open") this.mediaSource.endOfStream();
           break;
         }

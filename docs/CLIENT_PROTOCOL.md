@@ -130,7 +130,16 @@ totals, uniqueness and forward progress even against older servers.
 ## Changes and conditional responses
 
 Long-poll `/api/v1/sync/changes` with `after` and `waitSeconds` (0–30). New servers
-also return an optional `generation`; send it back on the next request. Persist
+also return an optional `generation`; send it back on the next request. A client that has just
+loaded everything starts with `after=0&latest=true` (server 2.21.0): it gets the newest cursor
+at once, with only the areas changed in the last minute, instead of paging through the whole
+kept history (up to 10,000 changes, a reload per page). Older servers ignore `latest`.
+
+Reads an app makes by itself (a progress view refreshed every few seconds, a remote's status, a
+page reloaded because the feed reported a change) may carry `X-Aurelia-Background: 1`; such GET
+requests don't count as someone using the server, so an open page never keeps a server with
+power saving awake. A title's details list at most 50 actors and 12 people with key crew jobs;
+the metadata editor still has everyone. Persist
 cursor/generation per server, user and device session, not just server address.
 On `resetRequired`, reload the authorized snapshot before continuing from the
 returned cursor. Restores rotate the generation; pruning retains a durable

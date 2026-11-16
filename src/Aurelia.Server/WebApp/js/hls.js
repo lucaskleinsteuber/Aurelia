@@ -39,6 +39,7 @@ export class HlsSource {
     this.variants = [];
     this.current = -1;
     this.playlists = new Map();
+    this.inits = new Map();
     this.throughput = null;
     this.stable = 0;
     this.retries = 0;
@@ -92,6 +93,7 @@ export class HlsSource {
     const master = new URL(hls.masterUrl(this.streamPath, this.track?.index ?? null), location.origin);
     this.master = master;
     this.playlists.clear();
+    this.inits = new Map();
     this.variants = hls.parseMaster(await this.request(master.href)).filter((variant) => isTypeSupported(videoMime(variant)));
     if (generation !== this.generation) return;
     if (!this.variants.length) throw new Error("This browser can't play any of the qualities.");
@@ -138,9 +140,33 @@ export class HlsSource {
     if (!track || track === this.track) return;
     const position = this.video.currentTime;
     const paused = this.video.paused;
+    // A track that fails to open is not taken as chosen, so choosing it again tries again; the
+    // track before it plays on (audit X6).
+    const previous = this.track;
     this.track = track;
-    await this.open(position);
+    try {
+      await this.open(position);
+    } catch (error) {
+      this.track = previous;
+      await this.open(position).catch(() => {});
+      if (!paused) this.video.play().catch(() => {});
+      throw error;
+    }
     if (!paused) this.video.play().catch(() => {});
+  }
+
+  /**
+   * A renewed ticket (after almost twelve hours): the next requests use its address while what
+   * plays continues; the old ticket is revoked at once (audit X7).
+   */
+  useStreamPath(streamPath) {
+    const before = this.streamPath;
+    if (!streamPath || streamPath === before) return;
+    this.streamPath = streamPath;
+    const swap = (url) => new URL(String(url.href ?? url).replace(before, streamPath));
+    if (this.master) this.master = swap(this.master);
+    for (const [index, playlist] of this.playlists) this.playlists.set(index, { ...playlist, address: swap(playlist.address) });
+    this.inits = new Map();
   }
 
   /** "auto" or a quality: takes effect with the next segment. */
@@ -183,7 +209,9 @@ export class HlsSource {
         }
         if (this.loaded !== this.current) {
           // A new quality begins with its own init segment; a different profile needs changeType.
-          const init = await this.request(new URL(playlist.init, playlist.address).href, controller.signal, "bytes");
+          const initAddress = new URL(playlist.init, playlist.address).href;
+          const init = this.inits.get(initAddress) ?? await this.request(initAddress, controller.signal, "bytes");
+          this.inits.set(initAddress, init);
           if (generation !== this.generation) return;
           if (this.variant.codecs !== this.bufferCodecs && typeof this.buffer.changeType === "function") {
             await this.idle();
@@ -264,7 +292,15 @@ export class HlsSource {
       const start = buffered[0][0];
       if (this.video.currentTime < start && start - this.video.currentTime < 2) this.video.currentTime = start;
     }
-    await this.trim(rules.BEHIND_SECONDS);
+    await this.trim(this.window().behind);
+  }
+
+  /**
+   * How much to keep ahead and behind for the quality that plays, by its bitrate as live
+   * conversion does: a minute either way of 1080p is more than Firefox keeps (audit, player).
+   */
+  window() {
+    return rules.bufferWindow((this.variant?.bandwidth ?? 0) / 8);
   }
 
   async trim(behind) {
@@ -283,7 +319,7 @@ export class HlsSource {
   async room(generation) {
     while (generation === this.generation && !this.destroyed) {
       const allowed = this.mediaSource.streaming !== false;
-      if (allowed && rules.shouldRead(rules.ranges(this.buffer.buffered), this.video.currentTime, rules.AHEAD_SECONDS)) return;
+      if (allowed && rules.shouldRead(rules.ranges(this.buffer.buffered), this.video.currentTime, this.window().ahead)) return;
       await this.sleep(1000);
     }
   }
@@ -301,9 +337,14 @@ export class HlsSource {
       const time = this.video.currentTime;
       if (rules.bufferedEnd(rules.ranges(this.buffer.buffered), time) != null) return this.wake();
       const playlist = await this.playlist(this.current);
-      // After abort the parser starts over, so the quality's init segment is sent again.
+      const target = hls.segmentAt(playlist.segments, time);
+      // A resumed title starts its stream at the right segment and then seeks there: the segment
+      // on its way is the one needed, so it isn't broken off and asked for again (audit X3).
+      if (this.streaming && target === this.next) return this.wake();
+      // After abort the parser starts over, so the quality's init segment is sent again; it is
+      // kept, so only the media segment is fetched anew.
       this.loaded = -1;
-      this.continueAt(hls.segmentAt(playlist.segments, time));
+      this.continueAt(target);
     }, SEEK_SETTLE_MS);
   }
 

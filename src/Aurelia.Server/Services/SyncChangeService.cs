@@ -48,6 +48,38 @@ public sealed class SyncChangeService(AureliaDbContext database, DatabaseChangeS
         }
     }
 
+    /// <summary>How far back a client that starts its feed now hears about changes.</summary>
+    public static readonly TimeSpan StartWindow = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// Where a client that just loaded everything starts its feed (<c>latest=true</c>, since server
+    /// 2.21.0): the newest cursor at once, with only what changed in the last minute, so a change
+    /// made while the client was loading is still heard. Starting at 0 instead pages through the
+    /// whole kept history (up to 10,000 changes), and older clients reload once per page.
+    /// </summary>
+    public async Task<SyncChangesResponse> LatestAsync(Guid userId, bool isAdministrator, CancellationToken cancellationToken)
+        => await ReadSnapshotAsync(async () =>
+    {
+        var history = await HistoryAsync(cancellationToken);
+        var since = DateTimeOffset.UtcNow - StartWindow;
+        var recent = await database.SyncChanges.AsNoTracking()
+            .Where(change => (change.UserId == null || change.UserId == userId)
+                && (isAdministrator || change.Area != SyncChangeArea.Libraries)
+                && change.CreatedAt > since)
+            .OrderByDescending(change => change.Cursor)
+            .Take(1_000)
+            .ToListAsync(cancellationToken);
+        return new SyncChangesResponse(
+            history.HighWater,
+            false,
+            recent.Select(change => change.Area).Distinct().ToList(),
+            recent.Where(change => change.MediaItemId.HasValue)
+                .Select(change => change.MediaItemId!.Value)
+                .Distinct()
+                .Take(MaximumChangedMediaIds)
+                .ToList(), history.Generation);
+    }, cancellationToken);
+
     public async Task<long> CurrentCursorAsync(
         Guid userId,
         bool isAdministrator,

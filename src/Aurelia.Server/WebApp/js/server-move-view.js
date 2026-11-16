@@ -309,7 +309,7 @@ export function createMoveTools({ api, app, kit, chooseServerFolder }) {
 
     function network() {
       clear(context.body);
-      const code = h("div", { class: "pairing-code move-code", "aria-live": "polite" }, "…");
+      const code = h("div", { class: "code-display move-code", "aria-live": "polite" }, "…");
       const left = h("p", { class: "muted small" });
       const state = h("p", { role: "status" });
       const where = h("p", { class: "muted small" }, `On the new server, type this server’s address (${location.host}) and the code.`);
@@ -342,12 +342,13 @@ export function createMoveTools({ api, app, kit, chooseServerFolder }) {
         const started = await api.startServerMove({ method: "network" });
         if (!context.alive()) return;
         code.textContent = formatMoveCode(started.code);
-        code.className = "pairing-code move-code";
+        code.className = "code-display move-code";
         state.textContent = "Waiting for the new server…";
         const tick = () => {
           const text = countdown(started.expiresAt, Date.now());
           left.textContent = text ? `The code works once, for ${text}.` : "This code has expired. Choose New Code.";
-          if (!text) { code.classList.add("expired"); clearInterval(timer); }
+          // An expired code isn't asked about any more; New Code starts again (audit S20).
+          if (!text) { code.classList.add("expired"); clearInterval(timer); stop(); }
         };
         tick();
         timer = setInterval(tick, 1000);

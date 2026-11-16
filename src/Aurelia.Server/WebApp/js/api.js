@@ -21,7 +21,10 @@ export class ApiError extends Error {
  * @param {(path: string, method: string) => void} [hooks.onChange]  called before each request that
  *   may change something on the server (everything but GET and HEAD), so remembered pages can be dropped
  */
-export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { onChange, onMoved } = {}) {
+export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { onChange, onMoved, isBackground } = {}) {
+  // Reads the page makes by itself (a progress refresh, a remote's status, a page reloaded because
+  // the server reported a change) say so; the server then doesn't count them as someone using it.
+  let backgroundDepth = 0;
   /** A problem answer as an ApiError; a server that moved away also tells the app (docs/SERVER_MOVE.md). */
   function problem(status, value) {
     const error = new ApiError(status, value?.code ?? `http_${status}`, value?.message ?? defaultMessage(status));
@@ -38,6 +41,7 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
   async function request(path, { method = "GET", body, as = "profile", signal, keepalive = false, approval, headers: extra } = {}) {
     if (method !== "GET" && method !== "HEAD") onChange?.(path, method);
     const headers = { Accept: "application/json", "X-Aurelia-Web": as, ...(extra ?? {}) };
+    if (method === "GET" && (backgroundDepth > 0 || isBackground?.())) headers["X-Aurelia-Background"] = "1";
     if (body !== undefined) headers["Content-Type"] = "application/json";
     if (approval) headers["X-Aurelia-Approval"] = approval;
     let response;
@@ -69,6 +73,12 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
   }
 
   const id = (value) => encodeURIComponent(value);
+
+  /** Runs `start`, whose reads begin at once, as the page's own background reads. */
+  function background(start) {
+    backgroundDepth += 1;
+    try { return start(); } finally { backgroundDepth -= 1; }
+  }
 
   /** Sends a file as it is (a picture or an encrypted backup); the answer is JSON or nothing. */
   async function send(path, blob, { method = "POST", contentType = blob?.type || "application/octet-stream", signal, as = "profile", headers: extra } = {}) {
@@ -133,6 +143,7 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
 
   return {
     request,
+    background,
     serverInfo: (options = {}) => request("/api/v1/server/info", { as: "device", ...options }),
 
     /** Signs this browser in with the code from the main device; the credential stays in a cookie. */
@@ -471,8 +482,10 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     previewRelocation: (libraryId, path, options = {}) => request(`/api/v1/libraries/${id(libraryId)}/relocate/preview`, { ...options, method: "POST", body: { path } }),
     relocateLibrary: (libraryId, path, force = false) => approved(`/api/v1/libraries/${id(libraryId)}/relocate`, { body: force ? { path, force: true } : { path } }),
     cinemaTrailers: (mediaId, count, options = {}) => request(`/api/v1/media/${id(mediaId)}/cinema-trailers?${new URLSearchParams({ count })}`, options),
+    // The first read after loading starts at the newest change (server 2.21.0) instead of paging
+    // through the whole kept history (audit W4); older servers ignore `latest` and page as before.
     changes: (after, generation, signal) =>
-      request(`/api/v1/sync/changes?${new URLSearchParams(generation ? { after, waitSeconds: 25, generation } : { after, waitSeconds: 25 })}`, { signal }),
+      request(`/api/v1/sync/changes?${new URLSearchParams(generation ? { after, waitSeconds: 25, generation } : { after, waitSeconds: 25, ...(after ? {} : { latest: "true" }) })}`, { signal }),
   };
 }
 

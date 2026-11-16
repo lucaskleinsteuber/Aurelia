@@ -30,6 +30,13 @@ public sealed class ServerUseClock(ServerRuntimeOptions runtime, TimeProvider cl
         "/api/v1/server/security/alerts",
     ];
 
+    /// <summary>
+    /// Marks a read an open app makes by itself (since server 2.21.0): a page that refreshes its
+    /// progress every few seconds, a remote's status or a page reloaded because the server
+    /// reported a change. Only reads may carry it; whatever a person changes still counts.
+    /// </summary>
+    public const string BackgroundHeader = "X-Aurelia-Background";
+
     /// <summary>A request that waits on the server for something to happen is an app keeping watch.</summary>
     private static readonly string[] WaitParameters = ["waitSeconds", "waitMs"];
 
@@ -47,6 +54,10 @@ public sealed class ServerUseClock(ServerRuntimeOptions runtime, TimeProvider cl
         // swiping and dealing count.
         if (HttpMethods.IsGet(context.Request.Method)
             && (path.StartsWithSegments("/api/v1/watch-together") || path.StartsWithSegments("/api/v1/movie-night"))) return false;
+        // A small remote asks every few seconds how the other device plays; the other device counts.
+        if (HttpMethods.IsGet(context.Request.Method) && path.StartsWithSegments("/api/v1/devices/players")
+            && path.Value?.EndsWith("/status", StringComparison.OrdinalIgnoreCase) == true) return false;
+        if (HttpMethods.IsGet(context.Request.Method) && context.Request.Headers.ContainsKey(BackgroundHeader)) return false;
         // Whatever an open app waits for (new devices for the owner, commands, changes): nobody
         // did anything. New waiting requests then never keep the server awake by being forgotten here.
         if (HttpMethods.IsGet(context.Request.Method))
