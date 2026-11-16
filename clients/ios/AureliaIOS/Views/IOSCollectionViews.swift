@@ -61,6 +61,7 @@ struct IOSCollectionsView: View {
   @State private var error: String?
   @State private var generation = UUID()
   @State private var creating = false
+  @State private var loadedRevision: UUID?
 
   var body: some View {
     ScrollView {
@@ -107,15 +108,19 @@ struct IOSCollectionsView: View {
       .environmentObject(model)
     }
     .task(id: model.libraryRefresh) {
+      let revision = model.libraryRefresh
+      let automatic = loadedRevision != nil && loadedRevision != revision
+      loadedRevision = revision
       generation = UUID()
       complete = false
       loading = false
-      await next(replacing: true)
+      await next(replacing: true, background: automatic)
     }
   }
 
-  private func next(replacing: Bool = false) async {
-    guard !loading || replacing, !complete || replacing, let api = model.client else { return }
+  private func next(replacing: Bool = false, background: Bool = false) async {
+    guard !loading || replacing, !complete || replacing, let client = model.client else { return }
+    let api = background ? client.background : client
     let run = generation
     let session = model.session?.sessionId
     loading = true
@@ -157,6 +162,7 @@ struct IOSCollectionView: View {
   @State private var playback: CollectionPlaybackRequest?
   @State private var expandedMembers = Set<UUID>()
   @State private var fullOverview = false
+  @State private var loadedRevision: UUID?
   @Environment(\.dismiss) private var dismiss
 
   private struct CollectionPlaybackRequest: Identifiable {
@@ -284,7 +290,10 @@ struct IOSCollectionView: View {
       }
     )
     .task(id: "\(model.libraryRefresh.uuidString)-\(targetID.uuidString)") {
-      await reload()
+      let revision = model.libraryRefresh
+      let automatic = loadedRevision != nil && loadedRevision != revision
+      loadedRevision = revision
+      await reload(background: automatic)
     }
     .modifier(IOSLibraryActionPresentation(actions: actions))
   }
@@ -644,8 +653,9 @@ struct IOSCollectionView: View {
     }
   }
 
-  private func reload() async {
-    guard let api = model.client, let sessionID = model.session?.sessionId else { return }
+  private func reload(background: Bool = false) async {
+    guard let client = model.client, let sessionID = model.session?.sessionId else { return }
+    let api = background ? client.background : client
     let request = UUID()
     requestID = request
     loading = detail == nil

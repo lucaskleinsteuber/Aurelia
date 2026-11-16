@@ -27,6 +27,10 @@ struct IOSCollectionEditorView: View {
   @State private var error: String?
   @State private var initialized = false
   @State private var savedSuccessfully = false
+  /// Creating the collection and attaching artwork are separate server operations. Keep the
+  /// created identity so a failed artwork upload can be retried without creating a duplicate.
+  @StateObject private var saveRecovery = IOSCollectionSaveRecovery()
+  private var savedCollection: IOSCollection? { saveRecovery.savedCollection }
 
   struct EditableMember: Identifiable, Equatable {
     let mediaId: UUID
@@ -132,11 +136,14 @@ struct IOSCollectionEditorView: View {
           }
         }
       }
-      .navigationTitle(existing == nil ? "New Collection" : "Edit Collection")
+      .disabled(saving || uploadingArtwork)
+      .navigationTitle(
+        existing == nil && savedCollection == nil ? "New Collection" : "Edit Collection"
+      )
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
-          Button("Cancel") { dismiss() }
+          Button("Cancel") { dismiss() }.disabled(saving || uploadingArtwork)
         }
         ToolbarItem(placement: .confirmationAction) {
           Button(saving ? "Saving…" : "Save") {
@@ -145,6 +152,7 @@ struct IOSCollectionEditorView: View {
           .disabled(!canSave)
         }
       }
+      .interactiveDismissDisabled(saving || uploadingArtwork)
       .onAppear { populateInitialState() }
       .onDisappear {
         if !savedSuccessfully { cleanupStagedUploads() }
@@ -310,8 +318,8 @@ struct IOSCollectionEditorView: View {
     defer { uploadingArtwork = false }
     do {
       let uploadId: UUID?
-      if let existing {
-        uploadId = try await api.uploadCollectionEditorImage(collectionID: existing.id, jpeg).id
+      if let collectionID = savedCollection?.id ?? existing?.id {
+        uploadId = try await api.uploadCollectionEditorImage(collectionID: collectionID, jpeg).id
       } else {
         uploadId = nil
       }
@@ -331,8 +339,9 @@ struct IOSCollectionEditorView: View {
   }
 
   private func discardUpload(_ id: UUID?) {
-    guard let id, let existing, let api = model.client else { return }
-    Task { try? await api.discardCollectionEditorImage(collectionID: existing.id, uploadID: id) }
+    guard let id, let collectionID = savedCollection?.id ?? existing?.id, let api = model.client
+    else { return }
+    Task { try? await api.discardCollectionEditorImage(collectionID: collectionID, uploadID: id) }
   }
 
   private func cleanupStagedUploads() {
@@ -341,7 +350,8 @@ struct IOSCollectionEditorView: View {
   }
 
   private func save() async {
-    guard let api = model.client, let cleanedName = IOSCollectionRules.cleanedName(name) else {
+    guard canSave, let api = model.client, let cleanedName = IOSCollectionRules.cleanedName(name)
+    else {
       return
     }
     saving = true
@@ -358,13 +368,11 @@ struct IOSCollectionEditorView: View {
       members: members.map {
         IOSCollectionMemberInput(mediaId: $0.mediaId, seasonNumber: $0.seasonNumber)
       })
+    var detailsSaved = false
     do {
-      let saved: IOSCollection
-      if let existing {
-        saved = try await api.updateCollection(id: existing.id, payload)
-      } else {
-        saved = try await api.createCollection(payload)
-      }
+      let saved = try await saveRecovery.saveDetails(
+        existingID: existing?.id, payload: payload, api: api)
+      detailsSaved = true
       if model.supportsCollectionsV3 {
         if let cover = stagedCover {
           let uploadId =
@@ -373,12 +381,15 @@ struct IOSCollectionEditorView: View {
             } else {
               try await api.uploadCollectionEditorImage(collectionID: saved.id, cover.data).id
             }
+          stagedCover = StagedArtwork(
+            uploadId: uploadId, data: cover.data, crop: cover.crop, preview: cover.preview)
           _ = try await api.saveCollectionArtwork(
             collectionID: saved.id, kind: "poster",
             IOSSaveCollectionArtwork(uploadId: uploadId, crop: cover.crop))
           stagedCover = nil
         } else if removeCover {
           try await api.deleteCollectionArtwork(collectionID: saved.id, kind: "poster")
+          removeCover = false
         }
         if let backdrop = stagedBackdrop {
           let uploadId =
@@ -387,12 +398,15 @@ struct IOSCollectionEditorView: View {
             } else {
               try await api.uploadCollectionEditorImage(collectionID: saved.id, backdrop.data).id
             }
+          stagedBackdrop = StagedArtwork(
+            uploadId: uploadId, data: backdrop.data, crop: backdrop.crop, preview: backdrop.preview)
           _ = try await api.saveCollectionArtwork(
             collectionID: saved.id, kind: "backdrop",
             IOSSaveCollectionArtwork(uploadId: uploadId, crop: backdrop.crop))
           stagedBackdrop = nil
         } else if removeBackdrop {
           try await api.deleteCollectionArtwork(collectionID: saved.id, kind: "backdrop")
+          removeBackdrop = false
         }
       }
       savedSuccessfully = true
@@ -400,7 +414,11 @@ struct IOSCollectionEditorView: View {
       onSaved?(saved)
       dismiss()
     } catch {
-      self.error = error.localizedDescription
+      self.error =
+        !detailsSaved
+        ? error.localizedDescription
+        : "The collection was saved, but its artwork could not be saved. Try Save again. \(error.localizedDescription)"
+      if detailsSaved { model.scheduleLibraryRefresh() }
     }
   }
 

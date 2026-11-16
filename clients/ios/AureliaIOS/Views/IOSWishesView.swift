@@ -52,6 +52,8 @@ struct IOSWishesView: View {
   @State private var isLoading = false
   @State private var isLoadingMore = false
   @State private var hasMore = false
+  @State private var listRequest = UUID()
+  @State private var searchRequest = UUID()
   @State private var providerEnabled = true
   @State private var bannerMessage: String?
   @State private var errorMessage: String?
@@ -610,16 +612,28 @@ struct IOSWishesView: View {
 
   private func loadWishes(reset: Bool, markSeen: Bool) async {
     guard let api = model.client else { return }
+    let request = UUID()
+    listRequest = request
+    let requestedFilter = filter
+    let sessionID = model.session?.sessionId
+    isLoadingMore = false
     if reset { isLoading = true }
     errorMessage = nil
-    defer { if reset { isLoading = false } }
+    defer { if reset, listRequest == request { isLoading = false } }
     do {
       if markSeen {
         let updated = try? await api.markWishesSeen()
+        guard !Task.isCancelled, listRequest == request, model.session?.sessionId == sessionID
+        else {
+          return
+        }
         if let updated { model.updateWishSummaryFromPage(updated) }
       }
       let response = try await api.wishes(
-        state: filter.wishState, offset: 0, limit: IOSWishPresentation.pageSize)
+        state: requestedFilter.wishState, offset: 0, limit: IOSWishPresentation.pageSize)
+      guard !Task.isCancelled, listRequest == request, filter == requestedFilter,
+        model.session?.sessionId == sessionID
+      else { return }
       wishes = response.wishes
       providerEnabled = response.providerEnabled
       if !response.providerEnabled { showManualForm = true }
@@ -628,22 +642,34 @@ struct IOSWishesView: View {
         IOSWishSummaryResponse(
           openCount: response.openCount, newlyFulfilledCount: response.newlyFulfilledCount))
     } catch {
+      guard !Task.isCancelled, listRequest == request, filter == requestedFilter,
+        model.session?.sessionId == sessionID
+      else { return }
       errorMessage = IOSWishPresentation.describeError(error)
       model.handleSessionFailure(error)
     }
   }
 
   private func loadMore() async {
-    guard let api = model.client, !isLoadingMore else { return }
+    guard let api = model.client, !isLoading, !isLoadingMore, hasMore else { return }
+    let request = listRequest
+    let requestedFilter = filter
+    let sessionID = model.session?.sessionId
     isLoadingMore = true
-    defer { isLoadingMore = false }
+    defer { if listRequest == request { isLoadingMore = false } }
     do {
       let response = try await api.wishes(
-        state: filter.wishState, offset: wishes.count, limit: IOSWishPresentation.pageSize)
+        state: requestedFilter.wishState, offset: wishes.count, limit: IOSWishPresentation.pageSize)
+      guard !Task.isCancelled, listRequest == request, filter == requestedFilter,
+        model.session?.sessionId == sessionID
+      else { return }
       let existing = Set(wishes.map(\.id))
       wishes.append(contentsOf: response.wishes.filter { !existing.contains($0.id) })
       hasMore = response.wishes.count == IOSWishPresentation.pageSize
     } catch {
+      guard !Task.isCancelled, listRequest == request, filter == requestedFilter,
+        model.session?.sessionId == sessionID
+      else { return }
       errorMessage = IOSWishPresentation.describeError(error)
     }
   }
@@ -652,16 +678,28 @@ struct IOSWishesView: View {
     guard let api = model.client else { return }
     let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return }
+    let request = UUID()
+    searchRequest = request
+    let kind = searchKindFilter
+    let sessionID = model.session?.sessionId
     isSearching = true
     errorMessage = nil
     alreadyInLibraryConflict = nil
-    defer { isSearching = false }
+    defer { if searchRequest == request { isSearching = false } }
     do {
-      let response = try await api.wishSearch(query: trimmed, kind: searchKindFilter)
+      let response = try await api.wishSearch(query: trimmed, kind: kind)
+      guard !Task.isCancelled, searchRequest == request, model.session?.sessionId == sessionID
+      else {
+        return
+      }
       providerEnabled = response.providerEnabled
       if !response.providerEnabled { showManualForm = true }
       searchResults = response.results
     } catch {
+      guard !Task.isCancelled, searchRequest == request, model.session?.sessionId == sessionID
+      else {
+        return
+      }
       errorMessage = IOSWishPresentation.describeError(error)
       model.handleSessionFailure(error)
     }

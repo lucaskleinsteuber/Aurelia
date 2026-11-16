@@ -9,7 +9,9 @@ struct IOSWatchHistoryView: View {
   @State private var loading = true
   @State private var loadingMore = false
   @State private var error: String?
+  @State private var errorOnNextPage = false
   @State private var confirmClear = false
+  @State private var requestID = UUID()
 
   var body: some View {
     List {
@@ -30,6 +32,15 @@ struct IOSWatchHistoryView: View {
       }
       if loadingMore {
         ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
+      }
+      if let error, !items.isEmpty {
+        Section {
+          IOSErrorText(message: error)
+          Button("Try Again") {
+            Task { if errorOnNextPage { await loadMore() } else { await load() } }
+          }
+          .disabled(loading || loadingMore)
+        }
       }
     }
     .scrollContentBackground(.hidden)
@@ -73,26 +84,51 @@ struct IOSWatchHistoryView: View {
 
   private func load() async {
     guard let client = model.client else { return }
+    let request = UUID()
+    requestID = request
+    let sessionID = model.session?.sessionId
     loading = true
-    defer { loading = false }
+    loadingMore = false
+    errorOnNextPage = false
+    defer { if requestID == request { loading = false } }
     do {
       let page = try await client.history(offset: 0)
+      guard !Task.isCancelled, requestID == request, model.session?.sessionId == sessionID else {
+        return
+      }
       items = page.items
       total = page.total
       error = nil
     } catch {
+      guard !Task.isCancelled, requestID == request, model.session?.sessionId == sessionID else {
+        return
+      }
       self.error = error.localizedDescription
+      errorOnNextPage = false
     }
   }
 
   private func loadMore() async {
-    guard !loadingMore, items.count < total, let client = model.client else { return }
+    guard !loading, !loadingMore, items.count < total, let client = model.client else { return }
+    let request = requestID
+    let sessionID = model.session?.sessionId
     loadingMore = true
-    defer { loadingMore = false }
-    if let page = try? await client.history(offset: items.count) {
+    defer { if requestID == request { loadingMore = false } }
+    do {
+      let page = try await client.history(offset: items.count)
+      guard !Task.isCancelled, requestID == request, model.session?.sessionId == sessionID else {
+        return
+      }
       let known = Set(items.map(\.id))
       items += page.items.filter { !known.contains($0.id) }
       total = page.total
+      error = nil
+    } catch {
+      guard !Task.isCancelled, requestID == request, model.session?.sessionId == sessionID else {
+        return
+      }
+      self.error = error.localizedDescription
+      errorOnNextPage = true
     }
   }
 
@@ -100,10 +136,15 @@ struct IOSWatchHistoryView: View {
     guard let client = model.client else { return }
     do {
       try await client.deleteHistoryItem(id: item.id)
+      requestID = UUID()
+      loading = false
+      loadingMore = false
       items.removeAll { $0.id == item.id }
       total = max(0, total - 1)
+      error = nil
     } catch {
       self.error = error.localizedDescription
+      errorOnNextPage = false
     }
   }
 
@@ -111,10 +152,15 @@ struct IOSWatchHistoryView: View {
     guard let client = model.client else { return }
     do {
       try await client.clearHistory()
+      requestID = UUID()
+      loading = false
+      loadingMore = false
       items = []
       total = 0
+      error = nil
     } catch {
       self.error = error.localizedDescription
+      errorOnNextPage = false
     }
   }
 }
@@ -161,11 +207,15 @@ struct IOSStatisticsView: View {
   @State private var year = Calendar.current.component(.year, from: Date())
   @State private var wrappedYear: IOSWrappedLaunch?
   @State private var error: String?
+  @State private var reviewError: String?
 
   var body: some View {
     ScrollView {
       if let stats {
         VStack(alignment: .leading, spacing: 28) {
+          if let error {
+            IOSErrorText(message: error).padding(.horizontal, IOSDesign.margin)
+          }
           LazyVGrid(
             columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
             spacing: 12
@@ -357,6 +407,12 @@ struct IOSStatisticsView: View {
               .foregroundStyle(.secondary).padding(.horizontal, IOSDesign.margin)
           }
         }
+        if let reviewError {
+          VStack(alignment: .leading, spacing: 12) {
+            IOSErrorText(message: reviewError)
+            Button("Try Again") { Task { await loadReview() } }.buttonStyle(IOSButtonStyle())
+          }.padding(.horizontal, IOSDesign.margin)
+        }
       }
       .onAppear { if !years.contains(year), let latest = years.max() { year = latest } }
     }
@@ -376,7 +432,22 @@ struct IOSStatisticsView: View {
 
   private func loadReview() async {
     guard let client = model.client else { return }
-    review = try? await client.yearInReview(year: year)
+    let requestedYear = year
+    let sessionID = model.session?.sessionId
+    review = nil
+    reviewError = nil
+    do {
+      let loaded = try await client.yearInReview(year: requestedYear)
+      guard !Task.isCancelled, year == requestedYear, model.session?.sessionId == sessionID else {
+        return
+      }
+      review = loaded
+    } catch {
+      guard !Task.isCancelled, year == requestedYear, model.session?.sessionId == sessionID else {
+        return
+      }
+      reviewError = error.localizedDescription
+    }
   }
 }
 
