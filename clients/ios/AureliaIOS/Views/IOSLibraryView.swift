@@ -3,12 +3,14 @@ import UIKit
 
 /// A poster with its title and year below, as in the Apple TV app on iPhone.
 struct IOSPosterLabel: View {
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let item: IOSCatalogItem
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
       IOSArtworkView(
         artwork: item.poster, width: 320,
-        symbol: item.kind == .series || item.kind == .episode ? "tv" : "film"
+        symbol: item.kind == .series || item.kind == .episode ? "tv" : "film",
+        placeholderTitle: item.parentTitle ?? item.title
       )
       .aspectRatio(2 / 3, contentMode: .fit)
       .overlay(alignment: .topTrailing) { IOSItemBadges(item: item).padding(5) }
@@ -23,9 +25,10 @@ struct IOSPosterLabel: View {
           .strokeBorder(.white.opacity(0.08), lineWidth: 0.5)
       }
       VStack(alignment: .leading, spacing: 1) {
-        Text(item.title).font(.footnote.weight(.semibold)).lineLimit(1)
+        Text(item.title).font(.footnote.weight(.semibold))
+          .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
         Text(item.cardSubtitle).font(.caption).foregroundStyle(.secondary)
-          .lineLimit(item.kind == .episode ? 2 : 1)
+          .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : (item.kind == .episode ? 2 : 1))
         if item.kind == .episode, let availability = item.availabilityMessage {
           Text(availability).font(.caption).foregroundStyle(.secondary).lineLimit(2)
         }
@@ -33,6 +36,9 @@ struct IOSPosterLabel: View {
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .opacity(item.isPlayable || item.kind == .series ? 1 : 0.6)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(item.title)
+    .accessibilityValue(item.accessibilitySummary)
   }
 }
 
@@ -66,6 +72,8 @@ struct IOSArtworkView: View {
   let artwork: IOSArtwork?
   let width: Int
   var symbol: String? = "film"
+  var placeholderTitle: String?
+  var onUnavailable: (() -> Void)?
   @State private var image: UIImage?
 
   var body: some View {
@@ -74,8 +82,22 @@ struct IOSArtworkView: View {
       .overlay {
         if let image {
           Image(uiImage: image).resizable().scaledToFill().transition(.opacity)
+            .accessibilityHidden(true)
         } else if let symbol {
-          Image(systemName: symbol).font(.title2).foregroundStyle(.tertiary)
+          VStack(spacing: 12) {
+            Image(systemName: symbol).font(.title2.weight(.light))
+              .foregroundStyle(.white.opacity(0.45))
+            if let placeholderTitle, !placeholderTitle.isEmpty {
+              Text(placeholderTitle).font(.footnote.weight(.semibold))
+                .multilineTextAlignment(.center).foregroundStyle(.white.opacity(0.8))
+                .lineLimit(4).minimumScaleFactor(0.85)
+            }
+          }
+          .padding(placeholderTitle == nil ? 8 : 12)
+          // Decorative copy of the accessible card title; keep it within the poster at
+          // accessibility sizes, while the actual title below follows the full text size.
+          .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+          .accessibilityHidden(true)
         }
       }
       .clipped()
@@ -86,10 +108,13 @@ struct IOSArtworkView: View {
         let sessionID = model.session?.sessionId
         do {
           let decoded = try await model.artwork.image(
-            artwork: artwork, width: requestWidth, api: api)
+            artwork: artwork, width: requestWidth, api: api.background)
           guard !Task.isCancelled, model.session?.sessionId == sessionID else { return }
           image = decoded
-        } catch {}
+        } catch {
+          guard !Task.isCancelled, model.session?.sessionId == sessionID else { return }
+          onUnavailable?()
+        }
       }
   }
 

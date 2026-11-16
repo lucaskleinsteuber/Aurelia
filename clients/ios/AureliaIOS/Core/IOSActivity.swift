@@ -178,6 +178,16 @@ enum IOSWrapped {
     return Int((Double(target) * (1 - pow(1 - t, 3))).rounded())
   }
 
+  /// A paused or manually read slide must show its actual statistic, never an intermediate
+  /// count (including zero on a slide opened while paused).
+  static func countPresentation(
+    _ number: String, fraction: Double, automaticMotion: Bool, paused: Bool
+  ) -> String {
+    guard automaticMotion, !paused, fraction < 1, let target = countTarget(number), target > 1
+    else { return number }
+    return String(countValue(target, fraction: fraction))
+  }
+
   /// The slide after a tap; nil past the last one, which closes the story.
   static func step(from index: Int, count: Int, forward: Bool) -> Int? {
     forward ? (index + 1 < count ? index + 1 : nil) : max(0, index - 1)

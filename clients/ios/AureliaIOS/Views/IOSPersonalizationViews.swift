@@ -571,30 +571,32 @@ struct IOSSetupDoneView: View {
   @ObservedObject var guide: IOSSetupGuide
 
   var body: some View {
-    VStack(spacing: 24) {
-      Spacer()
-      Image(systemName: "checkmark").font(.system(size: 48, weight: .semibold))
-        .foregroundStyle(Color.accentColor)
-      VStack(spacing: 8) {
-        Text("You're All Set").font(.largeTitle.bold())
-        Text("Here is what Aurelia set up with you.").font(.subheadline).foregroundStyle(.secondary)
-      }
-      VStack(alignment: .leading, spacing: 12) {
-        check("This device is connected to \(model.connection?.name ?? "your server").")
-        if let user = model.session?.user {
-          check("You watch as \(user.shownName).")
+    IOSSetupScrollView {
+      VStack(spacing: 24) {
+        Spacer()
+        Image(systemName: "checkmark").font(.system(size: 48, weight: .semibold))
+          .foregroundStyle(Color.accentColor)
+        VStack(spacing: 8) {
+          Text("You're All Set").font(.largeTitle.bold())
+          Text("Here is what Aurelia set up with you.").font(.subheadline).foregroundStyle(
+            .secondary)
         }
-        check("Progress, favorites and your watchlist follow you to every device.")
+        VStack(alignment: .leading, spacing: 12) {
+          check("This device is connected to \(model.connection?.name ?? "your server").")
+          if let user = model.session?.user {
+            check("You watch as \(user.shownName).")
+          }
+          check("Progress, favorites and your watchlist follow you to every device.")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        Spacer()
+        Button("Start Watching") { guide.finish() }
+          .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
+          .accessibilityIdentifier("setup-start-watching")
       }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(18)
-      .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-      Spacer()
-      Button("Start Watching") { guide.finish() }
-        .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
-        .accessibilityIdentifier("setup-start-watching")
     }
-    .padding(IOSDesign.margin).frame(maxWidth: 520).frame(maxWidth: .infinity)
     .background(IOSDesign.canvas.ignoresSafeArea())
     .accessibilityIdentifier("setup-done")
   }
@@ -661,6 +663,7 @@ struct IOSLibraryTour: View {
       .padding(.bottom, 90)
       .frame(maxWidth: 520)
     }
+    .accessibilityAddTraits(.isModal)
     .onAppear { tab = Self.stops[0].tab }
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("library-tour")

@@ -2,6 +2,37 @@ import Foundation
 import Testing
 
 struct IOSActivityTests {
+  @Test func pausedWrappedSlidesAlwaysShowTheActualStatistic() throws {
+    let numbers = ["143", "357"]
+    #expect(
+      IOSWrapped.countPresentation("357", fraction: 0.35, automaticMotion: true, paused: true)
+        == "357")
+    let next = try #require(IOSWrapped.step(from: 0, count: numbers.count, forward: true))
+    #expect(
+      IOSWrapped.countPresentation(numbers[next], fraction: 0, automaticMotion: true, paused: true)
+        == "357", "Next while paused must not leave the new statistic at zero.")
+    let previous = try #require(IOSWrapped.step(from: next, count: numbers.count, forward: false))
+    #expect(
+      IOSWrapped.countPresentation(
+        numbers[previous], fraction: 0, automaticMotion: true, paused: true)
+        == "143")
+    #expect(
+      IOSWrapped.countPresentation("357", fraction: 1, automaticMotion: true, paused: false)
+        == "357", "Resuming an already shown statistic must not restart its count.")
+  }
+
+  @Test func accessibleWrappedValuesStayStableWhileNormalCountsStillAnimate() {
+    #expect(
+      IOSWrapped.countPresentation("357", fraction: 0, automaticMotion: false, paused: false)
+        == "357")
+    #expect(
+      IOSWrapped.countPresentation("357", fraction: 0.5, automaticMotion: true, paused: false)
+        == "312")
+    #expect(
+      IOSWrapped.countPresentation("02:47", fraction: 0.5, automaticMotion: true, paused: false)
+        == "02:47")
+  }
+
   @Test func watchTimeReadsLikeSpokenDurations() {
     #expect(IOSWatchTime.text(seconds: 0) == "0 min")
     #expect(IOSWatchTime.text(seconds: 20) == "Under 1 min")

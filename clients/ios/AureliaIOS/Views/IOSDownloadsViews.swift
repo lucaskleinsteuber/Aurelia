@@ -95,11 +95,17 @@ struct IOSOfflineModeView: View {
     NavigationStack {
       Group {
         if case .open(let profile) = model.offlineMode {
+          let titles = store.titles(serverID: profile.serverID, profileID: profile.profileID)
           List {
-            IOSOfflineSections(
-              titles: store.titles(serverID: profile.serverID, profileID: profile.profileID),
-              store: store
-            ) { playing = $0 }
+            if titles.isEmpty {
+              ContentUnavailableView(
+                "No Downloads", systemImage: "arrow.down.circle",
+                description: Text(
+                  "There are no downloads for this profile. Connect to the server to download a title."
+                ))
+            } else {
+              IOSOfflineSections(titles: titles, store: store) { playing = $0 }
+            }
           }
           .scrollContentBackground(.hidden)
           .navigationTitle("Downloads")
@@ -126,50 +132,58 @@ struct IOSOfflineModeView: View {
 
   private var profiles: some View {
     let cards = model.connection.map { store.offlineProfiles(serverID: $0.serverID) } ?? []
-    return VStack(spacing: 24) {
-      Spacer()
-      Image(systemName: "arrow.down.circle").font(.system(size: 44, weight: .medium))
-        .foregroundStyle(.secondary)
-      VStack(spacing: 8) {
-        Text("Watch Downloads").font(.title.bold())
-        Text("Choose whose downloads to watch. Everything plays from this \(IOSDesign.deviceName).")
+    return ScrollView {
+      VStack(spacing: 24) {
+        Image(systemName: "arrow.down.circle").font(.system(size: 44, weight: .medium))
+          .foregroundStyle(.secondary)
+        VStack(spacing: 8) {
+          Text("Watch Downloads").font(.title.bold())
+          Text(
+            "Choose whose downloads to watch. Everything plays from this \(IOSDesign.deviceName)."
+          )
           .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
-      }
-      .frame(maxWidth: 420)
-      if cards.isEmpty {
-        Text(
-          "Open your profile once while the server answers, then its downloads open here too."
-        )
-        .font(.footnote).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+        }
         .frame(maxWidth: 420)
-      }
-      HStack(spacing: 24) {
-        ForEach(cards) { card in
-          Button {
-            if card.pinProtected {
-              pin = ""
-              asking = card
-            } else {
-              _ = model.openOffline(card, pin: "")
-            }
-          } label: {
-            VStack(spacing: 8) {
-              IOSProfilePicture(
-                id: card.profileID, name: card.name, size: 72, pictureKey: card.pictureKey,
-                pictureRevision: card.pictureRevision)
-              Text(card.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+        if cards.isEmpty {
+          Text(
+            "Open your profile once while the server answers, then its downloads open here too."
+          )
+          .font(.footnote).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+          .frame(maxWidth: 420)
+        }
+        LazyVGrid(
+          columns: [GridItem(.adaptive(minimum: 100, maximum: 160), spacing: 24)], spacing: 24
+        ) {
+          ForEach(cards) { card in
+            Button {
               if card.pinProtected {
-                Image(systemName: "lock.fill").font(.caption2).foregroundStyle(.secondary)
+                pin = ""
+                asking = card
+              } else {
+                _ = model.openOffline(card, pin: "")
+              }
+            } label: {
+              VStack(spacing: 8) {
+                IOSProfilePicture(
+                  id: card.profileID, name: card.name, size: 72, pictureKey: card.pictureKey,
+                  pictureRevision: card.pictureRevision)
+                Text(card.name).font(.subheadline.weight(.semibold)).multilineTextAlignment(.center)
+                if card.pinProtected {
+                  Image(systemName: "lock.fill").font(.caption2).foregroundStyle(.secondary)
+                }
               }
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(card.name)
+            .accessibilityValue(card.pinProtected ? "PIN protected" : "")
+            .accessibilityIdentifier("offline-profile-\(card.profileID)")
           }
-          .buttonStyle(.plain)
-          .accessibilityIdentifier("offline-profile-\(card.profileID)")
         }
+        .frame(maxWidth: 640)
       }
-      Spacer()
+      .padding(IOSDesign.margin).padding(.vertical, 32)
+      .frame(maxWidth: .infinity)
     }
-    .padding(IOSDesign.margin)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .alert(
       asking.map { "PIN for \($0.name)" } ?? "PIN",

@@ -4,6 +4,7 @@ import SwiftUI
 /// horizontal shelves. Focus moves only through the native focus engine.
 struct IOSHomeView: View {
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.scenePhase) private var scenePhase
   @StateObject private var actions = IOSLibraryActions()
   @State private var playback: IOSHomePlayback?
   @State private var launching = false
@@ -12,6 +13,8 @@ struct IOSHomeView: View {
   @State private var movieNight: IOSMovieNightLaunch?
   @State private var movieNights: [IOSMovieNightSummary] = []
   @State private var monthlyWrapped: IOSWrappedLaunch?
+  @State private var loadedRevision: UUID?
+  @State private var failedHeroArtwork: IOSArtwork?
   /// The server returns at most this many items in Home's catalog shelves.
   private static let shelfLimit = 30
 
@@ -114,10 +117,13 @@ struct IOSHomeView: View {
       VStack(alignment: .leading, spacing: 28) {
         if let home = model.home {
           if let hero = hero(home) {
-            IOSHomeHero(item: model.overlay(hero), launching: launching) { play($0) }
+            IOSHomeHero(
+              item: model.overlay(hero), launching: launching, play: { play($0) },
+              showsArtwork: showsHeroArtwork,
+              artworkUnavailable: { failedHeroArtwork = hero.backdrop ?? hero.poster })
           } else {
             Text("Home").font(.largeTitle.bold())
-              .padding(.horizontal, IOSDesign.margin).padding(.top, 60)
+              .padding(.horizontal, IOSDesign.margin).padding(.top, 12)
           }
           if !model.watchParties.isEmpty { watchTogether }
           if model.supportsMonthlyWrapped, IOSWrapped.monthIsNew() {
@@ -150,7 +156,7 @@ struct IOSHomeView: View {
                   role: model.session?.user.role, accessMode: model.session?.user.accessMode
                 ).storage
                   ? "Add a storage location in Settings › Library."
-                  : "Add a storage location in Aurelia on your Mac."))
+                  : "Ask the server owner to add a storage location."))
           }
         }
         if model.homeLoading && model.home == nil {
@@ -166,23 +172,32 @@ struct IOSHomeView: View {
         }
       }.padding(.bottom, 32)
     }
-    // The hero artwork reaches the top edge, under the status bar.
-    .ignoresSafeArea(edges: .top)
+    // Only real artwork extends under the status bar; the text feature uses native safe areas.
+    .ignoresSafeArea(edges: showsHeroArtwork ? .top : [])
     .toolbar(.hidden, for: .navigationBar)
     .background(IOSDesign.canvas.ignoresSafeArea())
-    .task(id: model.session?.sessionId) {
+    .task(id: PollingKey(sessionID: model.session?.sessionId, phase: scenePhase)) {
+      guard scenePhase == .active, model.session != nil else { return }
       // Parties others start appear on Home within a few seconds.
       while !Task.isCancelled {
-        await model.refreshWatchParties()
-        if model.supportsMovieNight, let api = model.client {
-          movieNights = (try? await api.movieNights()) ?? movieNights
+        await IOSAPIClient.withBackgroundRequests {
+          await model.refreshWatchParties()
+          if model.supportsMovieNight, let api = model.client {
+            movieNights = (try? await api.background.movieNights()) ?? movieNights
+          }
         }
-        try? await Task.sleep(for: .seconds(15))
+        do { try await Task.sleep(for: .seconds(15)) } catch { return }
       }
     }
     .task(id: model.libraryRefresh) {
-      await model.loadHome()
-      await model.preloadLibrary()
+      let revision = model.libraryRefresh
+      let automatic = loadedRevision != nil && loadedRevision != revision
+      loadedRevision = revision
+      if automatic {
+        await IOSAPIClient.withBackgroundRequests { await refreshHome() }
+      } else {
+        await refreshHome()
+      }
       #if DEBUG
         if IOSShowcasePage.current == "detail", detailItem == nil, let home = model.home,
           let featured = hero(home)
@@ -247,6 +262,8 @@ struct IOSHomeView: View {
       playback = nil
       movieNight = nil
     }
+    .onChange(of: featuredArtwork) { _, _ in failedHeroArtwork = nil }
+    .onChange(of: model.libraryRefresh) { _, _ in failedHeroArtwork = nil }
     .onChange(of: model.remoteStopRequests) { _, _ in playback = nil }
     .onChange(of: model.suggestedPlaybackItem) { _, item in
       guard let item else { return }
@@ -290,6 +307,16 @@ struct IOSHomeView: View {
     }
   }
 
+  private struct PollingKey: Equatable {
+    let sessionID: UUID?
+    let phase: ScenePhase
+  }
+
+  private func refreshHome() async {
+    await model.loadHome()
+    await model.preloadLibrary()
+  }
+
   /// Continue Watching starts playback right away from the server's resume target.
   /// `viaPlan` plays a show from its plan (Movie Night's match, a suggestion): a show itself is
   /// not playable; its plan picks the episode.
@@ -330,6 +357,16 @@ struct IOSHomeView: View {
 
   private func hero(_ home: IOSHome) -> IOSCatalogItem? {
     home.recommendation ?? home.continueWatching.first ?? home.recentlyAdded.first
+  }
+
+  private var featuredArtwork: IOSArtwork? {
+    guard let home = model.home, let item = hero(home) else { return nil }
+    return item.backdrop ?? item.poster
+  }
+
+  private var showsHeroArtwork: Bool {
+    guard let featuredArtwork else { return false }
+    return featuredArtwork != failedHeroArtwork
   }
 
   @ViewBuilder
@@ -417,13 +454,63 @@ struct IOSHomeView: View {
 /// The featured title across the top: its artwork to the screen edges, fading into the page,
 /// with the title and one main action, like the Apple TV app on iPhone.
 private struct IOSHomeHero: View {
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let item: IOSCatalogItem
   let launching: Bool
   let play: (IOSCatalogItem) -> Void
+  let showsArtwork: Bool
+  let artworkUnavailable: () -> Void
 
+  @ViewBuilder
   var body: some View {
+    if showsArtwork {
+      artworkHero
+    } else {
+      compactFeature
+    }
+  }
+
+  private var compactFeature: some View {
+    VStack(alignment: .leading, spacing: 20) {
+      Text("Home").font(.largeTitle.bold()).accessibilityAddTraits(.isHeader)
+      if dynamicTypeSize.isAccessibilitySize {
+        featureText
+      } else {
+        HStack(alignment: .top, spacing: 16) {
+          Image(systemName: item.kind == .movie ? "film" : "tv")
+            .font(.title2.weight(.light)).foregroundStyle(.secondary)
+            .frame(width: 52, height: 64)
+            .background(
+              IOSDesign.surface,
+              in: RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous)
+            )
+            .accessibilityHidden(true)
+          featureText
+        }
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.horizontal, IOSDesign.margin).padding(.top, 12)
+  }
+
+  private var featureText: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(item.parentTitle ?? item.title).font(.title2.bold())
+        .fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
+      Text(eyebrow).font(.footnote).foregroundStyle(.secondary)
+      if !item.genres.isEmpty {
+        Text(item.genres.prefix(3).joined(separator: " · ")).font(.subheadline)
+          .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+      }
+      mainAction.padding(.top, 6)
+    }
+    .frame(maxWidth: 640, alignment: .leading)
+  }
+
+  private var artworkHero: some View {
     ZStack(alignment: .bottom) {
-      IOSHeroBackdrop(artwork: item.backdrop ?? item.poster)
+      IOSHeroBackdrop(
+        artwork: item.backdrop ?? item.poster, onUnavailable: artworkUnavailable)
       VStack(spacing: 10) {
         IOSEyebrow(text: eyebrow)
         Text(item.parentTitle ?? item.title).font(.system(.largeTitle, weight: .bold))
@@ -432,27 +519,31 @@ private struct IOSHomeHero: View {
           Text(item.genres.prefix(3).joined(separator: " · ")).font(.subheadline)
             .foregroundStyle(.white.opacity(0.75))
         }
-        Group {
-          if item.progressFraction != nil {
-            Button {
-              play(item)
-            } label: {
-              Label("Continue", systemImage: "play.fill")
-            }.disabled(launching)
-          } else {
-            NavigationLink {
-              IOSDetailView(id: item.detailID, initial: item)
-            } label: {
-              Label("Details", systemImage: "info.circle")
-            }
-          }
-        }
-        .buttonStyle(IOSButtonStyle(kind: .primary)).frame(minWidth: 180).padding(.top, 6)
-        .accessibilityIdentifier("home-hero")
+        mainAction.padding(.top, 6)
       }
       .padding(.horizontal, IOSDesign.margin).padding(.bottom, 8)
     }
     .frame(maxWidth: .infinity)
+  }
+
+  private var mainAction: some View {
+    Group {
+      if item.progressFraction != nil {
+        Button {
+          play(item)
+        } label: {
+          Label("Continue", systemImage: "play.fill")
+        }.disabled(launching)
+      } else {
+        NavigationLink {
+          IOSDetailView(id: item.detailID, initial: item)
+        } label: {
+          Label("Details", systemImage: "info.circle")
+        }
+      }
+    }
+    .buttonStyle(IOSButtonStyle(kind: .primary)).frame(minWidth: 180)
+    .accessibilityIdentifier("home-hero")
   }
 
   private var eyebrow: String {
@@ -465,9 +556,10 @@ private struct IOSHomeHero: View {
 /// Wide artwork that fills the top of a page and fades into the canvas below.
 struct IOSHeroBackdrop: View {
   let artwork: IOSArtwork?
+  var onUnavailable: (() -> Void)?
   var body: some View {
     GeometryReader { geometry in
-      IOSArtworkView(artwork: artwork, width: 1280, symbol: nil)
+      IOSArtworkView(artwork: artwork, width: 1280, symbol: nil, onUnavailable: onUnavailable)
         .frame(width: geometry.size.width, height: geometry.size.height)
         .overlay {
           LinearGradient(
@@ -490,18 +582,22 @@ struct IOSContinueCard: View {
   let item: IOSCatalogItem
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      IOSArtworkView(artwork: item.backdrop ?? item.poster, width: 640, symbol: "play.rectangle")
-        .frame(width: IOSDesign.landscapeWidth, height: IOSDesign.landscapeWidth * 9 / 16)
-        .overlay(alignment: .bottomLeading) {
-          if let fraction = item.progressFraction {
-            IOSProgressBar(fraction: fraction).padding(.horizontal, 10).padding(.bottom, 10)
-          }
+      IOSArtworkView(
+        artwork: item.backdrop ?? item.poster, width: 640, symbol: "play.rectangle",
+        placeholderTitle: item.parentTitle ?? item.title
+      )
+      .frame(width: IOSDesign.landscapeWidth, height: IOSDesign.landscapeWidth * 9 / 16)
+      .overlay(alignment: .bottomLeading) {
+        if let fraction = item.progressFraction {
+          IOSProgressBar(fraction: fraction).padding(.horizontal, 10).padding(.bottom, 10)
         }
-        .overlay(alignment: .center) {
-          Image(systemName: "play.fill").font(.title3).foregroundStyle(.white)
-            .frame(width: 44, height: 44).background(.ultraThinMaterial, in: Circle())
-        }
-        .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
+      }
+      .overlay(alignment: .topTrailing) {
+        Image(systemName: "play.fill").font(.title3).foregroundStyle(.white)
+          .frame(width: 44, height: 44).background(.ultraThinMaterial, in: Circle())
+          .padding(10)
+      }
+      .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
       Text(item.parentTitle ?? item.title).font(.footnote.weight(.semibold)).lineLimit(1)
       Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
     }

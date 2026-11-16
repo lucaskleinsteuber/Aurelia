@@ -671,6 +671,21 @@ extension IOSCatalogItem {
     return availabilityMessage ?? year.map(String.init) ?? kindLabel
   }
 
+  /// Artwork badges have the same meaning for VoiceOver as for someone seeing the poster.
+  var accessibilitySummary: String {
+    var parts = [cardSubtitle]
+    if let availabilityMessage, !parts.contains(availabilityMessage) {
+      parts.append(availabilityMessage)
+    }
+    if isFavorite { parts.append("Favorite") }
+    if watchState == "completed" || progress?.isCompleted == true {
+      parts.append("Watched")
+    } else if (progress?.positionMilliseconds ?? 0) > 0 {
+      parts.append("In progress")
+    }
+    return parts.joined(separator: ", ")
+  }
+
   func replacing(progress: IOSPlaybackProgress? = nil, favorite: Bool? = nil) -> IOSCatalogItem {
     IOSCatalogItem(
       id: id, kind: kind, title: title, originalTitle: originalTitle, year: year,

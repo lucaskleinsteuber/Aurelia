@@ -42,7 +42,7 @@ struct IOSSectionHeader<Destination: View>: View {
 
   var body: some View {
     HStack(alignment: .firstTextBaseline, spacing: 8) {
-      Text(title).font(.title3.weight(.bold))
+      Text(title).font(.title3.weight(.bold)).accessibilityAddTraits(.isHeader)
       if let count {
         Text("\(count)").font(.subheadline.weight(.semibold)).foregroundStyle(.tertiary)
       }
@@ -55,12 +55,11 @@ struct IOSSectionHeader<Destination: View>: View {
             Text("See All")
             Image(systemName: "chevron.right").font(.caption.weight(.bold))
           }.font(.subheadline.weight(.semibold))
-        }.tint(.white.opacity(0.7))
+        }.tint(.white.opacity(0.7)).accessibilityLabel("See all \(title)")
       }
     }
     .padding(.horizontal, IOSDesign.margin)
-    .accessibilityElement(children: .combine)
-    .accessibilityAddTraits(.isHeader)
+    .accessibilityElement(children: .contain)
   }
 }
 

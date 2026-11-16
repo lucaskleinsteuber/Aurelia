@@ -4,6 +4,7 @@ private enum IOSLibraryTab: Hashable { case home, movies, shows, search, profile
 
 struct IOSRootView: View {
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.scenePhase) private var scenePhase
   @State private var tab: IOSLibraryTab = .home
   @State private var introductionReplay = false
   @StateObject private var securityAlerts = IOSSecurityAlertCenter()
@@ -25,13 +26,16 @@ struct IOSRootView: View {
       } else if model.phase == .connection, model.connection == nil, !guide.introSeen {
         IOSSetupIntroductionView(guide: guide)
       } else if model.phase == .library, guide.isGuiding {
-        IOSSetupDoneView(guide: guide).overlay(alignment: .top) { stepBar(.done) }
+        IOSSetupDoneView(guide: guide).safeAreaInset(edge: .top, spacing: 0) { stepBar(.done) }
       } else {
         phaseView
       }
     }
     .background(IOSDesign.canvas.ignoresSafeArea())
-    .onReceive(NotificationCenter.default.publisher(for: .iosShowIntroduction)) { _ in
+    .onReceive(
+      NotificationCenter.default.publisher(for: .iosShowIntroduction).receive(
+        on: DispatchQueue.main)
+    ) { _ in
       introductionReplay = true
     }
     .onChange(of: model.session?.sessionId) { _, _ in tab = .home }
@@ -50,7 +54,7 @@ struct IOSRootView: View {
   @ViewBuilder
   private func stepBar(_ step: IOSSetupStep) -> some View {
     if guide.isGuiding {
-      IOSSetupStepBar(current: step).padding(.top, 4)
+      IOSSetupStepBar(current: step).padding(.top, 4).padding(.bottom, 8)
     }
   }
 
@@ -59,57 +63,67 @@ struct IOSRootView: View {
     Group {
       switch model.phase {
       case .connection:
-        IOSConnectionView(browser: model.browser).overlay(alignment: .top) { stepBar(.connect) }
-      case .trust: IOSServerTrustView().overlay(alignment: .top) { stepBar(.approve) }
-      case .pairing: IOSPairingView().overlay(alignment: .top) { stepBar(.approve) }
-      case .profiles: IOSProfilesView().overlay(alignment: .top) { stepBar(.profile) }
+        IOSConnectionView(browser: model.browser).safeAreaInset(edge: .top, spacing: 0) {
+          stepBar(.connect)
+        }
+      case .trust: IOSServerTrustView().safeAreaInset(edge: .top, spacing: 0) { stepBar(.approve) }
+      case .pairing: IOSPairingView().safeAreaInset(edge: .top, spacing: 0) { stepBar(.approve) }
+      case .profiles: IOSProfilesView().safeAreaInset(edge: .top, spacing: 0) { stepBar(.profile) }
       case .library:
-        TabView(selection: $tab) {
-          NavigationStack { IOSHomeView() }.tabItem { Label("Home", systemImage: "house.fill") }
-            .tag(
-              IOSLibraryTab.home)
-          NavigationStack { IOSLibraryGrid(listing: model.movies, title: "Movies") }
-            .tabItem { Label("Movies", systemImage: "film") }.tag(IOSLibraryTab.movies)
-          NavigationStack { IOSLibraryGrid(listing: model.shows, title: "TV Shows") }
-            .tabItem { Label("TV Shows", systemImage: "tv.fill") }.tag(IOSLibraryTab.shows)
-          NavigationStack { IOSBrowseDestination(section: .search) }.tabItem {
-            Label("Search", systemImage: "magnifyingglass")
-          }.tag(IOSLibraryTab.search)
-          IOSSettingsTab()
-            .tabItem { Label("Settings", systemImage: "gearshape") }
-            .badge(model.supportsWishes ? model.wishBadgeCount : 0)
-            .tag(IOSLibraryTab.profile)
-        }
-        .tint(.white)
-        .modifier(IOSDownloadQualityDialog())
-        .sheet(isPresented: $model.wishesPresented) {
-          NavigationStack {
-            IOSWishesView()
-              .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                  Button("Done") { model.wishesPresented = false }
+        VStack(spacing: 0) {
+          IOSSecurityAlertBanner(center: securityAlerts)
+          TabView(selection: $tab) {
+            NavigationStack { IOSHomeView() }.tabItem { Label("Home", systemImage: "house.fill") }
+              .tag(
+                IOSLibraryTab.home)
+            NavigationStack { IOSLibraryGrid(listing: model.movies, title: "Movies") }
+              .tabItem { Label("Movies", systemImage: "film") }.tag(IOSLibraryTab.movies)
+            NavigationStack { IOSLibraryGrid(listing: model.shows, title: "TV Shows") }
+              .tabItem { Label("TV Shows", systemImage: "tv.fill") }.tag(IOSLibraryTab.shows)
+            NavigationStack { IOSBrowseDestination(section: .search) }.tabItem {
+              Label("Search", systemImage: "magnifyingglass")
+            }.tag(IOSLibraryTab.search)
+            IOSSettingsTab()
+              .tabItem { Label("Settings", systemImage: "gearshape") }
+              .badge(model.supportsWishes ? model.wishBadgeCount : 0)
+              .tag(IOSLibraryTab.profile)
+          }
+          .tint(.white)
+          .modifier(IOSDownloadQualityDialog())
+          .sheet(isPresented: $model.wishesPresented) {
+            NavigationStack {
+              IOSWishesView()
+                .toolbar {
+                  ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { model.wishesPresented = false }
+                  }
                 }
-              }
-          }
-        }
-        .overlay {
-          if guide.tourPending, !guide.isGuiding {
-            IOSLibraryTour(tab: tabIndex) { guide.tourShown() }.transition(.opacity)
-          }
-        }
-        .overlay(alignment: .top) { IOSSecurityAlertBanner(center: securityAlerts) }
-        .task(id: model.session?.sessionId) { securityAlerts.start(model: model) }
-        .onDisappear { securityAlerts.stop() }
-        #if DEBUG
-          .onAppear {
-            switch IOSShowcasePage.current {
-            case "movies": tab = .movies
-            case "shows": tab = .shows
-            default: break
             }
-            if IOSUITestScenario.current == .admin { tab = .profile }
           }
-        #endif
+          .overlay {
+            if guide.tourPending, !guide.isGuiding {
+              IOSLibraryTour(tab: tabIndex) { guide.tourShown() }.transition(.opacity)
+            }
+          }
+          .task(id: "\(model.session?.sessionId.uuidString ?? "")-\(scenePhase)") {
+            if scenePhase == .active {
+              securityAlerts.start(model: model)
+            } else {
+              securityAlerts.stop()
+            }
+          }
+          .onDisappear { securityAlerts.stop() }
+          #if DEBUG
+            .onAppear {
+              switch IOSShowcasePage.current {
+              case "movies": tab = .movies
+              case "shows": tab = .shows
+              default: break
+              }
+              if IOSUITestScenario.current == .admin { tab = .profile }
+            }
+          #endif
+        }
       }
     }
   }
@@ -228,81 +242,83 @@ struct IOSConnectionView: View {
 /// Apple TV keeps trying, so turning the server on or opening Aurelia on a Mac is enough.
 struct IOSSavedServerView: View {
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.scenePhase) private var scenePhase
   let name: String
   let chooseOtherServer: () -> Void
 
   var body: some View {
-    VStack(spacing: 20) {
-      Spacer()
-      if model.savedServerUnreachable {
-        Image(systemName: "power").font(.system(size: 44, weight: .medium))
-          .foregroundStyle(.secondary)
-        VStack(spacing: 10) {
-          Text(
-            model.savedServerAppHost.map { "Start Aurelia on Your \($0)" } ?? "The Server Is Off"
-          ).font(.title.bold())
-          Text(
-            model.savedServerAppHost.map {
-              "“\(name)” runs inside the Aurelia app on a \($0). Open Aurelia there, or wake the \($0), and Aurelia connects by itself."
-            }
-              ?? "“\(name)” isn’t answering. Turn on the computer the server runs on, or open Aurelia on your Mac to wake it."
-          )
-          .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
-          Text("Aurelia connects by itself as soon as the server is on.")
-            .font(.footnote).foregroundStyle(.tertiary).multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: 420)
-        ZStack {
-          if model.isWakingServer {
-            ProgressView("Wake signal sent. Waiting for the server…")
-          } else if model.isBusy {
-            ProgressView("Waiting for the server…")
-          } else {
-            HStack(spacing: 12) {
-              if model.wakeOnLanStatus.canWake {
-                Button {
-                  Task { await model.wakeServerNow() }
-                } label: {
-                  Label("Wake Server", systemImage: "power")
-                }
-                .buttonStyle(IOSButtonStyle(kind: .primary))
-                .accessibilityIdentifier("server-wake")
+    IOSSetupScrollView {
+      VStack(spacing: 20) {
+        Spacer()
+        if model.savedServerUnreachable {
+          Image(systemName: "power").font(.system(size: 44, weight: .medium))
+            .foregroundStyle(.secondary)
+          VStack(spacing: 10) {
+            Text(
+              model.savedServerAppHost.map { "Start Aurelia on Your \($0)" } ?? "The Server Is Off"
+            ).font(.title.bold())
+            Text(
+              model.savedServerAppHost.map {
+                "“\(name)” runs inside the Aurelia app on a \($0). Open Aurelia there, or wake the \($0), and Aurelia connects by itself."
               }
-              Button("Try Again") { Task { await model.reconnect(userInitiated: true) } }
-                .buttonStyle(
-                  IOSButtonStyle(kind: model.wakeOnLanStatus.canWake ? .secondary : .primary)
-                )
-                .accessibilityIdentifier("tv-server-retry")
-            }
+                ?? "“\(name)” isn’t answering. Turn on the computer the server runs on, or open Aurelia on your Mac to wake it."
+            )
+            .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Text("Aurelia connects by itself as soon as the server is on.")
+              .font(.footnote).foregroundStyle(.tertiary).multilineTextAlignment(.center)
           }
-        }.frame(minHeight: 56)
-      } else {
-        ProgressView().controlSize(.large)
-        Text("Connecting to \(name)…").font(.title3.weight(.semibold))
-          .multilineTextAlignment(.center)
-      }
-      Spacer()
-      if model.canWatchOffline {
-        Button {
-          model.enterOfflineMode()
-        } label: {
-          Label("Watch Downloads", systemImage: "arrow.down.circle")
+          .frame(maxWidth: 420)
+          ZStack {
+            if model.isWakingServer {
+              ProgressView("Wake signal sent. Waiting for the server…")
+            } else if model.isBusy {
+              ProgressView("Waiting for the server…")
+            } else {
+              HStack(spacing: 12) {
+                if model.wakeOnLanStatus.canWake {
+                  Button {
+                    Task { await model.wakeServerNow() }
+                  } label: {
+                    Label("Wake Server", systemImage: "power")
+                  }
+                  .buttonStyle(IOSButtonStyle(kind: .primary))
+                  .accessibilityIdentifier("server-wake")
+                }
+                Button("Try Again") { Task { await model.reconnect(userInitiated: true) } }
+                  .buttonStyle(
+                    IOSButtonStyle(kind: model.wakeOnLanStatus.canWake ? .secondary : .primary)
+                  )
+                  .accessibilityIdentifier("tv-server-retry")
+              }
+            }
+          }.frame(minHeight: 56)
+        } else {
+          ProgressView().controlSize(.large)
+          Text("Connecting to \(name)…").font(.title3.weight(.semibold))
+            .multilineTextAlignment(.center)
         }
-        .buttonStyle(IOSButtonStyle(kind: .secondary))
-        .accessibilityIdentifier("server-watch-downloads")
+        Spacer()
+        if model.canWatchOffline {
+          Button {
+            model.enterOfflineMode()
+          } label: {
+            Label("Watch Downloads", systemImage: "arrow.down.circle")
+          }
+          .buttonStyle(IOSButtonStyle(kind: .secondary))
+          .accessibilityIdentifier("server-watch-downloads")
+        }
+        Button("Connect to Another Server", action: chooseOtherServer)
+          .font(.subheadline.weight(.semibold)).tint(.white.opacity(0.75))
+          .accessibilityIdentifier("tv-other-server")
       }
-      Button("Connect to Another Server", action: chooseOtherServer)
-        .font(.subheadline.weight(.semibold)).tint(.white.opacity(0.75))
-        .accessibilityIdentifier("tv-other-server")
     }
-    .padding(IOSDesign.margin).padding(.bottom, 12)
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .accessibilityIdentifier("tv-server-asleep")
-    .task(id: model.savedServerUnreachable) {
+    .task(id: "\(model.savedServerUnreachable)-\(scenePhase)") {
       // Tries again every 20 seconds while the hint is shown.
-      guard model.savedServerUnreachable else { return }
+      guard model.savedServerUnreachable, scenePhase == .active else { return }
       while !Task.isCancelled {
         do { try await Task.sleep(for: .seconds(20)) } catch { return }
+        guard !Task.isCancelled, scenePhase == .active else { return }
         if !model.isBusy { await model.reconnect() }
       }
     }
@@ -313,33 +329,35 @@ struct IOSServerTrustView: View {
   @EnvironmentObject private var model: IOSAppModel
 
   var body: some View {
-    VStack(spacing: 22) {
-      Spacer()
-      Image(systemName: "lock.shield").font(.system(size: 44)).foregroundStyle(.secondary)
-      VStack(spacing: 6) {
-        Text(model.inspected?.info.name ?? "Aurelia Server").font(.title.bold())
-          .multilineTextAlignment(.center)
-        Text(model.inspected?.baseURL.host ?? "").font(.subheadline).foregroundStyle(.secondary)
+    IOSSetupScrollView {
+      VStack(spacing: 22) {
+        Spacer()
+        Image(systemName: "lock.shield").font(.system(size: 44)).foregroundStyle(.secondary)
+        VStack(spacing: 6) {
+          Text(model.inspected?.info.name ?? "Aurelia Server").font(.title.bold())
+            .multilineTextAlignment(.center)
+          Text(model.inspected?.baseURL.host ?? "").font(.subheadline).foregroundStyle(.secondary)
+        }
+        VStack(spacing: 10) {
+          Text("Check that Aurelia on your Mac or Linux computer shows the same fingerprint.")
+            .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+          Text(IOSServerIdentity.display(model.inspected?.fingerprint ?? ""))
+            .font(.system(.footnote, design: .monospaced, weight: .medium))
+            .multilineTextAlignment(.center).textSelection(.enabled)
+            .padding(14).frame(maxWidth: .infinity)
+            .background(
+              IOSDesign.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        if let error = model.error { IOSErrorText(message: error) }
+        Spacer()
+        VStack(spacing: 10) {
+          Button("Trust and Continue") { model.beginPairing() }
+            .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
+          Button("Back") { model.cancelPairing() }
+            .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
+        }.disabled(model.isBusy)
       }
-      VStack(spacing: 10) {
-        Text("Check that Aurelia on your Mac or Linux computer shows the same fingerprint.")
-          .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-        Text(IOSServerIdentity.display(model.inspected?.fingerprint ?? ""))
-          .font(.system(.footnote, design: .monospaced, weight: .medium))
-          .multilineTextAlignment(.center).textSelection(.enabled)
-          .padding(14).frame(maxWidth: .infinity)
-          .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-      }
-      if let error = model.error { IOSErrorText(message: error) }
-      Spacer()
-      VStack(spacing: 10) {
-        Button("Trust and Continue") { model.beginPairing() }
-          .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
-        Button("Back") { model.cancelPairing() }
-          .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
-      }.disabled(model.isBusy)
     }
-    .padding(IOSDesign.margin).frame(maxWidth: 520).frame(maxWidth: .infinity)
     .iosBackCommand { model.cancelPairing() }
   }
 }
@@ -350,55 +368,57 @@ struct IOSPairingView: View {
   @FocusState private var focused: Bool
 
   var body: some View {
-    VStack(spacing: 22) {
-      Spacer()
-      Image(systemName: IOSDesign.isPad ? "ipad.badge.checkmark" : "iphone.badge.checkmark")
-        .font(.system(size: 44)).foregroundStyle(.secondary)
-      VStack(spacing: 6) {
-        Text("Enter the Code").font(.title.bold())
+    IOSSetupScrollView {
+      VStack(spacing: 22) {
+        Spacer()
+        Image(systemName: IOSDesign.isPad ? "ipad.badge.checkmark" : "iphone.badge.checkmark")
+          .font(.system(size: 44)).foregroundStyle(.secondary)
+        VStack(spacing: 6) {
+          Text("Enter the Code").font(.title.bold())
+            .multilineTextAlignment(.center)
+          Text("Your Mac or Linux computer shows the code; you type it here.")
+            .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        }
+        VStack(alignment: .leading, spacing: 6) {
+          IOSPairingStep(
+            number: 1,
+            text: "On the computer that runs Aurelia, open Settings › Profiles and Devices.")
+          IOSPairingStep(
+            number: 2,
+            text: "Click Create Code. On a Linux server without screen, run aurelia pair.")
+          IOSPairingStep(
+            number: 3, text: "Type the 8 digits below. A code works once and for five minutes.")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        TextField("8-digit code", text: $code)
+          .keyboardType(.numberPad).textContentType(.oneTimeCode)
+          .font(.system(size: 34, weight: .semibold, design: .monospaced))
           .multilineTextAlignment(.center)
-        Text("Your Mac or Linux computer shows the code; you type it here.")
-          .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-      }
-      VStack(alignment: .leading, spacing: 6) {
-        IOSPairingStep(
-          number: 1,
-          text: "On the computer that runs Aurelia, open Settings › Profiles and Devices.")
-        IOSPairingStep(
-          number: 2, text: "Click Create Code. On a Linux server without screen, run aurelia pair.")
-        IOSPairingStep(
-          number: 3, text: "Type the 8 digits below. A code works once and for five minutes.")
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      TextField("8-digit code", text: $code)
-        .keyboardType(.numberPad).textContentType(.oneTimeCode)
-        .font(.system(size: 34, weight: .semibold, design: .monospaced))
-        .multilineTextAlignment(.center)
-        .padding(.vertical, 12).frame(maxWidth: .infinity)
-        .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .focused($focused)
-        .onChange(of: code) { _, value in
-          let digits = String(value.filter(\.isNumber).prefix(8))
-          if digits != value { code = digits }
+          .padding(.vertical, 12).frame(maxWidth: .infinity)
+          .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+          .focused($focused)
+          .onChange(of: code) { _, value in
+            let digits = String(value.filter(\.isNumber).prefix(8))
+            if digits != value { code = digits }
+          }
+          .onSubmit { model.pair(code: code) }
+          .accessibilityLabel("Pairing code")
+          .accessibilityIdentifier("pairing-code")
+        if let error = model.error { IOSErrorText(message: error) }
+        Spacer()
+        VStack(spacing: 10) {
+          Button {
+            model.pair(code: code)
+          } label: {
+            if model.isBusy { ProgressView() } else { Text("Pair This \(IOSDesign.deviceName)") }
+          }
+          .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
+          .disabled(code.count != 8 || model.isBusy)
+          Button("Cancel") { model.cancelPairing() }
+            .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
         }
-        .onSubmit { model.pair(code: code) }
-        .accessibilityLabel("Pairing code")
-        .accessibilityIdentifier("pairing-code")
-      if let error = model.error { IOSErrorText(message: error) }
-      Spacer()
-      VStack(spacing: 10) {
-        Button {
-          model.pair(code: code)
-        } label: {
-          if model.isBusy { ProgressView() } else { Text("Pair This \(IOSDesign.deviceName)") }
-        }
-        .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
-        .disabled(code.count != 8 || model.isBusy)
-        Button("Cancel") { model.cancelPairing() }
-          .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
       }
     }
-    .padding(IOSDesign.margin).frame(maxWidth: 520).frame(maxWidth: .infinity)
     .onAppear { focused = true }
     .iosBackCommand { model.cancelPairing() }
   }
@@ -422,5 +442,23 @@ struct IOSErrorText: View {
   var body: some View {
     Text(message).font(.footnote).foregroundStyle(.orange).multilineTextAlignment(.center)
       .accessibilityAddTraits(.updatesFrequently)
+  }
+}
+
+/// Keeps setup actions reachable when the keyboard, rotation or larger text reduces the space.
+struct IOSSetupScrollView<Content: View>: View {
+  @ViewBuilder let content: Content
+
+  var body: some View {
+    GeometryReader { geometry in
+      ScrollView {
+        content
+          .padding(IOSDesign.margin)
+          .frame(maxWidth: 520)
+          .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+      }
+      .scrollBounceBehavior(.basedOnSize)
+      .scrollDismissesKeyboard(.interactively)
+    }
   }
 }

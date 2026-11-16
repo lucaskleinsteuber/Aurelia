@@ -134,7 +134,7 @@ struct IOSLibraryGrid: View {
         // Only the library revision changed: update the shown titles in place.
         lastKey = request
         if let api = model.client {
-          await listing.refresh(api: api, onFailure: model.handleSessionFailure)
+          await listing.refresh(api: api.background, onFailure: model.handleSessionFailure)
         }
         return
       }
