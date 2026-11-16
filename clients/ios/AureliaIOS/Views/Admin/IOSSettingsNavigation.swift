@@ -33,7 +33,9 @@ struct IOSSettingsTab: View {
       } else {
         NavigationStack(path: $phonePath) {
           IOSSettingsRoot(selection: nil)
-            .navigationDestination(for: IOSSettingsPage.self) { IOSSettingsDestination(page: $0) }
+            .navigationDestination(for: IOSSettingsPage.self) {
+              IOSSettingsDestination(page: $0).toolbar(.hidden, for: .tabBar)
+            }
         }
       }
     }
@@ -60,6 +62,7 @@ struct IOSSettingsTab: View {
     .onChange(of: model.session?.sessionId) { _, _ in
       admin.attach(model)
       phonePath = []
+      selection = admin.permissions.storage ? .library : .playback
     }
     .sheet(isPresented: $admin.unlockRequested, onDismiss: { admin.cancelUnlock() }) {
       IOSManagementUnlockSheet(admin: admin, serverName: model.connection?.name ?? "Aurelia")

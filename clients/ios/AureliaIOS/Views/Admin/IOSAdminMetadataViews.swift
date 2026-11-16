@@ -13,14 +13,15 @@ struct IOSAdminMetadataView: View {
   }
 
   var body: some View {
+    let owner = admin.permissions.owner
     IOSAdminLoader { client in
-      async let provider = try? client.metadataProvider()
+      async let provider = owner ? client.metadataProvider() : nil
       async let jobs = client.metadataJobs(limit: 10)
-      async let reviews = (try? client.metadataReviews()) ?? []
-      async let subtitles = try? client.subtitleProvider()
+      async let reviews = client.metadataReviews()
+      async let subtitles = owner ? client.subtitleProvider() : nil
       return Overview(
-        provider: await provider, jobs: try await jobs, reviews: await reviews,
-        subtitles: await subtitles)
+        provider: try await provider, jobs: try await jobs, reviews: try await reviews,
+        subtitles: try await subtitles)
     } content: { overview, reload in
       IOSAdminMetadataContent(overview: overview, owner: admin.permissions.owner, reload: reload)
     }
@@ -33,7 +34,7 @@ private struct IOSAdminMetadataContent: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   let overview: IOSAdminMetadataView.Overview
   let owner: Bool
-  let reload: () async -> Void
+  let reload: @MainActor @Sendable () async -> Void
   @State private var token = ""
   @State private var confirmation: IOSAdminConfirmation?
 
@@ -173,30 +174,28 @@ private struct IOSAdminMetadataContent: View {
           Text("Subtitle Downloads")
         }
       }
-      Section {
-        IOSAdminActionButton(
-          "Remove Unused Artwork", systemImage: "photo.stack",
-          detail: "Frees space taken by posters of titles that are gone."
-        ) { try await $0.pruneArtwork() }
-        IOSAdminActionButton(
-          "Rebuild Search", systemImage: "text.magnifyingglass",
-          detail: "Use this if search misses titles you know are there."
-        ) { try await $0.rebuildSearch() }
-      } header: {
-        Text("Artwork and Search")
-      } footer: {
-        Text("Only Aurelia’s own copies of posters and backdrops are removed, never your files.")
+      if owner {
+        Section {
+          IOSAdminActionButton(
+            "Remove Unused Artwork", systemImage: "photo.stack",
+            detail: "Frees space taken by posters of titles that are gone."
+          ) { try await $0.pruneArtwork() }
+          IOSAdminActionButton(
+            "Rebuild Search", systemImage: "text.magnifyingglass",
+            detail: "Use this if search misses titles you know are there."
+          ) { try await $0.rebuildSearch() }
+        } header: {
+          Text("Artwork and Search")
+        } footer: {
+          Text("Only Aurelia’s own copies of posters and backdrops are removed, never your files.")
+        }
       }
     }
     .scrollContentBackground(.hidden)
     .background(IOSDesign.canvas.ignoresSafeArea())
     .refreshable { await reload() }
     .adminConfirmation($confirmation)
-    .task(id: activeJob?.itemsProcessed) {
-      guard activeJob != nil else { return }
-      try? await Task.sleep(for: .seconds(3))
-      await reload()
-    }
+    .adminPolling(every: 3, while: activeJob != nil, reload: reload)
   }
 }
 
@@ -310,8 +309,14 @@ private struct IOSAdminSubtitlesView: View {
         }
         if provider.hasAccount {
           LabeledContent("Account", value: provider.accountName ?? "Saved")
-          Button("Remove Account", role: .destructive) {
-            Task { await admin.perform { _ = try await $0.removeSubtitleAccount() } }
+          Button("Remove Account…", role: .destructive) {
+            confirmation = IOSAdminConfirmation(
+              title: "Remove the OpenSubtitles account?",
+              message: "Downloaded subtitles stay. The server no longer uses this account.",
+              action: "Remove"
+            ) {
+              Task { await admin.perform { _ = try await $0.removeSubtitleAccount() } }
+            }
           }
         } else {
           TextField("Account Name (optional)", text: $account)

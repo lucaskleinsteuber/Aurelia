@@ -333,6 +333,15 @@ enum IOSPowerRules {
       afterSleepTimer: draft.afterSleepTimer ?? true, wakeOnAccess: wake)
   }
 
+  /// The time pickers show these defaults as soon as awake hours are enabled. Store the same
+  /// values in the draft so saving without moving either picker sends what the person sees.
+  static func withDefaultAwakeHours(_ power: IOSServerPower) -> IOSServerPower {
+    var draft = power
+    draft.awakeFrom = draft.awakeFrom ?? "07:00"
+    draft.awakeUntil = draft.awakeUntil ?? "23:00"
+    return draft
+  }
+
   static func isTime(_ value: String) -> Bool {
     let parts = value.split(separator: ":")
     guard value.count == 5, parts.count == 2, let hour = Int(parts[0]), let minute = Int(parts[1])
@@ -454,5 +463,123 @@ enum IOSImportRules {
         category: needsParent && !category.isEmpty ? category : nil,
         title: oneFile && !title.isEmpty ? title : nil)
     }
+  }
+}
+
+/// A profile is saved through separate server endpoints. Each successful endpoint can advance
+/// the profile or access revision; subsequent changes must use its returned revision, not the
+/// revision from when the editor opened. Title exceptions always come from a successful load.
+struct IOSProfileSavePlan: Sendable {
+  let editor: IOSProfileEditor
+  let age: IOSProfileAgeLimit
+  let name: String?
+  let picture: String??
+  let update: IOSProfileUpdateRequest?
+  let ageLimit: Int?
+
+  func save(using client: IOSAPIClient) async throws {
+    let id = editor.user.id
+    var revision = editor.revision
+    var accessRevision = age.revision
+    var changed = false
+    var storedAgeLimit = age.ageLimit
+    do {
+      if let name {
+        let user = try await client.renameProfile(id: id, name: name)
+        changed = true
+        revision = user.profileRevision ?? revision + 1
+      }
+      if let picture {
+        let user = try await client.setProfilePicture(id: id, builtin: picture)
+        changed = true
+        revision = user.profileRevision ?? revision + 1
+      }
+      // The server requires removing a children's age limit before promoting the profile.
+      if let update, update.role != "user", age.ageLimit != nil {
+        var cleared = age
+        cleared.ageLimit = nil
+        let result = try await client.setAgeLimit(user: id, cleared)
+        changed = true
+        accessRevision = result.revision
+        revision += 1
+        storedAgeLimit = nil
+      }
+      if var update {
+        // Enabling an age limit already switches from chosen titles to the whole library in
+        // the SAME server transaction. Clearing grants first would leave an unrestricted
+        // profile if the later age-rule request failed.
+        if ageLimit != nil {
+          update.accessMode = nil
+          update.titleIds = nil
+        }
+        let profileChanged =
+          update.role != editor.user.role || update.isEnabled != editor.isEnabled
+          || update.pinProtectionEnabled != (editor.user.pinProtectionEnabled ?? true)
+          || update.pin != nil || update.accessMode != nil
+        if profileChanged {
+          update.revision = revision
+          let result = try await client.updateProfile(id: id, update)
+          changed = true
+          accessRevision = result.access.revision
+          // Choosing individual titles also clears the age limit in the server transaction.
+          storedAgeLimit = result.user.ageLimit
+        }
+      }
+      if ageLimit != storedAgeLimit {
+        var value = age
+        value.ageLimit = ageLimit
+        value.revision = accessRevision
+        _ = try await client.setAgeLimit(user: id, value)
+        changed = true
+      }
+    } catch {
+      // Do not automatically replay a partially applied multi-request edit after unlocking.
+      // Server-side atomic profile editing would be needed to roll these changes back.
+      if changed {
+        throw PartialSave(problem: error.localizedDescription)
+      }
+      throw error
+    }
+  }
+
+  struct PartialSave: LocalizedError, Sendable {
+    let problem: String
+    var errorDescription: String? {
+      "Some profile changes were saved. Reopen this profile before trying again. " + problem
+    }
+  }
+}
+
+/// Speech status retains completed jobs. Only these server states still need progress reads.
+enum IOSAdminPollingRules {
+  static func speechJobIsActive(_ state: String) -> Bool {
+    ["waiting", "listening", "saving"].contains(state)
+  }
+}
+
+/// One storage location's administration data. Classification discoveries exist only for an
+/// automatic location; unassigned-file reviews also exist for explicit movie/show locations.
+struct IOSStorageLocationData: Sendable {
+  let library: IOSLibrarySummary
+  let scans: [IOSLibraryScan]
+  let exclusions: [IOSExcludedMedia]
+  let discoveries: [IOSLibraryDiscovery]
+  let reviews: [IOSLibraryImportReview]
+
+  static func load(client: IOSAPIClient, libraryID: UUID) async throws -> IOSStorageLocationData {
+    let libraries = try await client.libraries()
+    guard let library = libraries.first(where: { $0.id == libraryID }) else {
+      throw IOSCoreError.server(
+        status: 404, code: "library_not_found", message: "This storage location was removed.",
+        retryAfter: nil)
+    }
+    async let scans = client.libraryScans(id: libraryID)
+    async let exclusions = client.exclusions(library: libraryID)
+    async let discoveries =
+      library.kind == "automatic" ? client.discoveries(library: libraryID) : []
+    async let reviews = client.importReviews(library: libraryID)
+    return try await IOSStorageLocationData(
+      library: library, scans: scans, exclusions: exclusions, discoveries: discoveries,
+      reviews: reviews)
   }
 }

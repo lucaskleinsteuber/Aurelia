@@ -20,8 +20,10 @@ private struct IOSAdminAutomationForm: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   @EnvironmentObject private var model: IOSAppModel
   @State private var siriReady = false
+  @State private var changingSiri = false
+  @State private var busyWebhooks: Set<UUID> = []
   let overview: IOSAutomationOverview
-  let reload: () async -> Void
+  let reload: @MainActor @Sendable () async -> Void
   @State private var editing: EditorTarget?
   @State private var deliveriesFor: IOSAutomationWebhook?
   @State private var creatingToken = false
@@ -90,10 +92,15 @@ private struct IOSAdminAutomationForm: View {
             } label: {
               Label("Edit", systemImage: "pencil")
             }
-            Button {
-              Task { await rotate(webhook) }
+            Button(role: .destructive) {
+              confirmation = IOSAdminConfirmation(
+                title: "Replace the secret for “\(webhook.name)”?",
+                message:
+                  "The old secret stops working at once. Update the receiver with the new one.",
+                action: "Replace Secret"
+              ) { Task { await rotate(webhook) } }
             } label: {
-              Label("New Secret", systemImage: "key")
+              Label("New Secret…", systemImage: "key")
             }
             Divider()
             Button(role: .destructive) {
@@ -168,6 +175,7 @@ private struct IOSAdminAutomationForm: View {
           Button("Remove Siri from This \(IOSDesign.deviceName)", role: .destructive) {
             Task { await removeSiri() }
           }
+          .disabled(changingSiri)
         } else {
           Button {
             Task { await setUpSiri() }
@@ -177,6 +185,7 @@ private struct IOSAdminAutomationForm: View {
               "Creates a key for this \(IOSDesign.deviceName), so Siri can play, turn the server off and say what plays, even when Aurelia is closed."
             )
           }
+          .disabled(changingSiri)
           .accessibilityIdentifier("automation-set-up-siri")
         }
       } header: {
@@ -273,7 +282,9 @@ private struct IOSAdminAutomationForm: View {
   private var siriKeyName: String { "Siri on \(model.deviceName)" }
 
   private func setUpSiri() async {
-    guard let server = model.connection?.serverID else { return }
+    guard !changingSiri, let server = model.connection?.serverID else { return }
+    changingSiri = true
+    defer { changingSiri = false }
     let name = siriKeyName
     guard
       let created = await admin.value(
@@ -287,18 +298,29 @@ private struct IOSAdminAutomationForm: View {
       siriReady = true
       AureliaShortcuts.updateAppShortcutParameters()
     } catch {
-      admin.alert = "This \(IOSDesign.deviceName) couldn't keep the key. Try again."
+      let id = created.token.id
+      do {
+        try await admin.runChange { try await $0.revokeIntegrationToken(id: id) }
+        admin.alert = "This \(IOSDesign.deviceName) couldn't keep the key. Try again."
+      } catch {
+        admin.alert =
+          "This \(IOSDesign.deviceName) couldn't keep the key. Remove “\(name)” from Keys for Home Assistant and Shortcuts before trying again."
+      }
     }
   }
 
   private func removeSiri() async {
-    guard let server = model.connection?.serverID else { return }
-    IOSSiriKeyStore().delete(server: server)
-    siriReady = false
+    guard !changingSiri, let server = model.connection?.serverID else { return }
+    changingSiri = true
+    defer { changingSiri = false }
     if let token = overview.tokens.first(where: { $0.name == siriKeyName }) {
       let id = token.id
-      await admin.perform("Removing Siri's key…") { try await $0.revokeIntegrationToken(id: id) }
+      guard
+        await admin.perform("Removing Siri's key…", { try await $0.revokeIntegrationToken(id: id) })
+      else { return }
     }
+    IOSSiriKeyStore().delete(server: server)
+    siriReady = false
   }
 
   private func webhookRow(_ webhook: IOSAutomationWebhook) -> some View {
@@ -335,6 +357,8 @@ private struct IOSAdminAutomationForm: View {
 
   private func test(_ webhook: IOSAutomationWebhook) async {
     let id = webhook.id
+    guard busyWebhooks.insert(id).inserted else { return }
+    defer { busyWebhooks.remove(id) }
     guard let delivery = await admin.value("Sending a test…", { try await $0.testWebhook(id: id) })
     else { return }
     result =
@@ -345,6 +369,8 @@ private struct IOSAdminAutomationForm: View {
 
   private func rotate(_ webhook: IOSAutomationWebhook) async {
     let id = webhook.id
+    guard busyWebhooks.insert(id).inserted else { return }
+    defer { busyWebhooks.remove(id) }
     guard
       let secret = await admin.value(
         "Creating a new secret…", { try await $0.rotateWebhookSecret(id: id) })
@@ -391,6 +417,7 @@ private struct IOSWebhookEditor: View {
   @State private var excludeChildren: Bool
   @State private var enabled: Bool
   @State private var problem: String?
+  @State private var saving = false
 
   init(
     overview: IOSAutomationOverview, webhook: IOSAutomationWebhook?,
@@ -485,6 +512,7 @@ private struct IOSWebhookEditor: View {
       ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
       ToolbarItem(placement: .confirmationAction) {
         Button(webhook == nil ? "Add" : "Save") { Task { await save() } }
+          .disabled(saving)
       }
     }
   }
@@ -499,6 +527,9 @@ private struct IOSWebhookEditor: View {
   }
 
   private func save() async {
+    guard !saving else { return }
+    saving = true
+    defer { saving = false }
     let address =
       preset == "homeAssistant"
       ? IOSAutomationText.homeAssistantURL(base: base, webhookID: webhookID) : url
@@ -536,6 +567,7 @@ private struct IOSIntegrationTokenEditor: View {
   let created: (String) -> Void
   @State private var name = "Home Assistant"
   @State private var scopes: Set<String> = ["status"]
+  @State private var saving = false
 
   var body: some View {
     IOSAdminForm(title: "Create a Key") {
@@ -564,11 +596,14 @@ private struct IOSIntegrationTokenEditor: View {
       ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
       ToolbarItem(placement: .confirmationAction) {
         Button("Create") {
+          guard !saving else { return }
+          saving = true
           let (title, chosen) = (
             name.trimmingCharacters(in: .whitespaces),
             IOSAutomationText.scopes.map(\.id).filter(scopes.contains)
           )
           Task {
+            defer { saving = false }
             if let result = await admin.value(
               "Creating the key…",
               { try await $0.createIntegrationToken(name: title, scopes: chosen) })
@@ -578,7 +613,7 @@ private struct IOSIntegrationTokenEditor: View {
             }
           }
         }
-        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || scopes.isEmpty)
+        .disabled(saving || name.trimmingCharacters(in: .whitespaces).isEmpty || scopes.isEmpty)
       }
     }
   }

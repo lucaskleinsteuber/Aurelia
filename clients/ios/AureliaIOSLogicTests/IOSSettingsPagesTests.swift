@@ -7,6 +7,22 @@ struct IOSSettingsPagesTests {
 
   // MARK: Which pages a profile sees
 
+  @Test func importReviewCountsUseSingularAndPluralAndIncludeTrailers() {
+    let single = IOSImportPreviewCounts(
+      files: 4, movies: 1, series: 1, episodes: 1, extras: 0, trailers: 1,
+      pending: 0, ignored: 0, errors: 0)
+    #expect(IOSLibraryAdminText.importSummary(single) == "1 movie · 1 show · 1 episode · 1 extra")
+    let empty = IOSImportPreviewCounts(
+      files: 0, movies: 0, series: 0, episodes: 0, extras: 0, trailers: 0,
+      pending: 0, ignored: 0, errors: 0)
+    #expect(
+      IOSLibraryAdminText.importSummary(empty) == "0 movies · 0 shows · 0 episodes · 0 extras")
+    let many = IOSImportPreviewCounts(
+      files: 8, movies: 2, series: 2, episodes: 2, extras: 1, trailers: 1,
+      pending: 0, ignored: 0, errors: 0)
+    #expect(IOSLibraryAdminText.importSummary(many) == "2 movies · 2 shows · 2 episodes · 2 extras")
+  }
+
   @Test func theOwnerSeesEveryServerPageIncludingPowerAndUpdates() {
     let visibility = IOSSettingsPage.Visibility(
       permissions: IOSAdminPermissions(role: "owner", accessMode: nil), supportsWishes: true,

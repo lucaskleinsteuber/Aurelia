@@ -58,6 +58,19 @@ enum IOSLibraryAdminText {
     return trimmed
   }
 
+  /// The import review's title counts, with trailers counted alongside extras.
+  static func importSummary(_ counts: IOSImportPreviewCounts) -> String {
+    func count(_ value: Int, _ singular: String, _ plural: String) -> String {
+      "\(value) \(value == 1 ? singular : plural)"
+    }
+    return [
+      count(counts.movies, "movie", "movies"),
+      count(counts.series, "show", "shows"),
+      count(counts.episodes, "episode", "episodes"),
+      count(counts.extras + counts.trailers, "extra", "extras"),
+    ].joined(separator: " · ")
+  }
+
   /// Offline titles can be listed after a week, a month or three months away.
   static let offlineChoices = [7, 30, 90]
 }

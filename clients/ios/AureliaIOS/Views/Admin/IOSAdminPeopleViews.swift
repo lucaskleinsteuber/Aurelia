@@ -15,9 +15,9 @@ struct IOSAdminPeopleView: View {
     IOSAdminLoader { client in
       async let users = owner ? client.serverUsers() : []
       async let devices = client.ownDevices()
-      async let configuration = owner ? try? client.serverSettings() : nil
+      async let configuration = owner ? client.serverSettings() : nil
       return Overview(
-        users: try await users, devices: try await devices, configuration: await configuration)
+        users: try await users, devices: try await devices, configuration: try await configuration)
     } content: { overview, reload in
       IOSAdminPeopleContent(overview: overview, owner: owner, reload: reload)
     }
@@ -31,7 +31,7 @@ private struct IOSAdminPeopleContent: View {
   @EnvironmentObject private var model: IOSAppModel
   let overview: IOSAdminPeopleView.Overview
   let owner: Bool
-  let reload: () async -> Void
+  let reload: @MainActor @Sendable () async -> Void
   @State private var code: IOSPairingCode?
   @State private var enteringCode = false
   @State private var creating = false
@@ -189,37 +189,57 @@ private struct IOSPairingCodeRow: View {
 private struct IOSDeviceApprovalSheet: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   @Environment(\.dismiss) private var dismiss
-  @State private var code = ""
-  @State private var preview: IOSDeviceAuthorizationPreview?
-  @State private var done: String?
+  @StateObject private var approval = IOSDeviceApprovalModel()
+  @State private var requestTask: Task<Void, Never>?
 
   var body: some View {
     NavigationStack {
       Form {
         Section {
-          TextField("8-digit code", text: $code).keyboardType(.numberPad)
-            .font(.title2.monospacedDigit())
-          Button("Look Up") {
-            let typed = code
-            Task {
-              preview = await admin.value("Looking up…") {
-                try await $0.lookupDevicePairing(code: typed)
+          TextField(
+            "8-digit code",
+            text: Binding(
+              get: { approval.code },
+              set: { value in
+                requestTask?.cancel()
+                approval.code = value
+              })
+          )
+          .keyboardType(.numberPad)
+          .font(.title2.monospacedDigit())
+          .disabled(approval.phase == .deciding)
+          Button(action: lookUp) {
+            HStack {
+              Text(approval.phase == .lookingUp ? "Looking Up…" : "Look Up")
+              if approval.phase == .lookingUp {
+                Spacer()
+                ProgressView()
               }
             }
           }
-          .disabled(code.filter(\.isNumber).count != 8)
+          .disabled(!approval.canLookUp)
+          if let error = approval.error {
+            Text(IOSAdministrationModel.message(error))
+              .font(.footnote).foregroundStyle(.orange)
+            if approval.preview == nil {
+              Button("Try Again", action: lookUp).disabled(!approval.canLookUp)
+            }
+          }
         } footer: {
           Text("The device shows this code when you choose “Connect with a Code”.")
         }
-        if let preview, done == nil {
+        if let preview = approval.preview, approval.done == nil {
           Section("Device") {
             LabeledContent("Name", value: preview.deviceName)
             LabeledContent("Server", value: preview.serverName)
-            Button("Allow “\(preview.deviceName)”") { decide(preview, approve: true) }
-            Button("Deny", role: .destructive) { decide(preview, approve: false) }
+            Button("Allow “\(preview.deviceName)”") { decide(approve: true) }
+              .disabled(approval.isWorking)
+            Button("Deny", role: .destructive) { decide(approve: false) }
+              .disabled(approval.isWorking)
+            if approval.phase == .deciding { ProgressView("Confirming…") }
           }
         }
-        if let done { Section { Text(done) } }
+        if let done = approval.done { Section { Text(done) } }
       }
       .scrollContentBackground(.hidden)
       .background(IOSDesign.canvas.ignoresSafeArea())
@@ -229,18 +249,30 @@ private struct IOSDeviceApprovalSheet: View {
         ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
       }
     }
+    .onDisappear {
+      requestTask?.cancel()
+      approval.invalidate()
+    }
   }
 
-  private func decide(_ preview: IOSDeviceAuthorizationPreview, approve: Bool) {
-    let id = preview.id
-    Task {
-      if await admin.value(
-        approve ? "Allowing…" : "Denying…",
-        {
-          try await $0.decideDevicePairing(id: id, approve: approve)
-        }) != nil
-      {
-        done = approve ? "“\(preview.deviceName)” can connect now." : "The device was denied."
+  private func lookUp() {
+    guard approval.canLookUp else { return }
+    requestTask?.cancel()
+    requestTask = Task {
+      await approval.lookUp { typed in
+        try await admin.run { try await $0.lookupDevicePairing(code: typed) }
+      }
+    }
+  }
+
+  private func decide(approve: Bool) {
+    guard !approval.isWorking, approval.preview != nil, approval.done == nil else { return }
+    requestTask?.cancel()
+    requestTask = Task {
+      await approval.decide(approve: approve) { id, approved in
+        try await admin.runChange {
+          _ = try await $0.decideDevicePairing(id: id, approve: approved)
+        }
       }
     }
   }
@@ -256,6 +288,7 @@ private struct IOSAdminCreateProfileView: View {
   @State private var pin = ""
   @State private var ageLimit: Int?
   @State private var picture: String?
+  @State private var saving = false
 
   private var canSave: Bool {
     IOSProfileRules.isValidName(name)
@@ -265,7 +298,8 @@ private struct IOSAdminCreateProfileView: View {
   var body: some View {
     IOSAdminForm(title: "New Profile") {
       Section {
-        TextField("Name", text: $name).textContentType(.name)
+        IOSAdminProfileIdentity(name: name, role: role, picture: picture)
+        IOSAdminProfileNameField(name: $name)
         Picker("Role", selection: $role) {
           Text("Viewer").tag("user")
           Text("Administrator").tag("admin")
@@ -307,12 +341,15 @@ private struct IOSAdminCreateProfileView: View {
       ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
       ToolbarItem(placement: .confirmationAction) {
         Button("Create") {
+          guard !saving else { return }
+          saving = true
           let request = IOSProfileCreateRequest(
             username: name.trimmingCharacters(in: .whitespacesAndNewlines), role: role,
             isEnabled: true, pinProtectionEnabled: protection, pin: protection ? pin : nil,
             accessMode: "entireLibrary", titleIds: nil, displayName: nil, pictureKey: picture,
             ageLimit: role == "user" ? ageLimit : nil)
           Task {
+            defer { saving = false }
             if await admin.perform(
               "Creating the profile…", { _ = try await $0.createProfile(request) })
             {
@@ -320,64 +357,9 @@ private struct IOSAdminCreateProfileView: View {
             }
           }
         }
-        .disabled(!canSave)
+        .disabled(!canSave || saving)
       }
     }
-  }
-}
-
-/// Built-in pictures: a symbol on one of the profile colors, or the initial.
-private struct IOSAdminPicturePicker: View {
-  @Binding var selection: String?
-  let name: String
-  @State private var palette = IOSProfilePictures.palettes[0]
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      ScrollView(.horizontal, showsIndicators: false) {
-        HStack(spacing: 10) {
-          ForEach(IOSProfilePictures.palettes, id: \.self) { color in
-            Button {
-              palette = color
-              if let parsed = IOSProfilePictures.parse(selection) {
-                selection = IOSProfilePictures.builtin(symbol: parsed.symbol, palette: color)
-              }
-            } label: {
-              IOSProfilePicture(
-                id: nil, name: name, size: 30,
-                pictureKey: IOSProfilePictures.builtin(symbol: "star", palette: color)
-              )
-              .overlay(Circle().stroke(.white, lineWidth: palette == color ? 2 : 0))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(color.capitalized)
-          }
-        }
-      }
-      LazyVGrid(columns: [GridItem(.adaptive(minimum: 48), spacing: 10)], spacing: 10) {
-        Button {
-          selection = nil
-        } label: {
-          IOSProfilePicture(id: nil, name: name.isEmpty ? "?" : name, size: 44)
-            .overlay(Circle().stroke(.white, lineWidth: selection == nil ? 2 : 0))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Initial")
-        ForEach(IOSProfilePictures.symbols, id: \.self) { symbol in
-          let key = IOSProfilePictures.builtin(symbol: symbol, palette: palette)
-          Button {
-            selection = key
-          } label: {
-            IOSProfilePicture(id: nil, name: name, size: 44, pictureKey: key)
-              .overlay(Circle().stroke(.white, lineWidth: selection == key ? 2 : 0))
-          }
-          .buttonStyle(.plain)
-          .accessibilityLabel(symbol.capitalized)
-        }
-      }
-    }
-    .padding(.vertical, 4)
-    .onAppear { if let parsed = IOSProfilePictures.parse(selection) { palette = parsed.palette } }
   }
 }
 
@@ -387,16 +369,16 @@ struct IOSAdminProfileEditor: View {
 
   struct Loaded: Sendable {
     let editor: IOSProfileEditor
-    let ageLimit: IOSProfileAgeLimit?
+    let ageLimit: IOSProfileAgeLimit
     let devices: [IOSDeviceSession]
   }
 
   var body: some View {
     IOSAdminLoader { client in
       async let editor = client.profileEditor(id: userID)
-      async let age = try? client.ageLimit(user: userID)
-      async let devices = (try? client.userDevices(user: userID)) ?? []
-      return Loaded(editor: try await editor, ageLimit: await age, devices: await devices)
+      async let age = client.ageLimit(user: userID)
+      async let devices = client.userDevices(user: userID)
+      return Loaded(editor: try await editor, ageLimit: try await age, devices: try await devices)
     } content: { loaded, reload in
       IOSAdminProfileForm(loaded: loaded, reload: reload)
         .id(loaded.editor.revision)
@@ -411,7 +393,7 @@ private struct IOSAdminProfileForm: View {
   @EnvironmentObject private var model: IOSAppModel
   @Environment(\.dismiss) private var dismiss
   let loaded: IOSAdminProfileEditor.Loaded
-  let reload: () async -> Void
+  let reload: @MainActor @Sendable () async -> Void
   @State private var name: String
   @State private var picture: String?
   @State private var role: String
@@ -422,22 +404,23 @@ private struct IOSAdminProfileForm: View {
   @State private var titleIds: [UUID]
   @State private var ageLimit: Int?
   @State private var confirmation: IOSAdminConfirmation?
-  @State private var resettingPIN = false
+  @State private var saving = false
 
-  init(loaded: IOSAdminProfileEditor.Loaded, reload: @escaping () async -> Void) {
+  init(
+    loaded: IOSAdminProfileEditor.Loaded, reload: @escaping @MainActor @Sendable () async -> Void
+  ) {
     self.loaded = loaded
     self.reload = reload
     let user = loaded.editor.user
     _name = State(initialValue: user.shownName)
-    _picture = State(
-      initialValue: user.pictureKey == IOSProfilePictures.photoKey ? nil : user.pictureKey)
+    _picture = State(initialValue: user.pictureKey)
     _role = State(initialValue: user.role)
     _enabled = State(initialValue: loaded.editor.isEnabled)
     _protection = State(initialValue: user.pinProtectionEnabled ?? true)
     let mode = loaded.editor.access.mode == "selectedTitles" ? "selectedTitles" : "entireLibrary"
     _accessMode = State(initialValue: mode)
     _titleIds = State(initialValue: loaded.editor.access.titleIds)
-    _ageLimit = State(initialValue: loaded.ageLimit?.ageLimit ?? user.ageLimit)
+    _ageLimit = State(initialValue: loaded.ageLimit.ageLimit)
   }
 
   private var user: IOSAdminUser { loaded.editor.user }
@@ -453,9 +436,9 @@ private struct IOSAdminProfileForm: View {
       || (accessMode == "selectedTitles" && titleIds != loaded.editor.access.titleIds)
   }
   private var changed: Bool {
-    profileChanged || name != user.shownName
-      || (!hasPhoto && picture != user.pictureKey) || (hasPhoto && picture != nil)
-      || ageLimit != (loaded.ageLimit?.ageLimit ?? user.ageLimit)
+    profileChanged || name.trimmingCharacters(in: .whitespacesAndNewlines) != user.shownName
+      || picture != user.pictureKey
+      || ageLimit != (loaded.ageLimit.ageLimit)
   }
   private var canSave: Bool {
     IOSProfileRules.isValidName(name)
@@ -467,24 +450,34 @@ private struct IOSAdminProfileForm: View {
   var body: some View {
     Form {
       Section {
-        TextField("Name", text: $name)
+        IOSAdminProfileIdentity(
+          name: name, role: role, picture: picture, id: user.id,
+          pictureRevision: user.pictureRevision ?? 0)
+        IOSAdminProfileNameField(name: $name)
         if !isOwner {
           Picker("Role", selection: $role) {
             Text("Viewer").tag("user")
             Text("Administrator").tag("admin")
           }
-          .onChange(of: role) { _, value in if value == "admin" { protection = true } }
+          .onChange(of: role) { _, value in
+            if value == "admin" {
+              protection = true
+              ageLimit = nil
+            }
+          }
           Toggle("Profile Turned On", isOn: $enabled).disabled(isSelf)
         } else {
           LabeledContent("Role", value: "Owner")
         }
       }
-      Section("Picture") {
-        if hasPhoto && picture == nil {
-          Text("Uses a photo. Choose a picture below to replace it.").font(.caption)
-            .foregroundStyle(.secondary)
-        }
+      Section {
         IOSAdminPicturePicker(selection: $picture, name: name)
+      } header: {
+        Text("Picture")
+      } footer: {
+        if hasPhoto && picture == IOSProfilePictures.photoKey {
+          Text("Choosing a color, symbol or initial replaces this profile’s photo.")
+        }
       }
       Section {
         Toggle("Protect with a PIN", isOn: $protection).disabled(role != "user")
@@ -511,6 +504,9 @@ private struct IOSAdminProfileForm: View {
               Text(IOSProfileRules.ageTitle($0)).tag($0)
             }
           }
+          .onChange(of: ageLimit) { _, value in
+            if value != nil { accessMode = "entireLibrary" }
+          }
           if ageLimit != nil {
             NavigationLink("Screen Time") { IOSAdminScreenTimeView(userID: user.id, name: name) }
           }
@@ -527,6 +523,9 @@ private struct IOSAdminProfileForm: View {
           Picker("Can Watch", selection: $accessMode) {
             Text("The Whole Library").tag("entireLibrary")
             Text("Chosen Titles").tag("selectedTitles")
+          }
+          .onChange(of: accessMode) { _, value in
+            if value == "selectedTitles" { ageLimit = nil }
           }
           if accessMode == "selectedTitles" {
             NavigationLink {
@@ -585,46 +584,39 @@ private struct IOSAdminProfileForm: View {
     .adminConfirmation($confirmation)
     .toolbar {
       ToolbarItem(placement: .confirmationAction) {
-        Button("Save") { save() }.disabled(!changed || !canSave)
+        Button("Save") { save() }.disabled(!changed || !canSave || saving)
       }
     }
   }
 
   private func save() {
-    let id = user.id
+    guard !saving else { return }
+    saving = true
     let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
     let renamed = trimmed != user.shownName ? trimmed : nil
-    let newPicture: String?? =
-      (!hasPhoto && picture != user.pictureKey) || (hasPhoto && picture != nil)
-      ? .some(picture) : nil
-    let age = ageLimit != (loaded.ageLimit?.ageLimit ?? user.ageLimit) ? loaded.ageLimit : nil
-    let ageValue = ageLimit
+    let newPicture: String?? = picture != user.pictureKey ? .some(picture) : nil
+    let accessChanged =
+      accessMode != loaded.editor.access.mode
+      || (accessMode == "selectedTitles" && titleIds != loaded.editor.access.titleIds)
     let update: IOSProfileUpdateRequest? =
       profileChanged
       ? IOSProfileUpdateRequest(
         revision: loaded.editor.revision, role: isOwner ? "owner" : role, isEnabled: enabled,
         pinProtectionEnabled: protection, pin: protection && !pin.isEmpty ? pin : nil,
-        accessMode: isOwner ? nil : accessMode,
-        titleIds: accessMode == "selectedTitles" ? titleIds : nil) : nil
+        accessMode: !isOwner && accessChanged ? accessMode : nil,
+        titleIds: !isOwner && accessChanged && accessMode == "selectedTitles" ? titleIds : nil)
+      : nil
+    let plan = IOSProfileSavePlan(
+      editor: loaded.editor, age: loaded.ageLimit, name: renamed, picture: newPicture,
+      update: update, ageLimit: role == "user" ? ageLimit : nil)
     Task {
-      let saved = await admin.perform("Saving…") { client in
-        if let renamed { _ = try await client.renameProfile(id: id, name: renamed) }
-        if let newPicture { _ = try await client.setProfilePicture(id: id, builtin: newPicture) }
-        if let update { _ = try await client.updateProfile(id: id, update) }
-        if let age {
-          var value = age
-          value.ageLimit = ageValue
-          _ = try await client.setAgeLimit(user: id, value)
-        } else if ageValue != nil, loaded.ageLimit == nil {
-          _ = try await client.setAgeLimit(
-            user: id,
-            IOSProfileAgeLimit(
-              ageLimit: ageValue, allowedTitleIds: [], hiddenTitleIds: [], revision: 0))
-        }
+      defer { saving = false }
+      if await admin.perform("Saving…", { try await plan.save(using: $0) }) {
+        pin = ""
       }
-      if saved { pin = "" }
     }
   }
+
 }
 
 /// Chooses the movies and series a profile may watch.
@@ -634,6 +626,7 @@ private struct IOSAdminTitleChooser: View {
   @State private var titles: [IOSCatalogItem] = []
   @State private var search = ""
   @State private var loading = true
+  @State private var error: String?
 
   private var shown: [IOSCatalogItem] {
     let query = search.trimmingCharacters(in: .whitespaces)
@@ -644,6 +637,15 @@ private struct IOSAdminTitleChooser: View {
   var body: some View {
     List {
       if loading { ProgressView() }
+      if let error {
+        IOSAdminSectionProblem(message: error, retry: load)
+      } else if !loading && shown.isEmpty {
+        ContentUnavailableView(
+          search.isEmpty ? "No Titles" : "No Results",
+          systemImage: search.isEmpty ? "film.stack" : "magnifyingglass",
+          description: Text(
+            search.isEmpty ? "Add movies or shows to the library first." : "Try another title."))
+      }
       ForEach(shown) { item in
         Button {
           if let index = selection.firstIndex(of: item.id) {
@@ -675,23 +677,34 @@ private struct IOSAdminTitleChooser: View {
     .background(IOSDesign.canvas.ignoresSafeArea())
     .navigationTitle("\(selection.count) Titles")
     .navigationBarTitleDisplayMode(.inline)
-    .task {
-      guard titles.isEmpty, let client = admin.client else { return }
+    .task { await load() }
+  }
+
+  private func load() async {
+    loading = true
+    error = nil
+    defer { loading = false }
+    do {
+      guard let client = admin.client else { throw IOSCoreError.profileRequired }
       var all: [IOSCatalogItem] = []
       for kind in [IOSMediaKind.movie, .series] {
         var offset = 0
         while true {
-          guard let page = try? await client.catalogPage(kind: kind, offset: offset, limit: 200)
-          else { break }
+          try Task.checkCancellation()
+          let page = try await client.catalogPage(kind: kind, offset: offset, limit: 200)
           all += page.items
           offset += page.items.count
           if page.items.isEmpty || offset >= page.total { break }
         }
       }
+      try Task.checkCancellation()
       titles = all.sorted {
         $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
       }
-      loading = false
+    } catch is CancellationError {
+      return
+    } catch {
+      self.error = IOSAdministrationModel.message(error)
     }
   }
 }
@@ -867,7 +880,7 @@ struct IOSAdminDevicesView: View {
 private struct IOSAdminDevicesForm: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   let loaded: IOSAdminDevicesView.Loaded
-  let reload: () async -> Void
+  let reload: @MainActor @Sendable () async -> Void
   @State private var confirmation: IOSAdminConfirmation?
 
   var body: some View {

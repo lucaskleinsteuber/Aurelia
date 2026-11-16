@@ -27,6 +27,10 @@ final class IOSAdministrationModel: ObservableObject {
       profileID = current
       managementExpiresAt = nil
       expiryTask?.cancel()
+      cancelUnlock()
+      unlockError = nil
+      alert = nil
+      activity = nil
     }
   }
 
@@ -42,12 +46,19 @@ final class IOSAdministrationModel: ObservableObject {
     -> Value
   {
     guard let client else { throw IOSCoreError.profileRequired }
+    let requestedProfile = profileID
+    try Task.checkCancellation()
     do {
-      return try await work(client)
-    } catch let failure as IOSCoreError where failure.isManagementLocked {
-      managementExpiresAt = nil
-      guard await requestUnlock(), let fresh = self.client else { throw CancellationError() }
-      return try await work(fresh)
+      do {
+        return try await work(client)
+      } catch let failure as IOSCoreError where failure.isManagementLocked {
+        managementExpiresAt = nil
+        guard await requestUnlock(), requestedProfile == profileID, let fresh = self.client else {
+          throw CancellationError()
+        }
+        try Task.checkCancellation()
+        return try await work(fresh)
+      }
     } catch let failure as IOSCoreError where failure.endsSession {
       app?.handleSessionFailure(failure)
       throw failure
@@ -280,15 +291,25 @@ struct IOSManagementUnlockSheet: View {
 struct IOSAdminLoader<Value: Sendable, Content: View>: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   let load: @Sendable (IOSAPIClient) async throws -> Value
-  @ViewBuilder let content: (Value, _ reload: @escaping () async -> Void) -> Content
+  @ViewBuilder let content:
+    (Value, _ reload: @escaping @MainActor @Sendable () async -> Void) -> Content
   @State private var value: Value?
   @State private var error: String?
   @State private var locked = false
+  @State private var requestGeneration = 0
 
   var body: some View {
     Group {
       if let value {
-        content(value, reload)
+        VStack(spacing: 0) {
+          if let error {
+            IOSAdminSectionProblem(message: error, retry: reload)
+              .padding()
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .background(.regularMaterial)
+          }
+          content(value, reload)
+        }
       } else if locked {
         ContentUnavailableView {
           Label("Management Is Locked", systemImage: "lock")
@@ -309,20 +330,54 @@ struct IOSAdminLoader<Value: Sendable, Content: View>: View {
         ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
       }
     }
-    .task { await reload() }
-    .onChange(of: admin.revision) { _, _ in Task { await reload() } }
+    .task(id: admin.revision) { await reload() }
   }
 
   private func reload() async {
+    requestGeneration += 1
+    let generation = requestGeneration
     do {
-      value = try await admin.run(load)
+      let answer = try await admin.run(load)
+      guard generation == requestGeneration, !Task.isCancelled else { return }
+      value = answer
       error = nil
       locked = false
     } catch is CancellationError {
+      guard generation == requestGeneration, !Task.isCancelled else { return }
       if value == nil { locked = true }
     } catch {
-      if value == nil { self.error = IOSAdministrationModel.message(error) }
+      guard generation == requestGeneration, !Task.isCancelled else { return }
+      self.error = IOSAdministrationModel.message(error)
     }
+  }
+}
+
+/// Progress polling belongs to the visible, active page. It keeps checking even if a count did
+/// not change, stops on cancellation, and never extends the server's user-activity clock.
+private struct IOSAdminPolling: ViewModifier {
+  @Environment(\.scenePhase) private var scenePhase
+  let seconds: Double
+  let active: Bool
+  let reload: @MainActor @Sendable () async -> Void
+
+  func body(content: Content) -> some View {
+    content.task(id: active && scenePhase == .active) {
+      guard active, scenePhase == .active else { return }
+      while !Task.isCancelled {
+        do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
+        guard !Task.isCancelled else { return }
+        await IOSAPIClient.withBackgroundRequests { await reload() }
+      }
+    }
+  }
+}
+
+extension View {
+  func adminPolling(
+    every seconds: Double, while active: Bool,
+    reload: @escaping @MainActor @Sendable () async -> Void
+  ) -> some View {
+    modifier(IOSAdminPolling(seconds: seconds, active: active, reload: reload))
   }
 }
 
@@ -500,6 +555,7 @@ struct IOSAdminActionButton: View {
   }
 
   private func run() async {
+    guard state != .running else { return }
     state = .running
     do {
       try await admin.runChange(work)
