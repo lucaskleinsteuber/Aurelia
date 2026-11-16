@@ -1,6 +1,15 @@
 import Combine
 import Foundation
 
+/// Scheduling is separate from preparation so logic checks never start a system transfer.
+protocol IOSOfflineTransferring: AnyObject, Sendable {
+  func start(_ request: URLRequest, media: UUID, fingerprint: String, startNow: Bool)
+  func resume(_ data: Data, media: UUID, fingerprint: String, startNow: Bool)
+  func startQueued(media: UUID)
+  func cancel(media: UUID)
+  func knownMedia() async -> Set<UUID>
+}
+
 /// The downloads on this iPhone or iPad, the ones still loading and the profiles that may open
 /// them offline. Files live in this app's own data folder, excluded from backups, never next to
 /// the media and never on the server.
@@ -19,21 +28,32 @@ final class IOSOfflineStore: ObservableObject {
   @Published private(set) var leftoverBytes: Int64 = 0
 
   let root: URL
-  private var downloader: IOSOfflineDownloader?
+  private var downloader: (any IOSOfflineTransferring)?
+  private struct Preparation {
+    let token: UUID
+    let serverID: UUID
+    let profileID: UUID
+  }
+  private var preparations: [UUID: Preparation] = [:]
   /// Converted downloads running now, and the client each one continues with.
   private var convertedTasks: [UUID: Task<Void, Never>] = [:]
+  private var convertedRuns: [UUID: UUID] = [:]
   private var convertedClients: [UUID: IOSAPIClient] = [:]
   /// Lets the app keep a converted download going in the background (BGContinuedProcessingTask):
   /// called when one starts, as it moves on (0…1) and when it ends.
-  var convertedStarted: ((UUID, String) -> Void)?
-  var convertedProgressed: ((UUID, Double) -> Void)?
-  var convertedEnded: ((UUID, Bool) -> Void)?
+  var convertedStarted: ((_ media: UUID, _ run: UUID, _ title: String) -> Void)?
+  var convertedProgressed: ((_ media: UUID, _ run: UUID, _ share: Double) -> Void)?
+  var convertedEnded: ((_ media: UUID, _ run: UUID, _ success: Bool) -> Void)?
   /// The system's completion handler after it woke the app for finished transfers.
   var backgroundCompletion: (() -> Void)?
 
-  init(root: URL, transfers: Bool) {
+  init(root: URL, transfers: Bool, transfer: (any IOSOfflineTransferring)? = nil) {
     self.root = root
     load()
+    if let transfer {
+      downloader = transfer
+      return
+    }
     guard transfers else { return }
     let downloader = IOSOfflineDownloader(root: root, events: events())
     self.downloader = downloader
@@ -115,13 +135,25 @@ final class IOSOfflineStore: ObservableObject {
       return
     }
     preparing.insert(item.id)
+    let preparation = Preparation(
+      token: UUID(), serverID: connection.serverID, profileID: session.user.id)
+    preparations[item.id] = preparation
+    let isCurrent: @MainActor () -> Bool = { [weak self] in
+      self?.preparations[item.id]?.token == preparation.token && !Task.isCancelled
+    }
     errorMessage = nil
-    defer { preparing.remove(item.id) }
+    defer {
+      if preparations[item.id]?.token == preparation.token {
+        preparations[item.id] = nil
+        preparing.remove(item.id)
+      }
+    }
     let folder = folder(for: item.id)
     var ticketID: UUID?
     do {
       let ticket = try await api.createTicket(mediaID: item.id, forDownload: true)
       ticketID = ticket.id
+      guard isCurrent() else { throw CancellationError() }
       let needed = quality == nil ? ticket.contentLength : (expectedBytes ?? 0)
       guard IOSOfflineRules.hasRoom(for: needed, available: availableBytes) else {
         throw IOSOfflineError.notEnoughSpace
@@ -143,13 +175,20 @@ final class IOSOfflineStore: ObservableObject {
         parentTitle: item.parentTitle ?? series?.title, seasonNumber: item.seasonNumber,
         episodeNumber: item.episodeNumber)
       title.quality = quality
-      title.subtitles = await Self.subtitles(ticket: ticket, into: folder, api: api)
+      title.subtitles = await Self.subtitles(
+        ticket: ticket, into: folder, api: api, isCurrent: isCurrent)
+      guard isCurrent() else { throw CancellationError() }
       title.posterFile = await Self.keep(
-        item.poster, width: 640, as: "poster.image", in: folder, api: api)
+        item.poster, width: 640, as: "poster.image", in: folder, api: api, isCurrent: isCurrent)
+      guard isCurrent() else { throw CancellationError() }
       title.backdropFile = await Self.keep(
-        item.backdrop, width: 1920, as: "backdrop.image", in: folder, api: api)
+        item.backdrop, width: 1920, as: "backdrop.image", in: folder, api: api,
+        isCurrent: isCurrent)
+      guard isCurrent() else { throw CancellationError() }
       title.seriesPosterFile = await Self.keep(
-        series?.poster, width: 640, as: "series-poster.image", in: folder, api: api)
+        series?.poster, width: 640, as: "series-poster.image", in: folder, api: api,
+        isCurrent: isCurrent)
+      guard isCurrent() else { throw CancellationError() }
       let url = try api.validatedStreamURL(path: ticket.streamPath)
       var request = URLRequest(url: url)
       request.setValue("Bearer \(session.token)", forHTTPHeaderField: "Authorization")
@@ -176,8 +215,11 @@ final class IOSOfflineStore: ObservableObject {
       downloader.start(
         request, media: item.id, fingerprint: connection.fingerprint, startNow: startNow)
     } catch {
-      try? FileManager.default.removeItem(at: folder)
       if let ticketID { Task { try? await api.revokeTicket(id: ticketID) } }
+      // A retired preparation's folder may already belong to a new request for this title.
+      guard preparations[item.id]?.token == preparation.token else { return }
+      try? FileManager.default.removeItem(at: folder)
+      guard !(error is CancellationError), !Task.isCancelled else { return }
       errorMessage = "\(item.title) could not be downloaded. \(Self.describe(error))"
     }
   }
@@ -211,19 +253,42 @@ final class IOSOfflineStore: ObservableObject {
       downloader.resume(data, media: id, fingerprint: entry.fingerprint, startNow: startNow)
       return
     }
-    guard let api, api.session?.user.id == entry.title.profileID,
-      let item = try? await api.summary(id: id)
-    else {
+    guard let api, api.session?.user.id == entry.title.profileID else {
+      update(id) { $0.message = "Open Aurelia at home to try this download again." }
+      return
+    }
+    let preparation = Preparation(
+      token: UUID(), serverID: entry.title.serverID, profileID: entry.title.profileID)
+    preparations[id] = preparation
+    preparing.insert(id)
+    defer {
+      if preparations[id]?.token == preparation.token {
+        preparations[id] = nil
+        preparing.remove(id)
+      }
+    }
+    let item = try? await api.summary(id: id)
+    guard !Task.isCancelled, preparations[id]?.token == preparation.token,
+      pending(id)?.ticketID == entry.ticketID
+    else { return }
+    guard let item else {
       update(id) { $0.message = "Open Aurelia at home to try this download again." }
       return
     }
     let series: IOSCatalogItem? =
       if let parent = item.parentId { try? await api.summary(id: parent) } else { nil }
+    guard !Task.isCancelled, preparations[id]?.token == preparation.token,
+      pending(id)?.ticketID == entry.ticketID
+    else { return }
+    preparations[id] = nil
+    preparing.remove(id)
     discard(id)
     await download(item, series: series, api: api)
   }
 
   func cancel(_ id: UUID) {
+    cancelPreparation(id)
+    if let run = convertedRuns.removeValue(forKey: id) { convertedEnded?(id, run, false) }
     convertedTasks.removeValue(forKey: id)?.cancel()
     convertedClients[id] = nil
     downloader?.cancel(media: id)
@@ -256,7 +321,10 @@ final class IOSOfflineStore: ObservableObject {
         id, message: "Open Aurelia at home to continue this download.", resumeData: nil)
       return
     }
-    convertedStarted?(id, entry.title.title)
+    let run = UUID()
+    convertedRuns[id] = run
+    convertedStarted?(id, run, entry.title.title)
+    guard convertedRuns[id] == run else { return }
     let folder = folder(for: id)
     let partial = folder.appendingPathComponent("title.mp4.part")
     convertedTasks[id] = Task { [weak self] in
@@ -266,20 +334,21 @@ final class IOSOfflineStore: ObservableObject {
         await tickets.add(ticket.id)
         let size = try await IOSConvertedDownloader(api: api, mediaID: id).run(
           ticket: ticket, from: converted, into: partial,
-          saved: { [weak self] state in await self?.convertedSaved(id, state) },
+          saved: { [weak self] state in await self?.convertedSaved(id, state, run: run) },
           renewed: { ticket in await tickets.add(ticket.id) })
-        self?.convertedFinished(id, partial: partial, size: size)
+        self?.convertedFinished(id, partial: partial, size: size, run: run)
       } catch is CancellationError {
-        self?.convertedStopped(id, message: nil)
+        self?.convertedStopped(id, message: nil, run: run)
       } catch {
-        self?.convertedStopped(id, message: Self.describe(error))
+        self?.convertedStopped(id, message: Self.describe(error), run: run)
       }
       let used = await tickets.all
       Task { for ticket in used { try? await api.revokeTicket(id: ticket) } }
     }
   }
 
-  private func convertedSaved(_ id: UUID, _ state: IOSConvertedProgress) {
+  func convertedSaved(_ id: UUID, _ state: IOSConvertedProgress, run: UUID) {
+    guard convertedRuns[id] == run else { return }
     guard let index = pending.firstIndex(where: { $0.id == id }) else { return }
     let before = pending[index].converted?.nextSegment ?? 0
     pending[index].converted = state
@@ -290,14 +359,17 @@ final class IOSOfflineStore: ObservableObject {
     {
       savePending()
     }
-    convertedProgressed?(id, state.share)
+    convertedProgressed?(id, run, state.share)
   }
 
-  private func convertedFinished(_ id: UUID, partial: URL, size: Int64) {
-    convertedTasks[id] = nil
-    convertedClients[id] = nil
+  func convertedFinished(_ id: UUID, partial: URL, size: Int64, run: UUID) {
+    guard convertedRuns[id] == run else { return }
     guard let index = pending.firstIndex(where: { $0.id == id }) else {
+      convertedRuns[id] = nil
+      convertedTasks[id] = nil
+      convertedClients[id] = nil
       try? FileManager.default.removeItem(at: partial)
+      convertedEnded?(id, run, false)
       return
     }
     var title = pending[index].title
@@ -306,29 +378,35 @@ final class IOSOfflineStore: ObservableObject {
       try? FileManager.default.removeItem(at: destination)
       try FileManager.default.moveItem(at: partial, to: destination)
     } catch {
-      convertedStopped(id, message: "The file could not be saved.")
+      convertedStopped(id, message: "The file could not be saved.", run: run)
       return
     }
     title.bytes = size
     title.downloadedAt = Date()
+    convertedRuns[id] = nil
+    convertedTasks[id] = nil
+    convertedClients[id] = nil
     pending.remove(at: index)
     savePending()
     record(title)
-    convertedEnded?(id, true)
+    convertedEnded?(id, run, true)
     startNextWaiting()
   }
 
   /// A converted download that stopped keeps what it has; Try Again continues from there.
-  private func convertedStopped(_ id: UUID, message: String?) {
+  func convertedStopped(_ id: UUID, message: String?, run: UUID) {
+    guard convertedRuns[id] == run else { return }
+    convertedRuns[id] = nil
     convertedTasks[id] = nil
-    convertedEnded?(id, false)
+    convertedEnded?(id, run, false)
     guard pending(id) != nil else { return }
     transferFailed(
       id, message: message ?? "Paused. Try Again continues where it stopped.", resumeData: nil)
   }
 
   /// The system ended the time it gave the app in the background: the download pauses.
-  func pauseConverted(_ id: UUID) {
+  func pauseConverted(_ id: UUID, run: UUID) {
+    guard convertedRuns[id] == run else { return }
     convertedTasks[id]?.cancel()
   }
 
@@ -343,10 +421,28 @@ final class IOSOfflineStore: ObservableObject {
   /// Everything from one server: its downloads and its profiles' offline cards. Used when this
   /// device is disconnected from that server.
   func forget(serverID: UUID) {
+    cancelPreparations(serverID: serverID)
     for entry in pending where entry.title.serverID == serverID { cancel(entry.id) }
     for title in titles where title.serverID == serverID { remove(title.id) }
     cards.removeAll { $0.serverID == serverID }
     saveCards()
+  }
+
+  /// Stops only metadata/ticket preparation. Already authorized background downloads continue
+  /// across profile changes; disconnecting removes those separately in forget(serverID:).
+  func cancelPreparations(serverID: UUID, profileID: UUID? = nil) {
+    let retired = preparations.filter {
+      $0.value.serverID == serverID && (profileID == nil || $0.value.profileID == profileID)
+    }.map(\.key)
+    for id in retired { cancelPreparation(id) }
+  }
+
+  private func cancelPreparation(_ id: UUID) {
+    guard preparations.removeValue(forKey: id) != nil else { return }
+    preparing.remove(id)
+    if pending(id) == nil, title(id) == nil {
+      try? FileManager.default.removeItem(at: folder(for: id))
+    }
   }
 
   private func discard(_ id: UUID) {
@@ -449,7 +545,7 @@ final class IOSOfflineStore: ObservableObject {
   }
 
   /// After a restart: downloads the system no longer carries out stopped while the app was gone.
-  private func reconcile(with downloader: IOSOfflineDownloader) async {
+  private func reconcile(with downloader: any IOSOfflineTransferring) async {
     // Only what was saved before this launch; a download started meanwhile is not yet listed.
     let saved = Set(pending.map(\.id))
     let known = await downloader.knownMedia()
@@ -630,16 +726,21 @@ final class IOSOfflineStore: ObservableObject {
 
   // MARK: Helpers
 
-  private static func subtitles(ticket: IOSPlaybackTicket, into folder: URL, api: IOSAPIClient)
-    async -> [IOSOfflineSubtitle]
-  {
-    guard let tracks = try? await api.streamSubtitles(ticketID: ticket.id) else { return [] }
+  private static func subtitles(
+    ticket: IOSPlaybackTicket, into folder: URL, api: IOSAPIClient,
+    isCurrent: @MainActor () -> Bool
+  ) async -> [IOSOfflineSubtitle] {
+    guard let tracks = try? await api.streamSubtitles(ticketID: ticket.id), isCurrent() else {
+      return []
+    }
     var kept: [IOSOfflineSubtitle] = []
     for track in IOSLiveSubtitleTrack.sidecarFiles(tracks) {
+      guard isCurrent() else { return kept }
       let name = "subtitle-\(track.index).vtt"
       guard
         let data = try? await api.streamSubtitleFile(
           streamPath: ticket.streamPath, index: track.index),
+        isCurrent(),
         (try? data.write(to: folder.appendingPathComponent(name), options: .atomic)) != nil
       else { continue }
       kept.append(
@@ -651,9 +752,11 @@ final class IOSOfflineStore: ObservableObject {
   }
 
   private static func keep(
-    _ artwork: IOSArtwork?, width: Int, as name: String, in folder: URL, api: IOSAPIClient
+    _ artwork: IOSArtwork?, width: Int, as name: String, in folder: URL, api: IOSAPIClient,
+    isCurrent: @MainActor () -> Bool
   ) async -> String? {
     guard let artwork, let data = try? await api.artworkData(artwork: artwork, width: width),
+      isCurrent(),
       (try? data.write(to: folder.appendingPathComponent(name), options: .atomic)) != nil
     else { return nil }
     return name
@@ -696,7 +799,9 @@ enum IOSOfflineError: LocalizedError {
 /// The background transfers: the system keeps loading while the app is in the background or
 /// closed, and wakes it when a file is complete. Every connection is checked against the
 /// server's pinned key, as everywhere else in the app.
-final class IOSOfflineDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+final class IOSOfflineDownloader: NSObject, URLSessionDownloadDelegate, IOSOfflineTransferring,
+  @unchecked Sendable
+{
   struct Events: Sendable {
     let progress: @Sendable (UUID, Int64, Int64) -> Void
     let finished: @Sendable (UUID, URL, Int) -> Void

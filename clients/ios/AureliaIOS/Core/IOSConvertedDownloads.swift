@@ -1,6 +1,16 @@
 import CryptoKit
 import Foundation
 
+/// BGTask's expiration block has no actor or delivery-queue contract. Construct the outer
+/// callback outside MainActor before handing it to the framework; the hop happens inside it.
+enum IOSBackgroundTaskCallbacks {
+  nonisolated static func expiration(
+    onExpire: @escaping @MainActor @Sendable () -> Void
+  ) -> @Sendable () -> Void {
+    { Task { @MainActor in onExpire() } }
+  }
+}
+
 // Smaller downloads ("converted-downloads-v1", server 2.20.0), copied from the Mac app, not shared.
 // The server converts the copy live from its adaptive-streaming qualities; only this device keeps
 // it (owner's decision, 15.11.2026).
@@ -52,15 +62,29 @@ enum IOSDownloadQualityPreference {
 
   /// The original when nothing smaller is offered; otherwise the chosen quality, the next smaller
   /// one the title has, or its smallest.
-  static func resolve(_ preference: String, options: IOSDownloadOptions?) -> IOSDownloadChoice {
-    guard let options, options.canConvert, !options.qualities.isEmpty else { return .original }
+  static func resolve(_ preference: String, options: IOSDownloadOptions) -> IOSDownloadChoice {
+    guard options.canConvert, !options.qualities.isEmpty else { return .original }
     if preference == original { return .original }
     guard let wanted = order.firstIndex(of: preference) else { return .ask }
-    let offered = options.qualities.map(\.id)
-    if let match = offered.first(where: { (order.firstIndex(of: $0) ?? 0) >= wanted }) {
+    let offered = options.qualities.map(\.id).sorted {
+      let left = Int($0.dropLast()) ?? Int.max
+      let right = Int($1.dropLast()) ?? Int.max
+      return left == right ? $0 < $1 : left > right
+    }
+    let targetHeight = Int(order[wanted].dropLast()) ?? 0
+    if let match = offered.first(where: { (Int($0.dropLast()) ?? Int.max) <= targetHeight }) {
       return .converted(match)
     }
     return .converted(offered[offered.count - 1])
+  }
+
+  /// A failed options request is a failure, never permission to download a larger original.
+  nonisolated(nonsending) static func resolve(
+    _ preference: String,
+    loadingOptions: nonisolated(nonsending) () async throws -> IOSDownloadOptions
+  ) async throws -> (choice: IOSDownloadChoice, options: IOSDownloadOptions) {
+    let options = try await loadingOptions()
+    return (resolve(preference, options: options), options)
   }
 }
 

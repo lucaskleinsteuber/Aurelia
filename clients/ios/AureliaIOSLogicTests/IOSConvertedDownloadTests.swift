@@ -4,6 +4,19 @@ import Testing
 /// Smaller downloads on iPhone and iPad ("converted-downloads-v1"): which quality a download
 /// takes, which pieces it may ask for, and how a stopped download continues.
 struct IOSConvertedDownloadTests {
+  @Test @MainActor func backgroundExpirationCanArriveOnARealBackgroundQueue() async {
+    var deliveredOnMainActor = false
+    await withCheckedContinuation { continuation in
+      let handler = IOSBackgroundTaskCallbacks.expiration {
+        MainActor.assertIsolated()
+        deliveredOnMainActor = Thread.isMainThread
+        continuation.resume()
+      }
+      DispatchQueue.global(qos: .utility).async(execute: handler)
+    }
+    #expect(deliveredOnMainActor)
+  }
+
   private func options(_ ids: [String], canConvert: Bool = true) -> IOSDownloadOptions {
     IOSDownloadOptions(
       originalBytes: 54_000_000_000, durationSeconds: 7200, canConvert: canConvert,
@@ -21,9 +34,41 @@ struct IOSConvertedDownloadTests {
     #expect(
       IOSDownloadQualityPreference.resolve("1080p", options: options(["480p"]))
         == .converted("480p"))
+    #expect(
+      IOSDownloadQualityPreference.resolve("720p", options: options(["480p", "1080p", "720p"]))
+        == .converted("720p"))
+    for offered in [["720p", "1080p"], ["1080p", "720p"]] {
+      #expect(
+        IOSDownloadQualityPreference.resolve("480p", options: options(offered))
+          == .converted("720p"))
+    }
     #expect(IOSDownloadQualityPreference.resolve("ask", options: options([])) == .original)
-    #expect(IOSDownloadQualityPreference.resolve("720p", options: nil) == .original)
+    #expect(
+      IOSDownloadQualityPreference.resolve("720p", options: options(["480p"], canConvert: false))
+        == .original)
     #expect(IOSDownloadText.button(all.qualities[1]) == "720p · about 1.8 GB")
+  }
+
+  @Test func failedQualityRequestsNeverResolveToTheOriginal() async {
+    for preference in ["ask", "720p"] {
+      await #expect(throws: URLError(.cannotConnectToHost)) {
+        try await IOSDownloadQualityPreference.resolve(preference) {
+          throw URLError(.cannotConnectToHost)
+        }
+      }
+    }
+  }
+
+  @Test func laterEpisodesUseAnAvailableSmallerQualityAndOnlyKnownEmptyOffersUseOriginal()
+    async throws
+  {
+    let smaller = try await IOSDownloadQualityPreference.resolve("720p") {
+      options(["480p"])
+    }
+    #expect(smaller.choice == .converted("480p"))
+    #expect(smaller.options.qualities.first?.estimatedBytes == 1_800_000_000)
+    let original = try await IOSDownloadQualityPreference.resolve("720p") { options([]) }
+    #expect(original.choice == .original)
   }
 
   @Test func onlyTheServersHLSPiecesAreAskedFor() {
