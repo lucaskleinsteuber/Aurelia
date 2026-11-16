@@ -1,6 +1,24 @@
 import Foundation
 
 struct IOSAPIClient: Sendable {
+  /// Reads made by the app itself must not keep an idle server awake (server 2.21+).
+  /// Task-local scope follows child tasks without changing other, user-initiated requests.
+  @TaskLocal private static var requestsInBackground = false
+  private var readsInBackground = false
+
+  nonisolated(nonsending) static func withBackgroundRequests<Value>(
+    operation: nonisolated(nonsending) () async throws -> Value
+  ) async rethrows -> Value {
+    try await $requestsInBackground.withValue(true, operation: operation)
+  }
+
+  /// A copy for automatic refreshes that are started by a new SwiftUI task.
+  var background: IOSAPIClient {
+    var copy = self
+    copy.readsInBackground = true
+    return copy
+  }
+
   let connection: IOSStoredConnection?
   let session: IOSProfileSession?
   let baseURL: URL
@@ -991,6 +1009,10 @@ struct IOSAPIClient: Sendable {
     -> IOSHTTPResponse
   {
     try Task.checkCancellation()
+    var request = request
+    if request.httpMethod == "GET", readsInBackground || Self.requestsInBackground {
+      request.setValue("1", forHTTPHeaderField: "X-Aurelia-Background")
+    }
     let response = try await transport.execute(request, trust: .pinned(fingerprint))
     try Task.checkCancellation()
     if let actual = response.fingerprint,

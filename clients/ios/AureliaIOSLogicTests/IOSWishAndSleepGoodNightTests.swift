@@ -225,12 +225,12 @@ struct IOSWishAndSleepGoodNightTests {
       connection: Self.connection, session: Self.session,
       transport: IOSWishFakeTransport(responses: []))
     let cache = IOSWishPosterByteCache(
-      memoryLimitBytes: 1024, itemLimit: 10, diskCache: disk
-    ) { path, _, _ in
-      await counter.increment()
-      try await Task.sleep(for: .milliseconds(25))
-      return Data(repeating: path.utf8.first ?? 1, count: 700)
-    }
+      memoryLimitBytes: 1024, itemLimit: 10, diskCache: disk,
+      fetcher: { path, _, _ in
+        await counter.increment()
+        try await Task.sleep(for: .milliseconds(25))
+        return Data(repeating: path.utf8.first ?? 1, count: 700)
+      })
 
     async let a = cache.data(posterPath: "/p1.jpg", width: 342, client: client)
     async let b = cache.data(posterPath: "/p1.jpg", width: 342, client: client)
@@ -243,6 +243,44 @@ struct IOSWishAndSleepGoodNightTests {
     try await Task.sleep(for: .milliseconds(50))
     disk.prune()
     #expect(disk.byteCount() <= 1024)
+  }
+
+  @MainActor
+  @Test func wishPosterRetriesAfterATemporaryNetworkFailure() async {
+    let clock = IOSWishPosterTestClock()
+    let counter = IOSWishCounter()
+    let client = IOSAPIClient(
+      connection: Self.connection, session: Self.session,
+      transport: IOSWishFakeTransport(responses: []))
+    let cache = IOSWishPosterByteCache(
+      diskCache: nil, failureRetryInterval: 30, now: { clock.now },
+      fetcher: { _, _, _ in
+        await counter.increment()
+        if await counter.value == 1 { throw URLError(.notConnectedToInternet) }
+        return Data([7, 8, 9])
+      })
+    #expect(await cache.data(posterPath: "/retry.jpg", client: client) == nil)
+    #expect(await cache.data(posterPath: "/retry.jpg", client: client) == nil)
+    #expect(await counter.value == 1, "A failing server is not hammered on each view update.")
+    clock.now = clock.now.addingTimeInterval(30)
+    #expect(await cache.data(posterPath: "/retry.jpg", client: client) == Data([7, 8, 9]))
+    #expect(
+      await counter.value == 2, "The old failure must not hide the poster for the whole session.")
+  }
+
+  @MainActor
+  @Test func clearingWishPostersRejectsAnUncancellableOldFetch() async {
+    let gate = IOSWishPosterFetchGate()
+    let client = IOSAPIClient(
+      connection: Self.connection, session: Self.session,
+      transport: IOSWishFakeTransport(responses: []))
+    let cache = IOSWishPosterByteCache(diskCache: nil, fetcher: { _, _, _ in await gate.fetch() })
+    let fetching = Task { await cache.data(posterPath: "/old.jpg", client: client) }
+    await gate.waitForRequest()
+    cache.clear()
+    await gate.finish(Data([1, 2, 3]))
+    #expect(await fetching.value == nil)
+    #expect(cache.cachedData(posterPath: "/old.jpg", serverID: Self.serverID) == nil)
   }
 
   @MainActor
@@ -299,6 +337,34 @@ private actor IOSWishFakeTransport: IOSHTTPTransport {
 private actor IOSWishCounter {
   private(set) var value = 0
   func increment() { value += 1 }
+}
+
+@MainActor
+private final class IOSWishPosterTestClock {
+  var now = Date(timeIntervalSince1970: 1_800_000_000)
+}
+
+private actor IOSWishPosterFetchGate {
+  private var pending: CheckedContinuation<Data, Never>?
+  private var requestWaiter: CheckedContinuation<Void, Never>?
+
+  func fetch() async -> Data {
+    await withCheckedContinuation { continuation in
+      pending = continuation
+      requestWaiter?.resume()
+      requestWaiter = nil
+    }
+  }
+
+  func waitForRequest() async {
+    if pending != nil { return }
+    await withCheckedContinuation { requestWaiter = $0 }
+  }
+
+  func finish(_ data: Data) {
+    pending?.resume(returning: data)
+    pending = nil
+  }
 }
 
 @MainActor

@@ -3,6 +3,61 @@ import Testing
 
 @Suite("iOS client contracts and transport")
 struct IOSCoreTests {
+  @Test func automaticReadsAreMarkedWithoutMarkingMutationsOrLaterUserReads() async throws {
+    let transport = IOSCoreFakeTransport(responses: Array(repeating: response("{}"), count: 5))
+    let api = IOSAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    _ = try await api.adminData("/api/v1/server/status")
+    try await IOSAPIClient.withBackgroundRequests {
+      _ = try await api.adminData("/api/v1/server/status")
+      _ = try await api.adminData("/api/v1/server/status", method: "POST")
+      let child = Task { try await api.adminData("/api/v1/server/status") }
+      _ = try await child.value
+    }
+    _ = try await api.adminData("/api/v1/server/status")
+    let requests = await transport.requests.map(\.request)
+    #expect(requests.count == 5)
+    #expect(
+      requests.map { $0.value(forHTTPHeaderField: "X-Aurelia-Background") }
+        == [nil, "1", nil, "1", nil])
+    #expect(requests[2].httpMethod == "POST")
+  }
+
+  @Test func backgroundClientCopiesKeepUserRequestsIndependent() async throws {
+    let transport = IOSCoreFakeTransport(responses: Array(repeating: response("{}"), count: 3))
+    let api = IOSAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    _ = try await api.background.adminData("/api/v1/server/status")
+    _ = try await api.background.adminData("/api/v1/server/status", method: "DELETE")
+    _ = try await api.adminData("/api/v1/server/status")
+    let requests = await transport.requests.map(\.request)
+    #expect(
+      requests.map { $0.value(forHTTPHeaderField: "X-Aurelia-Background") }
+        == ["1", nil, nil])
+  }
+
+  @Test @MainActor func aFailedBackgroundScopeRestoresTheCallingActorAndRequestContext()
+    async throws
+  {
+    let transport = IOSCoreFakeTransport(responses: [response("{}")])
+    let api = IOSAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    var reachedOnMainActor = false
+    do {
+      try await IOSAPIClient.withBackgroundRequests {
+        MainActor.assertIsolated()
+        reachedOnMainActor = true
+        throw IOSCoreError.invalidRequest
+      }
+    } catch IOSCoreError.invalidRequest {
+      #expect(reachedOnMainActor)
+    }
+    _ = try await api.adminData("/api/v1/server/status")
+    #expect(
+      await transport.requests.first?.request.value(forHTTPHeaderField: "X-Aurelia-Background")
+        == nil)
+  }
+
   @Test func remoteCommandsDecodeAsTheServerWritesThem() throws {
     let json = #"""
       [{"commandId":"5f0c2f1e-4c7b-4a39-9a3e-0d6c1c2b8a11","action":"play","mediaId":"0b6f6a8e-2d9c-4b43-8d55-3f1a4c5e6d70","positionSeconds":null,"skipSeconds":null,"createdAt":"2026-10-31T16:50:00.1234567+00:00"}]

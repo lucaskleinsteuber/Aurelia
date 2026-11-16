@@ -9,9 +9,12 @@ final class IOSWishPosterByteCache {
   private let memoryBytes = NSCache<NSString, NSData>()
   private let diskCache: IOSArtworkDiskCache?
   private let fetcher: Fetcher
+  private let now: @MainActor @Sendable () -> Date
+  private let failureRetryInterval: TimeInterval
   private var flights: [String: Task<Data?, Never>] = [:]
-  private var failedKeys: Set<String> = []
+  private var failedKeys: [String: Date] = [:]
   private var failedOrder: [String] = []
+  private var generation = UUID()
   private static let maxFailureEntries = 128
 
   static let standardDiskCache: IOSArtworkDiskCache? = {
@@ -28,6 +31,8 @@ final class IOSWishPosterByteCache {
     memoryLimitBytes: Int = 24 * 1_024 * 1_024,
     itemLimit: Int = 150,
     diskCache: IOSArtworkDiskCache? = IOSWishPosterByteCache.standardDiskCache,
+    failureRetryInterval: TimeInterval = 30,
+    now: @escaping @MainActor @Sendable () -> Date = { Date() },
     fetcher: @escaping Fetcher = { posterPath, width, client in
       try await client.wishPosterData(path: posterPath, width: width)
     }
@@ -35,6 +40,8 @@ final class IOSWishPosterByteCache {
     memoryBytes.totalCostLimit = memoryLimitBytes
     memoryBytes.countLimit = itemLimit
     self.diskCache = diskCache
+    self.failureRetryInterval = failureRetryInterval
+    self.now = now
     self.fetcher = fetcher
   }
 
@@ -55,32 +62,48 @@ final class IOSWishPosterByteCache {
     if let mem = memoryBytes.object(forKey: key as NSString) {
       return mem as Data
     }
-    if failedKeys.contains(key) {
-      return nil
+    if let retryAt = failedKeys[key] {
+      guard now() >= retryAt else { return nil }
+      failedKeys[key] = nil
+      failedOrder.removeAll { $0 == key }
     }
     if let running = flights[key] {
       return await running.value
     }
 
+    let run = generation
     let task = Task<Data?, Never> { @MainActor [weak self] in
       guard let self else { return nil }
-      defer { self.flights[key] = nil }
+      defer { if self.generation == run { self.flights[key] = nil } }
 
-      if let disk = self.diskCache?.data(forKey: key), !disk.isEmpty {
-        self.memoryBytes.setObject(disk as NSData, forKey: key as NSString, cost: disk.count)
-        return disk
+      let diskCache = self.diskCache
+      if let diskCache {
+        let disk = await Task.detached(priority: .utility) {
+          diskCache.data(forKey: key)
+        }.value
+        guard !Task.isCancelled, self.generation == run else { return nil }
+        if let disk, !disk.isEmpty {
+          self.memoryBytes.setObject(disk as NSData, forKey: key as NSString, cost: disk.count)
+          return disk
+        }
       }
       do {
-        let fetched = try await self.fetcher(normalized, width, client)
+        let fetched = try await self.fetcher(normalized, width, client.background)
+        guard !Task.isCancelled, self.generation == run else { return nil }
         guard !fetched.isEmpty else {
           self.recordFailure(key)
           return nil
         }
         self.memoryBytes.setObject(fetched as NSData, forKey: key as NSString, cost: fetched.count)
-        self.diskCache?.store(fetched, forKey: key)
+        if let diskCache {
+          await Task.detached(priority: .utility) { diskCache.store(fetched, forKey: key) }.value
+        }
+        guard !Task.isCancelled, self.generation == run else { return nil }
         return fetched
       } catch {
-        if !(error is CancellationError) {
+        if !Task.isCancelled, self.generation == run, !(error is CancellationError),
+          (error as? URLError)?.code != .cancelled
+        {
           self.recordFailure(key)
         }
         return nil
@@ -91,6 +114,7 @@ final class IOSWishPosterByteCache {
   }
 
   func clear() {
+    generation = UUID()
     for task in flights.values { task.cancel() }
     flights.removeAll()
     memoryBytes.removeAllObjects()
@@ -109,12 +133,12 @@ final class IOSWishPosterByteCache {
   }
 
   private func recordFailure(_ key: String) {
-    guard !failedKeys.contains(key) else { return }
-    failedKeys.insert(key)
+    guard failedKeys[key] == nil else { return }
+    failedKeys[key] = now().addingTimeInterval(failureRetryInterval)
     failedOrder.append(key)
     while failedOrder.count > Self.maxFailureEntries {
       let oldest = failedOrder.removeFirst()
-      failedKeys.remove(oldest)
+      failedKeys.removeValue(forKey: oldest)
     }
   }
 }
