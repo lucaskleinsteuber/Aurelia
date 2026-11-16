@@ -811,7 +811,7 @@ private struct IOSWishLibraryDestination: Hashable {
   func hash(into hasher: inout Hasher) { hasher.combine(item.id) }
 }
 
-private struct IOSWishPosterView: View {
+struct IOSWishPosterView: View {
   @EnvironmentObject private var model: IOSAppModel
   let posterPath: String?
   let kind: IOSMediaKind

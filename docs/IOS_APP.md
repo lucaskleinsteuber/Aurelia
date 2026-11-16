@@ -34,7 +34,8 @@ its screens are its own:
   Mac and in the browser.
 - **Name and Picture** crops a chosen photo to a circle (drag and pinch) before it is uploaded.
 - **Screens** are built for iPhone and iPad rather than taken from the TV: a tab bar with Home,
-  Movies, TV Shows, Search and Settings, iOS text sizes and margins, the PIN entered on a keypad
+  Movies, TV Shows, Search and Settings (People opens from Search, so the tab bar keeps five
+  tabs on iPhone), iOS text sizes and margins, the PIN entered on a keypad
   like the iPhone passcode, seasons as a menu with the episodes listed below, and settings as an
   iOS form. The player works by touch; a hardware keyboard adds the arrow keys, Space and Escape.
   The app icon is the Mac app's Liquid Glass icon.
@@ -136,7 +137,8 @@ Good to know:
 zsh scripts/test-ios-logic.sh
 ```
 
-Runs the logic tests on the Mac without a simulator.
+Runs the logic tests on the Mac without a simulator. Like the build below, it first checks the
+Swift formatting (`bash scripts/check-swift-format.sh`, `--fix` formats).
 
 ```bash
 zsh scripts/build-ios.sh

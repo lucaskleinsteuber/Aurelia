@@ -45,6 +45,7 @@ final class IOSAppModel: ObservableObject {
   var supportsMonthlyWrapped: Bool { capabilities?.supportsMonthlyWrapped ?? false }
   var supportsAdaptiveStreaming: Bool { capabilities?.supportsAdaptiveStreaming ?? false }
   var supportsWishes: Bool { capabilities?.supportsWishes ?? false }
+  var supportsPeople: Bool { capabilities?.supportsPeople ?? false }
   var isWishAdmin: Bool { IOSWishPresentation.isAdministrator(session?.user) }
   @Published private(set) var wishSummary: IOSWishSummaryResponse?
   @Published var wishNotificationsEnabled: Bool = IOSWishNotificationCenter.shared

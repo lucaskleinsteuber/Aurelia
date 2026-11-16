@@ -238,6 +238,8 @@ struct IOSCapabilities: Codable, Equatable, Sendable {
   var supportsConvertedDownloads: Bool { capabilities?.contains("converted-downloads-v1") == true }
   /// Family Requests / Wishes.
   var supportsWishes: Bool { capabilities?.contains("wishes-v1") == true }
+  /// People: everyone in the library's credits, and a person's life and other titles from TMDB.
+  var supportsPeople: Bool { capabilities?.contains("people-v1") == true }
 }
 
 struct IOSUser: Codable, Equatable, Sendable {
@@ -541,6 +543,40 @@ struct IOSPersonDetailResponse: Codable, Equatable, Sendable {
   let subtitle: String?
   let profile: IOSArtwork?
   let items: [IOSCatalogItem]
+}
+
+/// One person in People ("people-v1"): everyone TMDB identified in the library's credits.
+struct IOSPersonSummary: Codable, Equatable, Identifiable, Sendable {
+  let name: String
+  let personKey: String
+  let profile: IOSArtwork?
+  let titleCount: Int
+  let department: String?
+
+  var id: String { personKey }
+}
+
+struct IOSPeoplePage: Codable, Equatable, Sendable {
+  let items: [IOSPersonSummary]
+  let total: Int
+  let offset: Int
+  let limit: Int
+}
+
+/// A person's life from TMDB and the titles they are known for that the library doesn't have.
+struct IOSPersonProfile: Codable, Equatable, Sendable {
+  let about: IOSPersonAbout?
+  let knownFor: [IOSWishSearchHit]
+}
+
+struct IOSPersonAbout: Codable, Equatable, Sendable {
+  let biography: String?
+  let birthday: String?
+  let deathday: String?
+  let placeOfBirth: String?
+  let knownForDepartment: String?
+  let provider: String
+  let providerPersonId: String
 }
 
 enum IOSCatalogPageValidator {

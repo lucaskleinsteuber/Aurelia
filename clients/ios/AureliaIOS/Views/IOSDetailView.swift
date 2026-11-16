@@ -368,7 +368,8 @@ struct IOSDetailView: View {
           ForEach(people) { person in
             if model.supportsWatchlist {
               NavigationLink {
-                IOSPersonDetailView(name: person.name)
+                IOSPersonDetailView(
+                  name: person.name, personKey: person.id.hasPrefix("unidentified:") ? nil : person.id)
               } label: {
                 IOSPersonLabel(person: person)
               }.buttonStyle(IOSContentButtonStyle())

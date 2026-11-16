@@ -103,6 +103,17 @@ struct IOSLibraryGrid: View {
     .navigationTitle(title)
     .modifier(IOSSearchField(enabled: listing.section == .search, text: $search))
     .toolbar {
+      // People ("people-v1") opens from Search, so the tab bar keeps its five tabs on iPhone.
+      if listing.section == .search && model.supportsPeople {
+        ToolbarItem(placement: .topBarLeading) {
+          NavigationLink {
+            IOSPeopleView()
+          } label: {
+            Label("People", systemImage: "person.2")
+          }
+          .accessibilityIdentifier("browse-people")
+        }
+      }
       ToolbarItem(placement: .topBarTrailing) {
         Button {
           filters = true

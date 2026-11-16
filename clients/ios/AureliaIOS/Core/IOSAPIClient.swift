@@ -449,6 +449,22 @@ struct IOSAPIClient: Sendable {
     let data = try await send("/api/v1/catalog/person", query: query)
     return try Self.decode(IOSPersonDetailResponse.self, data: data)
   }
+  /// People in the library's credits, those in the most titles first ("people-v1").
+  func people(query search: String, offset: Int, limit: Int) async throws -> IOSPeoplePage {
+    var query = [
+      URLQueryItem(name: "offset", value: String(offset)),
+      URLQueryItem(name: "limit", value: String(limit)),
+    ]
+    let trimmed = search.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmed.isEmpty { query.append(URLQueryItem(name: "query", value: trimmed)) }
+    return try Self.decode(IOSPeoplePage.self, data: await send("/api/v1/people", query: query))
+  }
+  /// A person's life and the titles TMDB knows them for; empty without TMDB.
+  func personProfile(key: String) async throws -> IOSPersonProfile {
+    try Self.decode(
+      IOSPersonProfile.self,
+      data: await send("/api/v1/people/profile", query: [URLQueryItem(name: "key", value: key)]))
+  }
   func scrubPreviewFrame(mediaID: UUID, seconds: Int) async throws -> Data {
     try await send(
       "/api/v1/media/\(mediaID.uuidString.lowercased())/scrub-previews/\(max(0, seconds))",
