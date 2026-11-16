@@ -892,7 +892,7 @@ struct WishesPage: View {
   }
 }
 
-private struct WishPosterThumbnail: View {
+struct WishPosterThumbnail: View {
   let posterPath: String?
   let width: Int
   let profile: StoredServerProfile

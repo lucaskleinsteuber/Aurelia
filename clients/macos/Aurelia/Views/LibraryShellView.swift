@@ -124,14 +124,15 @@ struct LibraryShellView: View {
       LibraryFindShortcut(isBlocked: {
         model.playback != nil || model.movieNightLaunch != nil || model.wrappedLaunch != nil
       }) {
-        // Wishes has its own search; every page without a library search switches to Library.
+        // Wishes and People have their own search; every page without a library search switches
+        // to Library.
         let searchesHere: Set<LibraryDestination> = [
-          .library, .recentlyAdded, .tvShows, .movies, .wishes,
+          .library, .recentlyAdded, .tvShows, .movies, .wishes, .people,
         ]
         let leaving = !searchesHere.contains(destination) || selection != nil
         if leaving {
           selection = nil
-          if destination != .wishes { destination = .library }
+          if destination != .wishes && destination != .people { destination = .library }
         }
         findRequest = FindRequest(startsNewSearch: leaving)
       }
@@ -191,7 +192,7 @@ struct LibraryShellView: View {
     }
     .onChange(of: model.requestedDestination) { _, target in
       guard let target else { return }
-      if target == .wishes, !model.supportsWishes {
+      if (target == .wishes && !model.supportsWishes) || (target == .people && !model.supportsPeople) {
         model.requestedDestination = nil
         return
       }
@@ -227,6 +228,7 @@ struct LibraryShellView: View {
       guard SidebarPreferences.isVisible(item) else { return false }
       if item == .watchlist && !model.supportsWatchlist { return false }
       if item == .wishes && !model.supportsWishes { return false }
+      if item == .people && !model.supportsPeople { return false }
       return true
     }
   }
@@ -250,7 +252,8 @@ struct LibraryShellView: View {
         serverId: profile.serverId, userId: profile.user?.id ?? profile.sessionId)
       targetDestination =
         ((restored == .watchlist && !model.supportsWatchlist)
-          || (restored == .wishes && !model.supportsWishes)) ? .home : restored
+          || (restored == .wishes && !model.supportsWishes)
+          || (restored == .people && !model.supportsPeople)) ? .home : restored
     }
 
     let visible = visibleSidebarItems
@@ -505,6 +508,8 @@ struct LibraryShellView: View {
       WatchlistPage(onSelect: { open(.media($0)) })
     case .wishes:
       WishesPage(onOpenMedia: { open(.media($0)) }, findRequestID: findRequest?.id)
+    case .people:
+      PeoplePage(onSelectPerson: { open(.person($0)) }, findRequestID: findRequest?.id)
     case .recentlyAdded:
       LibraryPage(
         section: .recentlyAdded, findRequest: findRequest,
@@ -1927,57 +1932,35 @@ private struct PersonDetailView: View {
   @State private var isLoading = true
   @State private var errorMessage: String?
   @State private var retryRevision = 0
+  /// The person's life and other titles from TMDB ("people-v1"); the page never waits for it.
+  @State private var profile: PersonProfileResponse?
+  @State private var biographyExpanded = false
+  @State private var wishing: String?
+  @State private var wishMessage: String?
+
+  /// Only a person TMDB identified has a life to show.
+  private var profileKey: String? {
+    guard model.supportsPeople, let key = person.personKey, key.hasPrefix("tmdb:person:") else { return nil }
+    return key
+  }
 
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 28) {
-        HStack(spacing: 18) {
-          AureliaIconControl(symbol: "chevron.left", label: "Back", action: onBack)
-          AuthenticatedArtwork(
-            artwork: detail?.profile ?? person.profile,
-            symbol: "person.fill"
-          )
-          .frame(width: 84, height: 84)
-          .clipShape(Circle())
-          .overlay { Circle().stroke(AureliaDesign.hairline, lineWidth: 1) }
-          VStack(alignment: .leading, spacing: 6) {
-            Text((detail?.subtitle ?? person.subtitle ?? "Cast & Crew").uppercased())
-              .font(.caption.weight(.bold))
-              .tracking(1)
-              .foregroundStyle(.secondary)
-            Text(detail?.name ?? person.name)
-              .font(AureliaDesign.heroTitle)
-              .lineLimit(2)
-            if let items = detail?.items {
-              Text("\(items.count) \(items.count == 1 ? "title" : "titles") in your library")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            }
-          }
-          Spacer()
+        header
+        if let biography = profile?.about?.biography?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !biography.isEmpty
+        {
+          biographySection(biography)
         }
-        if isLoading {
-          AureliaDelayedProgress()
-            .frame(maxWidth: .infinity, minHeight: 240)
-            .accessibilityLabel("Loading titles")
-        } else if let errorMessage {
-          ContentUnavailableView {
-            Label("Couldn’t Load Person", systemImage: "exclamationmark.triangle")
-          } description: {
-            Text(errorMessage)
-          } actions: {
-            Button("Try Again") { retryRevision += 1 }
+        VStack(alignment: .leading, spacing: 16) {
+          if profileKey != nil, let items = detail?.items, !items.isEmpty {
+            AureliaSectionHeading(title: "In Your Library", count: items.count)
           }
-          .frame(maxWidth: .infinity, minHeight: 260)
-        } else if let items = detail?.items, !items.isEmpty {
-          posterGrid(items, onSelect: onSelect)
-        } else {
-          ContentUnavailableView(
-            "No Titles Found",
-            systemImage: "person.crop.circle.badge.questionmark",
-            description: Text("No accessible movies or TV shows in this library match this person.")
-          )
-          .frame(maxWidth: .infinity, minHeight: 260)
+          titles
+        }
+        if let knownFor = profile?.knownFor, !knownFor.isEmpty {
+          knownForSection(knownFor)
         }
       }
       .padding(AureliaDesign.pagePadding)
@@ -2012,7 +1995,222 @@ private struct PersonDetailView: View {
         }
       }
     }
+    .task(id: person.personKey) {
+      biographyExpanded = false
+      wishMessage = nil
+      guard let key = profileKey else {
+        profile = nil
+        return
+      }
+      if let remembered = model.rememberedPersonProfile(key) {
+        profile = remembered
+        return
+      }
+      profile = nil
+      do {
+        let loaded = try await model.personProfile(key)
+        guard !Task.isCancelled else { return }
+        withAnimation(.easeOut(duration: 0.15)) { profile = loaded }
+      } catch {
+        // Without TMDB, or while it is away, the page shows the library's titles only.
+      }
+    }
     .accessibilityIdentifier("person-detail-page")
+  }
+
+  private var header: some View {
+    HStack(spacing: 18) {
+      AureliaIconControl(symbol: "chevron.left", label: "Back", action: onBack)
+      AuthenticatedArtwork(
+        artwork: detail?.profile ?? person.profile,
+        symbol: "person.fill"
+      )
+      .frame(width: 84, height: 84)
+      .clipShape(Circle())
+      .overlay { Circle().stroke(AureliaDesign.hairline, lineWidth: 1) }
+      VStack(alignment: .leading, spacing: 6) {
+        Text((detail?.subtitle ?? person.subtitle ?? "Cast & Crew").uppercased())
+          .font(.caption.weight(.bold))
+          .tracking(1)
+          .foregroundStyle(.secondary)
+        Text(detail?.name ?? person.name)
+          .font(AureliaDesign.heroTitle)
+          .lineLimit(2)
+        if let life = PeoplePresentation.life(profile?.about) {
+          Text(life)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("person-life")
+        }
+        if let items = detail?.items {
+          Text("\(items.count) \(items.count == 1 ? "title" : "titles") in your library")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+        }
+      }
+      Spacer()
+    }
+  }
+
+  private func biographySection(_ biography: String) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("Biography")
+        .font(AureliaDesign.sectionTitle)
+      Text(biography)
+        .font(.body)
+        .foregroundStyle(.secondary)
+        .lineLimit(biographyExpanded ? nil : 4)
+        .frame(maxWidth: 760, alignment: .leading)
+        .textSelection(.enabled)
+      HStack(spacing: 12) {
+        if biography.count > 320 {
+          Button(biographyExpanded ? "Less" : "More") { biographyExpanded.toggle() }
+            .buttonStyle(.link)
+            .accessibilityIdentifier("person-biography-more")
+        }
+        Text("From TMDB")
+          .font(.caption)
+          .foregroundStyle(.tertiary)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var titles: some View {
+    if isLoading {
+      AureliaDelayedProgress()
+        .frame(maxWidth: .infinity, minHeight: 240)
+        .accessibilityLabel("Loading titles")
+    } else if let errorMessage {
+      ContentUnavailableView {
+        Label("Couldn’t Load Person", systemImage: "exclamationmark.triangle")
+      } description: {
+        Text(errorMessage)
+      } actions: {
+        Button("Try Again") { retryRevision += 1 }
+      }
+      .frame(maxWidth: .infinity, minHeight: 260)
+    } else if let items = detail?.items, !items.isEmpty {
+      posterGrid(items, onSelect: onSelect)
+    } else {
+      ContentUnavailableView(
+        "No Titles Found",
+        systemImage: "person.crop.circle.badge.questionmark",
+        description: Text("No accessible movies or TV shows in this library match this person.")
+      )
+      .frame(maxWidth: .infinity, minHeight: 260)
+    }
+  }
+
+  private func knownForSection(_ hits: [WishSearchHit]) -> some View {
+    VStack(alignment: .leading, spacing: 14) {
+      AureliaSectionHeading(title: "Known For", count: hits.count)
+      if let wishMessage {
+        Text(wishMessage)
+          .font(.callout)
+          .foregroundStyle(.secondary)
+      }
+      ScrollView(.horizontal) {
+        LazyHStack(alignment: .top, spacing: 18) {
+          ForEach(hits) { hit in
+            knownForCard(hit)
+          }
+        }
+        .padding(.vertical, 4)
+      }
+      .scrollIndicators(.never)
+      .scrollClipDisabled()
+    }
+    .accessibilityIdentifier("person-known-for")
+  }
+
+  private func knownForCard(_ hit: WishSearchHit) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      if let account = model.profile {
+        WishPosterThumbnail(
+          posterPath: hit.posterPath, width: 342, profile: account, cache: model.wishPosterCache
+        )
+        .frame(width: 140, height: 210)
+      }
+      Text(hit.title)
+        .font(.callout.weight(.semibold))
+        .lineLimit(1)
+      Text([hit.year.map(String.init), WishPresentation.kindLabel(hit.kind)].compactMap { $0 }.joined(separator: " · "))
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+      if model.supportsWishes {
+        wishControl(hit)
+          .padding(.top, 2)
+      }
+    }
+    .frame(width: 140, alignment: .leading)
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("known-for-\(hit.id)")
+  }
+
+  @ViewBuilder
+  private func wishControl(_ hit: WishSearchHit) -> some View {
+    if hit.alreadyWished && hit.supportedByCaller {
+      Label("Wished", systemImage: "checkmark")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+    } else {
+      Button {
+        Task { await wish(hit) }
+      } label: {
+        Label(hit.alreadyWished ? "Me Too" : "Wish", systemImage: "gift")
+      }
+      .buttonStyle(.bordered)
+      .controlSize(.small)
+      .disabled(wishing != nil)
+    }
+  }
+
+  /// Wishes the title, or adds this profile to someone else's wish for it.
+  private func wish(_ hit: WishSearchHit) async {
+    guard let account = model.profile else { return }
+    wishing = hit.id
+    wishMessage = nil
+    defer { wishing = nil }
+    do {
+      let client = APIClient(profile: account)
+      var wishId = hit.existingWishId
+      if hit.alreadyWished, let existing = hit.existingWishId {
+        _ = try await client.setWishSupport(id: existing, supported: true)
+      } else {
+        switch try await client.createWish(
+          CreateWishRequest(
+            kind: hit.kind, title: hit.title, year: hit.year, provider: hit.provider,
+            providerMediaId: hit.providerMediaId, overview: hit.overview,
+            posterPath: hit.posterPath, note: nil))
+        {
+        case .created(let created):
+          wishId = created.wish.id
+        case .alreadyInLibrary(let problem):
+          wishMessage = problem.message
+          return
+        }
+      }
+      if let current = profile {
+        profile = PersonProfileResponse(
+          about: current.about,
+          knownFor: current.knownFor.map { item in
+            guard item.id == hit.id else { return item }
+            return WishSearchHit(
+              provider: item.provider, providerMediaId: item.providerMediaId, kind: item.kind,
+              title: item.title, year: item.year, overview: item.overview,
+              posterPath: item.posterPath, posterUrl: item.posterUrl,
+              alreadyInLibrary: item.alreadyInLibrary, existingMediaId: item.existingMediaId,
+              alreadyWished: true, existingWishId: wishId, supportedByCaller: true)
+          })
+      }
+      model.forgetPersonProfiles()
+      await model.refreshWishSummary(notify: false)
+    } catch {
+      if error is CancellationError { return }
+      wishMessage = WishPresentation.describeError(error)
+    }
   }
 }
 

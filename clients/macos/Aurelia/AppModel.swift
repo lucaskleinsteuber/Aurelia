@@ -138,6 +138,9 @@ final class AppModel: ObservableObject {
   var supportsWishes: Bool {
     libraryCapabilities.contains(ServerFeatureNames.wishes)
   }
+  var supportsPeople: Bool {
+    libraryCapabilities.contains(ServerFeatureNames.people)
+  }
   var isWishAdmin: Bool {
     WishPresentation.isAdministrator(profile?.user)
   }
@@ -2383,6 +2386,39 @@ final class AppModel: ObservableObject {
     selection.personKey ?? "name:\(selection.name.lowercased())"
   }
 
+  /// A person's life and other titles from TMDB, kept for ten minutes. The server keeps them for
+  /// 30 days; this only spares the request when someone clicks back and forth.
+  private var personProfiles: [String: (profile: PersonProfileResponse, at: Date)] = [:]
+
+  func rememberedPersonProfile(_ personKey: String) -> PersonProfileResponse? {
+    guard let entry = personProfiles[personKey], Date().timeIntervalSince(entry.at) < 600 else { return nil }
+    return entry.profile
+  }
+
+  func personProfile(_ personKey: String) async throws -> PersonProfileResponse {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let loaded = try await currentConnection {
+      try await APIClient(profile: profile).personProfile(personKey: personKey)
+    }
+    if personProfiles.count >= 40, let oldest = personProfiles.min(by: { $0.value.at < $1.value.at })?.key {
+      personProfiles.removeValue(forKey: oldest)
+    }
+    personProfiles[personKey] = (loaded, Date())
+    return loaded
+  }
+
+  /// A wish made from a person's page shows on it at once and the next time it opens.
+  func forgetPersonProfiles() {
+    personProfiles.removeAll()
+  }
+
+  func people(query: String, offset: Int, limit: Int) async throws -> PeoplePageResponse {
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await currentConnection {
+      try await APIClient(profile: profile).people(query: query, offset: offset, limit: limit)
+    }
+  }
+
   func saveMetadata(id: UUID, request: UpdateMediaMetadataRequest) async throws
     -> MediaMetadataSummary
   {
@@ -3564,6 +3600,7 @@ final class AppModel: ObservableObject {
 
   private func clearPersonalViewState() {
     personDetails.removeAll()
+    personProfiles.removeAll()
     browseWarmup?.cancel()
     browseWarmup = nil
     browseResults.removeAll()

@@ -60,6 +60,7 @@ enum SidebarPreferences {
     .library,
     .collections,
     .watchlist,
+    .people,
     .wishes,
     .recentlyAdded,
     .tvShows,

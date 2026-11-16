@@ -1349,6 +1349,28 @@ struct APIClient: Sendable {
     return try await get(components.string ?? "/api/v1/catalog/person")
   }
 
+  /// People in the library's credits, those in the most titles first ("people-v1").
+  func people(query: String, offset: Int, limit: Int) async throws -> PeoplePageResponse {
+    var components = URLComponents()
+    components.path = "/api/v1/people"
+    var items = [
+      URLQueryItem(name: "offset", value: String(offset)),
+      URLQueryItem(name: "limit", value: String(limit)),
+    ]
+    let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmed.isEmpty { items.append(URLQueryItem(name: "query", value: trimmed)) }
+    components.queryItems = items
+    return try await get(components.string ?? "/api/v1/people")
+  }
+
+  /// A person's life and the titles TMDB knows them for; empty without TMDB.
+  func personProfile(personKey: String) async throws -> PersonProfileResponse {
+    var components = URLComponents()
+    components.path = "/api/v1/people/profile"
+    components.queryItems = [URLQueryItem(name: "key", value: personKey)]
+    return try await get(components.string ?? "/api/v1/people/profile")
+  }
+
   func mediaMetadata(id: UUID) async throws -> MediaMetadataSummary {
     try await get("/api/v1/media/\(id.uuidString.lowercased())/metadata")
   }

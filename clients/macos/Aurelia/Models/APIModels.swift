@@ -1250,6 +1250,44 @@ struct PersonSelection: Hashable, Sendable {
   let subtitle: String?
 }
 
+/// One person in People ("people-v1"): everyone TMDB identified in the library's credits.
+struct PersonSummary: Codable, Equatable, Identifiable, Sendable {
+  let name: String
+  let personKey: String
+  let profile: ArtworkSummary?
+  let titleCount: Int
+  let department: String?
+
+  var id: String { personKey }
+
+  var selection: PersonSelection {
+    PersonSelection(name: name, personKey: personKey, profile: profile, subtitle: department)
+  }
+}
+
+struct PeoplePageResponse: Codable, Equatable, Sendable {
+  let items: [PersonSummary]
+  let total: Int
+  let offset: Int
+  let limit: Int
+}
+
+/// A person's life from TMDB and the titles they are known for that the library doesn't have.
+struct PersonProfileResponse: Codable, Equatable, Sendable {
+  let about: PersonAbout?
+  let knownFor: [WishSearchHit]
+}
+
+struct PersonAbout: Codable, Equatable, Sendable {
+  let biography: String?
+  let birthday: String?
+  let deathday: String?
+  let placeOfBirth: String?
+  let knownForDepartment: String?
+  let provider: String
+  let providerPersonId: String
+}
+
 struct SelectMetadataMatchRequest: Encodable, Sendable {
   let providerMediaId: String
   let mediaType: String

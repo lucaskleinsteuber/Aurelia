@@ -154,6 +154,7 @@ enum LibraryDestination: String, CaseIterable, Identifiable, Sendable {
   case library
   case collections
   case watchlist
+  case people
   case wishes
   case recentlyAdded
   case tvShows
@@ -170,6 +171,7 @@ enum LibraryDestination: String, CaseIterable, Identifiable, Sendable {
     case .library: "Library"
     case .collections: "Collections"
     case .watchlist: "Watchlist"
+    case .people: "People"
     case .wishes: "Wishes"
     case .recentlyAdded: "Recently Added"
     case .tvShows: "TV Shows"
@@ -186,6 +188,7 @@ enum LibraryDestination: String, CaseIterable, Identifiable, Sendable {
     case .library: "rectangle.stack.fill"
     case .collections: "square.stack.3d.up.fill"
     case .watchlist: "bookmark.fill"
+    case .people: "person.2.fill"
     case .wishes: "sparkles"
     case .recentlyAdded: "clock"
     case .tvShows: "tv"

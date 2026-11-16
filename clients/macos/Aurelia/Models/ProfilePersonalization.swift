@@ -155,4 +155,6 @@ enum ServerFeatureNames {
   static let convertedDownloads = "converted-downloads-v1"
   static let suggestions = "suggestions-v1"
   static let wishes = "wishes-v1"
+  /// People in the sidebar and a person's life and other titles from TMDB.
+  static let people = "people-v1"
 }

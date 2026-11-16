@@ -158,6 +158,13 @@ macOS loads its speech model from Apple once. It needs macOS 26 on a Mac that su
 server 2.1.0 or newer (2.2.0 for syncing), and an administrator profile. Clear dialogue works best; songs, heavy
 accents and people talking over each other come out less well.
 
+## People
+
+With a server that has `people-v1`, People in the sidebar lists everyone TMDB identified in the
+library, those in the most titles first; ⌘F searches them. A person's page, from People or from
+Cast & Crew, shows their titles in the library at once and adds, when TMDB is on, their life
+dates, biography and a Known For row of titles the library doesn't have, each with Wish or Me Too.
+
 ## Movie Night
 
 Can't decide? **Movie Night** on Home lets everyone at home swipe through the same posters, on
