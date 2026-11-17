@@ -11,7 +11,6 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Sendable {
   case profilesAndDevices = "Profiles and Devices"
   case server = "Server"
   case power = "Power"
-  case smartHome = "Smart Home"
   case updates = "Updates"
   case advanced = "Advanced"
   case about = "About"
@@ -29,7 +28,6 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Sendable {
     case .profilesAndDevices: "person.2.fill"
     case .server: "server.rack"
     case .power: "bolt.fill"
-    case .smartHome: "house.fill"
     case .updates: "arrow.down.circle.fill"
     case .advanced: "slider.horizontal.3"
     case .about: "info.circle.fill"
@@ -288,9 +286,6 @@ struct AppSettingsView: View {
       return model.canManageMedia
     case .power:
       return model.profile?.user?.role == .owner
-    case .smartHome:
-      return model.profile?.user?.role == .owner
-        && model.libraryCapabilities.contains("automation-v1")
     }
   }
 
@@ -377,8 +372,7 @@ struct AppSettingsView: View {
       }
     case .power:
       ServerManagementView(.power)
-    case .smartHome:
-      ServerAutomationSection()
+      ServerPowerNowSection()
     case .updates:
       updatesSections
     case .advanced:
@@ -436,6 +430,7 @@ struct AppSettingsView: View {
           query, "power sleep shut down turn off wake lan unused idle energy awake hours server")
       {
         ServerManagementView(.power)
+        ServerPowerNowSection()
         let _ = { foundAny = true }()
       }
       if queryMatches(

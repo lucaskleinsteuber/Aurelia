@@ -1666,8 +1666,8 @@ struct APIClient: Sendable {
     return try await perform(path: "/api/v1/wishes/poster?\(query)", method: "GET")
   }
 
-  /// A playback ticket. `forDownload` tells the server nobody watches yet: Smart Home hears
-  /// nothing and no scrub previews are made (servers before 2.20.0 ignore it).
+  /// A playback ticket. `forDownload` tells the server nobody watches yet, so no scrub previews
+  /// are made (servers before 2.20.0 ignore it).
   func createPlayback(mediaId: UUID, forDownload: Bool = false) async throws
     -> PlaybackSourceResponse
   {
@@ -1810,18 +1810,6 @@ struct APIClient: Sendable {
       path: "/api/v1/media/\(mediaId.uuidString.lowercased())/subtitles/synced?language=\(code)",
       method: "POST", body: Data(subRip.utf8), timeout: 60)
     return try Self.decode(DownloadedSubtitle.self, from: data)
-  }
-
-  /// Smart Home (server 2.16.0): the player's state, the moment it changes.
-  func reportPlaybackState(ticket: UUID, state: String, positionSeconds: Double) async throws {
-    struct Body: Encodable {
-      let state: String
-      let positionSeconds: Double
-    }
-    _ = try await perform(
-      path: "/api/v1/playback/\(ticket.uuidString.lowercased())/state", method: "POST",
-      body: try JSONEncoder().encode(Body(state: state, positionSeconds: positionSeconds)),
-      timeout: 5)
   }
 
   func revokePlayback(id: UUID) async throws {
@@ -2012,61 +2000,17 @@ struct APIClient: Sendable {
     }
   }
 
-  // MARK: Smart Home ("automation-v1")
+  // MARK: Turning the server off now ("power-now-v1")
 
-  func automationOverview() async throws -> AutomationOverview {
-    try await get("/api/v1/server/automation")
-  }
-  func createWebhook(_ request: AutomationWebhookRequest) async throws -> AutomationWebhookCreated {
-    try Self.decode(
-      AutomationWebhookCreated.self,
-      from: await perform(
-        path: "/api/v1/server/automation/webhooks", method: "POST",
-        body: JSONEncoder().encode(request)))
-  }
-  func saveWebhook(id: UUID, _ request: AutomationWebhookRequest) async throws {
-    _ = try await perform(
-      path: "/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())", method: "PUT",
-      body: JSONEncoder().encode(request))
-  }
-  func deleteWebhook(id: UUID) async throws {
-    _ = try await perform(
-      path: "/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())", method: "DELETE")
-  }
-  func testWebhook(id: UUID) async throws -> AutomationDelivery {
-    try Self.decode(
-      AutomationDelivery.self,
-      from: await perform(
-        path: "/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())/test",
-        method: "POST", timeout: 20))
-  }
-  func webhookDeliveries(id: UUID) async throws -> [AutomationDelivery] {
-    try await get(
-      "/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())/deliveries?limit=50")
-  }
-  func rotateWebhookSecret(id: UUID) async throws -> AutomationSecret {
-    try Self.decode(
-      AutomationSecret.self,
-      from: await perform(
-        path: "/api/v1/server/automation/webhooks/\(id.uuidString.lowercased())/secret",
-        method: "POST"))
-  }
-  func createIntegrationToken(name: String, scopes: [String]) async throws
-    -> IntegrationTokenCreated
-  {
-    struct Payload: Encodable {
-      let name: String
-      let scopes: [String]
+  /// What this server can do now (Sleep, Turn Off, Stop). Servers from 2.16.0 to 2.22 listed it in
+  /// their Smart Home overview ("automation-v1"), since removed.
+  func powerNowActions(capabilities: Set<String>) async throws -> [String] {
+    if capabilities.contains(PowerNowText.capability) {
+      let options: PowerNowOptions = try await get("/api/v1/server/power/now")
+      return options.actions
     }
-    return try Self.decode(
-      IntegrationTokenCreated.self,
-      from: await perform(
-        path: "/api/v1/server/automation/tokens", method: "POST",
-        body: JSONEncoder().encode(Payload(name: name, scopes: scopes))))
-  }
-  func revokeIntegrationToken(id: UUID) async throws {
-    _ = try await perform(
-      path: "/api/v1/server/automation/tokens/\(id.uuidString.lowercased())", method: "DELETE")
+    let legacy: LegacyPowerNowOptions = try await get("/api/v1/server/automation")
+    return legacy.powerActions
   }
   func powerNow(action: String, force: Bool = false) async throws -> PowerNowResult {
     struct Payload: Encodable {
@@ -2698,16 +2642,6 @@ struct APIClient: Sendable {
       return Data(response.utf8)
     }
   #endif
-
-  /// A request with a Siri integration key instead of a profile, pinned to the server's certificate.
-  static func integrationRequest(
-    profile: StoredServerProfile, key: String?, path: String, method: String, body: Data?
-  ) async throws -> Data {
-    let (data, _, _) = try await request(
-      baseURL: profile.baseURL, path: path, method: method, token: key, body: body,
-      trustMode: .pinned(profile.publicKeyFingerprint), timeout: 10)
-    return data
-  }
 
   private static func request(
     baseURL: URL,

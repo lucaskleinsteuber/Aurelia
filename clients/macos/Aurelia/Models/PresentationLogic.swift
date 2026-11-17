@@ -284,7 +284,6 @@ enum ServerIssueText {
     case "request_failed": "A request failed on the server"
     case "host_rejected", "host_operation_rejected":
       "The server refused an address it doesn't answer to"
-    case "integration_key_rejected": "A Smart Home key was refused"
     case "backup_attempt_failed": "An automatic backup failed"
     case "conversion_failed": "Converting a title while it played failed"
     case "subtitle_conversion_failed": "A subtitle couldn't be converted"
