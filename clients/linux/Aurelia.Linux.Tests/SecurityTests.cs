@@ -117,32 +117,17 @@ public sealed class SecurityTests
     }
 }
 
-/// <summary>Smart Home on Linux ("automation-v1"): what the player reports and the settings' words.</summary>
-public sealed class AutomationTests
+/// <summary>Settings › Power › Right Now: Sleep, Turn Off or Stop Now, and older servers.</summary>
+public sealed class PowerNowTests
 {
     [Fact]
-    public void ThePlayerReportsRealStatesOnce()
+    public void NewAndOlderServersOfferItWithTheSameWords()
     {
-        Assert.Equal(PlaybackStates.Playing, AutomationPlaybackState.For(PlayerState.Playing));
-        Assert.Equal(PlaybackStates.Buffering, AutomationPlaybackState.For(PlayerState.Recovering));
-        Assert.Null(AutomationPlaybackState.For(PlayerState.Failed));
-        Assert.True(AutomationPlaybackState.ShouldReport(null, PlaybackStates.Playing));
-        Assert.False(AutomationPlaybackState.ShouldReport(PlaybackStates.Paused, PlaybackStates.Paused));
-        Assert.False(AutomationPlaybackState.ShouldReport(PlaybackStates.Finished, PlaybackStates.Paused));
-        Assert.True(AutomationPlaybackState.ShouldReport(PlaybackStates.Finished, PlaybackStates.Playing));
-    }
-
-    [Fact]
-    public void HomeAssistantsAddressIsBuiltFromItsAddressAndTheTriggerId()
-    {
-        Assert.Equal("http://homeassistant.local:8123/api/webhook/aurelia_lights", AutomationText.HomeAssistantUrl("homeassistant.local", "aurelia_lights"));
-        Assert.Equal("http://10.0.0.20:8123/api/webhook/x", AutomationText.HomeAssistantUrl("http://10.0.0.20:8123/", "x"));
-        Assert.Equal("https://ha.example.com/api/webhook/x", AutomationText.HomeAssistantUrl("https://ha.example.com", "x"));
-        Assert.Null(AutomationText.HomeAssistantUrl("homeassistant.local", "no spaces"));
-        Assert.Equal(("http://homeassistant.local:8123", "x"), AutomationText.SplitHomeAssistantUrl("http://homeassistant.local:8123/api/webhook/x"));
-        Assert.Equal("homeassistant.local:8123", AutomationText.Host("http://homeassistant.local:8123/api/webhook/secret"));
-        var example = AutomationText.HomeAssistantExample("aurelia_lights");
-        Assert.Contains("webhook_id: aurelia_lights", example, StringComparison.Ordinal);
-        Assert.Contains("{{ trigger.json.event in ['playback.started', 'playback.resumed'] }}", example, StringComparison.Ordinal);
+        Assert.True(PowerNowText.IsOffered(capability => capability == "power-now-v1"));
+        Assert.True(PowerNowText.IsOffered(capability => capability == "automation-v1"));
+        Assert.False(PowerNowText.IsOffered(_ => false));
+        Assert.Equal(["Sleep Now", "Turn Off Now", "Stop Aurelia Now"],
+            PowerNowText.Known(["sleep", "reboot", "shutdown", "stop"]).Select(PowerNowText.Title));
+        Assert.Contains("Wake-on-LAN", PowerNowText.Detail("sleep"), StringComparison.Ordinal);
     }
 }

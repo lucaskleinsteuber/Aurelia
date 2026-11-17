@@ -95,6 +95,7 @@ public sealed class ServerPage : StackPanel
             if (await PowerAsync() is { } unused) Children.Add(unused);
             else if (localHosting is null)
                 Children.Add(Section("When Nobody Uses Aurelia", Block(Note("This server can't save power from Aurelia: it follows its computer's own energy settings."))));
+            if (scope.IsOwner && PowerNowText.IsOffered(Client.Library.Supports)) Children.Add(new PowerNowSection(scope));
             return;
         }
         Children.Add(Summary());
@@ -107,7 +108,6 @@ public sealed class ServerPage : StackPanel
         if (scope.IsOwner && Client.Library.Supports(ServerFeatures.ServerSpeech)) Children.Add(await ServerSpeechSection.BuildAsync(scope));
         if (scope.IsOwner && Client.Library.Supports(ServerFeatures.FileChecks)) Children.Add(await ServerFileWatchSection.BuildAsync(scope));
         if (await VideoConversionAsync() is { } conversion) Children.Add(conversion);
-        if (scope.IsOwner && Client.Library.Supports(ServerFeatures.Automation)) Children.Add(new AutomationSection(scope));
         if (scope.IsOwner) Children.Add(new ServerMoveSection(scope, status?.NetworkAddresses));
         var advanced = new Expander { Header = "Advanced Settings", IsExpanded = showsAdvanced, HorizontalAlignment = HorizontalAlignment.Stretch };
         var advancedContent = new StackPanel { Spacing = 22, Margin = new Thickness(0, 12, 0, 0) };

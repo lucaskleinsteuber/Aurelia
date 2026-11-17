@@ -77,7 +77,6 @@ internal static class SettingsRows
         "Screen Time" => "IconHistory",
         "Favorites" => "IconFavorite",
         "Collections" or "Franchises in Library" => "IconCollections",
-        "Smart Home" => "IconHome",
         "Security" => "IconLock",
         "Notifications" => "IconWishes",
         "Advanced" or "Test Tools" => "IconSliders",

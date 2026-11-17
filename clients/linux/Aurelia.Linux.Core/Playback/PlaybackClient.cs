@@ -17,7 +17,7 @@ public sealed class PlaybackClient(AureliaApi api, LibraryClient library)
 
     /// <summary>
     /// POST /api/v1/media/{id}/playback: a short-lived ticket for one stream. <paramref name="forDownload"/>
-    /// tells the server nobody watches yet: Smart Home hears nothing (servers before 2.20.0 ignore it).
+    /// tells the server nobody watches yet, so no scrub previews are made (servers before 2.20.0 ignore it).
     /// </summary>
     public async Task<PlaybackSourceResponse> StartAsync(Guid mediaId, CancellationToken cancellation, bool forDownload = false)
     {
@@ -65,11 +65,6 @@ public sealed class PlaybackClient(AureliaApi api, LibraryClient library)
 
     public Task RevokeAsync(Guid ticketId, CancellationToken cancellation) =>
         Send<AureliaApi.NoContent>(HttpMethod.Delete, $"/api/v1/playback/{ticketId}", null, cancellation);
-
-    /// <summary>Smart Home (server 2.16.0): the player's state, the moment it changes.</summary>
-    public Task ReportStateAsync(Guid ticketId, string state, double positionSeconds, CancellationToken cancellation) =>
-        Send<AureliaApi.NoContent>(HttpMethod.Post, $"/api/v1/playback/{ticketId}/state",
-            new PlaybackStateRequest(state, positionSeconds), cancellation);
 
     public Task<PlaybackProgressResponse> ProgressAsync(Guid mediaId, CancellationToken cancellation) =>
         Send<PlaybackProgressResponse>(HttpMethod.Get, $"/api/v1/media/{mediaId}/progress", null, cancellation);
