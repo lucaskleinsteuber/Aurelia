@@ -5,6 +5,24 @@ import Testing
 struct IOSSettingsPagesTests {
   private let fingerprint = String(repeating: "B", count: 64)
 
+  @Test func emptyHomeDoesNotCallALimitedProfilesLibraryEmpty() {
+    let child = IOSUser(id: UUID(), username: "mia", role: "user", ageLimit: 6)
+    let childText = IOSEmptyLibraryText(user: child, managesStorage: false)
+    #expect(childText.title == "Nothing to Watch Yet")
+    #expect(childText.message.contains("FSK 6"))
+    let chosen = IOSUser(
+      id: UUID(), username: "sam", role: "user", accessMode: "selectedTitles")
+    #expect(
+      IOSEmptyLibraryText(user: chosen, managesStorage: false).title == "Nothing to Watch Yet")
+    let owner = IOSUser(id: UUID(), username: "alex", role: "owner")
+    let ownerText = IOSEmptyLibraryText(user: owner, managesStorage: true)
+    #expect(ownerText.title == "Your Library Is Empty")
+    #expect(ownerText.message == "Add a storage location in Settings › Library.")
+    #expect(
+      IOSEmptyLibraryText(user: nil, managesStorage: false).message
+        == "Ask the server owner to add a storage location.")
+  }
+
   // MARK: Which pages a profile sees
 
   @Test func importReviewCountsUseSingularAndPluralAndIncludeTrailers() {

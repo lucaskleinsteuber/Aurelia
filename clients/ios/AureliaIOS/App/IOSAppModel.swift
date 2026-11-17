@@ -186,6 +186,9 @@ final class IOSAppModel: ObservableObject {
         id: old.id, name: user.shownName, role: old.role, needsPinSetup: old.needsPinSetup,
         pinProtectionEnabled: old.pinProtectionEnabled, pictureKey: user.pictureKey,
         pictureRevision: user.pictureRevision ?? 0, ageLimit: user.ageLimit)
+      if let connection {
+        offline.refreshCards(serverID: connection.serverID, profiles: [profiles[index]])
+      }
     }
   }
 
@@ -687,6 +690,7 @@ final class IOSAppModel: ObservableObject {
         retryAfter: nil)
     }
     profiles = result.profiles
+    offline.refreshCards(serverID: connection.serverID, profiles: profiles)
     error = nil
     phase = .profiles
     browser.stop()

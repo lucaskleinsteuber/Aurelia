@@ -25,7 +25,7 @@ struct IOSProfilesView: View {
   }
 
   private var picker: some View {
-    ScrollView {
+    IOSCenteredScrollView {
       VStack(spacing: 32) {
         Text("Who’s watching?").font(.system(.largeTitle, weight: .bold))
           .multilineTextAlignment(.center)
@@ -60,10 +60,7 @@ struct IOSProfilesView: View {
         }
       }
       .padding(.horizontal, IOSDesign.margin).padding(.vertical, 40)
-      .frame(maxWidth: .infinity)
-      .containerRelativeFrame(.vertical, alignment: .center) { length, _ in length }
     }
-    .scrollBounceBehavior(.basedOnSize)
   }
 }
 
@@ -300,6 +297,7 @@ struct IOSPINView: View {
       }
       .scrollBounceBehavior(.basedOnSize)
     }
+    .background { keyboardKeys }
     // An inset, not an overlay: with large text the button would otherwise cover the avatar.
     .safeAreaInset(edge: .top, spacing: 0) {
       Button {
@@ -354,6 +352,18 @@ struct IOSPINView: View {
         .accessibilityIdentifier("profile-forgot-pin")
     }
     .frame(maxWidth: 300)
+  }
+
+  /// An iPad keyboard types the PIN too: digits, Delete and Return, without a text field.
+  private var keyboardKeys: some View {
+    ZStack {
+      ForEach(0..<10, id: \.self) { digit in
+        IOSKeyCommand(key: KeyEquivalent(Character(String(digit)))) { press(String(digit)) }
+      }
+      IOSKeyCommand(key: .delete) { press("delete") }
+      IOSKeyCommand(key: .return) { press("ok") }
+    }
+    .disabled(model.isBusy)
   }
 
   private var keypad: some View {

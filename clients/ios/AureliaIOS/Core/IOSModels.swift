@@ -762,3 +762,27 @@ public struct IOSRemotePlaybackCommand: Decodable, Sendable {
   /// ISO 8601 text, as the server writes every time.
   public let createdAt: String
 }
+
+/// What an empty Home says. A children's profile or one with chosen titles may see nothing
+/// while the library is full, so it is not told the library is empty.
+struct IOSEmptyLibraryText {
+  let title: String
+  let message: String
+
+  init(user: IOSUser?, managesStorage: Bool) {
+    if let age = user?.ageLimit {
+      title = "Nothing to Watch Yet"
+      message =
+        "This profile shows titles rated up to FSK \(age). Ask the server owner when you'd like more."
+    } else if user?.accessMode == "selectedTitles" {
+      title = "Nothing to Watch Yet"
+      message = "This profile shows the titles the server owner chose for it. Ask them for more."
+    } else {
+      title = "Your Library Is Empty"
+      message =
+        managesStorage
+        ? "Add a storage location in Settings › Library."
+        : "Ask the server owner to add a storage location."
+    }
+  }
+}

@@ -105,6 +105,29 @@ struct IOSOfflineTests {
       IOSOfflineProfileCard.make(serverID: serverID, profile: open, pin: nil)?.accepts("") == true)
   }
 
+  @Test @MainActor func rememberedCardsFollowANewNameAndPictureButKeepTheirPinCheck() throws {
+    let root = temporaryRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = IOSOfflineStore(root: root, transfers: false)
+    let before = IOSWatchingProfile(
+      id: profileID, name: "Synthetic", role: "user", needsPinSetup: false,
+      pinProtectionEnabled: true)
+    store.remember(
+      try #require(IOSOfflineProfileCard.make(serverID: serverID, profile: before, pin: "4826")))
+    let after = IOSWatchingProfile(
+      id: profileID, name: "Renamed", role: "user", needsPinSetup: false,
+      pinProtectionEnabled: true, pictureKey: "symbol:rocket:orange", pictureRevision: 3)
+    store.refreshCards(serverID: serverID, profiles: [after])
+    let reopened = IOSOfflineStore(root: root, transfers: false)
+    let card = try #require(reopened.card(serverID: serverID, profileID: profileID))
+    #expect(card.name == "Renamed")
+    #expect(card.pictureKey == "symbol:rocket:orange" && card.pictureRevision == 3)
+    #expect(card.accepts("4826") && !card.accepts("4827"))
+    // Another server's profile with the same id is left alone.
+    store.refreshCards(serverID: UUID(), profiles: [before])
+    #expect(store.card(serverID: serverID, profileID: profileID)?.name == "Renamed")
+  }
+
   // MARK: Offline player
 
   @Test func theOfflineTransportAnswersThePlayersRequests() async throws {

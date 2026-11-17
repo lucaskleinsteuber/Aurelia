@@ -465,21 +465,41 @@ final class IOSSecurityAlertCenter: ObservableObject {
 struct IOSSecurityAlertBanner: View {
   @EnvironmentObject private var model: IOSAppModel
   @ObservedObject var center: IOSSecurityAlertCenter
+  @Environment(\.dynamicTypeSize) private var typeSize
+  @State private var contentHeight: CGFloat = 0
 
+  // Its whole height up to about half a phone screen, then it scrolls: above the tabs it would
+  // otherwise be squeezed and cut its text and buttons short at large text sizes.
   var body: some View {
+    ScrollView { banners.padding(.bottom, showsAnything ? 12 : 0) }
+      .onScrollGeometryChange(for: CGFloat.self) {
+        $0.contentSize.height
+      } action: { _, height in
+        contentHeight = height
+      }
+      .frame(height: min(contentHeight, 420))
+      .scrollBounceBehavior(.basedOnSize)
+  }
+
+  /// Room for the cards' shadow, which the scroll view would otherwise cut off.
+  private var showsAnything: Bool {
+    !center.unlockRequests.isEmpty || !center.newDevices.isEmpty || center.message != nil
+  }
+
+  private var banners: some View {
     VStack(spacing: 8) {
       ForEach(center.unlockRequests) { request in
         card {
           Label(
             "\(request.deviceName) asks to manage the server as \(request.profileName). It shows the code \(request.code).",
             systemImage: "lock.open")
-          HStack {
+          actions {
             Button("Deny") { Task { await center.decide(request, approve: false, model: model) } }
-              .buttonStyle(IOSButtonStyle(kind: .secondary))
+              .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: stacked))
             Button("Confirm with \(IOSSecureEnclaveSigner.biometryName)") {
               Task { await center.decide(request, approve: true, model: model) }
             }
-            .buttonStyle(IOSButtonStyle(kind: .primary))
+            .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: stacked))
           }
         }
       }
@@ -488,13 +508,13 @@ struct IOSSecurityAlertBanner: View {
           Label(
             "New device signed in: \(device.deviceName)\(IOSSecurityText.deviceLine(platform: device.platform, ipAddress: device.ipAddress).isEmpty ? "" : " · " + IOSSecurityText.deviceLine(platform: device.platform, ipAddress: device.ipAddress)) · \(IOSAdminFormat.date(device.createdAt))",
             systemImage: "exclamationmark.shield")
-          HStack {
+          actions {
             Button("Block") { Task { await center.block(device, client: model.client) } }
-              .buttonStyle(IOSButtonStyle(kind: .secondary))
+              .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: stacked))
             Button("That Was Me") {
               Task { await center.acknowledge(device, client: model.client) }
             }
-            .buttonStyle(IOSButtonStyle(kind: .primary))
+            .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: stacked))
           }
         }
       }
@@ -508,6 +528,14 @@ struct IOSSecurityAlertBanner: View {
     .padding(.horizontal, IOSDesign.margin)
     .animation(.easeOut(duration: 0.2), value: center.newDevices)
     .animation(.easeOut(duration: 0.2), value: center.unlockRequests)
+  }
+
+  /// Side by side, or one above the other at accessibility text sizes ("Bloc/k" otherwise).
+  private var stacked: Bool { typeSize.isAccessibilitySize }
+
+  private func actions<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+    let layout = stacked ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout())
+    return layout { content() }
   }
 
   private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {

@@ -41,8 +41,10 @@ its screens are its own:
 - **Screens** are built for iPhone and iPad rather than taken from the TV: a tab bar with Home,
   Movies, TV Shows, Search and Settings (People opens from Search, so the tab bar keeps five
   tabs on iPhone), iOS text sizes and margins, the PIN entered on a keypad
-  like the iPhone passcode, seasons as a menu with the episodes listed below, and settings as an
+  like the iPhone passcode (or typed on an iPad keyboard, Return opens and Escape goes back), seasons as a menu with the episodes listed below, and settings as an
   iOS form. The player works by touch; a hardware keyboard adds the arrow keys, Space and Escape.
+  These keys are keyboard shortcuts (`IOSKeyCommand`), not `onKeyPress`, which only hears a key
+  while something has the focus and on iPad nothing does on most screens.
   The app icon is the Mac app's Liquid Glass icon.
 - **Settings** (rebuilt in 2.12.0) is one list of pages, each with a line that says what it is
   for; on an iPad the list is a sidebar like the Mac's, and the chosen page opens beside it with

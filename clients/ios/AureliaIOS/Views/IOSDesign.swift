@@ -151,3 +151,22 @@ struct IOSButtonStyle: ButtonStyle {
       .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
   }
 }
+
+/// A scroll view whose content sits in the middle while it fits, and scrolls from the top when it
+/// doesn't (large text sizes), instead of being squeezed to one screen and ending in "…".
+struct IOSCenteredScrollView<Content: View>: View {
+  @ViewBuilder var content: Content
+  @State private var visibleHeight: CGFloat = 0
+
+  var body: some View {
+    ScrollView {
+      content.frame(maxWidth: .infinity, minHeight: visibleHeight)
+    }
+    .onScrollGeometryChange(for: CGFloat.self) { geometry in
+      geometry.containerSize.height - geometry.contentInsets.top - geometry.contentInsets.bottom
+    } action: { _, height in
+      visibleHeight = max(0, height)
+    }
+    .scrollBounceBehavior(.basedOnSize)
+  }
+}

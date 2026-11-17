@@ -8,32 +8,40 @@ enum IOSMoveDirection {
 }
 
 extension View {
+  // Keyboard shortcuts, not onKeyPress: a key press reaches onKeyPress only while something has
+  // the focus, and on iPad nothing does on most screens (the PIN screen ignored Esc).
   func iosBackCommand(perform action: (() -> Void)?) -> some View {
-    onKeyPress(.escape) {
-      guard let action else { return .ignored }
-      action()
-      return .handled
-    }
+    background { IOSKeyCommand(key: .escape, action: action) }
   }
 
   func iosMoveCommand(perform action: ((IOSMoveDirection) -> Void)?) -> some View {
-    onKeyPress(keys: [.upArrow, .downArrow, .leftArrow, .rightArrow]) { press in
-      guard let action else { return .ignored }
-      switch press.key {
-      case .upArrow: action(.up)
-      case .downArrow: action(.down)
-      case .leftArrow: action(.left)
-      default: action(.right)
+    background {
+      ZStack {
+        IOSKeyCommand(key: .upArrow, action: action.map { act in { act(.up) } })
+        IOSKeyCommand(key: .downArrow, action: action.map { act in { act(.down) } })
+        IOSKeyCommand(key: .leftArrow, action: action.map { act in { act(.left) } })
+        IOSKeyCommand(key: .rightArrow, action: action.map { act in { act(.right) } })
       }
-      return .handled
     }
   }
 
   func iosPlayPauseCommand(perform action: (() -> Void)?) -> some View {
-    onKeyPress(.space) {
-      guard let action else { return .ignored }
-      action()
-      return .handled
+    background { IOSKeyCommand(key: .space, action: action) }
+  }
+}
+
+/// An invisible button that only answers a key of a hardware keyboard.
+struct IOSKeyCommand: View {
+  let key: KeyEquivalent
+  let action: (() -> Void)?
+
+  var body: some View {
+    if let action {
+      Button("", action: action)
+        .keyboardShortcut(key, modifiers: [])
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
   }
 }

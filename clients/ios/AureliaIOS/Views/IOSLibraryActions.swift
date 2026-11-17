@@ -173,12 +173,18 @@ struct IOSMediaContextActions: View {
   var includeFavorite = true
   var body: some View {
     if includeFavorite, item.kind == .movie || item.kind == .series {
-      Button(item.isFavorite ? "Remove from Favorites" : "Add to Favorites") {
+      Button(
+        item.isFavorite ? "Remove from Favorites" : "Add to Favorites",
+        systemImage: item.isFavorite ? "star.slash" : "star"
+      ) {
         Task { await actions.favorite(item, model: model) }
       }.disabled(actions.busy)
     }
     let watched = item.watchState == "completed" || item.progress?.isCompleted == true
-    Button(watched ? "Mark as Unwatched" : "Mark as Watched") {
+    Button(
+      watched ? "Mark as Unwatched" : "Mark as Watched",
+      systemImage: watched ? "circle" : "checkmark.circle"
+    ) {
       Task {
         await actions.watch(
           item, scope: item.kind == .series ? .series : .title, watched: !watched, model: model)
@@ -186,7 +192,10 @@ struct IOSMediaContextActions: View {
     }.disabled(actions.busy)
     if model.supportsWatchlist, item.kind == .movie || item.kind == .series {
       let watchlisted = model.isWatchlisted(item.id)
-      Button(watchlisted ? "Remove from Watchlist" : "Add to Watchlist") {
+      Button(
+        watchlisted ? "Remove from Watchlist" : "Add to Watchlist",
+        systemImage: watchlisted ? "bookmark.slash" : "bookmark"
+      ) {
         Task { _ = await model.setWatchlist(mediaId: item.id, isWatchlisted: !watchlisted) }
       }.disabled(actions.busy)
     }
@@ -199,7 +208,10 @@ struct IOSMediaContextActions: View {
     }
     if continuation || item.kind == .movie || item.kind == .series {
       let hidden = item.continueWatchingHidden == true
-      Button(hidden ? "Show in Continue Watching" : "Remove from Continue Watching") {
+      Button(
+        hidden ? "Show in Continue Watching" : "Remove from Continue Watching",
+        systemImage: hidden ? "eye" : "eye.slash"
+      ) {
         Task { await actions.continuation(item, hidden: !hidden, model: model) }
       }.disabled(actions.busy)
     }

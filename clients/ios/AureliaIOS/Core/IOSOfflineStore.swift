@@ -618,6 +618,29 @@ final class IOSOfflineStore: ObservableObject {
     saveCards()
   }
 
+  /// Keeps remembered profiles' names and pictures as the server shows them now, so the offline
+  /// chooser doesn't show an old picture. Their PIN checks stay as they are.
+  func refreshCards(serverID: UUID, profiles: [IOSWatchingProfile]) {
+    var changed = false
+    for profile in profiles {
+      guard
+        let index = cards.firstIndex(where: {
+          $0.serverID == serverID && $0.profileID == profile.id
+        })
+      else { continue }
+      let card = cards[index]
+      guard
+        card.name != profile.name || card.pictureKey != profile.pictureKey
+          || card.pictureRevision != profile.pictureRevision
+      else { continue }
+      cards[index].name = profile.name
+      cards[index].pictureKey = profile.pictureKey
+      cards[index].pictureRevision = profile.pictureRevision
+      changed = true
+    }
+    if changed { saveCards() }
+  }
+
   func card(serverID: UUID, profileID: UUID) -> IOSOfflineProfileCard? {
     cards.first { $0.serverID == serverID && $0.profileID == profileID }
   }

@@ -429,7 +429,7 @@ struct IOSSetupIntroductionView: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
-    ScrollView {
+    IOSCenteredScrollView {
       VStack(spacing: 26) {
         switch page {
         case .welcome: welcome
@@ -441,10 +441,8 @@ struct IOSSetupIntroductionView: View {
       .id(page)
       .transition(.opacity)
       .padding(.horizontal, IOSDesign.margin).padding(.vertical, 40)
-      .frame(maxWidth: 560).frame(maxWidth: .infinity)
-      .containerRelativeFrame(.vertical, alignment: .center) { length, _ in length }
+      .frame(maxWidth: 560)
     }
-    .scrollBounceBehavior(.basedOnSize)
     .background(IOSDesign.canvas.ignoresSafeArea())
     .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: page)
     .onAppear { if replay { page = .howItWorks } }
@@ -530,8 +528,7 @@ struct IOSSetupIntroductionView: View {
       .accessibilityIdentifier("setup-no-server-github")
       Text("When the server runs, go back and choose Yes, Connect to It.")
         .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
-      Button("Back") { page = .server }
-        .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
+      Button("Back") { page = .server }.tint(.white.opacity(0.75))
         .accessibilityIdentifier("setup-no-server-back")
     }
   }

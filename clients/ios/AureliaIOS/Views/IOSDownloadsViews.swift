@@ -162,15 +162,24 @@ struct IOSOfflineModeView: View {
                 _ = model.openOffline(card, pin: "")
               }
             } label: {
-              VStack(spacing: 8) {
+              // The same entry as "Who's watching?"; it fills its place in the row, so a lone
+              // profile is centered too.
+              VStack(spacing: 10) {
                 IOSProfilePicture(
-                  id: card.profileID, name: card.name, size: 72, pictureKey: card.pictureKey,
-                  pictureRevision: card.pictureRevision)
-                Text(card.name).font(.subheadline.weight(.semibold)).multilineTextAlignment(.center)
-                if card.pinProtected {
-                  Image(systemName: "lock.fill").font(.caption2).foregroundStyle(.secondary)
+                  id: card.profileID, name: card.name, size: 96, pictureKey: card.pictureKey,
+                  pictureRevision: card.pictureRevision
+                )
+                .shadow(color: .black.opacity(0.3), radius: 12, y: 6)
+                HStack(spacing: 4) {
+                  Text(card.name).font(.subheadline.weight(.semibold)).lineLimit(2)
+                    .multilineTextAlignment(.center)
+                  if card.pinProtected {
+                    Image(systemName: "lock.fill").font(.caption2.weight(.semibold))
+                      .foregroundStyle(.secondary)
+                  }
                 }
               }
+              .frame(maxWidth: .infinity)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(card.name)
@@ -192,6 +201,7 @@ struct IOSOfflineModeView: View {
         if let card = asking, !model.openOffline(card, pin: pin) { rejected = true }
         asking = nil
       }
+      .keyboardShortcut(.defaultAction)
       Button("Cancel", role: .cancel) { asking = nil }
     }
     .alert(model.offlinePinLock.message() ?? IOSProfilePIN.incorrect, isPresented: $rejected) {

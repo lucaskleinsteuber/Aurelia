@@ -149,14 +149,13 @@ struct IOSHomeView: View {
           if home.continueWatching.isEmpty && model.watchlistItems.isEmpty && home.favorites.isEmpty
             && home.recentlyAdded.isEmpty
           {
+            let empty = IOSEmptyLibraryText(
+              user: model.session?.user,
+              managesStorage: IOSAdminPermissions(
+                role: model.session?.user.role, accessMode: model.session?.user.accessMode
+              ).storage)
             ContentUnavailableView(
-              "Your Library Is Empty", systemImage: "film",
-              description: Text(
-                IOSAdminPermissions(
-                  role: model.session?.user.role, accessMode: model.session?.user.accessMode
-                ).storage
-                  ? "Add a storage location in Settings › Library."
-                  : "Ask the server owner to add a storage location."))
+              empty.title, systemImage: "film", description: Text(empty.message))
           }
         }
         if model.homeLoading && model.home == nil {
@@ -532,17 +531,19 @@ private struct IOSHomeHero: View {
         Button {
           play(item)
         } label: {
-          Label("Continue", systemImage: "play.fill")
+          Label("Continue", systemImage: "play.fill").frame(minWidth: 140)
         }.disabled(launching)
       } else {
         NavigationLink {
           IOSDetailView(id: item.detailID, initial: item)
         } label: {
-          Label("Details", systemImage: "info.circle")
+          // The button itself is at least 180 points wide (with its padding), so it lines up
+          // with the title beside the symbol instead of sitting inside a wider, centered frame.
+          Label("Details", systemImage: "info.circle").frame(minWidth: 140)
         }
       }
     }
-    .buttonStyle(IOSButtonStyle(kind: .primary)).frame(minWidth: 180)
+    .buttonStyle(IOSButtonStyle(kind: .primary))
     .accessibilityIdentifier("home-hero")
   }
 
