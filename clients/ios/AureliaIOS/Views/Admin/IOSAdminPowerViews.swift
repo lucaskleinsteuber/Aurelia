@@ -125,6 +125,7 @@ private struct IOSAdminPowerForm: View {
         }
         if let problem { Section { Text(problem).foregroundStyle(.orange) } }
       }
+      IOSAdminPowerNowSection()
     }
     .scrollContentBackground(.hidden)
     .background(IOSDesign.canvas.ignoresSafeArea())
@@ -201,6 +202,84 @@ private struct IOSAdminPowerForm: View {
 }
 
 /// Settings › Server Updates: a Linux server installed from the package updates itself.
+/// Settings › Power › Right Now for the owner: Sleep, Turn Off or Stop Now, without waiting for the
+/// unused minutes ("power-now-v1").
+private struct IOSAdminPowerNowSection: View {
+  @EnvironmentObject private var model: IOSAppModel
+  @EnvironmentObject private var admin: IOSAdministrationModel
+  @State private var actions: [String]?
+  @State private var problem: String?
+  @State private var result: String?
+  @State private var confirmation: IOSAdminConfirmation?
+
+  private var capabilities: [String]? { model.capabilities?.capabilities }
+
+  var body: some View {
+    if admin.permissions.owner, IOSPowerNowText.isOffered(by: capabilities) {
+      Section {
+        if let actions {
+          if actions.isEmpty {
+            Text(
+              "This server can't turn itself off; it runs as a service that something else starts and stops."
+            )
+            .font(.subheadline).foregroundStyle(.secondary)
+          }
+          ForEach(actions, id: \.self) { action in
+            Button(role: action == "stop" ? nil : .destructive) {
+              confirmation = IOSAdminConfirmation(
+                title: "\(IOSPowerNowText.title(action))?",
+                message: IOSPowerNowText.detail(action),
+                action: IOSPowerNowText.title(action)
+              ) { Task { await powerNow(action, force: false) } }
+            } label: {
+              IOSAdminToggleLabel(IOSPowerNowText.title(action), IOSPowerNowText.detail(action))
+            }
+          }
+        } else if let problem {
+          Text(problem).foregroundStyle(.orange)
+          Button("Try Again") { Task { await load() } }
+        } else {
+          ProgressView()
+        }
+        if let result { Text(result).font(.footnote).foregroundStyle(.secondary) }
+      } header: {
+        Text("Right Now")
+      } footer: {
+        Text("Without waiting for the unused minutes.")
+      }
+      .task { await load() }
+      .adminConfirmation($confirmation)
+    }
+  }
+
+  private func load() async {
+    let capabilities = capabilities
+    do {
+      actions = IOSPowerNowText.known(
+        try await admin.run { try await $0.powerNowActions(capabilities: capabilities) })
+      problem = nil
+    } catch is CancellationError {
+    } catch {
+      problem = IOSAdministrationModel.message(error)
+    }
+  }
+
+  private func powerNow(_ action: String, force: Bool) async {
+    do {
+      let answer = try await admin.run { try await $0.powerNow(action: action, force: force) }
+      result = answer.message
+    } catch let failure as IOSCoreError where failure.code == "playback_active" {
+      confirmation = IOSAdminConfirmation(
+        title: "Someone Is Watching", message: "Turn it off anyway? Their playback stops.",
+        action: IOSPowerNowText.title(action)
+      ) { Task { await powerNow(action, force: true) } }
+    } catch is CancellationError {
+    } catch {
+      admin.alert = IOSAdministrationModel.message(error)
+    }
+  }
+}
+
 struct IOSAdminUpdatesView: View {
   var body: some View {
     IOSAdminLoader {

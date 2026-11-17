@@ -44,10 +44,10 @@ struct IOSSettingsPagesTests {
   @Test func theOwnerSeesEveryServerPageIncludingPowerAndUpdates() {
     let visibility = IOSSettingsPage.Visibility(
       permissions: IOSAdminPermissions(role: "owner", accessMode: nil), supportsWishes: true,
-      supportsPersonalization: true, supportsSecurity: true, supportsAutomation: true)
+      supportsPersonalization: true, supportsSecurity: true)
     #expect(
       visibility.pages(in: .server)
-        == [.library, .metadata, .people, .security, .server, .power, .smartHome, .updates])
+        == [.library, .metadata, .people, .security, .server, .power, .updates])
     #expect(visibility.pages(in: .you).contains(.wishes))
     #expect(visibility.pages(in: .connection) == [.connection])
   }
@@ -213,69 +213,22 @@ private actor IOSSettingsTestTransport: IOSHTTPTransport {
   }
 }
 
-@Suite("iOS Smart Home")
-struct IOSAutomationTests {
-  @Test func thePlayerReportsRealStatesOnce() {
-    #expect(
-      IOSAutomationPlaybackState.state(wantsPlayback: true, isPlaying: true, finished: false)
-        == "playing")
-    #expect(
-      IOSAutomationPlaybackState.state(wantsPlayback: true, isPlaying: false, finished: false)
-        == "buffering")
-    #expect(
-      IOSAutomationPlaybackState.state(wantsPlayback: false, isPlaying: true, finished: false)
-        == "paused")
-    #expect(
-      IOSAutomationPlaybackState.state(wantsPlayback: true, isPlaying: true, finished: true)
-        == "finished")
-    #expect(IOSAutomationPlaybackState.shouldReport(last: nil, next: "playing"))
-    #expect(!IOSAutomationPlaybackState.shouldReport(last: "paused", next: "paused"))
-    #expect(!IOSAutomationPlaybackState.shouldReport(last: "finished", next: "paused"))
-  }
-
-  @Test func homeAssistantsAddressIsBuiltFromItsAddressAndTheTriggerID() {
-    #expect(
-      IOSAutomationText.homeAssistantURL(base: "homeassistant.local", webhookID: "aurelia_lights")
-        == "http://homeassistant.local:8123/api/webhook/aurelia_lights")
-    #expect(
-      IOSAutomationText.homeAssistantURL(base: "homeassistant.local", webhookID: "no spaces") == nil
+@Suite("iOS power now")
+struct IOSPowerNowTests {
+  @Test func newAndOlderServersOfferItWithTheSameWords() throws {
+    #expect(IOSPowerNowText.isOffered(by: ["power-now-v1"]))
+    #expect(IOSPowerNowText.isOffered(by: ["automation-v1"]))
+    #expect(!IOSPowerNowText.isOffered(by: ["people-v1"]))
+    #expect(!IOSPowerNowText.isOffered(by: nil))
+    let options = try JSONDecoder().decode(
+      IOSPowerNowOptions.self, from: Data(#"{"actions":["sleep","reboot","shutdown","stop"]}"#.utf8)
     )
     #expect(
-      IOSAutomationText.splitHomeAssistantURL("https://ha.example.com/api/webhook/x").webhookID
-        == "x")
-    #expect(
-      IOSAutomationText.host("http://homeassistant.local:8123/api/webhook/secret")
-        == "homeassistant.local:8123")
-  }
-
-  @Test func theStateReachesTheServerForThisTicket() async throws {
-    let transport = IOSAutomationTestTransport()
-    let ticket = UUID(uuidString: "76000000-0000-0000-0000-000000000001")!
-    let connection = IOSStoredConnection(
-      serverID: UUID(), name: "Synthetic server",
-      baseURL: URL(string: "https://fixture.invalid:43111")!,
-      fingerprint: String(repeating: "B", count: 64),
-      deviceToken: String(repeating: "D", count: 43), deviceSessionID: UUID())
-    let session = IOSProfileSession(
-      user: IOSUser(id: UUID(), username: "Owner", role: "owner"), sessionId: UUID(),
-      token: String(repeating: "P", count: 43), expiresAt: "2099-01-01T00:00:00Z")
-    try await IOSAPIClient(connection: connection, session: session, transport: transport)
-      .reportPlaybackState(ticket: ticket, state: "paused", positionSeconds: 61.5)
-    let request = try #require(await transport.requests.first)
-    #expect(request.httpMethod == "POST")
-    #expect(request.url?.path == "/api/v1/playback/76000000-0000-0000-0000-000000000001/state")
-    let body = try JSONDecoder().decode(
-      [String: IOSJSONValue].self, from: request.httpBody ?? Data())
-    #expect(body["state"] == .string("paused"))
-    #expect(body["positionSeconds"] == .number(61.5))
-  }
-}
-
-private actor IOSAutomationTestTransport: IOSHTTPTransport {
-  private(set) var requests: [URLRequest] = []
-  func execute(_ request: URLRequest, trust: IOSTrustMode) async throws -> IOSHTTPResponse {
-    requests.append(request)
-    return IOSHTTPResponse(
-      statusCode: 204, headers: [:], body: Data(), fingerprint: String(repeating: "B", count: 64))
+      IOSPowerNowText.known(options.actions).map(IOSPowerNowText.title)
+        == ["Sleep Now", "Turn Off Now", "Stop Aurelia Now"])
+    let legacy = try JSONDecoder().decode(
+      IOSLegacyPowerNowOptions.self,
+      from: Data(#"{"webhooks":[],"powerActions":["stop"],"somethingNew":true}"#.utf8))
+    #expect(legacy.powerActions == ["stop"])
   }
 }
