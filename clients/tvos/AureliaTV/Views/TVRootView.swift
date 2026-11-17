@@ -22,7 +22,7 @@ struct TVRootView: View {
       } else if model.phase == .connection, model.connection == nil, !guide.introSeen {
         TVSetupIntroductionView(guide: guide)
       } else if model.phase == .library, guide.isGuiding {
-        TVSetupDoneView(guide: guide).overlay(alignment: .top) { stepBar(.done) }
+        TVSetupDoneView(guide: guide).safeAreaInset(edge: .top, spacing: 0) { stepBar(.done) }
       } else {
         phaseView
       }
@@ -44,6 +44,7 @@ struct TVRootView: View {
     }
   }
 
+  /// Above the page, not over it: as an overlay it covered the Aurelia symbol on Connect.
   @ViewBuilder
   private func stepBar(_ step: TVSetupStep) -> some View {
     if guide.isGuiding {
@@ -56,10 +57,12 @@ struct TVRootView: View {
     Group {
       switch model.phase {
       case .connection:
-        TVConnectionView(browser: model.browser).overlay(alignment: .top) { stepBar(.connect) }
-      case .trust: TVServerTrustView().overlay(alignment: .top) { stepBar(.approve) }
-      case .pairing: TVPairingView().overlay(alignment: .top) { stepBar(.approve) }
-      case .profiles: TVProfilesView().overlay(alignment: .top) { stepBar(.profile) }
+        TVConnectionView(browser: model.browser).safeAreaInset(edge: .top, spacing: 0) {
+          stepBar(.connect)
+        }
+      case .trust: TVServerTrustView().safeAreaInset(edge: .top, spacing: 0) { stepBar(.approve) }
+      case .pairing: TVPairingView().safeAreaInset(edge: .top, spacing: 0) { stepBar(.approve) }
+      case .profiles: TVProfilesView().safeAreaInset(edge: .top, spacing: 0) { stepBar(.profile) }
       case .library:
         TabView(selection: $tab) {
           NavigationStack { TVHomeView() }.tabItem { Label("Home", systemImage: "house.fill") }.tag(
@@ -84,7 +87,11 @@ struct TVRootView: View {
         }
         .overlay {
           if guide.tourPending, !guide.isGuiding {
-            TVLibraryTour(tab: tabIndex) { guide.tourShown() }
+            // Back on Home afterwards: left on the profile tab, the tab bar still marked Home.
+            TVLibraryTour(tab: tabIndex) {
+              guide.tourShown()
+              tab = .home
+            }
           }
         }
       }
@@ -97,6 +104,9 @@ struct TVConnectionView: View {
   @ObservedObject var browser: TVBonjourBrowser
   @State private var address = ""
   @State private var choosingOtherServer = false
+  /// A server found on the network takes the focus when it appears; otherwise the address field
+  /// had it and the first press opened the keyboard instead of connecting.
+  @FocusState private var focusedServer: String?
 
   /// A saved server that is being reached, or is off, gets its own calm screen instead of the
   /// manual connection form.
@@ -137,14 +147,19 @@ struct TVConnectionView: View {
           Button("Reconnect to \(saved.name)") {
             choosingOtherServer = false
             Task { await model.reconnect(userInitiated: true) }
-          }.disabled(model.isBusy)
+          }
+          .buttonStyle(TVButtonStyle(kind: .primary))
+          .disabled(model.isBusy)
         }
         ForEach(browser.servers) { server in
           Button {
             model.inspect(address: server.baseURL.absoluteString)
           } label: {
-            Label(server.name, systemImage: "desktopcomputer").frame(minWidth: 460)
-          }.disabled(model.isBusy)
+            Label(server.name, systemImage: "desktopcomputer").frame(minWidth: 400)
+          }
+          .buttonStyle(TVButtonStyle())
+          .focused($focusedServer, equals: server.id)
+          .disabled(model.isBusy)
         }
         if browser.servers.isEmpty {
           Text(browser.errorMessage ?? "Looking for Aurelia servers…").foregroundStyle(.secondary)
@@ -155,10 +170,18 @@ struct TVConnectionView: View {
             .autocorrectionDisabled().submitLabel(.go)
             .onSubmit { model.inspect(address: address) }
           Button("Connect") { model.inspect(address: address) }
+            .buttonStyle(TVButtonStyle())
             .disabled(model.isBusy || address.trimmingCharacters(in: .whitespaces).isEmpty)
         }.frame(width: 700).padding(.top, 18)
         if model.isBusy { ProgressView("Connecting…") }
       }.padding(70).frame(maxWidth: .infinity)
+        .onChange(of: browser.servers.first?.id) { before, first in
+          guard before == nil, let first, address.isEmpty else { return }
+          Task { @MainActor in focusedServer = first }
+        }
+        .onAppear {
+          if let first = browser.servers.first?.id, address.isEmpty { focusedServer = first }
+        }
     }
   }
 }
@@ -175,26 +198,45 @@ struct TVSavedServerView: View {
       if model.savedServerUnreachable {
         Image(systemName: "power").font(.system(size: 72, weight: .medium))
           .foregroundStyle(.secondary)
-        VStack(spacing: 18) {
-          Text(
-            model.savedServerAppHost.map { "Start Aurelia on Your \($0)" } ?? "The Server Is Off"
-          ).font(.system(size: 56, weight: .bold))
-          Text(
-            model.savedServerAppHost.map {
-              "“\(name)” runs inside the Aurelia app on a \($0). Open Aurelia there, or wake the \($0), and this Apple TV connects by itself."
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+          if let sent = model.wakeSignalSentAt,
+            TVWakeOnLan.Waking.isWaking(since: sent, now: context.date)
+          {
+            // Like the Mac: this Apple TV woke the server, how long that takes, the seconds so far.
+            VStack(spacing: 18) {
+              Text("Waking “\(name)”…").font(.system(size: 56, weight: .bold))
+                .multilineTextAlignment(.center)
+              Text(TVWakeOnLan.Waking.hint)
+                .font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                .frame(maxWidth: 1100)
+              Text(TVWakeOnLan.Waking.elapsed(since: sent, now: context.date))
+                .font(.title3).monospacedDigit().foregroundStyle(.tertiary)
             }
-              ?? "“\(name)” isn’t answering. Turn on the computer the server runs on, or open Aurelia on your Mac to wake it."
-          )
-          .font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
-          .frame(maxWidth: 1100)
-          Text("This Apple TV connects by itself as soon as the server is on.")
-            .font(.title3).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+          } else {
+            VStack(spacing: 18) {
+              Text(
+                model.savedServerAppHost.map { "Start Aurelia on Your \($0)" }
+                  ?? "The Server Is Off"
+              ).font(.system(size: 56, weight: .bold))
+              Text(
+                model.savedServerAppHost.map {
+                  "“\(name)” runs inside the Aurelia app on a \($0). Open Aurelia there, or wake the \($0), and this Apple TV connects by itself."
+                }
+                  ?? "“\(name)” isn’t answering. Turn on the computer the server runs on, or open Aurelia on your Mac to wake it."
+              )
+              .font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
+              .frame(maxWidth: 1100)
+              Text("This Apple TV connects by itself as soon as the server is on.")
+                .font(.title3).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+            }
+          }
         }
         ZStack {
           if model.isBusy {
             ProgressView("Waiting for the server…")
           } else {
             Button("Try Again") { Task { await model.reconnect(userInitiated: true) } }
+              .buttonStyle(TVButtonStyle(kind: .primary))
               .accessibilityIdentifier("tv-server-retry")
           }
         }.frame(minHeight: 110)
@@ -204,6 +246,7 @@ struct TVSavedServerView: View {
       }
       HStack(spacing: 30) {
         Button("Connect to Another Server", action: chooseOtherServer)
+          .buttonStyle(TVButtonStyle())
           .accessibilityIdentifier("tv-other-server")
       }.font(.system(size: 24)).padding(.top, 20)
     }
@@ -222,6 +265,8 @@ struct TVSavedServerView: View {
 
 struct TVServerTrustView: View {
   @EnvironmentObject private var model: TVAppModel
+  /// Trust and Continue takes the focus first, as the main action does on iPhone and iPad.
+  @FocusState private var trustFocused: Bool
 
   var body: some View {
     VStack(spacing: 30) {
@@ -233,11 +278,13 @@ struct TVServerTrustView: View {
       Text(model.inspected?.baseURL.host ?? "").foregroundStyle(.secondary)
       if let error = model.error { TVErrorText(message: error) }
       HStack(spacing: 32) {
-        Button("Back") { model.cancelPairing() }
-        Button("Trust and Continue") { model.beginPairing() }.buttonStyle(
-          TVButtonStyle(kind: .primary))
+        Button("Trust and Continue") { model.beginPairing() }
+          .buttonStyle(TVButtonStyle(kind: .primary))
+          .focused($trustFocused)
+        Button("Back") { model.cancelPairing() }.buttonStyle(TVButtonStyle())
       }.disabled(model.isBusy)
     }.padding(80).frame(maxWidth: .infinity, maxHeight: .infinity)
+      .defaultFocus($trustFocused, true)
       .onExitCommand { model.cancelPairing() }
   }
 }
@@ -245,6 +292,8 @@ struct TVServerTrustView: View {
 struct TVPairingView: View {
   @EnvironmentObject private var model: TVAppModel
   @State private var code = ""
+  /// The code field takes the focus first, so the first OK press opens the keyboard.
+  @FocusState private var codeFocused: Bool
 
   var body: some View {
     VStack(spacing: 28) {
@@ -268,9 +317,10 @@ struct TVPairingView: View {
         .onSubmit { model.pair(code: code) }
         .accessibilityLabel("Pairing code")
         .accessibilityIdentifier("pairing-code")
+        .focused($codeFocused)
       if let error = model.error { TVErrorText(message: error) }
       HStack(spacing: 32) {
-        Button("Cancel") { model.cancelPairing() }
+        Button("Cancel") { model.cancelPairing() }.buttonStyle(TVButtonStyle())
         Button {
           model.pair(code: code)
         } label: {
@@ -280,6 +330,9 @@ struct TVPairingView: View {
         .disabled(code.count != 8 || model.isBusy)
       }
     }.padding(80).frame(maxWidth: .infinity, maxHeight: .infinity)
+      .defaultFocus($codeFocused, true)
+      // A text field does not take the default focus on tvOS; ask for it once the page is shown.
+      .task { codeFocused = true }
       .onExitCommand { model.cancelPairing() }
   }
 }
@@ -347,6 +400,8 @@ struct TVConnectionMenu: View {
     ) {
       Button("Disconnect", role: .destructive) { Task { await model.disconnect() } }
       Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("To connect again, you need a new code from your Mac or Linux computer.")
     }
   }
 }

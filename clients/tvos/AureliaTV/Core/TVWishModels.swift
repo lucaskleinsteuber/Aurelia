@@ -74,6 +74,13 @@ enum TVWishPresentation {
     kind == .series ? "TV Series" : "Movie"
   }
 
+  /// "Movie · 2021 · FSK 12", one text so the dots sit evenly between the parts.
+  static func metaLine(_ wish: TVWishSummary) -> String {
+    ([kindLabel(wish.kind)]
+      + [wish.year.map(String.init), wish.ageRating].compactMap { $0 }
+      .filter { !$0.isEmpty }).joined(separator: " · ")
+  }
+
   static func stateLabel(_ state: TVWishState) -> String {
     switch state {
     case .open: "Waiting"

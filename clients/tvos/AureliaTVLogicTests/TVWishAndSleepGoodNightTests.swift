@@ -197,6 +197,17 @@ struct TVWishAndSleepGoodNightTests {
     #expect(TVWishPresentation.stateLabel(.open) == "Waiting")
     #expect(TVWishPresentation.stateLabel(.fulfilled) == "In Library")
     #expect(TVWishPresentation.stateLabel(.declined) == "Declined")
+    // One text, so the dots sit evenly ("Movie  · 2021" before).
+    #expect(TVWishPresentation.metaLine(decoded.wishes[0]) == "Movie · 2021 · PG-13")
+  }
+
+  @Test func emptyHomeDoesNotCallALimitedProfilesLibraryEmpty() {
+    let child = TVUser(id: UUID(), username: "mia", role: "user", ageLimit: 6)
+    #expect(TVEmptyLibraryText(user: child).title == "Nothing to Watch Yet")
+    #expect(TVEmptyLibraryText(user: child).message.contains("FSK 6"))
+    let chosen = TVUser(id: UUID(), username: "sam", role: "user", accessMode: "selectedTitles")
+    #expect(TVEmptyLibraryText(user: chosen).title == "Nothing to Watch Yet")
+    #expect(TVEmptyLibraryText(user: nil).title == "Your Library Is Empty")
   }
 
   @Test func apiClientFetchesWishesAndValidatesProxiedPoster() async throws {

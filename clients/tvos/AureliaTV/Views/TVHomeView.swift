@@ -11,6 +11,7 @@ struct TVHomeView: View {
   @State private var unavailable: TVCatalogItem?
   @State private var movieNight: TVMovieNightLaunch?
   @State private var movieNights: [TVMovieNightSummary] = []
+  @State private var loadedRevision: UUID?
   /// The server returns at most this many items in Home's catalog shelves.
   private static let shelfLimit = 30
 
@@ -85,7 +86,11 @@ struct TVHomeView: View {
           if home.continueWatching.isEmpty && model.watchlistItems.isEmpty && home.favorites.isEmpty
             && home.recentlyAdded.isEmpty
           {
-            ContentUnavailableView("Your Library Is Empty", systemImage: "film")
+            let empty = TVEmptyLibraryText(user: model.session?.user)
+            ContentUnavailableView(
+              empty.title, systemImage: "film", description: Text(empty.message)
+            )
+            .frame(maxWidth: .infinity)
           }
         }
         if model.homeLoading && model.home == nil {
@@ -97,7 +102,10 @@ struct TVHomeView: View {
             Button("Try Again") { Task { await model.loadHome() } }.buttonStyle(TVButtonStyle())
           }.padding(.horizontal, TVDesign.pagePadding)
         }
-      }.padding(.bottom, 80)
+      }
+      .padding(.bottom, 80)
+      // The full width: without titles, Home otherwise shrank to a narrow centered column.
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
     // The hero artwork reaches the top edge beneath the native tab bar.
     .ignoresSafeArea(edges: .top)
@@ -105,16 +113,24 @@ struct TVHomeView: View {
     .task(id: model.session?.sessionId) {
       // Parties others start appear on Home within a few seconds.
       while !Task.isCancelled {
-        await model.refreshWatchParties()
-        if model.supportsMovieNight, let api = model.client {
-          movieNights = (try? await api.movieNights()) ?? movieNights
+        await TVAPIClient.withBackgroundRequests {
+          await model.refreshWatchParties()
+          if model.supportsMovieNight, let api = model.client {
+            movieNights = (try? await api.movieNights()) ?? movieNights
+          }
         }
         try? await Task.sleep(for: .seconds(15))
       }
     }
     .task(id: model.libraryRefresh) {
-      await model.loadHome()
-      await model.preloadLibrary()
+      // Opening Home counts as using the server; a reload after a reported change doesn't.
+      let revision = model.libraryRefresh
+      let automatic = loadedRevision != nil && loadedRevision != revision
+      loadedRevision = revision
+      await TVAPIClient.withBackgroundRequests(automatic) {
+        await model.loadHome()
+        await model.preloadLibrary()
+      }
     }
     .modifier(TVLibraryActionPresentation(actions: actions))
     .navigationDestination(item: $detailItem) { value in
@@ -521,6 +537,7 @@ struct TVCollectionsView: View {
   @State private var complete = false
   @State private var error: String?
   @State private var generation = UUID()
+  @State private var loadedRevision: UUID?
   @FocusState private var focused: UUID?
   var body: some View {
     ScrollView {
@@ -564,10 +581,13 @@ struct TVCollectionsView: View {
       }.padding(.horizontal, TVDesign.pagePadding).padding(.vertical, 40)
     }.background(TVDesign.canvas.ignoresSafeArea())
       .task(id: model.libraryRefresh) {
+        let revision = model.libraryRefresh
+        let automatic = loadedRevision != nil && loadedRevision != revision
+        loadedRevision = revision
         generation = UUID()
         complete = false
         loading = false
-        await next(replacing: true)
+        await TVAPIClient.withBackgroundRequests(automatic) { await next(replacing: true) }
       }
   }
   /// `replacing` refreshes the first page in place instead of emptying the grid.
@@ -620,6 +640,7 @@ struct TVCollectionView: View {
   @State private var playback: TVHomePlayback?
   @State private var selectedSeasonMemberID: UUID?
   @State private var requestID = UUID()
+  @State private var loadedRevision: UUID?
   @FocusState private var focused: CollectionFocus?
 
   private enum CollectionFocus: Hashable {
@@ -677,7 +698,12 @@ struct TVCollectionView: View {
     .ignoresSafeArea(edges: .top)
     .background(TVDesign.canvas.ignoresSafeArea())
     .defaultFocus($focused, defaultFocusTarget, priority: .userInitiated)
-    .task(id: model.libraryRefresh) { await reload() }
+    .task(id: model.libraryRefresh) {
+      let revision = model.libraryRefresh
+      let automatic = loadedRevision != nil && loadedRevision != revision
+      loadedRevision = revision
+      await TVAPIClient.withBackgroundRequests(automatic) { await reload() }
+    }
     .onChange(of: model.session?.sessionId) { _, _ in playback = nil }
     .onChange(of: model.remoteStopRequests) { _, _ in playback = nil }
     .modifier(TVLibraryActionPresentation(actions: actions))

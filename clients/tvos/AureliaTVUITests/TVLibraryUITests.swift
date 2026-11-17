@@ -187,9 +187,9 @@ final class TVLibraryUITests: XCTestCase {
     XCTAssertTrue(found.waitForExistence(timeout: 10))
     XCTAssertTrue(app.buttons["catalog-\(seriesID)"].waitForNonExistence(timeout: 5))
     select(app.buttons["browse-filters"], in: app)
-    let favorite = app.switches["Favorites Only"]
+    let favorite = app.buttons["filter-favorites"]
     select(favorite, in: app)
-    XCTAssertTrue(isOn(favorite))
+    XCTAssertEqual(favorite.value as? String, "On")
     select(app.buttons["filters-done"], in: app)
     XCTAssertTrue(app.staticTexts["No matching titles."].waitForExistence(timeout: 8))
     XCTAssertTrue(app.staticTexts["Favorites"].firstMatch.exists)

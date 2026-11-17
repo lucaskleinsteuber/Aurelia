@@ -279,17 +279,9 @@ private struct TVWishCard: View {
           TVWishStatePill(state: wish.state)
         }
 
-        HStack(spacing: 10) {
-          Text(TVWishPresentation.kindLabel(wish.kind))
-          if let year = wish.year {
-            Text("· \(String(year))")
-          }
-          if let age = wish.ageRating, !age.isEmpty {
-            Text("· \(age)")
-          }
-        }
-        .font(.system(size: 20, weight: .semibold))
-        .foregroundStyle(.secondary)
+        Text(TVWishPresentation.metaLine(wish))
+          .font(.system(size: 20, weight: .semibold))
+          .foregroundStyle(.secondary)
 
         Text(supportersSummary)
           .font(.system(size: 20))
@@ -424,13 +416,9 @@ private struct TVWishDetailSheet: View {
         VStack(alignment: .leading, spacing: 18) {
           TVWishStatePill(state: wish.state)
           Text(wish.title).font(.system(size: 48, weight: .bold))
-          HStack(spacing: 14) {
-            Text(TVWishPresentation.kindLabel(wish.kind))
-            if let year = wish.year { Text("· \(String(year))") }
-            if let age = wish.ageRating, !age.isEmpty { Text("· \(age)") }
-          }
-          .font(.system(size: 24, weight: .semibold))
-          .foregroundStyle(.secondary)
+          Text(TVWishPresentation.metaLine(wish))
+            .font(.system(size: 24, weight: .semibold))
+            .foregroundStyle(.secondary)
 
           Text("Wished by \(wish.userName)")
             .font(.system(size: 24))

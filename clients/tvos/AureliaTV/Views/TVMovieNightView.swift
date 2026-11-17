@@ -293,6 +293,8 @@ struct TVMovieNightView: View {
           .focusSection()
         }
       }
+      // As tall as the ticket: the buttons end at its lower edge instead of the screen's.
+      .fixedSize(horizontal: false, vertical: true)
     }
   }
 

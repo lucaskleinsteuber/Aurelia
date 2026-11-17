@@ -55,6 +55,12 @@ struct TVLibraryGrid: View {
             }
           }
           Spacer()
+          // Beside Filter & Sort in the header's focus section, so Left reaches it; below the
+          // header no Up or Down press could land on it.
+          if !querySummary.isEmpty {
+            Button("Clear Filters") { query = listing.section.defaultQuery }
+              .buttonStyle(TVButtonStyle()).accessibilityIdentifier("browse-clear")
+          }
           Button {
             filters = true
           } label: {
@@ -62,18 +68,16 @@ struct TVLibraryGrid: View {
           }
           .buttonStyle(TVButtonStyle()).accessibilityIdentifier("browse-filters")
         }
+        // Its own section, so Up from any title reaches Filter & Sort even when no title sits
+        // below it (a row with fewer than six titles, or a short search result).
+        .focusSection()
         if listing.section == .search {
           TextField("Search Library", text: $search).submitLabel(.search)
             .textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityIdentifier(
               "library-search")
         }
         if !querySummary.isEmpty {
-          HStack {
-            Text(querySummary).font(.system(size: 22)).foregroundStyle(.secondary)
-            Button("Clear Filters") { query = listing.section.defaultQuery }.buttonStyle(
-              TVButtonStyle()
-            ).accessibilityIdentifier("browse-clear")
-          }
+          Text(querySummary).font(.system(size: 22)).foregroundStyle(.secondary)
         }
         if listing.items.isEmpty && !listing.loading && listing.error == nil {
           Text(search.isEmpty ? "No titles match this view." : "No matching titles.")
@@ -120,10 +124,13 @@ struct TVLibraryGrid: View {
         if let previous = lastKey, previous != request, previous.query == request.query,
           previous.search == request.search, previous.session == request.session
         {
-          // Only the library revision changed: update the shown titles in place.
+          // Only the library revision changed: update the shown titles in place. Nobody asked
+          // for it, so the reload doesn't count as using the server.
           lastKey = request
           if let api = model.client {
-            await listing.refresh(api: api, onFailure: model.handleSessionFailure)
+            await TVAPIClient.withBackgroundRequests {
+              await listing.refresh(api: api, onFailure: model.handleSessionFailure)
+            }
           }
           return
         }
@@ -139,7 +146,9 @@ struct TVLibraryGrid: View {
         guard !Task.isCancelled, listing.items.isEmpty, let api = model.client else { return }
         await listing.loadNext(api: api, onFailure: model.handleSessionFailure)
       }
-      .sheet(isPresented: $filters) { TVBrowseFilters(query: $query, section: listing.section) }
+      .fullScreenCover(isPresented: $filters) {
+        TVBrowseFilters(query: $query, section: listing.section)
+      }
       .modifier(TVLibraryActionPresentation(actions: actions))
   }
   private func restore() {
@@ -162,46 +171,104 @@ struct TVLibraryGrid: View {
   }
 }
 
+/// Filter & Sort as a full page in the row style of Playback Settings. The system form in a
+/// sheet drew the focused row unreadable on tvOS 26 and let rows slide under its title.
 private struct TVBrowseFilters: View {
   @Environment(\.dismiss) private var dismiss
   @Binding var query: TVBrowseQuery
   let section: TVBrowseSection
   var body: some View {
-    NavigationStack {
-      Form {
-        if section.fixedKind == nil {
-          Picker("Media", selection: $query.kind) {
-            Text("All").tag(TVMediaKind?.none)
-            Text("Movies").tag(TVMediaKind?.some(.movie))
-            Text("TV Shows").tag(TVMediaKind?.some(.series))
+    HStack(alignment: .top, spacing: 90) {
+      VStack(spacing: 26) {
+        Image(systemName: "line.3.horizontal.decrease.circle.fill").font(.system(size: 150))
+          .symbolRenderingMode(.hierarchical).foregroundStyle(.white.opacity(0.85))
+        Text("Filter & Sort").font(.system(size: 48, weight: .bold))
+        Text("Select a row to change it. Menu or Done returns to the titles.")
+          .font(.system(size: 24)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+      }.frame(width: 560).padding(.top, 140)
+      ScrollView {
+        VStack(spacing: 14) {
+          if section.fixedKind == nil {
+            row("Media", value: mediaTitle, id: "filter-media") {
+              query.kind = Self.next(after: query.kind, in: [nil, .movie, .series])
+            }
           }
-        }
-        Toggle("Favorites Only", isOn: $query.favoritesOnly).disabled(section == .favorites)
-          .accessibilityIdentifier("filter-favorites")
-        TextField(
-          "Genre",
-          text: Binding(get: { query.genre ?? "" }, set: { query.genre = $0.isEmpty ? nil : $0 })
-        ).accessibilityIdentifier("filter-genre")
-        TextField("Year From", text: year(\.yearFrom)).keyboardType(.numberPad)
-          .accessibilityIdentifier("filter-year-from")
-        TextField("Year To", text: year(\.yearTo)).keyboardType(.numberPad).accessibilityIdentifier(
-          "filter-year-to")
-        Picker("Watch Status", selection: $query.watchState) {
-          ForEach(TVWatchFilter.allCases, id: \.self) { Text($0.title).tag($0) }
-        }.disabled(section == .continueWatching)
-        Picker("Sort", selection: $query.sort) {
-          Text("Default").tag(TVBrowseSort?.none)
-          ForEach(TVBrowseSort.allCases, id: \.self) { Text($0.title).tag(TVBrowseSort?.some($0)) }
-        }
-        Toggle("Descending", isOn: $query.descending).disabled(query.sort == nil)
-        Button("Reset Filters & Sort") { query = section.defaultQuery }
-        Button("Done") {
-          query = section.constrain(query)
-          dismiss()
-        }.accessibilityIdentifier("filters-done")
-      }.navigationTitle("Filter & Sort").background(TVDesign.canvas)
+          if section != .favorites {
+            row(
+              "Favorites Only", value: query.favoritesOnly ? "On" : "Off", id: "filter-favorites"
+            ) { query.favoritesOnly.toggle() }
+          }
+          field(
+            "Genre", prompt: "Any",
+            text: Binding(
+              get: { query.genre ?? "" }, set: { query.genre = $0.isEmpty ? nil : $0 }),
+            id: "filter-genre", numbers: false)
+          field("Year From", prompt: "Any", text: year(\.yearFrom), id: "filter-year-from")
+          field("Year To", prompt: "Any", text: year(\.yearTo), id: "filter-year-to")
+          if section != .continueWatching {
+            row("Watch Status", value: query.watchState.title, id: "filter-watch-status") {
+              query.watchState = Self.next(after: query.watchState, in: TVWatchFilter.allCases)
+            }
+          }
+          Spacer().frame(height: 18)
+          row("Sort", value: query.sort?.title ?? "Default", id: "filter-sort") {
+            query.sort = Self.next(after: query.sort, in: [nil] + TVBrowseSort.allCases.map { $0 })
+          }
+          if query.sort != nil {
+            row("Descending", value: query.descending ? "On" : "Off", id: "filter-descending") {
+              query.descending.toggle()
+            }
+          }
+          Spacer().frame(height: 18)
+          row("Reset Filters & Sort", value: nil, id: "filter-reset") {
+            query = section.defaultQuery
+          }
+          row("Done", value: nil, id: "filters-done") { dismiss() }
+        }.padding(.vertical, 30).padding(.horizontal, 20)
+      }.frame(maxWidth: .infinity).focusSection()
+    }.padding(.horizontal, TVDesign.pagePadding).padding(.top, 20)
+      .background(TVDesign.canvas.ignoresSafeArea())
+      // However the page closes, the query keeps only what this section allows.
+      .onDisappear { query = section.constrain(query) }
+  }
+
+  private var mediaTitle: String {
+    switch query.kind {
+    case .movie: "Movies"
+    case .series: "TV Shows"
+    default: "All"
     }
   }
+
+  private func row(_ title: String, value: String?, id: String, action: @escaping () -> Void)
+    -> some View
+  {
+    Button(action: action) {
+      HStack(spacing: 20) {
+        Text(title)
+        Spacer(minLength: 20)
+        if let value { Text(value).opacity(0.7).monospacedDigit() }
+      }.padding(.horizontal, 30).frame(maxWidth: .infinity, minHeight: 72)
+    }
+    .buttonStyle(TVButtonStyle(kind: .row)).accessibilityIdentifier(id)
+    .accessibilityValue(value ?? "")
+  }
+
+  private func field(
+    _ title: String, prompt: String, text: Binding<String>, id: String, numbers: Bool = true
+  ) -> some View {
+    HStack(spacing: 20) {
+      Text(title).frame(width: 220, alignment: .leading).padding(.leading, 30)
+      TextField(prompt, text: text).keyboardType(numbers ? .numberPad : .default)
+        .accessibilityLabel(title).accessibilityIdentifier(id)
+    }.frame(maxWidth: .infinity, minHeight: 72)
+  }
+
+  private static func next<Value: Equatable>(after current: Value, in values: [Value]) -> Value {
+    guard let index = values.firstIndex(of: current) else { return values[0] }
+    return values[(index + 1) % values.count]
+  }
+
   private func year(_ path: WritableKeyPath<TVBrowseQuery, Int?>) -> Binding<String> {
     Binding(
       get: { query[keyPath: path].map(String.init) ?? "" },

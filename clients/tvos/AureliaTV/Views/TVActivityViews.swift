@@ -45,6 +45,9 @@ struct TVWatchHistoryView: View {
           Text("Titles you watch on any device appear here.")
             .font(.system(size: 28)).foregroundStyle(.secondary)
             .frame(maxWidth: .infinity).padding(.top, 120)
+            // Something on the page must hold the focus; otherwise it falls to the tab bar and
+            // Menu leaves the app instead of going back to the profile page.
+            .focusable()
         }
         ForEach(TVWatchTime.days(items), id: \.title) { day in
           VStack(alignment: .leading, spacing: 16) {
@@ -64,6 +67,17 @@ struct TVWatchHistoryView: View {
           }
         }
         if loadingMore { ProgressView().frame(maxWidth: .infinity) }
+        // A failed next page or removal stays visible below the rows it could not change.
+        if let error, !items.isEmpty {
+          VStack(spacing: 20) {
+            TVErrorText(message: error)
+            Button("Try Again") {
+              Task { if items.count < total { await loadMore() } else { await load() } }
+            }
+            .buttonStyle(TVButtonStyle())
+          }
+          .frame(maxWidth: .infinity)
+        }
       }
       .padding(.horizontal, TVDesign.pagePadding).padding(.vertical, 40)
     }
@@ -97,10 +111,14 @@ struct TVWatchHistoryView: View {
     guard !loadingMore, items.count < total, let client = model.client else { return }
     loadingMore = true
     defer { loadingMore = false }
-    if let page = try? await client.history(offset: items.count) {
+    do {
+      let page = try await client.history(offset: items.count)
       let known = Set(items.map(\.id))
       items += page.items.filter { !known.contains($0.id) }
       total = page.total
+      error = nil
+    } catch {
+      self.error = error.localizedDescription
     }
   }
 
@@ -179,6 +197,9 @@ struct TVStatisticsView: View {
   @EnvironmentObject private var model: TVAppModel
   @State private var stats: TVUserStatistics?
   @State private var review: TVYearInReview?
+  /// The year `review` and `reviewError` belong to, so another year's numbers never show.
+  @State private var reviewYear: Int?
+  @State private var reviewError: String?
   @State private var year = Calendar.current.component(.year, from: Date())
   @State private var wrappedYear: TVWrappedLaunch?
   @State private var archiveYear: Int?
@@ -412,7 +433,9 @@ struct TVStatisticsView: View {
           .buttonStyle(TVCardButtonStyle())
           .accessibilityIdentifier("statistics-wrapped")
         }
-        if let review {
+        if let reviewError, reviewYear == year {
+          TVErrorText(message: reviewError)
+        } else if let review, reviewYear == year {
           HStack(spacing: 24) {
             tile(
               "Watch Time", TVWatchTime.text(hours: review.totalHoursWatched ?? 0), symbol: "clock")
@@ -444,7 +467,18 @@ struct TVStatisticsView: View {
 
   private func loadReview() async {
     guard let client = model.client else { return }
-    review = try? await client.yearInReview(year: year)
+    let requested = year
+    do {
+      let value = try await client.yearInReview(year: requested)
+      guard !Task.isCancelled, requested == year else { return }
+      review = value
+      reviewError = nil
+    } catch {
+      guard !Task.isCancelled, requested == year else { return }
+      review = nil
+      reviewError = error.localizedDescription
+    }
+    reviewYear = requested
   }
 }
 
@@ -469,10 +503,6 @@ struct TVWrappedView: View {
     let accent = TVWrapped.accent(slide?.accent ?? "night")
     ZStack {
       Color(wrappedHex: accent.field).ignoresSafeArea()
-      if let poster = slide?.poster {
-        TVArtworkView(artwork: poster, width: 640, symbol: nil)
-          .blur(radius: 60).opacity(0.3).ignoresSafeArea()
-      }
       if let slide {
         content(slide, accent: accent)
         bars(count: wrapped?.slides.count ?? 0, accent: accent)
@@ -511,7 +541,7 @@ struct TVWrappedView: View {
   private func content(_ slide: TVWrappedSlide, accent: TVWrapped.Accent) -> some View {
     HStack(alignment: .center, spacing: 70) {
       VStack(alignment: .leading, spacing: 22) {
-        Text(slide.eyebrow).font(.system(size: 30, weight: .bold)).opacity(0.8)
+        Text(slide.eyebrow).font(.system(size: 30, weight: .bold))
         Text(slide.headline).font(.system(size: 72, weight: .black)).tracking(-2).lineLimit(3)
           .minimumScaleFactor(0.6)
         if let number = slide.bigNumber {
@@ -529,7 +559,7 @@ struct TVWrappedView: View {
           Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 10) {
             ForEach(facts, id: \.label) { fact in
               GridRow {
-                Text(fact.label).opacity(0.72)
+                Text(fact.label)
                 Text(fact.value).fontWeight(.heavy)
               }
             }

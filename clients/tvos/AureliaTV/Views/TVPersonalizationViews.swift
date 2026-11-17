@@ -263,6 +263,9 @@ struct TVSetupIntroductionView: View {
   var replay = false
   var closed: (() -> Void)? = nil
   @State private var page: Page = .welcome
+  /// Each page's main button. A new page replaces the focused one, and tvOS would leave nothing
+  /// focused, so the first press of the remote did nothing.
+  @FocusState private var primaryFocused: Bool
 
   var body: some View {
     VStack(spacing: 44) {
@@ -278,6 +281,10 @@ struct TVSetupIntroductionView: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(TVDesign.canvas.ignoresSafeArea())
     .onAppear { if replay { page = .howItWorks } }
+    .defaultFocus($primaryFocused, true)
+    .onChange(of: page) { _, _ in
+      Task { @MainActor in primaryFocused = true }
+    }
     .onExitCommand {
       switch page {
       case .welcome: break
@@ -299,6 +306,7 @@ struct TVSetupIntroductionView: View {
       )
       HStack(spacing: 30) {
         Button("Connect to My Server") { guide.start() }
+          .focused($primaryFocused)
           .accessibilityIdentifier("setup-connect")
         Button("I'm New to Aurelia") { page = .howItWorks }
           .accessibilityIdentifier("setup-show-me-around")
@@ -320,6 +328,7 @@ struct TVSetupIntroductionView: View {
         if replay { closed?() } else { page = .server }
       }
       .buttonStyle(TVButtonStyle())
+      .focused($primaryFocused)
       .accessibilityIdentifier("setup-continue")
     }
   }
@@ -331,6 +340,7 @@ struct TVSetupIntroductionView: View {
         "It runs in Aurelia on a Mac, or on a Linux computer at home.")
       HStack(spacing: 30) {
         Button("Yes, Connect to It") { guide.start() }
+          .focused($primaryFocused)
           .accessibilityIdentifier("setup-has-server")
         Button("Not Yet") { page = .noServer }
           .accessibilityIdentifier("setup-no-server")
@@ -364,6 +374,7 @@ struct TVSetupIntroductionView: View {
           .font(.system(size: 24)).foregroundStyle(.secondary)
         Button("Back") { page = .server }
           .buttonStyle(TVButtonStyle())
+          .focused($primaryFocused)
           .accessibilityIdentifier("setup-no-server-back")
       }
       .frame(maxWidth: 900, alignment: .leading)
@@ -401,7 +412,9 @@ struct TVSetupStepBar: View {
       ForEach(Array(steps.enumerated()), id: \.element) { position, step in
         HStack(spacing: 10) {
           ZStack {
-            Circle().fill(position <= index ? Color.accentColor : Color.white.opacity(0.2))
+            // Blue as on iPhone and iPad: the Apple TV's accent color is white, which hid the
+            // current step's number.
+            Circle().fill(position <= index ? Color.blue : Color.white.opacity(0.2))
             if position < index {
               Image(systemName: "checkmark").font(.system(size: 16, weight: .bold))
             } else {
@@ -428,7 +441,7 @@ struct TVSetupDoneView: View {
   var body: some View {
     VStack(spacing: 44) {
       Image(systemName: "checkmark").font(.system(size: 90, weight: .semibold))
-        .foregroundStyle(Color.accentColor)
+        .foregroundStyle(Color.blue)
       Text("You're All Set").font(.system(size: 60, weight: .bold))
       VStack(alignment: .leading, spacing: 18) {
         check("This Apple TV is connected to \(model.connection?.name ?? "your server").")
@@ -449,7 +462,7 @@ struct TVSetupDoneView: View {
 
   private func check(_ text: String) -> some View {
     HStack(spacing: 16) {
-      Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
+      Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.blue)
       Text(text).font(.system(size: 28))
     }
   }
@@ -473,7 +486,7 @@ struct TVLibraryTour: View {
     Stop(tab: 3, title: "Search", text: "Find titles, people and genres in your library."),
     Stop(
       tab: 4, title: "Your Profile",
-      text: "Your name and picture, playback, switching profiles and About Aurelia."),
+      text: "Playback, watch history, statistics, switching profiles and About Aurelia."),
   ]
 
   @Binding var tab: Int

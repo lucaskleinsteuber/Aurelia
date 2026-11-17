@@ -3,6 +3,22 @@ import Testing
 
 @Suite("TV client contracts and transport")
 struct TVCoreTests {
+  @Test func wrappedInkStaysReadableOnEveryColorField() {
+    // WCAG contrast for normal text (4.5:1); the eyebrow and facts use the ink at full strength.
+    func luminance(_ hex: UInt32) -> Double {
+      [16, 8, 0].map { shift -> Double in
+        let channel = Double((hex >> UInt32(shift)) & 0xFF) / 255
+        return channel <= 0.039_28 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
+      }.enumerated().map { [0.2126, 0.7152, 0.0722][$0.offset] * $0.element }.reduce(0, +)
+    }
+    #expect(TVWrapped.accents.count == 8)
+    for (name, accent) in TVWrapped.accents {
+      let (a, b) = (luminance(accent.ink), luminance(accent.field))
+      let ratio = (max(a, b) + 0.05) / (min(a, b) + 0.05)
+      #expect(ratio >= 4.5, "\(name): \(ratio)")
+    }
+  }
+
   @Test func remoteCommandsDecodeAsTheServerWritesThem() throws {
     let json = #"""
       [{"commandId":"5f0c2f1e-4c7b-4a39-9a3e-0d6c1c2b8a11","action":"play","mediaId":"0b6f6a8e-2d9c-4b43-8d55-3f1a4c5e6d70","positionSeconds":null,"skipSeconds":null,"createdAt":"2026-10-31T16:50:00.1234567+00:00"}]
@@ -184,6 +200,47 @@ struct TVCoreTests {
     #expect(throws: TVCoreError.identityMismatch) {
       try wrongKey.validate(against: Self.connection)
     }
+  }
+
+  @Test func trailersAndSuggestionsSendTheirLimitAsAQuery() async throws {
+    let media = UUID()
+    let transport = TVCoreFakeTransport(responses: [
+      response(#"{"trailers":[]}"#),
+      response(#"{"mediaId":"\#(media.uuidString)","suggestions":[]}"#),
+    ])
+    let client = TVAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    _ = try await client.cinemaTrailers(mediaID: media, count: 2)
+    _ = try await client.suggestions(mediaID: media, limit: 3)
+    let urls = await transport.requests.compactMap(\.request.url)
+    #expect(
+      urls.map(\.path) == [
+        "/api/v1/media/\(media.uuidString.lowercased())/cinema-trailers",
+        "/api/v1/media/\(media.uuidString.lowercased())/suggestions",
+      ])
+    #expect(urls.map(\.query) == ["count=2", "limit=3"])
+  }
+
+  @Test func readsTheAppMakesByItselfAreMarkedAsBackground() async throws {
+    let transport = TVCoreFakeTransport(
+      responses: Array(repeating: response(emptyPageJSON), count: 4))
+    let client = TVAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    _ = try await client.catalogPage(kind: .movie, offset: 0)
+    try await TVAPIClient.withBackgroundRequests {
+      _ = try await client.catalogPage(kind: .movie, offset: 0)
+      // Child tasks carry it too.
+      let child = Task { try await client.catalogPage(kind: .movie, offset: 0) }
+      _ = try await child.value
+    }
+    // A reload someone asked for counts again.
+    try await TVAPIClient.withBackgroundRequests(false) {
+      _ = try await client.catalogPage(kind: .movie, offset: 0)
+    }
+    let requests = await transport.requests.map(\.request)
+    #expect(
+      requests.map { $0.value(forHTTPHeaderField: "X-Aurelia-Background") }
+        == [nil, "1", "1", nil])
   }
 
   @Test func profileAndCatalogUseDifferentCredentials() async throws {

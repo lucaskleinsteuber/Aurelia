@@ -236,6 +236,8 @@ struct TVUser: Codable, Equatable, Sendable {
   var pictureRevision: Int64? = nil
   /// A children's profile's highest FSK age, nil for none.
   var ageLimit: Int? = nil
+  /// "entireLibrary" or "selectedTitles" (the owner chose this profile's titles).
+  var accessMode: String? = nil
 
   var shownName: String {
     if let displayName, !displayName.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -694,4 +696,25 @@ public struct TVRemotePlaybackCommand: Decodable, Sendable {
   public let skipSeconds: Double?
   /// ISO 8601 text, as the server writes every time.
   public let createdAt: String
+}
+
+/// What an empty Home says, as on iPhone and iPad. A children's profile or one with chosen titles
+/// may see nothing while the library is full, so it is not told the library is empty.
+struct TVEmptyLibraryText {
+  let title: String
+  let message: String
+
+  init(user: TVUser?) {
+    if let age = user?.ageLimit {
+      title = "Nothing to Watch Yet"
+      message =
+        "This profile shows titles rated up to FSK \(age). Ask the server owner when you'd like more."
+    } else if user?.accessMode == "selectedTitles" {
+      title = "Nothing to Watch Yet"
+      message = "This profile shows the titles the server owner chose for it. Ask them for more."
+    } else {
+      title = "Your Library Is Empty"
+      message = "Ask the server owner to add a storage location."
+    }
+  }
 }

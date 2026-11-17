@@ -15,6 +15,9 @@ final class TVAppModel: ObservableObject {
   @Published private(set) var error: String?
   /// The saved server did not answer at all, probably asleep: shown as a hint, not as an error.
   @Published private(set) var savedServerUnreachable = false
+  /// When this Apple TV first sent a wake signal to the server that doesn't answer yet; the
+  /// "server is off" screen then says it is waking the server and counts the seconds.
+  @Published private(set) var wakeSignalSentAt: Date?
   /// "Mac" or "Linux PC" when the saved server runs inside the Aurelia app there: its owner starts
   /// it by opening Aurelia, and this device doesn't try to wake it.
   var savedServerAppHost: String? { connection.flatMap { TVWakeOnLan.appHost(for: $0.serverID) } }
@@ -232,6 +235,7 @@ final class TVAppModel: ObservableObject {
       try saveCredentials(relocated)
       connection = relocated
       savedServerUnreachable = false
+      wakeSignalSentAt = nil
       let discovered = browser.servers.filter { $0.serverID == saved.serverID }
         .flatMap { [$0.baseURL] + $0.alternativeURLs }
       TVWakeOnLan.remember(
@@ -265,6 +269,11 @@ final class TVAppModel: ObservableObject {
       TVSleepTimerWakeRule.mayWakeAutomatically()
     else { return }
     TVWakeOnLan.wake(serverID: serverID)
+    if TVWakeOnLan.canWake(serverID: serverID),
+      !TVWakeOnLan.Waking.isWaking(since: wakeSignalSentAt)
+    {
+      wakeSignalSentAt = Date()
+    }
   }
 
   /// Stops trying the saved server, so another one can be chosen at once.
@@ -272,6 +281,7 @@ final class TVAppModel: ObservableObject {
     guard phase == .connection, connection != nil else { return }
     retireWork()
     savedServerUnreachable = false
+    wakeSignalSentAt = nil
     error = nil
     startDiscovery()
   }
@@ -648,7 +658,10 @@ final class TVAppModel: ObservableObject {
       watchParties = []
       return
     }
-    let all = (try? await api.watchParties()) ?? []
+    // A failed try keeps the known parties, and a late answer for another profile is dropped.
+    guard let all = try? await api.watchParties(), !Task.isCancelled,
+      session?.sessionId == api.session?.sessionId
+    else { return }
     watchParties = all.filter { $0.id != watchParty?.partyID }
   }
 
@@ -936,6 +949,9 @@ final class TVAppModel: ObservableObject {
               break
             }
           }
+          // The server long-polls; an older one may answer at once, which must not become a
+          // tight request loop.
+          do { try await Task.sleep(for: .seconds(1)) } catch { return }
         } catch {
           do { try await Task.sleep(for: .seconds(2)) } catch { return }
         }

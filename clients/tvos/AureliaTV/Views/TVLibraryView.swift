@@ -24,7 +24,13 @@ struct TVPosterLabel: View {
     }.frame(maxWidth: .infinity, alignment: .leading)
   }
   private var subtitle: String {
-    item.availabilityMessage ?? item.year.map(String.init) ?? item.kindLabel
+    if let message = item.availabilityMessage { return message }
+    // An episode names its show and number; "Episode" alone told four results apart by nothing.
+    if item.kind == .episode {
+      let parts = [item.parentTitle, item.episodeLabel].compactMap { $0 }
+      if !parts.isEmpty { return parts.joined(separator: " · ") }
+    }
+    return item.year.map(String.init) ?? item.kindLabel
   }
 }
 

@@ -1,6 +1,17 @@
 import Foundation
 
 struct TVAPIClient: Sendable {
+  /// Reads the app makes by itself (a reload after the server reported a change, Home asking for
+  /// watch parties) must not keep an idle server awake (server 2.21+), as on iPhone and iPad.
+  /// Task-local, so it follows child tasks without touching requests someone asked for.
+  @TaskLocal private static var requestsInBackground = false
+
+  nonisolated(nonsending) static func withBackgroundRequests<Value>(
+    _ background: Bool = true, operation: nonisolated(nonsending) () async throws -> Value
+  ) async rethrows -> Value {
+    try await $requestsInBackground.withValue(background, operation: operation)
+  }
+
   let connection: TVStoredConnection?
   let session: TVProfileSession?
   let baseURL: URL
@@ -366,16 +377,20 @@ struct TVAPIClient: Sendable {
 
   /// Trailers of films nobody in this profile has watched yet, for cinema mode before `mediaID`.
   func cinemaTrailers(mediaID: UUID, count: Int) async throws -> [TVCinemaTrailer] {
-    let response: TVCinemaTrailersResponse = try await get(
-      "/api/v1/media/\(mediaID.uuidString.lowercased())/cinema-trailers?count=\(count)")
-    return response.trailers
+    // The count goes in the query: a "?" in the path is refused before the request is sent,
+    // so Cinema Mode never had trailers.
+    let data = try await send(
+      "/api/v1/media/\(mediaID.uuidString.lowercased())/cinema-trailers",
+      query: [URLQueryItem(name: "count", value: String(min(3, max(0, count))))])
+    return try Self.decode(TVCinemaTrailersResponse.self, data: data).trailers
   }
 
   /// What to watch after a title (servers from 2.11.0); an episode's are its series'.
   func suggestions(mediaID: UUID, limit: Int = 3) async throws -> [TVMediaSuggestion] {
-    let response: TVMediaSuggestionsResponse = try await get(
-      "/api/v1/media/\(mediaID.uuidString.lowercased())/suggestions?limit=\(limit)")
-    return response.suggestions
+    let data = try await send(
+      "/api/v1/media/\(mediaID.uuidString.lowercased())/suggestions",
+      query: [URLQueryItem(name: "limit", value: String(min(30, max(1, limit))))])
+    return try Self.decode(TVMediaSuggestionsResponse.self, data: data).suggestions
   }
 
   /// Sends a player state report (see TVAutomation.swift).
@@ -654,6 +669,10 @@ struct TVAPIClient: Sendable {
   }
   private func execute(_ request: URLRequest) async throws -> TVHTTPResponse {
     try Task.checkCancellation()
+    var request = request
+    if request.httpMethod == "GET", Self.requestsInBackground {
+      request.setValue("1", forHTTPHeaderField: "X-Aurelia-Background")
+    }
     let response = try await transport.execute(request, trust: .pinned(fingerprint))
     try Task.checkCancellation()
     if let actual = response.fingerprint,

@@ -290,6 +290,7 @@ struct TVPINView: View {
   let profile: TVWatchingProfile
   @State private var pin = ""
   @State private var attempts = 0
+  @State private var showingRecovery = false
   @FocusState private var focusedKey: String?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   private static let rows = [
@@ -326,6 +327,10 @@ struct TVPINView: View {
             TVErrorText(message: error).accessibilityIdentifier("profile-pin-error")
           }
         }.frame(height: 44)
+        // As on iPhone and iPad: how to get a new PIN.
+        Button("Forgot PIN?") { showingRecovery = true }
+          .buttonStyle(TVButtonStyle())
+          .accessibilityIdentifier("profile-forgot-pin")
       }
       .frame(width: 560)
       Grid(horizontalSpacing: 28, verticalSpacing: 26) {
@@ -343,6 +348,15 @@ struct TVPINView: View {
       withAnimation(.linear(duration: 0.4)) { attempts += 1 }
     }
     .onExitCommand { model.cancelProfileSelection() }
+    .alert("Forgot PIN?", isPresented: $showingRecovery) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(
+        profile.role == "owner"
+          ? "On the computer running your server, open Aurelia and choose Forgot PIN? on the owner profile. You need the Server Password. On a server without a screen, use its owner PIN recovery instructions."
+          : "Ask the server owner to set a new PIN for this profile in Settings › Profiles and Devices."
+      )
+    }
   }
 
   /// A capsule like the Mac's PIN field, with one dot per digit typed.
