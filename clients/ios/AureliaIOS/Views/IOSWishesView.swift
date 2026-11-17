@@ -46,6 +46,7 @@ struct IOSWishesView: View {
   }
 
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
   @State private var wishes: [IOSWishSummary] = []
   @State private var filter: Filter = .open
@@ -510,63 +511,109 @@ struct IOSWishesView: View {
         }
       }
 
-      HStack(spacing: 8) {
-        if wish.state == .open && wish.canSupport {
-          Button(wish.supportedByCaller ? "Remove Vote" : "+ Me Too") {
-            Task { await toggleSupport(wishID: wish.id, supported: !wish.supportedByCaller) }
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-          .disabled(isBusy)
-        }
-
-        if wish.state == .fulfilled, let mediaId = wish.fulfilledMediaItemId {
-          Button("Open in Library") {
-            Task { await openLibraryTitle(mediaId) }
-          }
-          .buttonStyle(.borderedProminent)
-          .tint(.white)
-          .foregroundStyle(.black)
-          .controlSize(.small)
-        }
-
-        if model.isWishAdmin && wish.state == .open {
-          Button("In Library") {
-            Task {
-              await resolveWish(
-                wish, state: .fulfilled, note: nil,
-                mediaID: wish.suggestions.first?.mediaId)
-            }
-          }
-          .buttonStyle(.borderedProminent)
-          .tint(.white)
-          .foregroundStyle(.black)
-          .controlSize(.small)
-          .disabled(isBusy)
-
-          Button("Decline") {
-            declineNote = ""
-            decliningWish = wish
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-          .disabled(isBusy)
-        }
-
-        Spacer(minLength: 4)
-
-        if (isOwnWish && wish.state == .open) || model.isWishAdmin {
-          Button(isOwnWish && !model.isWishAdmin ? "Withdraw" : "Remove", role: .destructive) {
-            Task { await deleteWish(wish) }
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-          .disabled(isBusy)
-        }
-      }
+      wishActions(wish, isBusy: isBusy, isOwnWish: isOwnWish)
     }
     .padding(14)
     .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+  }
+
+  @ViewBuilder
+  private func wishActions(_ wish: IOSWishSummary, isBusy: Bool, isOwnWish: Bool) -> some View {
+    if dynamicTypeSize.isAccessibilitySize {
+      VStack(spacing: 8) {
+        wishActionButtons(wish, isBusy: isBusy, isOwnWish: isOwnWish, expanded: true)
+      }
+    } else {
+      ViewThatFits(in: .horizontal) {
+        HStack(spacing: 8) {
+          wishActionButtons(wish, isBusy: isBusy, isOwnWish: isOwnWish, expanded: false)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        LazyVGrid(
+          columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
+          alignment: .leading, spacing: 8
+        ) {
+          wishActionButtons(wish, isBusy: isBusy, isOwnWish: isOwnWish, expanded: true)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+
+  @ViewBuilder
+  private func wishActionButtons(
+    _ wish: IOSWishSummary, isBusy: Bool, isOwnWish: Bool, expanded: Bool
+  ) -> some View {
+    if wish.state == .open && wish.canSupport {
+      Button {
+        Task { await toggleSupport(wishID: wish.id, supported: !wish.supportedByCaller) }
+      } label: {
+        wishActionLabel(wish.supportedByCaller ? "Remove Vote" : "+ Me Too", expanded: expanded)
+      }
+      .buttonStyle(.bordered)
+      .controlSize(.small)
+      .disabled(isBusy)
+    }
+
+    if wish.state == .fulfilled, let mediaId = wish.fulfilledMediaItemId {
+      Button {
+        Task { await openLibraryTitle(mediaId) }
+      } label: {
+        wishActionLabel("Open in Library", expanded: expanded)
+      }
+      .buttonStyle(.borderedProminent)
+      .tint(.white)
+      .foregroundStyle(.black)
+      .controlSize(.small)
+    }
+
+    if model.isWishAdmin && wish.state == .open {
+      Button {
+        Task {
+          await resolveWish(
+            wish, state: .fulfilled, note: nil,
+            mediaID: wish.suggestions.first?.mediaId)
+        }
+      } label: {
+        wishActionLabel("In Library", expanded: expanded)
+      }
+      .buttonStyle(.borderedProminent)
+      .tint(.white)
+      .foregroundStyle(.black)
+      .controlSize(.small)
+      .disabled(isBusy)
+
+      Button {
+        declineNote = ""
+        decliningWish = wish
+      } label: {
+        wishActionLabel("Decline", expanded: expanded)
+      }
+      .buttonStyle(.bordered)
+      .controlSize(.small)
+      .disabled(isBusy)
+    }
+
+    if !expanded { Spacer(minLength: 4) }
+
+    if (isOwnWish && wish.state == .open) || model.isWishAdmin {
+      Button(role: .destructive) {
+        Task { await deleteWish(wish) }
+      } label: {
+        wishActionLabel(isOwnWish && !model.isWishAdmin ? "Withdraw" : "Remove", expanded: expanded)
+      }
+      .buttonStyle(.bordered)
+      .controlSize(.small)
+      .disabled(isBusy)
+    }
+  }
+
+  private func wishActionLabel(_ title: String, expanded: Bool) -> some View {
+    Text(title)
+      .lineLimit(expanded ? nil : 1)
+      .fixedSize(horizontal: !expanded, vertical: expanded)
+      .frame(minWidth: 44, maxWidth: expanded ? .infinity : nil, minHeight: 44)
+      .contentShape(Rectangle())
   }
 
   private func badgePill(_ text: String) -> some View {
