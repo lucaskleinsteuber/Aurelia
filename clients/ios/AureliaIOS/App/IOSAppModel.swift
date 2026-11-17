@@ -292,6 +292,7 @@ final class IOSAppModel: ObservableObject {
       try saveCredentials(relocated)
       connection = relocated
       savedServerUnreachable = false
+      wakeSignalSentAt = nil
       let discovered = browser.servers.filter { $0.serverID == saved.serverID }
         .flatMap { [$0.baseURL] + $0.alternativeURLs }
       IOSWakeOnLan.rememberResolving(
@@ -327,6 +328,14 @@ final class IOSAppModel: ObservableObject {
   }
   /// Whether Wake Server is waiting for the server it woke.
   @Published private(set) var isWakingServer = false
+  /// When this device first sent a wake signal to the server that doesn't answer yet; the
+  /// "server is off" screen then says it is waking the server and counts the seconds.
+  @Published private(set) var wakeSignalSentAt: Date?
+
+  private func noteWakeSignal() {
+    guard wakeOnLanStatus.canWake else { return }
+    if !IOSWakeOnLan.Waking.isWaking(since: wakeSignalSentAt) { wakeSignalSentAt = Date() }
+  }
 
   /// Sends the Wake-on-LAN packet once, when someone asks for it.
   func sendWakeSignal() {
@@ -341,6 +350,7 @@ final class IOSAppModel: ObservableObject {
     isWakingServer = true
     defer { isWakingServer = false }
     allowWaking(explicit: true)
+    noteWakeSignal()
     let deadline = Date().addingTimeInterval(TimeInterval(IOSWakeOnLan.Plan.totalSeconds))
     while Date() < deadline, phase == .connection, connection?.serverID == saved.serverID {
       IOSWakeOnLan.wake(serverID: saved.serverID)
@@ -354,6 +364,7 @@ final class IOSAppModel: ObservableObject {
       IOSSleepTimerWakeRule.mayWakeAutomatically()
     else { return }
     IOSWakeOnLan.wake(serverID: serverID)
+    noteWakeSignal()
   }
 
   /// Stops trying the saved server, so another one can be chosen at once.
@@ -361,6 +372,7 @@ final class IOSAppModel: ObservableObject {
     guard phase == .connection, connection != nil else { return }
     retireWork()
     savedServerUnreachable = false
+    wakeSignalSentAt = nil
     error = nil
     startDiscovery()
   }

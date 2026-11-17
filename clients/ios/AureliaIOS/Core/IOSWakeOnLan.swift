@@ -202,6 +202,25 @@ enum IOSWakeOnLan {
     static let totalSeconds = 120
   }
 
+  /// What the app says after it sent a wake signal, like the Mac. A sleeping computer answers
+  /// within about half a minute, one that was turned off needs to start up first.
+  enum Waking {
+    static let hint =
+      "From sleep it usually answers within half a minute. If it was turned off, the computer needs one to two minutes to start."
+    /// After this the server is treated as off again, a little longer than the app waits.
+    static let window: TimeInterval = 150
+
+    static func isWaking(since sent: Date?, now: Date = Date()) -> Bool {
+      guard let sent else { return false }
+      let elapsed = now.timeIntervalSince(sent)
+      return elapsed >= 0 && elapsed < window
+    }
+
+    static func elapsed(since sent: Date, now: Date = Date()) -> String {
+      "\(max(0, Int(now.timeIntervalSince(sent)))) s"
+    }
+  }
+
   private static func load(_ defaults: UserDefaults) -> [String: Target] {
     guard let data = defaults.data(forKey: defaultsKey) else { return [:] }
     return (try? JSONDecoder().decode([String: Target].self, from: data)) ?? [:]

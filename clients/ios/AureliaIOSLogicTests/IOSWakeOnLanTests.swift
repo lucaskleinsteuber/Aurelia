@@ -45,6 +45,18 @@ struct IOSWakeOnLanTests {
     #expect(IOSWakeOnLan.target(for: serverID, defaults: defaults) == nil)
   }
 
+  @Test func theWakingScreenCountsUpAndNamesBothSleepAndOff() {
+    let sent = Date(timeIntervalSince1970: 1_000)
+    #expect(IOSWakeOnLan.Waking.isWaking(since: sent, now: sent.addingTimeInterval(42)))
+    #expect(IOSWakeOnLan.Waking.elapsed(since: sent, now: sent.addingTimeInterval(42.7)) == "42 s")
+    // A computer that was off needs more than the Mac's old "half a minute".
+    #expect(IOSWakeOnLan.Waking.isWaking(since: sent, now: sent.addingTimeInterval(110)))
+    #expect(IOSWakeOnLan.Waking.hint.contains("one to two minutes"))
+    // Past the two minutes the app waits, the server counts as off again.
+    #expect(!IOSWakeOnLan.Waking.isWaking(since: sent, now: sent.addingTimeInterval(151)))
+    #expect(!IOSWakeOnLan.Waking.isWaking(since: nil))
+  }
+
   @Test func packetAndAddressRules() {
     let card: [UInt8] = [0x02, 0x00, 0x5E, 0x10, 0x00, 0x01]
     let packet = IOSWakeOnLan.magicPacket(card)

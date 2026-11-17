@@ -251,9 +251,11 @@ struct ServerConnectionStatusText: View {
       case .waking(let since):
         Text("Waking \(name)…")
           .font(.title2.weight(.semibold))
-        Text("It was asleep and usually answers within half a minute.")
-          .font(.callout)
-          .foregroundStyle(.secondary)
+        Text(
+          "From sleep it usually answers within half a minute. If it was turned off, the computer needs one to two minutes to start."
+        )
+        .font(.callout)
+        .foregroundStyle(.secondary)
         TimelineView(.periodic(from: since, by: 1)) { context in
           Text("\(max(0, Int(context.date.timeIntervalSince(since)))) s")
             .monospacedDigit()

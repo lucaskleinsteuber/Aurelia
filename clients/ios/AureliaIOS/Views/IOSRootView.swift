@@ -253,21 +253,38 @@ struct IOSSavedServerView: View {
         if model.savedServerUnreachable {
           Image(systemName: "power").font(.system(size: 44, weight: .medium))
             .foregroundStyle(.secondary)
-          VStack(spacing: 10) {
-            Text(
-              model.savedServerAppHost.map { "Start Aurelia on Your \($0)" } ?? "The Server Is Off"
-            ).font(.title.bold())
-            Text(
-              model.savedServerAppHost.map {
-                "“\(name)” runs inside the Aurelia app on a \($0). Open Aurelia there, or wake the \($0), and Aurelia connects by itself."
+          TimelineView(.periodic(from: .now, by: 1)) { context in
+            if let sent = model.wakeSignalSentAt,
+              IOSWakeOnLan.Waking.isWaking(since: sent, now: context.date)
+            {
+              // Like the Mac: Aurelia woke the server, how long that takes, and the seconds so far.
+              VStack(spacing: 10) {
+                Text("Waking “\(name)”…").font(.title.bold()).multilineTextAlignment(.center)
+                Text(IOSWakeOnLan.Waking.hint)
+                  .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Text(IOSWakeOnLan.Waking.elapsed(since: sent, now: context.date))
+                  .font(.footnote).monospacedDigit().foregroundStyle(.tertiary)
               }
-                ?? "“\(name)” isn’t answering. Turn on the computer the server runs on, or open Aurelia on your Mac to wake it."
-            )
-            .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            Text("Aurelia connects by itself as soon as the server is on.")
-              .font(.footnote).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+              .frame(maxWidth: 420)
+            } else {
+              VStack(spacing: 10) {
+                Text(
+                  model.savedServerAppHost.map { "Start Aurelia on Your \($0)" }
+                    ?? "The Server Is Off"
+                ).font(.title.bold())
+                Text(
+                  model.savedServerAppHost.map {
+                    "“\(name)” runs inside the Aurelia app on a \($0). Open Aurelia there, or wake the \($0), and Aurelia connects by itself."
+                  }
+                    ?? "“\(name)” isn’t answering. Turn on the computer the server runs on, or open Aurelia on your Mac to wake it."
+                )
+                .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Text("Aurelia connects by itself as soon as the server is on.")
+                  .font(.footnote).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+              }
+              .frame(maxWidth: 420)
+            }
           }
-          .frame(maxWidth: 420)
           ZStack {
             if model.isWakingServer {
               ProgressView("Wake signal sent. Waiting for the server…")
