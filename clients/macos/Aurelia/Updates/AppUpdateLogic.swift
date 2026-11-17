@@ -118,18 +118,29 @@ struct AppRelease: Equatable, Sendable {
   }
 }
 
+/// Aurelia for Mac is published only as betas while it is development-signed and starts only on
+/// Macs registered to the developer's Apple account (CLAUDE.md, Hard rule 1). Beta Updates is
+/// therefore on by default and these texts say why. With a paid Apple Developer membership and
+/// stable Mac releases again, remove this and turn the default off in AppUpdatePreferences.
+enum AppUpdateBetaOnly {
+  static let explanation =
+    "Aurelia for Mac comes only as beta versions for now: it starts only on Macs registered to the developer's Apple account, so there are no stable Mac versions. Keep Beta Updates on to get the newest version."
+  static let noStableVersion =
+    "There are no stable versions of Aurelia for Mac yet. Turn on Beta Updates to get the newest version."
+}
+
 /// Local update choices; callers inject a private defaults suite in tests.
 enum AppUpdatePreferences {
   static let automaticChecksKey = "AureliaAutomaticUpdateChecks"
   static let skippedVersionsKey = "AureliaSkippedUpdateVersions"
   static let lastCheckKey = "AureliaLastUpdateCheck"
   static let latestETagKey = "AureliaUpdateLatestETag"
-  /// Off by default: only the owner's test Macs see pre-releases.
+  /// On unless turned off: every Mac version is a beta for now (see AppUpdateBetaOnly).
   static let betaUpdatesKey = "AureliaBetaUpdates"
   static let checkInterval: TimeInterval = 24 * 3_600
 
   static func betaUpdates(in defaults: UserDefaults) -> Bool {
-    defaults.bool(forKey: betaUpdatesKey)
+    defaults.object(forKey: betaUpdatesKey) == nil || defaults.bool(forKey: betaUpdatesKey)
   }
 
   static func checksAutomatically(in defaults: UserDefaults) -> Bool {

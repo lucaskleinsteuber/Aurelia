@@ -127,6 +127,9 @@ struct AppUpdateLogicTests {
     #expect(result.release.build == 100)
     #expect(await transport.requests.first?.url?.query == "per_page=20")
     try withPreferences { defaults, _ in
+      // Every Mac version is a beta for now, so Beta Updates is on until someone turns it off.
+      #expect(AppUpdatePreferences.betaUpdates(in: defaults))
+      defaults.set(false, forKey: AppUpdatePreferences.betaUpdatesKey)
       #expect(!AppUpdatePreferences.betaUpdates(in: defaults))
       AppUpdateCatalogCache.save(
         result.cache, repository: "owner/repo", beta: true, defaults: defaults)
@@ -135,6 +138,19 @@ struct AppUpdateLogicTests {
       // A beta list is not a valid stable answer, so the stable feed keeps nothing.
       #expect(AppUpdateCatalogCache.load(repository: "owner/repo", defaults: defaults) == nil)
     }
+  }
+
+  @Test func theAppGroupFollowsTheSigningTeamWrittenByTheBuild() {
+    #expect(
+      AppEdition.appGroup(declared: "ABCDE12345.com.lucas.aurelia.media.host")
+        == "ABCDE12345.com.lucas.aurelia.media.host")
+    // Missing or foreign values keep the owner's group.
+    #expect(AppEdition.appGroup(declared: nil) == "B5N7JVK37J.com.lucas.aurelia.media.host")
+    #expect(
+      AppEdition.appGroup(declared: "group.other.app") == "B5N7JVK37J.com.lucas.aurelia.media.host")
+    #expect(
+      AppEdition.appGroup(declared: "TOOLONGTEAM1.com.lucas.aurelia.media.host")
+        == "B5N7JVK37J.com.lucas.aurelia.media.host")
   }
 
   @Test func cachedBodiesAndCheckTimesAreValidatedAndSeparatedByFeed() throws {

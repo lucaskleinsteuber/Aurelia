@@ -64,7 +64,7 @@ struct AppSettingsView: View {
   @AppStorage(AureliaRest.enabledKey) private var restsWhenUnused = true
   @AppStorage(AureliaRest.minutesKey) private var restMinutes = AureliaRest.defaultMinutes
   @AppStorage(AppUpdatePreferences.automaticChecksKey) private var automaticUpdateChecks = true
-  @AppStorage(AppUpdatePreferences.betaUpdatesKey) private var betaUpdates = false
+  @AppStorage(AppUpdatePreferences.betaUpdatesKey) private var betaUpdates = true
   @AppStorage(DownloadQualityPreference.key) private var downloadQuality = DownloadQualityPreference
     .ask
 
@@ -1359,11 +1359,9 @@ struct AppSettingsView: View {
 
         Toggle("Beta Updates", isOn: $betaUpdates)
           .accessibilityIdentifier("updates-beta")
-        Text(
-          "Get test versions before everyone else. They may have bugs. If you turn this off, you keep the test version you have until the next stable version comes out, which then replaces it."
-        )
-        .font(.callout).foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
+        Text(AppUpdateBetaOnly.explanation)
+          .font(.callout).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
 
         Button("Check for Updates…") {
           Task { await updater.check(userInitiated: true) }

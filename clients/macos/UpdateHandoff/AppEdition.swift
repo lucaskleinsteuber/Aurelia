@@ -11,9 +11,21 @@ enum AppEdition {
   #endif
 
   static let bundleIdentifier = isTest ? "com.lucas.aurelia.media.test" : "com.lucas.aurelia.media"
-  static let appGroup =
-    isTest
-    ? "B5N7JVK37J.com.lucas.aurelia.media.test.host" : "B5N7JVK37J.com.lucas.aurelia.media.host"
+  /// The App Group the app shares with its server helper. Its prefix is the signing team, which
+  /// the build writes into both Info.plists (AureliaAppGroup); someone who builds Aurelia with
+  /// their own Apple ID gets their team's group. Without the key, the owner's group.
+  static let appGroup = appGroup(
+    declared: Bundle.main.object(forInfoDictionaryKey: "AureliaAppGroup"))
+
+  static func appGroup(declared: Any?) -> String {
+    let suffix = isTest ? ".com.lucas.aurelia.media.test.host" : ".com.lucas.aurelia.media.host"
+    if let declared = declared as? String, declared.hasSuffix(suffix),
+      declared.count == 10 + suffix.count
+    {
+      return declared
+    }
+    return "B5N7JVK37J" + suffix
+  }
   static let displayName = isTest ? "Aurelia Test" : "Aurelia"
   /// The launch agents of the bundled server host: "<identifier>.host.background" and ".host.login".
   static func agentName(startAtLogin: Bool) -> String {

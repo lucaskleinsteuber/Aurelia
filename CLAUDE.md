@@ -14,7 +14,11 @@ earlier habit suggests:
 
 1. **The Mac app stays beta.** Every Mac release is published as a beta
    (GitHub pre-release) and is never promoted to stable, until the owner explicitly
-   says otherwise or has bought a paid Apple Developer membership and says so.
+   says otherwise or has bought a paid Apple Developer membership and says so. Since
+   17.11.2026 every earlier Mac release is a pre-release too, each with a note that it
+   runs only on registered Macs and a link to `docs/BUILD_MAC_APP.md`; the Mac app has
+   Beta Updates on by default and explains why (`AppUpdateBetaOnly`). When this rule
+   ends, remove that note and text and turn the default off again.
 2. **Ask before every new version.** After each round of work, list the products
    that changed (Mac, Server, Linux app, Apple TV, iPhone and iPad, browser app) and
    ask the owner whether to make a new version for them. Wait for the answer. Only
@@ -222,7 +226,7 @@ beginners. Delegate like that.
   playback in tests. Hosting and network-trial tests use isolated server processes and temporary
   state; never start a second host over the installed server or use personal libraries for them.
   Publish its deb, rpm, Arch and Flatpak packages with `scripts/publish-release.sh --linux-app`
-  under its independent `linux-app-<version>-<build>` tag, never as the Mac latest release.
+  under its independent `linux-app-<version>-<build>` tag, never as GitHub's Latest release.
   Verify native package lifecycle tests in Ubuntu, Fedora and Arch, the actual Flatpak bundle,
   and native Wayland/X11 startup separately from headless app tests. See `docs/LINUX_APP.md`.
 - The former Windows/Linux desktop client (last 0.2.0 (6)) is archived outside the
@@ -363,10 +367,13 @@ beginners. Delegate like that.
   including unchanged products. Keep the version overview out of the README.
   Server and Linux Desktop have independent release tags. The Mac app is published as betas only,
   never promoted to stable (owner's decision, 11.11.2026: its development signature runs only on
-  registered Macs; see Hard rule 1 for when this changes); both architectures are still built and published, and GitHub's Latest stays at
-  the last stable Mac release. Everyone without a self-built Mac app uses Aurelia in a browser, so
-  the browser gets every Mac feature. Exception (owner, 12.11.2026): Mac 2.12.1 (170) was released as stable
-  together with Server 2.12.0 and Linux 2.3.0 and 2.4.0 at the owner's explicit request.
+  registered Macs; see Hard rule 1 for when this changes); both architectures are still built and published.
+  GitHub's Latest is the newest stable server (owner, 17.11.2026; `promote-release.sh` makes a promoted
+  server Latest), so `aurelia update`, the one-line install and Docker find it directly; they also read
+  the release list page by page, never only the last 30. Mac 2.12.1 (170), once stable, is a pre-release
+  like every Mac release. Everyone else builds the Mac app themselves
+  (`scripts/build-mac-app-yourself.sh`, `docs/BUILD_MAC_APP.md`, any free Apple ID via `AURELIA_TEAM_ID`)
+  or uses Aurelia in a browser, so the browser gets every Mac feature.
 - The main `lucaskleinsteuber/Aurelia` repository is public and stays public (owner's
   decision, 06.11.2026). Never change its visibility. Updates of the Mac app, the Linux app and
   the Linux server, the one-line Linux install and the Docker build read the public release feed

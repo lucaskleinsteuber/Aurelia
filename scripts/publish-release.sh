@@ -1,6 +1,6 @@
 #!/bin/bash
-# Publish one verified product from pushed source. The Mac retains the Latest channel,
-# while server and Linux desktop releases use their own tags.
+# Publish one verified product from pushed source. Every product has its own tags; GitHub's Latest
+# is the newest stable server (promote-release.sh), never a Mac release, which are all betas.
 #   --beta    publishes a GitHub pre-release: only apps with "Beta updates" on offer it.
 #   --promote <tag>  turns a tested beta into the stable release without rebuilding it.
 set -euo pipefail
@@ -21,7 +21,7 @@ if [ "${1:-}" = --linux-app ]; then
 fi
 case "$#:${1:-}" in
   0:)
-    product=Mac; latest=true
+    product=Mac; latest=false
     # The Mac app is development-signed and runs only on registered Macs, so it ships as betas
     # only (owner's decision, 11.11.2026); everyone else uses Aurelia in a browser.
     [ "$beta" = true ] || { echo "The Mac app is published as a beta only: use publish-release.sh --beta." >&2; exit 1; } ;;
@@ -123,7 +123,7 @@ else
   downloads="- **Mac with Apple silicon (M1 and newer):** Aurelia-$tag-macOS-arm64.dmg
 - **Mac with Intel processor:** Aurelia-$tag-macOS-x64.dmg
 
-Open the disk image and drag Aurelia to Applications. This development-signed build runs on Macs registered for its developer account. Aurelia-$tag-macOS-universal.dmg is the Apple silicon image under the name the updater of version 1.34 asks for."
+Open the disk image and drag Aurelia to Applications. Aurelia-$tag-macOS-universal.dmg is the Apple silicon image under the name the updater of version 1.34 asks for."
 fi
 
 head=$(git -C "$repository_root" rev-parse HEAD)
@@ -157,6 +157,12 @@ repository=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 notes="$notes
 
 $(python3 "$repository_root/scripts/release-links.py" "$repository" --candidate "$product" "$version" "$build" "$tag")"
+# Every Mac release says on whose Macs it runs and how to build it yourself.
+if [ "$product" = Mac ]; then
+  notes="$(cat "$repository_root/scripts/mac-registered-notice.md")
+
+$notes"
+fi
 if [ "$beta" = true ]; then
   title="$title Beta"
   notes="$(cat "$repository_root/scripts/beta-notice.md")

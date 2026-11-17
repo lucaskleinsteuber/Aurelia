@@ -10,7 +10,13 @@ bash "$repository_root/scripts/check-swift-format.sh"
 dotnet_bin=$DOTNET_BIN
 provisioning_profile=${AURELIA_PROVISIONING_PROFILE:-}
 bundle_identifier=com.lucas.aurelia.media
-team_identifier=B5N7JVK37J
+# The Apple team that signs the app; its ID prefixes the App Group. AURELIA_TEAM_ID builds Aurelia
+# with someone else's free Apple ID (scripts/build-mac-app-yourself.sh, docs/BUILD_MAC_APP.md).
+owner_team=B5N7JVK37J
+team_identifier=${AURELIA_TEAM_ID:-$owner_team}
+[[ "$team_identifier" =~ '^[A-Z0-9]{10}$' ]] || { echo "AURELIA_TEAM_ID must be a 10-character Apple team ID." >&2; exit 1; }
+own_build=0
+[[ "$team_identifier" != "$owner_team" ]] && own_build=1
 distribution=${AURELIA_DISTRIBUTION:-development}
 # AURELIA_TEST_EDITION=1 builds "Aurelia Test": its own bundle identifier, App Group, Keychain entry and
 # launch agents beside the real app, no self-updates, and Reset App Data in Settings. It is signed
@@ -31,6 +37,11 @@ if (( test_edition )); then
   app_group=$team_identifier.com.lucas.aurelia.media.test.host
   app_name="Aurelia Test"
   distribution=profileless-development
+fi
+# Another team has no provisioning profile for these bundle identifiers; it signs without one.
+if (( own_build )) && [[ "$distribution" != profileless-development ]]; then
+  echo "A build with your own Apple ID uses AURELIA_DISTRIBUTION=profileless-development (scripts/build-mac-app-yourself.sh sets it)." >&2
+  exit 1
 fi
 timestamp_option=--timestamp=none
 if [[ "$distribution" != development && "$distribution" != profileless-development && "$distribution" != developer-id ]]; then
@@ -221,6 +232,11 @@ DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
   build
 
 /usr/bin/ditto "$derived_data/Build/Products/Release/Aurelia.app" "$candidate"
+# The app and its server helper find their shared App Group here (AppEdition.appGroup).
+for info in "$candidate/Contents/Info.plist" \
+  "$candidate/Contents/Helpers/Aurelia Server Host.app/Contents/Info.plist"; do
+  /usr/bin/plutil -replace AureliaAppGroup -string "$app_group" "$info"
+done
 if (( test_edition )); then
   # The test edition's launch agents carry its own labels, so they never replace the real app's.
   for kind in background login; do
@@ -307,11 +323,10 @@ codesign --force --sign "$signing_identity" --options runtime "$timestamp_option
 helper_entitlements="$stage_root/AureliaServerHost-release.entitlements"
 cp "$repository_root/clients/macos/Configuration/AureliaServerHost.entitlements" "$helper_entitlements"
 cp "$repository_root/clients/macos/Configuration/Aurelia.entitlements" "$release_entitlements"
-if (( test_edition )); then
-  for entitlements in "$helper_entitlements" "$release_entitlements"; do
-    /usr/libexec/PlistBuddy -c "Set :com.apple.security.application-groups:0 $app_group" "$entitlements"
-  done
-fi
+# The App Group carries the signing team's ID (and the test edition's own name).
+for entitlements in "$helper_entitlements" "$release_entitlements"; do
+  /usr/libexec/PlistBuddy -c "Set :com.apple.security.application-groups:0 $app_group" "$entitlements"
+done
 codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
   --entitlements "$helper_entitlements" \
   "$candidate/Contents/Helpers/Aurelia Server Host.app"
@@ -334,8 +349,9 @@ update_repository=${origin#https://github.com/}
 update_repository=${update_repository#git@github.com:}
 update_repository=${update_repository#ssh://git@github.com/}
 update_repository=${update_repository%.git}
-# Aurelia Test never updates itself, so it gets no repository.
-if (( ! test_edition )) && [[ "$update_repository" == */* && "$update_repository" != */*/* ]]; then
+# Aurelia Test never updates itself, so it gets no repository; neither does a build with your own
+# Apple ID: the published downloads are signed for the owner's Macs and would not start on yours.
+if (( ! test_edition && ! own_build )) && [[ "$update_repository" == */* && "$update_repository" != */*/* ]]; then
   plutil -replace AureliaUpdateRepository -string "$update_repository" "$candidate/Contents/Info.plist"
 fi
 codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \

@@ -110,8 +110,8 @@ final class AppUpdater: ObservableObject {
       return
     }
     state = .checking
+    let beta = AppUpdatePreferences.betaUpdates(in: defaults)
     do {
-      let beta = AppUpdatePreferences.betaUpdates(in: defaults)
       let result = try await client.catalog(
         repository: repository,
         cached: AppUpdateCatalogCache.load(repository: repository, beta: beta, defaults: defaults),
@@ -139,9 +139,17 @@ final class AppUpdater: ObservableObject {
         }
       }
     } catch {
+      // Without betas the newest stable release is the server's: there is no Mac version in it.
+      let noMacRelease: Bool
+      switch error as? AppUpdateError {
+      case .invalidTag, .invalidRelease, .noDiskImage: noMacRelease = !beta
+      default: noMacRelease = false
+      }
       let message =
-        (error as? AppUpdateError)?.message
-        ?? "GitHub couldn't be reached. Check the internet connection, then try again."
+        noMacRelease
+        ? AppUpdateBetaOnly.noStableVersion
+        : (error as? AppUpdateError)?.message
+          ?? "GitHub couldn't be reached. Check the internet connection, then try again."
       state = .failed(message)
       Self.logger.error("Update check failed: \(message, privacy: .public)")
       if userInitiated, !onPage { alert("Couldn't Check for Updates", message) }

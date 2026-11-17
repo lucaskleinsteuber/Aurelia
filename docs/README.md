@@ -19,6 +19,7 @@ Aurelia from source or write their own client.
 | Guide | What it answers |
 | --- | --- |
 | [Aurelia for Mac](MAC_APP.md) | Which download (Apple silicon or Intel), installing, hosting on the Mac, downloads and the offline mode, updates |
+| [Build Aurelia for Mac yourself](BUILD_MAC_APP.md) | Step by step with a free Apple ID, for Macs the published download doesn't start on |
 | [Aurelia for Linux](LINUX_APP.md) | The desktop app: deb, rpm, Arch and Flatpak packages for x64 and arm64, hosting on a PC, updates |
 | [Aurelia for Apple TV](APPLE_TV.md) | Building and installing the tvOS app with Xcode, pairing, using the remote |
 | [Aurelia for iPhone and iPad](IOS_APP.md) | Building and installing the iOS app with Xcode, what it does |

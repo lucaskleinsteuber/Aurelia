@@ -18,9 +18,10 @@ name that version 1.34 of the app asks for when it updates itself, not a separat
 
 > [!IMPORTANT]
 > Aurelia is free and does not use Apple's paid developer program. The published Mac download is
-> development-signed and starts only on Macs registered to the developer's account. On any other
-> Mac, build it from source as described below. [Distribution and updates](FREE_DISTRIBUTION.md)
-> explains the background.
+> development-signed and starts only on Macs registered to the developer's account, so every Mac
+> release is a beta (pre-release) and the app looks for betas from the start. On any other Mac, use
+> Aurelia in a browser or [build the app yourself](BUILD_MAC_APP.md).
+> [Distribution and updates](FREE_DISTRIBUTION.md) explains the background.
 
 ## Installing
 
@@ -32,18 +33,18 @@ name that version 1.34 of the app asks for when it updates itself, not a separat
 
 ## Building it yourself
 
-You need a Mac with Xcode 26 and a free Apple ID signed in under Xcode › Settings › Accounts.
+On a Mac that is not registered to the developer's account, build the app yourself with your own
+free Apple ID: [Build Aurelia for Mac yourself](BUILD_MAC_APP.md) explains every step for people
+who have never built an app. In short, with Xcode 26 and an Apple Development certificate:
 
 ```sh
 git clone https://github.com/lucaskleinsteuber/Aurelia.git
 cd Aurelia
-AURELIA_MAC_ARCH=arm64 zsh scripts/build-macos-release.sh   # or x64 for an Intel Mac
+zsh scripts/build-mac-app-yourself.sh
 ```
 
-The script restores the pinned .NET SDK and dependencies, builds the server for the chosen
-processor, the app and its LGPL ffmpeg, signs everything with your development identity and puts
-`Aurelia.app` in `Local/Build/Build <number>/` (`Build <number> x64/` for Intel). Copy it to
-Applications. [Building and verification](TRANSPORT_TESTING.md) lists every check.
+The developer's own builds use `AURELIA_MAC_ARCH=arm64 zsh scripts/build-macos-release.sh` (or
+`x64`); [Building and verification](TRANSPORT_TESTING.md) lists every check.
 
 ## Hosting on the Mac
 

@@ -108,7 +108,8 @@ or *Processor: Intel*). On Linux: run `uname -m` (`x86_64` means x64, `aarch64` 
 > development-signed, runs only on Macs registered to the developer's account and is published
 > as a test version. **On any other Mac, use Aurelia in your browser** (Safari, Chrome, Firefox):
 > it does everything the Mac app does, from setting up the server to editing your library. Or build
-> the Mac app from source with a free Apple ID. The Apple TV, iPhone and iPad
+> the Mac app yourself with a free Apple ID: [step by step](docs/BUILD_MAC_APP.md), no programming
+> needed. The Apple TV, iPhone and iPad
 > apps are not in the App Store and are installed from source the same way.
 > [Distribution and updates](docs/FREE_DISTRIBUTION.md) explains why.
 
