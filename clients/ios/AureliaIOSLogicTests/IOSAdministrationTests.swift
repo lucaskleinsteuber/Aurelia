@@ -254,6 +254,20 @@ struct IOSAdministrationTests {
     }
   }
 
+  @Test func enablingAwakeHoursSavesTheTimesShownWithoutMovingThePickers() throws {
+    let power = IOSServerPower(
+      available: true, mode: "sleep", idleMinutes: 30, awakeFrom: nil, awakeUntil: nil,
+      hosting: "linuxServer")
+    let draft = IOSPowerRules.withDefaultAwakeHours(power)
+    let payload = try IOSPowerRules.payload(for: draft, awakeHours: true, server: power)
+    #expect(payload.awakeFrom == "07:00")
+    #expect(payload.awakeUntil == "23:00")
+    var existing = power
+    existing.awakeFrom = "09:30"
+    existing.awakeUntil = "21:15"
+    #expect(IOSPowerRules.withDefaultAwakeHours(existing) == existing)
+  }
+
   @Test func permissionsFollowTheServer() {
     #expect(
       IOSAdminPermissions(role: "owner", accessMode: "selectedTitles")
@@ -278,6 +292,228 @@ struct IOSAdministrationTests {
     #expect(IOSProfileRules.isValidName("A"))
     #expect(!IOSProfileRules.isValidName("   "))
     #expect(!IOSProfileRules.isValidName(String(repeating: "x", count: 65)))
+  }
+
+  @Test func profileSaveCarriesRevisionsFromNameAndPictureIntoThePINChange() async throws {
+    let baseline = profile(revision: 3, accessRevision: 7)
+    var renamed = baseline.user
+    renamed.displayName = "Alex"
+    renamed.profileRevision = 4
+    var pictured = renamed
+    pictured.pictureKey = "builtin:star:blue"
+    pictured.profileRevision = 5
+    let saved = profile(revision: 6, accessRevision: 7)
+    let transport = IOSAdminTestTransport(responses: [
+      try encoded(renamed), try encoded(pictured), try encoded(saved),
+    ])
+    let plan = IOSProfileSavePlan(
+      editor: baseline,
+      age: .init(ageLimit: nil, allowedTitleIds: [], hiddenTitleIds: [], revision: 7),
+      name: "Alex", picture: .some("builtin:star:blue"),
+      update: .init(
+        revision: 3, role: "user", isEnabled: true, pinProtectionEnabled: true, pin: "4821",
+        accessMode: nil, titleIds: nil), ageLimit: nil)
+    try await plan.save(using: api(transport))
+    let requests = await transport.requests
+    #expect(requests.count == 3)
+    let change = try JSONDecoder().decode(
+      IOSProfileUpdateRequest.self, from: #require(requests.last?.httpBody))
+    #expect(change.revision == 5)
+    #expect(change.accessMode == nil)
+    #expect(change.pin == "4821")
+  }
+
+  @Test func profileSaveKeepsAgeExceptionsWhenChangingThePINAndAge() async throws {
+    let title = UUID()
+    let hidden = UUID()
+    let baseline = profile(revision: 3, accessRevision: 7)
+    let newProfile = profile(revision: 4, accessRevision: 7)
+    let newAge = IOSProfileAgeLimit(
+      ageLimit: 6, allowedTitleIds: [title], hiddenTitleIds: [hidden], revision: 9)
+    let transport = IOSAdminTestTransport(responses: [try encoded(newProfile), try encoded(newAge)])
+    let plan = IOSProfileSavePlan(
+      editor: baseline,
+      age: .init(ageLimit: nil, allowedTitleIds: [title], hiddenTitleIds: [hidden], revision: 7),
+      name: nil, picture: nil,
+      update: .init(
+        revision: 3, role: "user", isEnabled: true, pinProtectionEnabled: true, pin: "4821",
+        accessMode: "entireLibrary", titleIds: nil), ageLimit: 6)
+    try await plan.save(using: api(transport))
+    let request = try #require(await transport.requests.last)
+    let value = try JSONDecoder().decode(IOSProfileAgeLimit.self, from: #require(request.httpBody))
+    #expect(value.revision == 7)
+    #expect(value.allowedTitleIds == [title])
+    #expect(value.hiddenTitleIds == [hidden])
+    #expect(value.ageLimit == 6)
+  }
+
+  @Test func promotingAChildProfileRemovesItsAgeLimitBeforeChangingTheRole() async throws {
+    let baseline = profile(revision: 3, accessRevision: 7)
+    let cleared = IOSProfileAgeLimit(
+      ageLimit: nil, allowedTitleIds: [], hiddenTitleIds: [], revision: 8)
+    let transport = IOSAdminTestTransport(responses: [
+      try encoded(cleared), try encoded(profile(revision: 5, accessRevision: 8)),
+    ])
+    let plan = IOSProfileSavePlan(
+      editor: baseline,
+      age: .init(ageLimit: 6, allowedTitleIds: [], hiddenTitleIds: [], revision: 7),
+      name: nil, picture: nil,
+      update: .init(
+        revision: 3, role: "admin", isEnabled: true, pinProtectionEnabled: true, pin: nil,
+        accessMode: nil, titleIds: nil), ageLimit: nil)
+    try await plan.save(using: api(transport))
+    let requests = await transport.requests
+    #expect(requests.count == 2)
+    #expect(requests[0].url?.lastPathComponent == "age-limit")
+    let value = try JSONDecoder().decode(
+      IOSProfileUpdateRequest.self, from: #require(requests[1].httpBody))
+    #expect(value.revision == 4)
+    #expect(value.role == "admin")
+  }
+
+  @Test func changingChosenTitlesToAnAgeLimitNeverTemporarilyRemovesTheRestriction() async throws {
+    let title = UUID()
+    let original = profile(revision: 3, accessRevision: 7)
+    let baseline = IOSProfileEditor(
+      user: original.user, isEnabled: true,
+      access: .init(mode: "selectedTitles", titleIds: [title], revision: 7), revision: 3)
+    let saved = IOSProfileAgeLimit(
+      ageLimit: 6, allowedTitleIds: [], hiddenTitleIds: [], revision: 8)
+    let transport = IOSAdminTestTransport(responses: [try encoded(saved)])
+    let plan = IOSProfileSavePlan(
+      editor: baseline,
+      age: .init(ageLimit: nil, allowedTitleIds: [], hiddenTitleIds: [], revision: 7),
+      name: nil, picture: nil,
+      update: .init(
+        revision: 3, role: "user", isEnabled: true, pinProtectionEnabled: true, pin: nil,
+        accessMode: "entireLibrary", titleIds: nil), ageLimit: 6)
+    try await plan.save(using: api(transport))
+    let requests = await transport.requests
+    #expect(requests.count == 1)
+    #expect(requests[0].url?.lastPathComponent == "age-limit")
+  }
+
+  @Test func changingAgeRulesToChosenTitlesDoesNotClearTheAgeLimitTwice() async throws {
+    let title = UUID()
+    let baseline = profile(revision: 3, accessRevision: 7)
+    let result = profile(revision: 4, accessRevision: 8)
+    let transport = IOSAdminTestTransport(responses: [try encoded(result)])
+    let plan = IOSProfileSavePlan(
+      editor: baseline,
+      age: .init(ageLimit: 6, allowedTitleIds: [], hiddenTitleIds: [], revision: 7),
+      name: nil, picture: nil,
+      update: .init(
+        revision: 3, role: "user", isEnabled: true, pinProtectionEnabled: true, pin: nil,
+        accessMode: "selectedTitles", titleIds: [title]), ageLimit: nil)
+    try await plan.save(using: api(transport))
+    let requests = await transport.requests
+    #expect(requests.count == 1)
+    #expect(requests[0].url?.lastPathComponent == "profile")
+  }
+
+  @Test func partiallySavedProfileChangesAreReportedAndNotReplayedAsAnUnlockRetry() async throws {
+    let baseline = profile(revision: 3, accessRevision: 7)
+    let transport = IOSAdminTestTransport(responses: [
+      try encoded(baseline.user), problem(403, "management_locked"),
+    ])
+    let plan = IOSProfileSavePlan(
+      editor: baseline,
+      age: .init(ageLimit: nil, allowedTitleIds: [], hiddenTitleIds: [], revision: 7),
+      name: "Alex", picture: .some("builtin:star:blue"), update: nil, ageLimit: nil)
+    await #expect(throws: IOSProfileSavePlan.PartialSave.self) {
+      try await plan.save(using: api(transport))
+    }
+    #expect(await transport.requests.count == 2)
+  }
+
+  @Test func preservingAPhotoAndChoosingTheInitialAreDifferentPictureEdits() async throws {
+    let original = profile(revision: 3, accessRevision: 7)
+    var user = original.user
+    user.pictureKey = IOSProfilePictures.photoKey
+    let baseline = IOSProfileEditor(
+      user: user, isEnabled: true, access: original.access, revision: original.revision)
+    let age = IOSProfileAgeLimit(
+      ageLimit: nil, allowedTitleIds: [], hiddenTitleIds: [], revision: 7)
+    var initial = user
+    initial.pictureKey = nil
+    let transport = IOSAdminTestTransport(responses: [try encoded(initial)])
+    try await IOSProfileSavePlan(
+      editor: baseline, age: age, name: nil, picture: nil, update: nil, ageLimit: nil
+    ).save(using: api(transport))
+    #expect(await transport.requests.isEmpty)
+    try await IOSProfileSavePlan(
+      editor: baseline, age: age, name: nil, picture: .some(nil), update: nil, ageLimit: nil
+    ).save(using: api(transport))
+    let requests = await transport.requests
+    #expect(requests.count == 1)
+    #expect(requests[0].url?.lastPathComponent == "picture")
+    let body = try #require(requests[0].httpBody)
+    #expect(!String(decoding: body, as: UTF8.self).contains("photo"))
+  }
+
+  @Test func explicitMovieAndShowLocationsDoNotRequestAutomaticDiscoveries() async throws {
+    for kind in ["movies", "tvShows"] {
+      let library = try storageLocation(kind: kind)
+      let transport = IOSAdminTestTransport(responses: [
+        try encoded([library]), raw("[]"), raw("[]"), raw("[]"),
+      ])
+      let loaded = try await IOSStorageLocationData.load(
+        client: api(transport), libraryID: library.id)
+      #expect(loaded.library.kind == kind)
+      #expect(loaded.discoveries.isEmpty)
+      let paths = await transport.requests.compactMap { $0.url?.path }
+      #expect(paths.count == 4)
+      #expect(paths.contains { $0.hasSuffix("/import-reviews") })
+      #expect(!paths.contains { $0.hasSuffix("/discoveries") })
+    }
+  }
+
+  @Test func automaticLocationsStillLoadDiscoveriesAndRequiredFailuresAreNotHidden() async throws {
+    let library = try storageLocation(kind: "automatic")
+    let transport = IOSAdminTestTransport(responses: [
+      try encoded([library]), raw("[]"), raw("[]"), raw("[]"), raw("[]"),
+    ])
+    _ = try await IOSStorageLocationData.load(client: api(transport), libraryID: library.id)
+    #expect(await transport.requests.contains { $0.url?.path.hasSuffix("/discoveries") == true })
+    let failing = IOSAdminTestTransport(responses: [try encoded([library])])
+    await #expect(throws: IOSCoreError.self) {
+      _ = try await IOSStorageLocationData.load(client: api(failing), libraryID: library.id)
+    }
+  }
+
+  private func storageLocation(kind: String) throws -> IOSLibrarySummary {
+    try JSONDecoder().decode(
+      IOSLibrarySummary.self,
+      from: Data(
+        """
+        {"id":"74000000-0000-0000-0000-000000000099","name":"Synthetic Movies","path":"/synthetic/media",
+        "kind":"\(kind)","availability":"available","createdAt":"2026-11-16T10:00:00Z",
+        "lastScanStartedAt":null,"lastScanCompletedAt":null,"lastError":null,"health":"healthy"}
+        """.utf8))
+  }
+
+  private func profile(revision: Int64, accessRevision: Int64) -> IOSProfileEditor {
+    IOSProfileEditor(
+      user: IOSAdminUser(
+        id: profileID, username: "Viewer", role: "user", profileRevision: revision),
+      isEnabled: true,
+      access: IOSTitleAccess(mode: "entireLibrary", titleIds: [], revision: accessRevision),
+      revision: revision)
+  }
+
+  private func encoded(_ value: some Encodable) throws -> IOSHTTPResponse {
+    IOSHTTPResponse(
+      statusCode: 200, headers: ["Content-Type": "application/json"],
+      body: try JSONEncoder().encode(value), fingerprint: fingerprint)
+  }
+
+  @Test func finishedSpeechJobsDoNotKeepPollingTheServer() {
+    for state in ["waiting", "listening", "saving"] {
+      #expect(IOSAdminPollingRules.speechJobIsActive(state))
+    }
+    for state in ["done", "alreadyInSync", "failed", "cancelled"] {
+      #expect(!IOSAdminPollingRules.speechJobIsActive(state))
+    }
   }
 
   // MARK: Reading the server's answers

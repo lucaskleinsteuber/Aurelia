@@ -2,6 +2,47 @@ import Foundation
 import Testing
 
 struct IOSArtworkDiskCacheTests {
+  @Test func everyStoreEnforcesItsBudgetWithoutAnExplicitPrune() {
+    let cache = temporaryCache(byteLimit: 1_000)
+    defer { try? FileManager.default.removeItem(at: cache.directory) }
+    for index in 0..<12 {
+      cache.store(Data(repeating: UInt8(index), count: 300), forKey: "entry-\(index)")
+      #expect(cache.byteCount() <= cache.byteLimit)
+    }
+  }
+
+  @Test func concurrentStoresAlsoRespectTheBudget() async {
+    let cache = temporaryCache(byteLimit: 1_000)
+    defer { try? FileManager.default.removeItem(at: cache.directory) }
+    await withTaskGroup(of: Void.self) { group in
+      for index in 0..<20 {
+        group.addTask {
+          cache.store(Data(repeating: UInt8(index), count: 300), forKey: "entry-\(index)")
+        }
+      }
+    }
+    #expect(cache.byteCount() <= cache.byteLimit)
+  }
+
+  @Test func anImageLargerThanTheEntireBudgetIsNotStored() {
+    let cache = temporaryCache(byteLimit: 100)
+    defer { try? FileManager.default.removeItem(at: cache.directory) }
+    cache.store(Data(repeating: 1, count: 101), forKey: "too-large")
+    #expect(cache.data(forKey: "too-large") == nil)
+    #expect(cache.byteCount() == 0)
+  }
+
+  @Test func pruningNeverDeletesUnrelatedFiles() throws {
+    let cache = temporaryCache(byteLimit: 1_000)
+    defer { try? FileManager.default.removeItem(at: cache.directory) }
+    cache.store(Data(repeating: 1, count: 600), forKey: "first")
+    let unrelated = cache.directory.appendingPathComponent("keep.txt")
+    try Data(repeating: 9, count: 2_000).write(to: unrelated)
+    cache.store(Data(repeating: 2, count: 600), forKey: "second")
+    cache.prune()
+    #expect(try Data(contentsOf: unrelated) == Data(repeating: 9, count: 2_000))
+  }
+
   @Test func entriesAreScopedToProfileRevisionAndWidth() throws {
     let cache = temporaryCache()
     defer { try? FileManager.default.removeItem(at: cache.directory) }

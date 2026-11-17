@@ -19,6 +19,7 @@ private struct IOSAdminPowerForm: View {
   @State private var draft: IOSServerPower
   @State private var awakeHours: Bool
   @State private var problem: String?
+  @State private var saving = false
 
   init(power: IOSServerPower) {
     self.power = power
@@ -78,6 +79,9 @@ private struct IOSAdminPowerForm: View {
           if !IOSPowerRules.hostedByApp(power.hosting) {
             Section {
               Toggle("Stay Awake at Set Hours", isOn: $awakeHours)
+                .onChange(of: awakeHours) { _, enabled in
+                  if enabled { draft = IOSPowerRules.withDefaultAwakeHours(draft) }
+                }
               if awakeHours {
                 timePicker("From", text: $draft.awakeFrom, fallback: "07:00")
                 timePicker("Until", text: $draft.awakeUntil, fallback: "23:00")
@@ -126,7 +130,7 @@ private struct IOSAdminPowerForm: View {
     .background(IOSDesign.canvas.ignoresSafeArea())
     .toolbar {
       ToolbarItem(placement: .confirmationAction) {
-        Button("Save") { save() }.disabled(!changed || !power.available)
+        Button("Save") { save() }.disabled(!changed || !power.available || saving)
       }
     }
   }
@@ -171,7 +175,12 @@ private struct IOSAdminPowerForm: View {
     do {
       let payload = try IOSPowerRules.payload(for: draft, awakeHours: awakeHours, server: power)
       problem = nil
-      Task { await admin.perform("Saving…") { _ = try await $0.saveServerPower(payload) } }
+      guard !saving else { return }
+      saving = true
+      Task {
+        defer { saving = false }
+        await admin.perform("Saving…") { _ = try await $0.saveServerPower(payload) }
+      }
     } catch {
       problem = error.localizedDescription
     }
@@ -207,7 +216,7 @@ struct IOSAdminUpdatesView: View {
 private struct IOSAdminUpdatesForm: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   let status: IOSServerUpdateStatus
-  let reload: () async -> Void
+  let reload: @MainActor @Sendable () async -> Void
   @State private var confirmation: IOSAdminConfirmation?
 
   var body: some View {
@@ -231,40 +240,39 @@ private struct IOSAdminUpdatesForm: View {
         }
         if let message = status.message { Text(message).foregroundStyle(.secondary) }
       }
-      Section {
-        Button("Check for Updates") {
-          Task { await admin.perform("Checking…") { _ = try await $0.checkServerUpdates() } }
-        }
-        .disabled(status.state != "idle" && status.state != "failed")
-        if status.updateAvailable {
-          Button("Install \(status.newest ?? "Update")…") {
-            confirmation = IOSAdminConfirmation(
-              title: "Install the update?",
-              message: "The server restarts once it is installed. Playback stops for a moment.",
-              action: "Install"
-            ) {
-              Task {
-                await admin.perform("Starting the update…") {
-                  _ = try await $0.installServerUpdate()
+      if status.available {
+        Section {
+          Button("Check for Updates") {
+            Task { await admin.perform("Checking…") { _ = try await $0.checkServerUpdates() } }
+          }
+          .disabled(status.state != "idle" && status.state != "failed")
+          if status.updateAvailable {
+            Button("Install \(status.newest ?? "Update")…") {
+              confirmation = IOSAdminConfirmation(
+                title: "Install the update?",
+                message: "The server restarts once it is installed. Playback stops for a moment.",
+                action: "Install"
+              ) {
+                Task {
+                  await admin.perform("Starting the update…") {
+                    _ = try await $0.installServerUpdate()
+                  }
                 }
               }
             }
+            .disabled(status.state != "idle" && status.state != "failed")
           }
-          .disabled(status.state != "idle" && status.state != "failed")
+        } footer: {
+          Text("Your library, profiles and settings stay as they are.")
         }
-      } footer: {
-        Text("Your library, profiles and settings stay as they are.")
       }
     }
     .scrollContentBackground(.hidden)
     .background(IOSDesign.canvas.ignoresSafeArea())
     .refreshable { await reload() }
     .adminConfirmation($confirmation)
-    .task(id: status.state) {
-      guard status.state == "checking" || status.state == "installing" else { return }
-      try? await Task.sleep(for: .seconds(3))
-      await reload()
-    }
+    .adminPolling(
+      every: 3, while: status.state == "checking" || status.state == "installing", reload: reload)
   }
 }
 
@@ -288,6 +296,8 @@ private struct IOSAdminResetForm: View {
   @State private var preview: IOSResetLibraryPreview?
   @State private var typed = ""
   @State private var result: String?
+  @State private var resetting = false
+  @State private var resetTask: Task<Void, Never>?
 
   var body: some View {
     Form {
@@ -319,7 +329,11 @@ private struct IOSAdminResetForm: View {
         Button("Show What Would Be Removed") {
           let ids = libraries.map(\.id).filter(selected.contains)
           Task {
-            preview = await admin.value("Counting…") { try await $0.previewReset(libraries: ids) }
+            let answer = await admin.value("Counting…") {
+              try await $0.previewReset(libraries: ids)
+            }
+            guard selected == Set(ids), !Task.isCancelled else { return }
+            preview = answer
           }
         }
         .disabled(selected.isEmpty)
@@ -330,36 +344,47 @@ private struct IOSAdminResetForm: View {
           LabeledContent("Storage Locations", value: "\(preview.storageLocations)")
           TextField("Type RESET to confirm", text: $typed)
             .textInputAutocapitalization(.characters).autocorrectionDisabled()
-          Button("Reset Library", role: .destructive) {
-            let chosen = preview
-            Task {
-              if var mutation = await admin.value(
-                "Resetting…", { try await $0.resetLibrary(chosen) })
-              {
-                // A large reset finishes in the background; follow it until it is done.
-                while mutation.state == "queued" || mutation.state == "running" {
-                  result = "Removing… \(mutation.removedItems) titles so far."
-                  try? await Task.sleep(for: .seconds(2))
-                  let id = mutation.id
-                  guard let next = try? await admin.run({ try await $0.libraryMutation(id: id) })
-                  else { break }
-                  mutation = next
-                }
-                result =
-                  mutation.error.map { "The reset stopped: \($0)" }
-                  ?? "Removed \(mutation.removedItems) titles. The video files are unchanged."
-                self.preview = nil
-                typed = ""
-                selected = []
-              }
-            }
-          }
-          .disabled(typed != "RESET")
+          Button("Reset Library", role: .destructive) { reset(preview) }
+            .disabled(typed != "RESET" || resetting)
         }
       }
       if let result { Section { Text(result) } }
     }
     .scrollContentBackground(.hidden)
     .background(IOSDesign.canvas.ignoresSafeArea())
+    .onDisappear { resetTask?.cancel() }
+  }
+
+  private func reset(_ chosen: IOSResetLibraryPreview) {
+    guard !resetting else { return }
+    resetting = true
+    resetTask = Task {
+      defer { resetting = false }
+      guard
+        var mutation = await admin.value(
+          "Resetting…", { try await $0.resetLibrary(chosen) })
+      else { return }
+      do {
+        while mutation.state == "queued" || mutation.state == "running" {
+          result = "Removing… \(mutation.removedItems) titles so far."
+          try await Task.sleep(for: .seconds(2))
+          let id = mutation.id
+          mutation = try await admin.run { try await $0.background.libraryMutation(id: id) }
+        }
+        try Task.checkCancellation()
+        result =
+          mutation.error.map { "The reset stopped: \($0)" }
+          ?? "Removed \(mutation.removedItems) titles. The video files are unchanged."
+        preview = nil
+        typed = ""
+        selected = []
+      } catch is CancellationError {
+        return
+      } catch {
+        result =
+          "Couldn’t check the reset’s progress. It may still be running on the server. "
+          + IOSAdministrationModel.message(error)
+      }
+    }
   }
 }

@@ -9,6 +9,9 @@ import Foundation
 struct IOSArtworkDiskCache: Sendable {
   let directory: URL
   let byteLimit: Int
+  /// Several artwork tasks may finish together. Serialize writes and pruning so each
+  /// completed store leaves the directory within its budget, including across cache copies.
+  private static let writeLock = NSLock()
 
   static let standard: IOSArtworkDiskCache? = {
     guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil,
@@ -38,14 +41,16 @@ struct IOSArtworkDiskCache: Sendable {
   }
 
   func store(_ data: Data, forKey key: String) {
-    guard !data.isEmpty, data.count <= 24 * 1024 * 1024 else { return }
-    do {
-      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-      try data.write(to: fileURL(forKey: key), options: [.atomic])
-    } catch {
-      return
+    guard !data.isEmpty, data.count <= 24 * 1024 * 1024, data.count <= byteLimit else { return }
+    Self.writeLock.withLock {
+      do {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try data.write(to: fileURL(forKey: key), options: [.atomic])
+      } catch {
+        return
+      }
+      pruneStoredEntries()
     }
-    if Int.random(in: 0..<64) == 0 { prune() }
   }
 
   func remove(forKey key: String) {
@@ -79,13 +84,17 @@ struct IOSArtworkDiskCache: Sendable {
 
   /// Removes the least recently used entries until the cache is below 80 % of its limit.
   func prune() {
+    Self.writeLock.withLock { pruneStoredEntries() }
+  }
+
+  private func pruneStoredEntries() {
     let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]
     guard
       let files = try? FileManager.default.contentsOfDirectory(
         at: directory, includingPropertiesForKeys: Array(keys))
     else { return }
     var entries: [(url: URL, size: Int, modified: Date)] = []
-    for file in files {
+    for file in files where file.pathExtension == "artwork" {
       guard let values = try? file.resourceValues(forKeys: keys), values.isRegularFile == true
       else { continue }
       entries.append((file, values.fileSize ?? 0, values.contentModificationDate ?? .distantPast))

@@ -46,12 +46,15 @@ struct IOSWishesView: View {
   }
 
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
   @State private var wishes: [IOSWishSummary] = []
   @State private var filter: Filter = .open
   @State private var isLoading = false
   @State private var isLoadingMore = false
   @State private var hasMore = false
+  @State private var listRequest = UUID()
+  @State private var searchRequest = UUID()
   @State private var providerEnabled = true
   @State private var bannerMessage: String?
   @State private var errorMessage: String?
@@ -109,29 +112,53 @@ struct IOSWishesView: View {
     .accessibilityIdentifier("wishes-page")
   }
 
+  @ViewBuilder
   private var headerRow: some View {
-    HStack(spacing: 12) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text(
-          model.isWishAdmin
-            ? "Titles requested by the household."
-            : "Request a movie or TV series for the library."
-        )
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
+    if dynamicTypeSize.isAccessibilitySize {
+      VStack(alignment: .leading, spacing: 12) {
+        headerDescription
+          .frame(maxWidth: .infinity, alignment: .leading)
+        composerToggle(expanded: true)
       }
-      Spacer(minLength: 8)
-      Button {
-        composerExpanded.toggle()
-        if composerExpanded && !providerEnabled { showManualForm = true }
-      } label: {
-        Label(
-          composerExpanded ? "Close" : "Make a Wish",
-          systemImage: composerExpanded ? "xmark" : "plus")
+    } else {
+      HStack(spacing: 12) {
+        headerDescription
+        Spacer(minLength: 8)
+        composerToggle(expanded: false)
       }
-      .buttonStyle(IOSButtonStyle(kind: composerExpanded ? .secondary : .primary))
-      .accessibilityIdentifier("wishes-toggle-composer")
     }
+  }
+
+  private var headerDescription: some View {
+    Text(
+      model.isWishAdmin
+        ? "Titles requested by the household."
+        : "Request a movie or TV series for the library."
+    )
+    .font(.subheadline)
+    .foregroundStyle(.secondary)
+    .fixedSize(horizontal: false, vertical: true)
+  }
+
+  private func composerToggle(expanded: Bool) -> some View {
+    Button {
+      composerExpanded.toggle()
+      if composerExpanded && !providerEnabled { showManualForm = true }
+    } label: {
+      Label {
+        Text(composerExpanded ? "Close" : "Make a Wish")
+          .lineLimit(expanded ? nil : 1)
+          .fixedSize(horizontal: false, vertical: true)
+      } icon: {
+        Image(systemName: composerExpanded ? "xmark" : "plus")
+      }
+      .labelStyle(.titleAndIcon)
+      .frame(minWidth: 44, maxWidth: expanded ? .infinity : nil, minHeight: 44)
+    }
+    .buttonStyle(
+      IOSButtonStyle(kind: composerExpanded ? .secondary : .primary, fullWidth: expanded)
+    )
+    .accessibilityIdentifier("wishes-toggle-composer")
   }
 
   private var filterBar: some View {
@@ -428,23 +455,20 @@ struct IOSWishesView: View {
     let isOwnWish = model.session?.user.id == wish.userId
 
     return VStack(alignment: .leading, spacing: 10) {
-      HStack(alignment: .top, spacing: 12) {
-        IOSWishPosterView(posterPath: wish.posterPath, kind: wish.kind, width: 62, height: 92)
+      wishHeaderLayout {
+        if !dynamicTypeSize.isAccessibilitySize
+          || wish.posterPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        {
+          IOSWishPosterView(posterPath: wish.posterPath, kind: wish.kind, width: 62, height: 92)
+            .accessibilityHidden(true)
+        }
 
         VStack(alignment: .leading, spacing: 4) {
           Text(wish.year.map { "\(wish.title) (\($0))" } ?? wish.title)
             .font(.headline)
+            .fixedSize(horizontal: false, vertical: true)
 
-          HStack(spacing: 6) {
-            badgePill(IOSWishPresentation.kindLabel(wish.kind))
-            badgePill(IOSWishPresentation.stateLabel(wish.state))
-            if let rating = wish.ageRating, !rating.isEmpty {
-              badgePill(rating)
-            }
-            if wish.state == .fulfilled && isOwnWish && wish.seenByWisherAt == nil {
-              badgePill("New")
-            }
-          }
+          wishBadges(wish, isOwnWish: isOwnWish)
 
           Text("Wished by \(wish.userName)")
             .font(.caption)
@@ -508,68 +532,157 @@ struct IOSWishesView: View {
         }
       }
 
-      HStack(spacing: 8) {
-        if wish.state == .open && wish.canSupport {
-          Button(wish.supportedByCaller ? "Remove Vote" : "+ Me Too") {
-            Task { await toggleSupport(wishID: wish.id, supported: !wish.supportedByCaller) }
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-          .disabled(isBusy)
-        }
-
-        if wish.state == .fulfilled, let mediaId = wish.fulfilledMediaItemId {
-          Button("Open in Library") {
-            Task { await openLibraryTitle(mediaId) }
-          }
-          .buttonStyle(.borderedProminent)
-          .tint(.white)
-          .foregroundStyle(.black)
-          .controlSize(.small)
-        }
-
-        if model.isWishAdmin && wish.state == .open {
-          Button("In Library") {
-            Task {
-              await resolveWish(
-                wish, state: .fulfilled, note: nil,
-                mediaID: wish.suggestions.first?.mediaId)
-            }
-          }
-          .buttonStyle(.borderedProminent)
-          .tint(.white)
-          .foregroundStyle(.black)
-          .controlSize(.small)
-          .disabled(isBusy)
-
-          Button("Decline") {
-            declineNote = ""
-            decliningWish = wish
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-          .disabled(isBusy)
-        }
-
-        Spacer(minLength: 4)
-
-        if (isOwnWish && wish.state == .open) || model.isWishAdmin {
-          Button(isOwnWish && !model.isWishAdmin ? "Withdraw" : "Remove", role: .destructive) {
-            Task { await deleteWish(wish) }
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-          .disabled(isBusy)
-        }
-      }
+      wishActions(wish, isBusy: isBusy, isOwnWish: isOwnWish)
     }
     .padding(14)
     .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
   }
 
-  private func badgePill(_ text: String) -> some View {
+  private var wishHeaderLayout: AnyLayout {
+    if dynamicTypeSize.isAccessibilitySize {
+      AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+    } else {
+      AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+    }
+  }
+
+  @ViewBuilder
+  private func wishBadges(_ wish: IOSWishSummary, isOwnWish: Bool) -> some View {
+    if dynamicTypeSize.isAccessibilitySize {
+      VStack(alignment: .leading, spacing: 6) {
+        wishBadgeLabels(wish, isOwnWish: isOwnWish, wrapping: true)
+      }
+    } else {
+      ViewThatFits(in: .horizontal) {
+        HStack(spacing: 6) {
+          wishBadgeLabels(wish, isOwnWish: isOwnWish, wrapping: false)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        VStack(alignment: .leading, spacing: 6) {
+          wishBadgeLabels(wish, isOwnWish: isOwnWish, wrapping: true)
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func wishBadgeLabels(
+    _ wish: IOSWishSummary, isOwnWish: Bool, wrapping: Bool
+  ) -> some View {
+    badgePill(IOSWishPresentation.kindLabel(wish.kind), wrapping: wrapping)
+    badgePill(IOSWishPresentation.stateLabel(wish.state), wrapping: wrapping)
+    if let rating = wish.ageRating, !rating.isEmpty {
+      badgePill(rating, wrapping: wrapping)
+    }
+    if wish.state == .fulfilled && isOwnWish && wish.seenByWisherAt == nil {
+      badgePill("New", wrapping: wrapping)
+    }
+  }
+
+  @ViewBuilder
+  private func wishActions(_ wish: IOSWishSummary, isBusy: Bool, isOwnWish: Bool) -> some View {
+    if dynamicTypeSize.isAccessibilitySize {
+      VStack(spacing: 8) {
+        wishActionButtons(wish, isBusy: isBusy, isOwnWish: isOwnWish, expanded: true)
+      }
+    } else {
+      ViewThatFits(in: .horizontal) {
+        HStack(spacing: 8) {
+          wishActionButtons(wish, isBusy: isBusy, isOwnWish: isOwnWish, expanded: false)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        LazyVGrid(
+          columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
+          alignment: .leading, spacing: 8
+        ) {
+          wishActionButtons(wish, isBusy: isBusy, isOwnWish: isOwnWish, expanded: true)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+
+  @ViewBuilder
+  private func wishActionButtons(
+    _ wish: IOSWishSummary, isBusy: Bool, isOwnWish: Bool, expanded: Bool
+  ) -> some View {
+    if wish.state == .open && wish.canSupport {
+      Button {
+        Task { await toggleSupport(wishID: wish.id, supported: !wish.supportedByCaller) }
+      } label: {
+        wishActionLabel(wish.supportedByCaller ? "Remove Vote" : "+ Me Too", expanded: expanded)
+      }
+      .buttonStyle(.bordered)
+      .controlSize(.small)
+      .disabled(isBusy)
+    }
+
+    if wish.state == .fulfilled, let mediaId = wish.fulfilledMediaItemId {
+      Button {
+        Task { await openLibraryTitle(mediaId) }
+      } label: {
+        wishActionLabel("Open in Library", expanded: expanded)
+      }
+      .buttonStyle(.borderedProminent)
+      .tint(.white)
+      .foregroundStyle(.black)
+      .controlSize(.small)
+    }
+
+    if model.isWishAdmin && wish.state == .open {
+      Button {
+        Task {
+          await resolveWish(
+            wish, state: .fulfilled, note: nil,
+            mediaID: wish.suggestions.first?.mediaId)
+        }
+      } label: {
+        wishActionLabel("In Library", expanded: expanded)
+      }
+      .buttonStyle(.borderedProminent)
+      .tint(.white)
+      .foregroundStyle(.black)
+      .controlSize(.small)
+      .disabled(isBusy)
+
+      Button {
+        declineNote = ""
+        decliningWish = wish
+      } label: {
+        wishActionLabel("Decline", expanded: expanded)
+      }
+      .buttonStyle(.bordered)
+      .controlSize(.small)
+      .disabled(isBusy)
+    }
+
+    if !expanded { Spacer(minLength: 4) }
+
+    if (isOwnWish && wish.state == .open) || model.isWishAdmin {
+      Button(role: .destructive) {
+        Task { await deleteWish(wish) }
+      } label: {
+        wishActionLabel(isOwnWish && !model.isWishAdmin ? "Withdraw" : "Remove", expanded: expanded)
+      }
+      .buttonStyle(.bordered)
+      .controlSize(.small)
+      .disabled(isBusy)
+    }
+  }
+
+  private func wishActionLabel(_ title: String, expanded: Bool) -> some View {
+    Text(title)
+      .lineLimit(expanded ? nil : 1)
+      .fixedSize(horizontal: !expanded, vertical: expanded)
+      .frame(minWidth: 44, maxWidth: expanded ? .infinity : nil, minHeight: 44)
+      .contentShape(Rectangle())
+  }
+
+  private func badgePill(_ text: String, wrapping: Bool) -> some View {
     Text(text)
       .font(.caption2.weight(.semibold))
+      .lineLimit(wrapping ? nil : 1)
+      .fixedSize(horizontal: !wrapping, vertical: true)
       .padding(.horizontal, 7)
       .padding(.vertical, 2)
       .background(IOSDesign.raised, in: Capsule())
@@ -610,16 +723,28 @@ struct IOSWishesView: View {
 
   private func loadWishes(reset: Bool, markSeen: Bool) async {
     guard let api = model.client else { return }
+    let request = UUID()
+    listRequest = request
+    let requestedFilter = filter
+    let sessionID = model.session?.sessionId
+    isLoadingMore = false
     if reset { isLoading = true }
     errorMessage = nil
-    defer { if reset { isLoading = false } }
+    defer { if reset, listRequest == request { isLoading = false } }
     do {
       if markSeen {
         let updated = try? await api.markWishesSeen()
+        guard !Task.isCancelled, listRequest == request, model.session?.sessionId == sessionID
+        else {
+          return
+        }
         if let updated { model.updateWishSummaryFromPage(updated) }
       }
       let response = try await api.wishes(
-        state: filter.wishState, offset: 0, limit: IOSWishPresentation.pageSize)
+        state: requestedFilter.wishState, offset: 0, limit: IOSWishPresentation.pageSize)
+      guard !Task.isCancelled, listRequest == request, filter == requestedFilter,
+        model.session?.sessionId == sessionID
+      else { return }
       wishes = response.wishes
       providerEnabled = response.providerEnabled
       if !response.providerEnabled { showManualForm = true }
@@ -628,22 +753,34 @@ struct IOSWishesView: View {
         IOSWishSummaryResponse(
           openCount: response.openCount, newlyFulfilledCount: response.newlyFulfilledCount))
     } catch {
+      guard !Task.isCancelled, listRequest == request, filter == requestedFilter,
+        model.session?.sessionId == sessionID
+      else { return }
       errorMessage = IOSWishPresentation.describeError(error)
       model.handleSessionFailure(error)
     }
   }
 
   private func loadMore() async {
-    guard let api = model.client, !isLoadingMore else { return }
+    guard let api = model.client, !isLoading, !isLoadingMore, hasMore else { return }
+    let request = listRequest
+    let requestedFilter = filter
+    let sessionID = model.session?.sessionId
     isLoadingMore = true
-    defer { isLoadingMore = false }
+    defer { if listRequest == request { isLoadingMore = false } }
     do {
       let response = try await api.wishes(
-        state: filter.wishState, offset: wishes.count, limit: IOSWishPresentation.pageSize)
+        state: requestedFilter.wishState, offset: wishes.count, limit: IOSWishPresentation.pageSize)
+      guard !Task.isCancelled, listRequest == request, filter == requestedFilter,
+        model.session?.sessionId == sessionID
+      else { return }
       let existing = Set(wishes.map(\.id))
       wishes.append(contentsOf: response.wishes.filter { !existing.contains($0.id) })
       hasMore = response.wishes.count == IOSWishPresentation.pageSize
     } catch {
+      guard !Task.isCancelled, listRequest == request, filter == requestedFilter,
+        model.session?.sessionId == sessionID
+      else { return }
       errorMessage = IOSWishPresentation.describeError(error)
     }
   }
@@ -652,16 +789,28 @@ struct IOSWishesView: View {
     guard let api = model.client else { return }
     let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return }
+    let request = UUID()
+    searchRequest = request
+    let kind = searchKindFilter
+    let sessionID = model.session?.sessionId
     isSearching = true
     errorMessage = nil
     alreadyInLibraryConflict = nil
-    defer { isSearching = false }
+    defer { if searchRequest == request { isSearching = false } }
     do {
-      let response = try await api.wishSearch(query: trimmed, kind: searchKindFilter)
+      let response = try await api.wishSearch(query: trimmed, kind: kind)
+      guard !Task.isCancelled, searchRequest == request, model.session?.sessionId == sessionID
+      else {
+        return
+      }
       providerEnabled = response.providerEnabled
       if !response.providerEnabled { showManualForm = true }
       searchResults = response.results
     } catch {
+      guard !Task.isCancelled, searchRequest == request, model.session?.sessionId == sessionID
+      else {
+        return
+      }
       errorMessage = IOSWishPresentation.describeError(error)
       model.handleSessionFailure(error)
     }

@@ -59,7 +59,11 @@ struct IOSPeopleView: View {
           if loadingMore {
             ProgressView().frame(maxWidth: .infinity)
           } else if let error {
-            IOSErrorText(message: error).padding(.horizontal, IOSDesign.margin)
+            VStack(alignment: .leading, spacing: 12) {
+              IOSErrorText(message: error)
+              Button("Try Again") { Task { await load(reset: false) } }
+                .buttonStyle(IOSButtonStyle())
+            }.padding(.horizontal, IOSDesign.margin)
           }
         }
       }

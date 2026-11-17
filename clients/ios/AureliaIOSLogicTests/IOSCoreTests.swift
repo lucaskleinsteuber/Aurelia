@@ -3,6 +3,109 @@ import Testing
 
 @Suite("iOS client contracts and transport")
 struct IOSCoreTests {
+  @Test func mediaPreflightReadsUseQueryItemsAndDecodeTheirResponses() async throws {
+    let trailer = itemJSON.replacingOccurrences(
+      of: "\"kind\":\"movie\"", with: "\"kind\":\"trailer\""
+    )
+    .replacingOccurrences(of: Self.mediaID.uuidString, with: Self.mutationID.uuidString)
+    let transport = IOSCoreFakeTransport(responses: [
+      response("{\"trailers\":[{\"trailer\":\(trailer),\"title\":\(itemJSON)}]}"),
+      response(
+        """
+        {"mediaId":"\(Self.mediaID)","suggestions":[{"item":\(itemJSON),"kind":"genre","reason":"Shared genre"}]}
+        """),
+    ])
+    let client = IOSAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    let trailers = try await client.cinemaTrailers(mediaID: Self.mediaID, count: 2)
+    let suggestions = try await client.suggestions(mediaID: Self.mediaID, limit: 4)
+    #expect(trailers.first?.trailer.kind == .trailer)
+    #expect(trailers.first?.title.id == Self.mediaID)
+    #expect(suggestions.first?.reason == "Shared genre")
+    let requests = await transport.requests.map(\.request)
+    #expect(requests.count == 2)
+    #expect(requests.allSatisfy { $0.httpMethod == "GET" })
+    #expect(
+      requests[0].url?.path
+        == "/api/v1/media/\(Self.mediaID.uuidString.lowercased())/cinema-trailers")
+    #expect(requests[0].url?.query == "count=2")
+    #expect(
+      requests[1].url?.path == "/api/v1/media/\(Self.mediaID.uuidString.lowercased())/suggestions")
+    #expect(requests[1].url?.query == "limit=4")
+  }
+
+  @Test(arguments: [(-5, 0, 1), (0, 0, 1), (3, 3, 3), (99, 3, 30)])
+  func mediaPreflightQuantitiesStayWithinTheServersBounds(
+    requested: Int, expectedTrailers: Int, expectedSuggestions: Int
+  ) async throws {
+    let transport = IOSCoreFakeTransport(responses: [
+      response("{\"trailers\":[]}"),
+      response("{\"mediaId\":\"\(Self.mediaID)\",\"suggestions\":[]}"),
+    ])
+    let client = IOSAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    _ = try await client.cinemaTrailers(mediaID: Self.mediaID, count: requested)
+    _ = try await client.suggestions(mediaID: Self.mediaID, limit: requested)
+    let requests = await transport.requests.map(\.request)
+    #expect(requests[0].url?.query == "count=\(expectedTrailers)")
+    #expect(requests[1].url?.query == "limit=\(expectedSuggestions)")
+  }
+
+  @Test func automaticReadsAreMarkedWithoutMarkingMutationsOrLaterUserReads() async throws {
+    let transport = IOSCoreFakeTransport(responses: Array(repeating: response("{}"), count: 5))
+    let api = IOSAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    _ = try await api.adminData("/api/v1/server/status")
+    try await IOSAPIClient.withBackgroundRequests {
+      _ = try await api.adminData("/api/v1/server/status")
+      _ = try await api.adminData("/api/v1/server/status", method: "POST")
+      let child = Task { try await api.adminData("/api/v1/server/status") }
+      _ = try await child.value
+    }
+    _ = try await api.adminData("/api/v1/server/status")
+    let requests = await transport.requests.map(\.request)
+    #expect(requests.count == 5)
+    #expect(
+      requests.map { $0.value(forHTTPHeaderField: "X-Aurelia-Background") }
+        == [nil, "1", nil, "1", nil])
+    #expect(requests[2].httpMethod == "POST")
+  }
+
+  @Test func backgroundClientCopiesKeepUserRequestsIndependent() async throws {
+    let transport = IOSCoreFakeTransport(responses: Array(repeating: response("{}"), count: 3))
+    let api = IOSAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    _ = try await api.background.adminData("/api/v1/server/status")
+    _ = try await api.background.adminData("/api/v1/server/status", method: "DELETE")
+    _ = try await api.adminData("/api/v1/server/status")
+    let requests = await transport.requests.map(\.request)
+    #expect(
+      requests.map { $0.value(forHTTPHeaderField: "X-Aurelia-Background") }
+        == ["1", nil, nil])
+  }
+
+  @Test @MainActor func aFailedBackgroundScopeRestoresTheCallingActorAndRequestContext()
+    async throws
+  {
+    let transport = IOSCoreFakeTransport(responses: [response("{}")])
+    let api = IOSAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    var reachedOnMainActor = false
+    do {
+      try await IOSAPIClient.withBackgroundRequests {
+        MainActor.assertIsolated()
+        reachedOnMainActor = true
+        throw IOSCoreError.invalidRequest
+      }
+    } catch IOSCoreError.invalidRequest {
+      #expect(reachedOnMainActor)
+    }
+    _ = try await api.adminData("/api/v1/server/status")
+    #expect(
+      await transport.requests.first?.request.value(forHTTPHeaderField: "X-Aurelia-Background")
+        == nil)
+  }
+
   @Test func remoteCommandsDecodeAsTheServerWritesThem() throws {
     let json = #"""
       [{"commandId":"5f0c2f1e-4c7b-4a39-9a3e-0d6c1c2b8a11","action":"play","mediaId":"0b6f6a8e-2d9c-4b43-8d55-3f1a4c5e6d70","positionSeconds":null,"skipSeconds":null,"createdAt":"2026-10-31T16:50:00.1234567+00:00"}]

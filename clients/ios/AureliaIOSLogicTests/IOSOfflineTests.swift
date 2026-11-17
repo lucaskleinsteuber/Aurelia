@@ -145,6 +145,181 @@ struct IOSOfflineTests {
 
   // MARK: Store
 
+  @Test(arguments: IOSOfflinePreparationTransport.Stage.allCases)
+  @MainActor fileprivate func forgettingDuringPreparationNeverQueuesOrRestoresFiles(
+    stage: IOSOfflinePreparationTransport.Stage
+  ) async {
+    let root = temporaryRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let transfer = IOSOfflineFakeTransfers()
+    let store = IOSOfflineStore(root: root, transfers: false, transfer: transfer)
+    let posterID = UUID()
+    let poster = IOSArtwork(
+      id: posterID, kind: "poster", path: "/api/v1/artwork/\(posterID.uuidString)",
+      contentType: "image/png", contentLength: 3, revision: 1)
+    let media = item(kind: .movie, poster: poster)
+    let transport = IOSOfflinePreparationTransport(mediaID: media.id, blockedStage: stage)
+    let api = preparationAPI(transport)
+    let preparation = Task { await store.download(media, series: nil, api: api) }
+    await transport.waitUntilBlocked()
+    #expect(store.preparing.contains(media.id))
+    store.forget(serverID: serverID)
+    await transport.release()
+    await preparation.value
+    #expect(store.pending.isEmpty && store.titles.isEmpty && store.preparing.isEmpty)
+    #expect(transfer.started.isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: store.folder(for: media.id).path))
+    #expect(store.errorMessage == nil)
+  }
+
+  @Test @MainActor func closingAProfileCancelsPreparationButKeepsAuthorizedTransfers() async {
+    let root = temporaryRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let transfer = IOSOfflineFakeTransfers()
+    let store = IOSOfflineStore(root: root, transfers: false, transfer: transfer)
+    let queued = item(kind: .movie)
+    await store.download(
+      queued, series: nil,
+      api: preparationAPI(IOSOfflinePreparationTransport(mediaID: queued.id)))
+    #expect(store.pending.map(\.id) == [queued.id])
+
+    let retired = item(kind: .movie)
+    let transport = IOSOfflinePreparationTransport(mediaID: retired.id, blockedStage: .subtitleFile)
+    let api = preparationAPI(transport)
+    let preparation = Task { await store.download(retired, series: nil, api: api) }
+    await transport.waitUntilBlocked()
+    store.cancelPreparations(serverID: serverID, profileID: profileID)
+    await transport.release()
+    await preparation.value
+    #expect(store.pending.map(\.id) == [queued.id])
+    #expect(transfer.started == [queued.id] && transfer.cancelled.isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: store.folder(for: retired.id).path))
+  }
+
+  @Test @MainActor func cancellingATitleRetiresItsPreparationBeforeItsResponseArrives() async {
+    let root = temporaryRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let transfer = IOSOfflineFakeTransfers()
+    let store = IOSOfflineStore(root: root, transfers: false, transfer: transfer)
+    let media = item(kind: .movie)
+    let transport = IOSOfflinePreparationTransport(mediaID: media.id, blockedStage: .ticket)
+    let api = preparationAPI(transport)
+    let preparation = Task { await store.download(media, series: nil, api: api) }
+    await transport.waitUntilBlocked()
+    store.cancel(media.id)
+    await transport.release()
+    await preparation.value
+    #expect(store.pending.isEmpty && store.preparing.isEmpty && transfer.started.isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: store.folder(for: media.id).path))
+  }
+
+  @Test @MainActor func anOldPreparationCannotRemoveANewerDownloadOfTheSameTitle() async {
+    let root = temporaryRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let transfer = IOSOfflineFakeTransfers()
+    let store = IOSOfflineStore(root: root, transfers: false, transfer: transfer)
+    let media = item(kind: .movie)
+    let old = IOSOfflinePreparationTransport(mediaID: media.id, blockedStage: .subtitleFile)
+    let oldAPI = preparationAPI(old)
+    let preparation = Task { await store.download(media, series: nil, api: oldAPI) }
+    await old.waitUntilBlocked()
+    store.cancel(media.id)
+    await store.download(
+      media, series: nil, api: preparationAPI(IOSOfflinePreparationTransport(mediaID: media.id)))
+    await old.release()
+    await preparation.value
+    #expect(store.pending.map(\.id) == [media.id])
+    #expect(transfer.started == [media.id])
+    #expect(FileManager.default.fileExists(atPath: store.folder(for: media.id).path))
+  }
+
+  @Test(arguments: [false, true])
+  @MainActor func retiringDuringRetryDoesNotStartAnotherTransfer(disconnect: Bool) async {
+    let root = temporaryRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let transfer = IOSOfflineFakeTransfers()
+    let store = IOSOfflineStore(root: root, transfers: false, transfer: transfer)
+    let media = item(kind: .movie)
+    await store.download(
+      media, series: nil, api: preparationAPI(IOSOfflinePreparationTransport(mediaID: media.id)))
+    store.transferFailed(media.id, message: "Synthetic interruption", resumeData: nil)
+    let transport = IOSOfflinePreparationTransport(
+      mediaID: media.id, blockedStage: .ticket, catalog: media)
+    let api = preparationAPI(transport)
+    let retry = Task { await store.retry(media.id, api: api) }
+    await transport.waitUntilBlocked()
+    if disconnect {
+      store.forget(serverID: serverID)
+    } else {
+      store.cancelPreparations(serverID: serverID, profileID: profileID)
+    }
+    await transport.release()
+    await retry.value
+    #expect(transfer.started == [media.id])
+    #expect(store.preparing.isEmpty)
+    if disconnect {
+      #expect(store.pending.isEmpty)
+      #expect(!FileManager.default.fileExists(atPath: store.folder(for: media.id).path))
+    } else {
+      #expect(store.pending(media.id)?.state == .failed)
+    }
+  }
+
+  @Test @MainActor func retiredConversionCallbacksAndExpiryCannotChangeANewerRun() async throws {
+    let root = temporaryRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = IOSOfflineStore(root: root, transfers: false, transfer: IOSOfflineFakeTransfers())
+    let media = item(kind: .movie)
+    var started: [UUID] = []
+    var ended: [UUID] = []
+    store.convertedStarted = { _, run, _ in started.append(run) }
+    store.convertedEnded = { _, run, _ in ended.append(run) }
+
+    let old = IOSOfflinePreparationTransport(mediaID: media.id, blockConvertedPlaylist: true)
+    await store.download(
+      media, series: nil, api: preparationAPI(old), quality: "720p", expectedBytes: 1_000)
+    await old.waitUntilBlocked()
+    let oldRun = try #require(started.first)
+    store.cancel(media.id)
+    #expect(ended == [oldRun])
+
+    let current = IOSOfflinePreparationTransport(mediaID: media.id, blockConvertedPlaylist: true)
+    await store.download(
+      media, series: nil, api: preparationAPI(current), quality: "720p", expectedBytes: 1_000)
+    await current.waitUntilBlocked()
+    let currentRun = try #require(started.last)
+    #expect(currentRun != oldRun)
+    let partial = store.folder(for: media.id).appendingPathComponent("title.mp4.part")
+    let sentinel = Data("new request owns this file".utf8)
+    try sentinel.write(to: partial)
+
+    // Inject late production callbacks as well as releasing the cancelled network read.
+    var staleProgress = IOSConvertedProgress(quality: "1080p", audio: nil)
+    staleProgress.nextSegment = 99
+    store.convertedSaved(media.id, staleProgress, run: oldRun)
+    store.convertedFinished(media.id, partial: partial, size: 1, run: oldRun)
+    store.convertedStopped(media.id, message: "Old failure", run: oldRun)
+    store.pauseConverted(media.id, run: oldRun)
+    await old.release()
+    await old.waitUntilRevocations(2)
+
+    #expect(store.pending(media.id)?.state == .downloading)
+    #expect(store.pending(media.id)?.converted?.nextSegment == 0)
+    #expect(store.pending(media.id)?.converted?.quality == "720p")
+    #expect(store.titles.isEmpty)
+    #expect(try Data(contentsOf: partial) == sentinel)
+    #expect(ended == [oldRun])
+
+    await current.release()
+    await current.waitUntilRevocations(2)
+    #expect(store.title(media.id)?.quality == "720p")
+    #expect(store.pending(media.id) == nil)
+    #expect(ended == [oldRun, currentRun])
+    #expect(
+      try Data(contentsOf: store.fileURL(for: #require(store.title(media.id))))
+        == Data([1, 2, 3, 4]))
+  }
+
   @Test @MainActor func storeKeepsDownloadsAndForgetsMissingFiles() throws {
     let root = temporaryRoot()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -274,6 +449,14 @@ struct IOSOfflineTests {
     return IOSAPIClient(connection: connection, session: session, transport: transport)
   }
 
+  private func preparationAPI(_ transport: IOSOfflinePreparationTransport) -> IOSAPIClient {
+    let session = IOSProfileSession(
+      user: IOSUser(id: profileID, username: "Viewer", role: "user"),
+      sessionId: UUID(), token: String(repeating: "P", count: 43),
+      expiresAt: "2099-01-01T00:00:00Z")
+    return IOSAPIClient(connection: connection, session: session, transport: transport)
+  }
+
   private func temporaryRoot() -> URL {
     FileManager.default.temporaryDirectory
       .appendingPathComponent("AureliaIOSOfflineTests-\(UUID().uuidString)", isDirectory: true)
@@ -314,10 +497,10 @@ struct IOSOfflineTests {
       episodeNumber: number, posterFile: nil, backdropFile: nil, seriesPosterFile: nil)
   }
 
-  private func item(kind: IOSMediaKind) -> IOSCatalogItem {
+  private func item(kind: IOSMediaKind, poster: IOSArtwork? = nil) -> IOSCatalogItem {
     IOSCatalogItem(
       id: UUID(), kind: kind, title: "Synthetic", originalTitle: nil, year: 2026, overview: nil,
-      genres: [], poster: nil, backdrop: nil, availability: .available, isFavorite: false,
+      genres: [], poster: poster, backdrop: nil, availability: .available, isFavorite: false,
       progress: nil, addedAt: "2026-01-01T00:00:00Z",
       parentTitle: kind == .episode ? "Synthetic Show" : nil,
       seasonNumber: kind == .episode ? 2 : nil, episodeNumber: kind == .episode ? 5 : nil,
@@ -385,4 +568,128 @@ private actor IOSOfflineServerTransport: IOSHTTPTransport {
     IOSHTTPResponse(
       statusCode: 200, headers: [:], body: try JSONEncoder().encode(value), fingerprint: nil)
   }
+}
+
+/// A controllable server read, deliberately returning even after the store retires preparation.
+private actor IOSOfflinePreparationTransport: IOSHTTPTransport {
+  enum Stage: CaseIterable, Sendable { case ticket, subtitles, subtitleFile, artwork }
+  private let mediaID: UUID
+  private let blockedStage: Stage?
+  private let catalog: IOSCatalogItem?
+  private let blockConvertedPlaylist: Bool
+  private let ticketID = UUID()
+  private var blocked = false
+  private var continuation: CheckedContinuation<Void, Never>?
+  private var waiters: [CheckedContinuation<Void, Never>] = []
+  private var revocations = 0
+  private var revocationWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+
+  init(
+    mediaID: UUID, blockedStage: Stage? = nil, catalog: IOSCatalogItem? = nil,
+    blockConvertedPlaylist: Bool = false
+  ) {
+    self.mediaID = mediaID
+    self.blockedStage = blockedStage
+    self.catalog = catalog
+    self.blockConvertedPlaylist = blockConvertedPlaylist
+  }
+
+  func execute(_ request: URLRequest, trust: IOSTrustMode) async throws -> IOSHTTPResponse {
+    let path = request.url?.path ?? ""
+    if request.httpMethod == "DELETE" {
+      revocations += 1
+      let ready = revocationWaiters.filter { $0.0 <= revocations }
+      revocationWaiters.removeAll { $0.0 <= revocations }
+      for (_, waiter) in ready { waiter.resume() }
+      return response(Data())
+    }
+    if path.hasSuffix("/index.m3u8") {
+      if blockConvertedPlaylist { await block() }
+      return response(Data("#EXTM3U\n#EXTINF:1,\n0.m4s\n".utf8))
+    }
+    if path.hasSuffix("/init.mp4") { return response(Data([1, 2])) }
+    if path.hasSuffix("/0.m4s") { return response(Data([3, 4])) }
+    if path.hasSuffix("/summary"), let catalog {
+      await blockIfNeeded(.ticket)
+      return response(try JSONEncoder().encode(catalog))
+    }
+    if path.hasSuffix("/playback") {
+      await blockIfNeeded(.ticket)
+      let ticket = IOSPlaybackTicket(
+        id: ticketID, mediaId: mediaID,
+        streamPath: "/api/v1/streams/" + String(repeating: "S", count: 43),
+        contentType: "video/mp4", contentLength: 1_000, expiresAt: "2099-01-01T00:00:00Z",
+        progress: IOSPlaybackProgress(
+          mediaId: mediaID, positionMilliseconds: 0, durationMilliseconds: 1_000,
+          isCompleted: false, lastPlayedAt: nil, updatedAt: nil, revision: 1,
+          lastMutationId: nil))
+      return response(try JSONEncoder().encode(ticket))
+    }
+    if path.hasSuffix("/subtitles") {
+      await blockIfNeeded(.subtitles)
+      return response(
+        Data(
+          #"[{"index":1000,"format":"subrip","language":"en","title":"Synthetic","isDefault":true,"isForced":false,"supported":true,"isSidecar":true,"isSdh":false}]"#
+            .utf8))
+    }
+    if path.hasSuffix("/subtitles/1000") {
+      await blockIfNeeded(.subtitleFile)
+      return response(Data("WEBVTT\n\n00:00.000 --> 00:01.000\nSynthetic\n".utf8))
+    }
+    if path.hasPrefix("/api/v1/artwork/") {
+      await blockIfNeeded(.artwork)
+      return response(Data([1, 2, 3]), contentType: "image/png")
+    }
+    return IOSHTTPResponse(statusCode: 404, headers: [:], body: Data(), fingerprint: nil)
+  }
+
+  func waitUntilBlocked() async {
+    if blocked { return }
+    await withCheckedContinuation { waiters.append($0) }
+  }
+
+  func release() {
+    continuation?.resume()
+    continuation = nil
+  }
+
+  func waitUntilRevocations(_ count: Int) async {
+    if revocations >= count { return }
+    await withCheckedContinuation { revocationWaiters.append((count, $0)) }
+  }
+
+  private func blockIfNeeded(_ stage: Stage) async {
+    guard stage == blockedStage else { return }
+    await block()
+  }
+
+  private func block() async {
+    guard !blocked else { return }
+    blocked = true
+    for waiter in waiters { waiter.resume() }
+    waiters.removeAll()
+    await withCheckedContinuation { continuation = $0 }
+  }
+
+  private func response(_ data: Data, contentType: String = "application/json") -> IOSHTTPResponse {
+    IOSHTTPResponse(
+      statusCode: 200, headers: ["Content-Type": contentType], body: data, fingerprint: nil)
+  }
+}
+
+/// Captures transfer scheduling without touching URLSession or receiving media bytes.
+private final class IOSOfflineFakeTransfers: IOSOfflineTransferring, @unchecked Sendable {
+  private let lock = NSLock()
+  private var startedIDs: [UUID] = []
+  private var cancelledIDs: [UUID] = []
+  var started: [UUID] { lock.withLock { startedIDs } }
+  var cancelled: [UUID] { lock.withLock { cancelledIDs } }
+
+  func start(_ request: URLRequest, media: UUID, fingerprint: String, startNow: Bool) {
+    lock.withLock { startedIDs.append(media) }
+  }
+  func resume(_ data: Data, media: UUID, fingerprint: String, startNow: Bool) {}
+  func startQueued(media: UUID) {}
+  func cancel(media: UUID) { lock.withLock { cancelledIDs.append(media) } }
+  func knownMedia() async -> Set<UUID> { [] }
 }

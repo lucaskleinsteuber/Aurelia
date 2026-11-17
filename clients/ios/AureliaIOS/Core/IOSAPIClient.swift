@@ -1,6 +1,24 @@
 import Foundation
 
 struct IOSAPIClient: Sendable {
+  /// Reads made by the app itself must not keep an idle server awake (server 2.21+).
+  /// Task-local scope follows child tasks without changing other, user-initiated requests.
+  @TaskLocal private static var requestsInBackground = false
+  private var readsInBackground = false
+
+  nonisolated(nonsending) static func withBackgroundRequests<Value>(
+    operation: nonisolated(nonsending) () async throws -> Value
+  ) async rethrows -> Value {
+    try await $requestsInBackground.withValue(true, operation: operation)
+  }
+
+  /// A copy for automatic refreshes that are started by a new SwiftUI task.
+  var background: IOSAPIClient {
+    var copy = self
+    copy.readsInBackground = true
+    return copy
+  }
+
   let connection: IOSStoredConnection?
   let session: IOSProfileSession?
   let baseURL: URL
@@ -575,14 +593,16 @@ struct IOSAPIClient: Sendable {
   /// Trailers of films nobody in this profile has watched yet, for cinema mode before `mediaID`.
   func cinemaTrailers(mediaID: UUID, count: Int) async throws -> [IOSCinemaTrailer] {
     let response: IOSCinemaTrailersResponse = try await get(
-      "/api/v1/media/\(mediaID.uuidString.lowercased())/cinema-trailers?count=\(count)")
+      "/api/v1/media/\(mediaID.uuidString.lowercased())/cinema-trailers",
+      query: [URLQueryItem(name: "count", value: String(min(3, max(0, count))))])
     return response.trailers
   }
 
   /// What to watch after a title (servers from 2.11.0); an episode's are its series'.
   func suggestions(mediaID: UUID, limit: Int = 3) async throws -> [IOSMediaSuggestion] {
     let response: IOSMediaSuggestionsResponse = try await get(
-      "/api/v1/media/\(mediaID.uuidString.lowercased())/suggestions?limit=\(limit)")
+      "/api/v1/media/\(mediaID.uuidString.lowercased())/suggestions",
+      query: [URLQueryItem(name: "limit", value: String(min(30, max(1, limit))))])
     return response.suggestions
   }
 
@@ -668,7 +688,7 @@ struct IOSAPIClient: Sendable {
   func setWishSupport(id: UUID, supported: Bool) async throws -> IOSWishSummary {
     let body = try JSONEncoder().encode(IOSSetWishSupportRequest(supported: supported))
     let data = try await send(
-      "/api/v1/wishes/\(id.uuidString.lowercased())/support", method: "POST", body: body)
+      "/api/v1/wishes/\(id.uuidString.lowercased())/support", method: "PUT", body: body)
     return try Self.decode(IOSWishSummary.self, data: data)
   }
 
@@ -677,14 +697,15 @@ struct IOSAPIClient: Sendable {
   {
     let body = try JSONEncoder().encode(requestBody)
     let data = try await send(
-      "/api/v1/wishes/\(id.uuidString.lowercased())/state", method: "POST", body: body)
+      "/api/v1/wishes/\(id.uuidString.lowercased())/state", method: "PUT", body: body)
     return try Self.decode(IOSWishSummary.self, data: data)
   }
 
   @discardableResult
   func markWishesSeen() async throws -> IOSWishSummaryResponse {
-    let data = try await send("/api/v1/wishes/seen", method: "POST")
-    return try Self.decode(IOSWishSummaryResponse.self, data: data)
+    // The mutation returns 204, not a summary. Reload the resulting badge counts separately.
+    _ = try await send("/api/v1/wishes/seen", method: "POST")
+    return try await background.wishSummary()
   }
 
   func wishPosterData(path: String, width: Int = 342) async throws -> Data {
@@ -922,10 +943,11 @@ struct IOSAPIClient: Sendable {
 
   private enum Authentication { case none, device, profile }
 
-  private func get<Value: Decodable>(_ path: String, authentication: Authentication = .profile)
-    async throws -> Value
-  {
-    try Self.decode(Value.self, data: await send(path, authentication: authentication))
+  private func get<Value: Decodable>(
+    _ path: String, query: [URLQueryItem] = [], authentication: Authentication = .profile
+  ) async throws -> Value {
+    try Self.decode(
+      Value.self, data: await send(path, query: query, authentication: authentication))
   }
   private func post<Value: Decodable>(
     _ path: String, payload: some Encodable,
@@ -991,6 +1013,10 @@ struct IOSAPIClient: Sendable {
     -> IOSHTTPResponse
   {
     try Task.checkCancellation()
+    var request = request
+    if request.httpMethod == "GET", readsInBackground || Self.requestsInBackground {
+      request.setValue("1", forHTTPHeaderField: "X-Aurelia-Background")
+    }
     let response = try await transport.execute(request, trust: .pinned(fingerprint))
     try Task.checkCancellation()
     if let actual = response.fingerprint,

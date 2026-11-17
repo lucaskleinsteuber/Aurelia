@@ -17,13 +17,13 @@ struct IOSAdminSecurityView: View {
     let owner = admin.permissions.owner
     IOSAdminLoader { client in
       async let passkeys = client.passkeys()
-      async let settings = owner ? try? client.securitySettings() : nil
-      async let devices = owner ? (try? client.securityDevices()) ?? [] : []
+      async let settings = owner ? client.securitySettings() : nil
+      async let devices = owner ? client.securityDevices() : []
       // Devices are listed under Profiles and Devices; here only how many are new.
-      async let blocked = owner ? (try? client.blockedDevices()) ?? [] : []
+      async let blocked = owner ? client.blockedDevices() : []
       return Overview(
-        settings: await settings, passkeys: try await passkeys, devices: await devices,
-        blocked: await blocked)
+        settings: try await settings, passkeys: try await passkeys, devices: try await devices,
+        blocked: try await blocked)
     } content: { overview, reload in
       IOSAdminSecurityContent(overview: overview, owner: owner, reload: reload)
     }
@@ -37,7 +37,7 @@ private struct IOSAdminSecurityContent: View {
   @EnvironmentObject private var model: IOSAppModel
   let overview: IOSAdminSecurityView.Overview
   let owner: Bool
-  let reload: () async -> Void
+  let reload: @MainActor @Sendable () async -> Void
   @State private var confirmation: IOSAdminConfirmation?
   @State private var logDays: Int?
   @State private var settingUp = false
@@ -288,6 +288,8 @@ private struct IOSAdminSecurityLogView: View {
   @State private var events: [IOSSecurityEvent] = []
   @State private var before: String?
   @State private var loading = false
+  @State private var error: String?
+  @State private var requestGeneration = 0
 
   var body: some View {
     List {
@@ -301,7 +303,11 @@ private struct IOSAdminSecurityLogView: View {
         .pickerStyle(.segmented)
       }
       Section {
-        if events.isEmpty && !loading { Text("Nothing logged").foregroundStyle(.secondary) }
+        if let error {
+          IOSAdminSectionProblem(message: error) { await load(more: false) }
+        } else if events.isEmpty && !loading {
+          Text("Nothing logged").foregroundStyle(.secondary)
+        }
         ForEach(events) { event in
           HStack(alignment: .top, spacing: 12) {
             Image(systemName: IOSSecurityText.symbol(event.outcome))
@@ -336,18 +342,32 @@ private struct IOSAdminSecurityLogView: View {
   }
 
   private func load(more: Bool) async {
+    guard !more || !loading else { return }
+    requestGeneration += 1
+    let generation = requestGeneration
     loading = true
-    defer { loading = false }
+    error = nil
+    if !more {
+      events = []
+      before = nil
+    }
     let outcome = filter == "all" ? nil : filter
     let cursor = more ? before : nil
-    guard
-      let page = await admin.value(
-        nil, { try await $0.securityEvents(outcome: outcome, before: cursor) })
-    else {
-      return
+    do {
+      let page = try await admin.run {
+        try await $0.securityEvents(outcome: outcome, before: cursor)
+      }
+      guard generation == requestGeneration, !Task.isCancelled else { return }
+      events = more ? events + page.events : page.events
+      before = page.before
+      loading = false
+    } catch is CancellationError {
+      if generation == requestGeneration { loading = false }
+    } catch {
+      guard generation == requestGeneration, !Task.isCancelled else { return }
+      self.error = IOSAdministrationModel.message(error)
+      loading = false
     }
-    events = more ? events + page.events : page.events
-    before = page.before
   }
 }
 
@@ -377,17 +397,21 @@ final class IOSSecurityAlertCenter: ObservableObject {
       while !Task.isCancelled {
         guard let self, let client = model?.client else { return }
         do {
-          let alerts = try await client.securityAlerts(
+          let alerts = try await client.background.securityAlerts(
             version: self.version, waitSeconds: self.version == 0 ? 0 : 25)
+          guard !Task.isCancelled else { return }
           self.version = alerts.version
           self.newDevices = alerts.newDevices.filter { !self.dismissed.contains($0.id) }
           self.unlockRequests = alerts.unlockRequests
           failures = 0
+          // Test transports or older servers may answer immediately instead of long polling.
+          // Bound successful replies too, so those responses never become a tight loop.
+          try await Task.sleep(for: .seconds(1))
         } catch is CancellationError {
           return
         } catch {
           failures += 1
-          try? await Task.sleep(for: .seconds(min(60, 5 * failures)))
+          do { try await Task.sleep(for: .seconds(min(60, 5 * failures))) } catch { return }
         }
       }
     }
@@ -399,16 +423,22 @@ final class IOSSecurityAlertCenter: ObservableObject {
   }
 
   func acknowledge(_ device: IOSSecurityDevice, client: IOSAPIClient?) async {
-    dismissed.insert(device.id)
-    newDevices.removeAll { $0.id == device.id }
-    try? await client?.acknowledgeDevice(id: device.id)
+    guard let client else { return }
+    do {
+      try await client.acknowledgeDevice(id: device.id)
+      dismissed.insert(device.id)
+      newDevices.removeAll { $0.id == device.id }
+    } catch {
+      message = IOSAdministrationModel.message(error)
+    }
   }
 
   func block(_ device: IOSSecurityDevice, client: IOSAPIClient?) async {
-    dismissed.insert(device.id)
-    newDevices.removeAll { $0.id == device.id }
+    guard let client else { return }
     do {
-      _ = try await client?.blockDevice(id: device.id)
+      _ = try await client.blockDevice(id: device.id)
+      dismissed.insert(device.id)
+      newDevices.removeAll { $0.id == device.id }
       message = "“\(device.deviceName)” is blocked and signed out."
     } catch {
       message = IOSAdministrationModel.message(error)

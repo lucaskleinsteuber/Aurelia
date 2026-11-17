@@ -61,6 +61,26 @@ struct IOSLibraryLogicTests {
     #expect(value == filter.wireValue)
   }
 
+  @Test func posterAccessibilityIncludesBadgesAndAvailabilityWithoutRepeatingIt() throws {
+    var json = try #require(
+      JSONSerialization.jsonObject(with: JSONEncoder().encode(item())) as? [String: Any])
+    json["isFavorite"] = true
+    json["watchState"] = "completed"
+    json["libraryAvailability"] = "unavailable"
+    let movie = try JSONDecoder().decode(
+      IOSCatalogItem.self, from: JSONSerialization.data(withJSONObject: json))
+    #expect(movie.accessibilitySummary == "Media drive disconnected, Favorite, Watched")
+    json["kind"] = "episode"
+    json["parentTitle"] = "Invented Show"
+    json["seasonNumber"] = 2
+    json["episodeNumber"] = 3
+    let episode = try JSONDecoder().decode(
+      IOSCatalogItem.self, from: JSONSerialization.data(withJSONObject: json))
+    #expect(
+      episode.accessibilitySummary
+        == "Invented Show · S02 E03, Media drive disconnected, Favorite, Watched")
+  }
+
   @Test(arguments: IOSBrowseSort.allCases)
   func sortDirectionIsExplicitOnlyWhenSortIsChosen(_ sort: IOSBrowseSort) throws {
     var query = IOSBrowseQuery()

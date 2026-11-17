@@ -2,6 +2,7 @@ import SwiftUI
 
 struct IOSDetailView: View {
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let id: UUID
   let initial: IOSCatalogItem
   var selectedEpisodeID: UUID? = nil
@@ -18,7 +19,14 @@ struct IOSDetailView: View {
   @State private var requestID = UUID()
   @State private var unavailable: IOSCatalogItem?
   @State private var showingAbout = false
+  @State private var loadedRevision: UUID?
+  @State private var failedHeaderArtwork: IOSArtwork?
   private var item: IOSCatalogItem { model.overlay(detail?.item ?? initial) }
+  private var headerArtwork: IOSArtwork? { item.backdrop ?? item.poster }
+  private var showsHeaderArtwork: Bool {
+    guard let headerArtwork else { return false }
+    return headerArtwork != failedHeaderArtwork
+  }
   private var seasons: [IOSSeason] { detail?.seasons ?? [] }
   private var joinableParties: [IOSWatchPartySummary] {
     let ids = Set([item.id] + seasons.flatMap { $0.episodes.map(\.item.id) })
@@ -52,11 +60,16 @@ struct IOSDetailView: View {
         }
       }.padding(.bottom, 32)
     }
-    .ignoresSafeArea(edges: .top)
+    .ignoresSafeArea(edges: showsHeaderArtwork ? .top : [])
     .background(IOSDesign.canvas.ignoresSafeArea())
     .navigationBarTitleDisplayMode(.inline)
     .toolbarBackground(.hidden, for: .navigationBar)
-    .task(id: model.detailRefresh) { await load() }
+    .task(id: model.detailRefresh) {
+      let revision = model.detailRefresh
+      let automatic = loadedRevision != nil && loadedRevision != revision
+      loadedRevision = revision
+      await load(background: automatic)
+    }
     .sheet(isPresented: $showingAbout) {
       if let detail { IOSAboutSheet(detail: detail) }
     }
@@ -71,6 +84,7 @@ struct IOSDetailView: View {
         "\(item.availabilityMessage ?? "This title can't be played right now.") Connect the drive on your Mac, then try again."
       )
     }
+    .onChange(of: headerArtwork) { _, _ in failedHeaderArtwork = nil }
     .onChange(of: model.session?.sessionId) { _, _ in playing = nil }
     .onChange(of: model.remoteStopRequests) { _, _ in playing = nil }
     .fullScreenCover(
@@ -110,11 +124,17 @@ struct IOSDetailView: View {
     }
   }
 
-  /// The artwork to the screen edges fading into the canvas, the title and facts below it on
-  /// the canvas (bright artwork never sits behind text), then Play with round actions beside it.
+  /// Real artwork reaches the edges and fades into the canvas. Missing or failed artwork uses
+  /// the same compact, readable title treatment as Home instead of reserving empty image space.
   private var header: some View {
     VStack(spacing: 0) {
-      IOSArtworkView(artwork: item.backdrop ?? item.poster, width: 1280, symbol: nil)
+      if showsHeaderArtwork, let artwork = headerArtwork {
+        IOSArtworkView(
+          artwork: artwork, width: 1280, symbol: nil,
+          onUnavailable: {
+            if headerArtwork == artwork { failedHeaderArtwork = artwork }
+          }
+        )
         .frame(maxWidth: .infinity).frame(height: IOSDesign.isPad ? 460 : 330)
         .clipped()
         .overlay {
@@ -128,16 +148,31 @@ struct IOSDetailView: View {
             ], startPoint: .top, endPoint: .bottom)
         }
         .accessibilityHidden(true)
-      VStack(spacing: 16) {
-        VStack(spacing: 6) {
-          Text(item.title).font(.title.weight(.bold))
-            .multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.8)
-          if !facts.isEmpty {
-            Text(facts).font(.footnote).foregroundStyle(.secondary)
-              .multilineTextAlignment(.center)
+      }
+      VStack(alignment: showsHeaderArtwork ? .center : .leading, spacing: 16) {
+        HStack(alignment: .top, spacing: 16) {
+          if !showsHeaderArtwork, !dynamicTypeSize.isAccessibilitySize {
+            Image(systemName: item.kind == .movie ? "film" : "tv")
+              .font(.title2.weight(.light)).foregroundStyle(.secondary)
+              .frame(width: 52, height: 64)
+              .background(
+                IOSDesign.surface,
+                in: RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous)
+              )
+              .accessibilityHidden(true)
           }
+          VStack(alignment: showsHeaderArtwork ? .center : .leading, spacing: 6) {
+            Text(item.title).font(.title.weight(.bold))
+              .multilineTextAlignment(showsHeaderArtwork ? .center : .leading)
+              .fixedSize(horizontal: false, vertical: true)
+            if !facts.isEmpty {
+              Text(facts).font(.footnote).foregroundStyle(.secondary)
+                .multilineTextAlignment(showsHeaderArtwork ? .center : .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+          }
+          .frame(maxWidth: .infinity, alignment: showsHeaderArtwork ? .center : .leading)
         }
-        .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
         if let target = plan?.target, let unavailable = target.availabilityMessage {
           Label(unavailable, systemImage: "exclamationmark.triangle.fill")
@@ -247,8 +282,10 @@ struct IOSDetailView: View {
           .accessibilityHint("Shows the full description")
         }
       }
+      .frame(maxWidth: showsHeaderArtwork ? .infinity : 760, alignment: .leading)
       .padding(.horizontal, IOSDesign.margin)
-      .padding(.top, -44)
+      .padding(.top, showsHeaderArtwork ? -44 : 16)
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
 
@@ -516,8 +553,9 @@ struct IOSDetailView: View {
     model.playerPresented = true
     playing = IOSDetailPlayback(item: item, queue: queue, startOver: startOver)
   }
-  private func load() async {
-    guard let api = model.client else { return }
+  private func load(background: Bool = false) async {
+    guard let client = model.client else { return }
+    let api = background ? client.background : client
     let sessionID = model.session?.sessionId
     let request = UUID()
     requestID = request

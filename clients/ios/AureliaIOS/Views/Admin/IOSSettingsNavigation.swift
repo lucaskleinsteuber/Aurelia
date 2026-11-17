@@ -33,7 +33,9 @@ struct IOSSettingsTab: View {
       } else {
         NavigationStack(path: $phonePath) {
           IOSSettingsRoot(selection: nil)
-            .navigationDestination(for: IOSSettingsPage.self) { IOSSettingsDestination(page: $0) }
+            .navigationDestination(for: IOSSettingsPage.self) {
+              IOSSettingsDestination(page: $0).toolbar(.hidden, for: .tabBar)
+            }
         }
       }
     }
@@ -60,6 +62,7 @@ struct IOSSettingsTab: View {
     .onChange(of: model.session?.sessionId) { _, _ in
       admin.attach(model)
       phonePath = []
+      selection = admin.permissions.storage ? .library : .playback
     }
     .sheet(isPresented: $admin.unlockRequested, onDismiss: { admin.cancelUnlock() }) {
       IOSManagementUnlockSheet(admin: admin, serverName: model.connection?.name ?? "Aurelia")
@@ -219,7 +222,7 @@ struct IOSSettingsRowLabel: View {
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
         Text(page.title)
-        Text(page.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+        Text(page.subtitle).font(.caption).foregroundStyle(Color.secondary).lineLimit(2)
       }
     }
     .padding(.vertical, 2)
@@ -352,6 +355,8 @@ struct IOSConnectionSettingsView: View {
           confirmingDisconnect = true
         } label: {
           Label("Disconnect This \(IOSDesign.deviceName)", systemImage: "xmark.circle")
+            // A destructive row is red throughout, its symbol too, as "Reset Library…".
+            .foregroundStyle(.red)
         }
         .accessibilityIdentifier("settings-disconnect")
       } footer: {

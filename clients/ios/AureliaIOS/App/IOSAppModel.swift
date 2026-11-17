@@ -566,6 +566,10 @@ final class IOSAppModel: ObservableObject {
   func enterBackground() {
     isForeground = false
     deactivateProgress()
+    refreshTask?.cancel()
+    refreshTask = nil
+    wishSummaryTask?.cancel()
+    wishSummaryTask = nil
     browser.stop()
   }
 
@@ -738,7 +742,9 @@ final class IOSAppModel: ObservableObject {
       watchParties = []
       return
     }
-    let all = (try? await api.watchParties()) ?? []
+    guard let all = try? await api.watchParties(), !Task.isCancelled,
+      session?.sessionId == api.session?.sessionId
+    else { return }
     watchParties = all.filter { $0.id != watchParty?.partyID }
   }
 
@@ -811,6 +817,10 @@ final class IOSAppModel: ObservableObject {
     watchParties = []
     expiry?.cancel()
     expiry = nil
+    if let connection, let session {
+      offline.cancelPreparations(serverID: connection.serverID, profileID: session.user.id)
+      offline.errorMessage = nil
+    }
     session = nil
     selectedProfile = nil
     profiles = []
@@ -825,6 +835,12 @@ final class IOSAppModel: ObservableObject {
     pendingProgress.removeAll()
     acknowledgedProgress.removeAll()
     mutationSummaries.removeAll()
+    remotePlaybackItem = nil
+    suggestedPlaybackItem = nil
+    downloadChoice = nil
+    downloadChoiceTask?.cancel()
+    downloadChoiceTask = nil
+    downloadChoiceRequest = UUID()
     watchlistItems = []
     watchlistIds = []
     syncTask?.cancel()
@@ -917,7 +933,9 @@ final class IOSAppModel: ObservableObject {
   }
 
   func refreshWishSummary(notify: Bool) async {
-    guard let api = client, let sessionID = session?.sessionId, supportsWishes else { return }
+    guard let api = client?.background, let sessionID = session?.sessionId, supportsWishes else {
+      return
+    }
     wishSummaryTask?.cancel()
     let task = Task { [weak self] in
       guard let summary = try? await api.wishSummary() else { return }
@@ -946,6 +964,7 @@ final class IOSAppModel: ObservableObject {
       {
         latestWish = opened.wishes.first
       }
+      guard !Task.isCancelled, self.session?.sessionId == sessionID else { return }
       if let event = IOSWishPresentation.notificationEvent(
         previous: previous, current: summary, isAdmin: self.isWishAdmin, latestWish: latestWish)
       {
@@ -964,23 +983,30 @@ final class IOSAppModel: ObservableObject {
       watchlistItems = response.items
       watchlistIds = Set(response.mediaIds)
     } catch {
+      guard !Task.isCancelled, session?.sessionId == sessionID else { return }
       handleSessionFailure(error)
     }
   }
 
   func setWatchlist(mediaId: UUID, isWatchlisted: Bool) async -> Bool {
-    guard let api = client, supportsWatchlist else { return false }
+    guard let api = client, let sessionID = session?.sessionId, supportsWatchlist else {
+      return false
+    }
     do {
       let state = try await api.setWatchlist(mediaID: mediaId, isWatchlisted: isWatchlisted)
+      guard !Task.isCancelled, session?.sessionId == sessionID else { return false }
       if state.isWatchlisted {
         watchlistIds.insert(mediaId)
       } else {
         watchlistIds.remove(mediaId)
         watchlistItems.removeAll { $0.id == mediaId }
       }
-      Task { await loadWatchlist() }
+      Task {
+        await IOSAPIClient.withBackgroundRequests { await loadWatchlist() }
+      }
       return true
     } catch {
+      guard !Task.isCancelled, session?.sessionId == sessionID else { return false }
       handleSessionFailure(error)
       return false
     }
@@ -989,7 +1015,7 @@ final class IOSAppModel: ObservableObject {
   /// Loads the first Movies and TV Shows pages and their leading posters in the
   /// background, so the tabs are already filled when they are opened.
   func preloadLibrary() async {
-    guard let api = client, let connection, let session else { return }
+    guard let api = client?.background, let connection, let session else { return }
     for listing in [movies, shows] where listing.items.isEmpty && !listing.loading {
       let query = environment.browsePreferences.load(
         serverID: connection.serverID, profileID: session.user.id, section: listing.section)
@@ -1013,7 +1039,7 @@ final class IOSAppModel: ObservableObject {
 
   func scheduleLibraryRefresh() {
     deferredRefresh = true
-    guard !playerPresented, refreshTask == nil else { return }
+    guard isForeground, !playerPresented, refreshTask == nil else { return }
     let sessionID = session?.sessionId
     refreshTask = Task { [weak self] in
       do { try await Task.sleep(for: .milliseconds(600)) } catch { return }
@@ -1035,7 +1061,7 @@ final class IOSAppModel: ObservableObject {
     progressObserver?.cancel()
     remoteDeviceHeartbeatTask?.cancel()
     remoteDeviceCommandTask?.cancel()
-    let api = makeClient(connection: connection, session: session)
+    let api = makeClient(connection: connection, session: session).background
     let sessionID = session.sessionId
     let scope = IOSProgressScope(connection: connection, session: session)
     let deviceId = tvDeviceId
@@ -1070,9 +1096,8 @@ final class IOSAppModel: ObservableObject {
           for cmd in commands {
             if cmd.action.lowercased() == "play", let mediaId = cmd.mediaId {
               if let item = try? await api.summary(id: mediaId) {
-                await MainActor.run { [weak self] in
-                  self?.remotePlaybackItem = item
-                }
+                guard !Task.isCancelled, self.session?.sessionId == sessionID else { return }
+                self.remotePlaybackItem = item
               }
             } else if cmd.action.lowercased() == "stop" {
               await MainActor.run { [weak self] in
@@ -1081,6 +1106,9 @@ final class IOSAppModel: ObservableObject {
               }
             }
           }
+          // Older servers and test transports can answer an empty long poll immediately.
+          // Bound that case instead of spinning on MainActor and flooding the server.
+          try await Task.sleep(for: .seconds(1))
         } catch {
           do { try await Task.sleep(for: .seconds(2)) } catch { return }
         }
@@ -1170,6 +1198,8 @@ final class IOSAppModel: ObservableObject {
   }
 
   private func activateProgress(connection: IOSStoredConnection, session: IOSProfileSession) {
+    // An unlock or reconnect may finish after the scene has entered the background.
+    guard isForeground else { return }
     observePersonalState(connection: connection, session: session)
     let previous = outboxTransition
     let run = generation
@@ -1204,6 +1234,8 @@ final class IOSAppModel: ObservableObject {
   private var convertedBackground: IOSConvertedBackground?
   /// Downloads whose quality the person chooses now (Settings › Playback › Download Quality).
   @Published var downloadChoice: IOSPendingDownloadChoice?
+  private var downloadChoiceTask: Task<Void, Never>?
+  private var downloadChoiceRequest = UUID()
   var supportsConvertedDownloads: Bool { capabilities?.supportsConvertedDownloads ?? false }
 
   /// Downloads a movie or episode for the open profile.
@@ -1224,7 +1256,13 @@ final class IOSAppModel: ObservableObject {
 
   /// The original, or a smaller copy when the server offers one: as set, or asked for now.
   private func chooseQuality(for items: [IOSCatalogItem]) {
-    guard let client, let first = items.first else { return }
+    guard let client, let sessionID = session?.sessionId, let first = items.first else { return }
+    downloadChoiceTask?.cancel()
+    downloadChoiceTask = nil
+    let request = UUID()
+    downloadChoiceRequest = request
+    downloadChoice = nil
+    offline.errorMessage = nil
     let preference =
       UserDefaults.standard.string(forKey: IOSDownloadQualityPreference.key)
       ?? IOSDownloadQualityPreference.ask
@@ -1232,17 +1270,45 @@ final class IOSAppModel: ObservableObject {
       startDownloads(items, quality: nil)
       return
     }
-    Task {
-      let options = try? await client.downloadOptions(mediaID: first.id)
-      guard self.session?.sessionId == client.session?.sessionId else { return }
-      switch IOSDownloadQualityPreference.resolve(preference, options: options) {
-      case .original: startDownloads(items, quality: nil)
-      case .ask:
-        if let options { downloadChoice = IOSPendingDownloadChoice(items: items, options: options) }
-      case .converted(let quality):
-        startDownloads(items, quality: quality, audio: options?.audioTrack, options: options)
+    downloadChoiceTask = Task {
+      defer { if downloadChoiceRequest == request { downloadChoiceTask = nil } }
+      do {
+        let resolved = try await IOSDownloadQualityPreference.resolve(preference) {
+          try await client.downloadOptions(mediaID: first.id)
+        }
+        guard !Task.isCancelled, self.session?.sessionId == sessionID,
+          downloadChoiceRequest == request
+        else { return }
+        switch resolved.choice {
+        case .original: startDownloads(items, quality: nil)
+        case .ask:
+          downloadChoice = IOSPendingDownloadChoice(
+            items: items, options: resolved.options, sessionID: sessionID, id: request)
+        case .converted(let quality):
+          startDownloads(
+            items, quality: quality, audio: resolved.options.audioTrack, options: resolved.options)
+        }
+      } catch {
+        guard !Task.isCancelled, self.session?.sessionId == sessionID,
+          downloadChoiceRequest == request
+        else { return }
+        offline.errorMessage =
+          "Download options for \(first.title) could not be loaded. \(error.localizedDescription)"
       }
     }
+  }
+
+  /// SwiftUI can dismiss the confirmation dialog before delivering its chosen action.
+  /// Keep its request/session identity separate from the optional presented dialog.
+  func confirmDownloads(_ choice: IOSPendingDownloadChoice, quality: IOSDownloadQuality?) {
+    guard choice.id == downloadChoiceRequest, choice.sessionID == session?.sessionId else {
+      return
+    }
+    downloadChoice = nil
+    downloadChoiceRequest = UUID()
+    startDownloads(
+      choice.items, quality: quality?.id, audio: quality == nil ? nil : choice.options.audioTrack,
+      options: choice.options)
   }
 
   /// Starts the downloads in one quality; nil keeps the original files. Each further episode
@@ -1258,18 +1324,45 @@ final class IOSAppModel: ObservableObject {
           try? await client.summary(id: parent)
         } else { nil }
       for (index, item) in items.enumerated() {
-        guard self.session?.sessionId == client.session?.sessionId else { return }
+        guard !Task.isCancelled, self.session?.sessionId == client.session?.sessionId else {
+          return
+        }
         var chosen = quality
+        var chosenAudio = audio
         var expected = options?.qualities.first { $0.id == quality }?.estimatedBytes
-        if index > 0, let wanted = quality {
-          let own = try? await client.downloadOptions(mediaID: item.id)
-          let match = own?.qualities.first { $0.id == wanted }
-          chosen = match == nil ? nil : wanted
-          expected = match?.estimatedBytes
+        if let wanted = quality, index > 0 || options == nil {
+          do {
+            let resolved = try await IOSDownloadQualityPreference.resolve(wanted) {
+              try await client.downloadOptions(mediaID: item.id)
+            }
+            guard !Task.isCancelled, self.session?.sessionId == client.session?.sessionId else {
+              return
+            }
+            if case .converted(let ownQuality) = resolved.choice {
+              chosen = ownQuality
+              chosenAudio = resolved.options.audioTrack
+              expected = resolved.options.qualities.first { $0.id == ownQuality }?.estimatedBytes
+            } else {
+              chosen = nil
+              chosenAudio = nil
+              expected = nil
+            }
+          } catch {
+            guard !Task.isCancelled, self.session?.sessionId == client.session?.sessionId else {
+              return
+            }
+            offline.errorMessage =
+              "Download options for \(item.title) could not be loaded. \(error.localizedDescription)"
+            return
+          }
         }
         await offline.download(
-          item, series: series, api: client, quality: chosen, audio: chosen == nil ? nil : audio,
+          item, series: series, api: client, quality: chosen,
+          audio: chosen == nil ? nil : chosenAudio,
           expectedBytes: expected)
+        // Keep the failed title and its feedback visible; another episode must not clear
+        // that error by starting a new preparation immediately afterwards.
+        if offline.errorMessage != nil { return }
       }
     }
   }
@@ -1335,11 +1428,17 @@ final class IOSAppModel: ObservableObject {
   /// Remembers a profile that opened while the server answered, for the offline mode.
   private func rememberForOffline(_ profile: IOSWatchingProfile, pin: String?, serverID: UUID) {
     let store = offline
+    let run = generation
+    let sessionID = session?.sessionId
     // Deriving the PIN check takes a moment; keep it off the main actor.
-    Task.detached(priority: .utility) {
-      guard let card = IOSOfflineProfileCard.make(serverID: serverID, profile: profile, pin: pin)
+    Task { [weak self] in
+      let card = await Task.detached(priority: .utility) {
+        IOSOfflineProfileCard.make(serverID: serverID, profile: profile, pin: pin)
+      }.value
+      guard let self, self.current(run), self.connection?.serverID == serverID,
+        self.session?.sessionId == sessionID, let card
       else { return }
-      await store.remember(card)
+      store.remember(card)
     }
   }
 

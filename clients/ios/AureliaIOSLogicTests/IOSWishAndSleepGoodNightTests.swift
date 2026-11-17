@@ -178,7 +178,7 @@ struct IOSWishAndSleepGoodNightTests {
       {"code":"already_in_library","message":"Already in the library.","mediaId":"\(Self.mediaID.uuidString)","title":"Quiet Orbit","kind":"movie"}
       """
     let summaryJSON = """
-      {"openCount":2,"newlyFulfilledCount":1}
+      {"openCount":2,"newlyFulfilledCount":0}
       """
     let transport = IOSWishFakeTransport(responses: [
       IOSHTTPResponse(
@@ -187,6 +187,7 @@ struct IOSWishAndSleepGoodNightTests {
         statusCode: 200, headers: [:], body: Data(searchJSON.utf8), fingerprint: Self.fingerprint),
       IOSHTTPResponse(
         statusCode: 409, headers: [:], body: Data(conflictJSON.utf8), fingerprint: Self.fingerprint),
+      IOSHTTPResponse(statusCode: 204, headers: [:], body: Data(), fingerprint: Self.fingerprint),
       IOSHTTPResponse(
         statusCode: 200, headers: [:], body: Data(summaryJSON.utf8), fingerprint: Self.fingerprint),
     ])
@@ -209,7 +210,63 @@ struct IOSWishAndSleepGoodNightTests {
     }
 
     let seen = try await client.markWishesSeen()
-    #expect(seen.newlyFulfilledCount == 1)
+    #expect(seen.newlyFulfilledCount == 0)
+    let requests = await transport.requests
+    #expect(requests.count == 5)
+    #expect(requests[3].httpMethod == "POST")
+    #expect(requests[3].url?.path == "/api/v1/wishes/seen")
+    #expect(requests[3].value(forHTTPHeaderField: "X-Aurelia-Background") == nil)
+    #expect(requests[4].httpMethod == "GET")
+    #expect(requests[4].url?.path == "/api/v1/wishes/summary")
+    #expect(requests[4].value(forHTTPHeaderField: "X-Aurelia-Background") == "1")
+  }
+
+  @Test func wishSupportAndResolutionUsePutWithoutMarkingTheMutationAsBackground() async throws {
+    func wish(_ supported: Bool, state: String = "open") -> IOSHTTPResponse {
+      let json = """
+        {"id":"\(Self.wishID)","userId":"\(Self.mediaID)","userName":"Mia","kind":"movie",
+        "title":"Moonlit Garden","year":2025,"state":"\(state)","createdAt":"2026-11-16T00:00:00Z",
+        "canSupport":true,"supportedByCaller":\(supported),"supporters":[],"suggestions":[]}
+        """
+      return IOSHTTPResponse(
+        statusCode: 200, headers: [:], body: Data(json.utf8), fingerprint: Self.fingerprint)
+    }
+    let transport = IOSWishFakeTransport(responses: [
+      wish(true), wish(false), wish(false, state: "declined"),
+    ])
+    let client = IOSAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    try await IOSAPIClient.withBackgroundRequests {
+      let supported = try await client.setWishSupport(id: Self.wishID, supported: true)
+      #expect(supported.supportedByCaller)
+      let removed = try await client.setWishSupport(id: Self.wishID, supported: false)
+      #expect(!removed.supportedByCaller)
+      let declined = try await client.updateWishState(
+        id: Self.wishID,
+        requestBody: .init(
+          state: .declined, resolutionNote: "Not available yet", fulfilledMediaItemId: nil))
+      #expect(declined.state == .declined)
+    }
+    let requests = await transport.requests
+    #expect(requests.count == 3)
+    #expect(requests.allSatisfy { $0.httpMethod == "PUT" })
+    #expect(requests.allSatisfy { $0.value(forHTTPHeaderField: "X-Aurelia-Background") == nil })
+    #expect(
+      requests.allSatisfy { $0.value(forHTTPHeaderField: "Content-Type") == "application/json" })
+    #expect(
+      requests[0].url?.path == "/api/v1/wishes/\(Self.wishID.uuidString.lowercased())/support")
+    #expect(requests[1].url?.path == requests[0].url?.path)
+    #expect(
+      requests[2].url?.path == "/api/v1/wishes/\(Self.wishID.uuidString.lowercased())/state")
+    let addBody = try #require(requests[0].httpBody)
+    let removeBody = try #require(requests[1].httpBody)
+    let stateBody = try #require(requests[2].httpBody)
+    let add = try #require(JSONSerialization.jsonObject(with: addBody) as? [String: Bool])
+    let remove = try #require(JSONSerialization.jsonObject(with: removeBody) as? [String: Bool])
+    #expect(add == ["supported": true])
+    #expect(remove == ["supported": false])
+    let state = try #require(JSONSerialization.jsonObject(with: stateBody) as? [String: String])
+    #expect(state == ["state": "declined", "resolutionNote": "Not available yet"])
   }
 
   @MainActor
@@ -225,12 +282,12 @@ struct IOSWishAndSleepGoodNightTests {
       connection: Self.connection, session: Self.session,
       transport: IOSWishFakeTransport(responses: []))
     let cache = IOSWishPosterByteCache(
-      memoryLimitBytes: 1024, itemLimit: 10, diskCache: disk
-    ) { path, _, _ in
-      await counter.increment()
-      try await Task.sleep(for: .milliseconds(25))
-      return Data(repeating: path.utf8.first ?? 1, count: 700)
-    }
+      memoryLimitBytes: 1024, itemLimit: 10, diskCache: disk,
+      fetcher: { path, _, _ in
+        await counter.increment()
+        try await Task.sleep(for: .milliseconds(25))
+        return Data(repeating: path.utf8.first ?? 1, count: 700)
+      })
 
     async let a = cache.data(posterPath: "/p1.jpg", width: 342, client: client)
     async let b = cache.data(posterPath: "/p1.jpg", width: 342, client: client)
@@ -243,6 +300,44 @@ struct IOSWishAndSleepGoodNightTests {
     try await Task.sleep(for: .milliseconds(50))
     disk.prune()
     #expect(disk.byteCount() <= 1024)
+  }
+
+  @MainActor
+  @Test func wishPosterRetriesAfterATemporaryNetworkFailure() async {
+    let clock = IOSWishPosterTestClock()
+    let counter = IOSWishCounter()
+    let client = IOSAPIClient(
+      connection: Self.connection, session: Self.session,
+      transport: IOSWishFakeTransport(responses: []))
+    let cache = IOSWishPosterByteCache(
+      diskCache: nil, failureRetryInterval: 30, now: { clock.now },
+      fetcher: { _, _, _ in
+        await counter.increment()
+        if await counter.value == 1 { throw URLError(.notConnectedToInternet) }
+        return Data([7, 8, 9])
+      })
+    #expect(await cache.data(posterPath: "/retry.jpg", client: client) == nil)
+    #expect(await cache.data(posterPath: "/retry.jpg", client: client) == nil)
+    #expect(await counter.value == 1, "A failing server is not hammered on each view update.")
+    clock.now = clock.now.addingTimeInterval(30)
+    #expect(await cache.data(posterPath: "/retry.jpg", client: client) == Data([7, 8, 9]))
+    #expect(
+      await counter.value == 2, "The old failure must not hide the poster for the whole session.")
+  }
+
+  @MainActor
+  @Test func clearingWishPostersRejectsAnUncancellableOldFetch() async {
+    let gate = IOSWishPosterFetchGate()
+    let client = IOSAPIClient(
+      connection: Self.connection, session: Self.session,
+      transport: IOSWishFakeTransport(responses: []))
+    let cache = IOSWishPosterByteCache(diskCache: nil, fetcher: { _, _, _ in await gate.fetch() })
+    let fetching = Task { await cache.data(posterPath: "/old.jpg", client: client) }
+    await gate.waitForRequest()
+    cache.clear()
+    await gate.finish(Data([1, 2, 3]))
+    #expect(await fetching.value == nil)
+    #expect(cache.cachedData(posterPath: "/old.jpg", serverID: Self.serverID) == nil)
   }
 
   @MainActor
@@ -289,8 +384,10 @@ struct IOSWishAndSleepGoodNightTests {
 
 private actor IOSWishFakeTransport: IOSHTTPTransport {
   private var queued: [IOSHTTPResponse]
+  private(set) var requests: [URLRequest] = []
   init(responses: [IOSHTTPResponse]) { queued = responses }
   func execute(_ request: URLRequest, trust: IOSTrustMode) async throws -> IOSHTTPResponse {
+    requests.append(request)
     guard !queued.isEmpty else { throw IOSCoreError.invalidResponse }
     return queued.removeFirst()
   }
@@ -299,6 +396,34 @@ private actor IOSWishFakeTransport: IOSHTTPTransport {
 private actor IOSWishCounter {
   private(set) var value = 0
   func increment() { value += 1 }
+}
+
+@MainActor
+private final class IOSWishPosterTestClock {
+  var now = Date(timeIntervalSince1970: 1_800_000_000)
+}
+
+private actor IOSWishPosterFetchGate {
+  private var pending: CheckedContinuation<Data, Never>?
+  private var requestWaiter: CheckedContinuation<Void, Never>?
+
+  func fetch() async -> Data {
+    await withCheckedContinuation { continuation in
+      pending = continuation
+      requestWaiter?.resume()
+      requestWaiter = nil
+    }
+  }
+
+  func waitForRequest() async {
+    if pending != nil { return }
+    await withCheckedContinuation { requestWaiter = $0 }
+  }
+
+  func finish(_ data: Data) {
+    pending?.resume(returning: data)
+    pending = nil
+  }
 }
 
 @MainActor

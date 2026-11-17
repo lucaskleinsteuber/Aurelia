@@ -7,8 +7,9 @@ struct IOSProfilesView: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
+    // The glow fills the whole screen as a background. As a sibling in the ZStack it pulled the
+    // stack beneath the status bar, and the PIN screen's "Profiles" button sat over the clock.
     ZStack {
-      IOSAmbientBackground()
       if let profile = model.selectedProfile {
         IOSPINView(profile: profile).id(profile.id)
           .transition(.opacity)
@@ -16,6 +17,8 @@ struct IOSProfilesView: View {
         picker.transition(.opacity)
       }
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background { IOSAmbientBackground() }
     .animation(
       reduceMotion ? .easeOut(duration: 0.12) : .smooth(duration: 0.32),
       value: model.selectedProfile?.id)
@@ -64,8 +67,9 @@ struct IOSProfilesView: View {
   }
 }
 
-/// Center each row, including a single profile and the last partially filled row.
-private struct IOSProfileRows: Layout {
+/// Center each row, including a single profile and the last partially filled row; also the
+/// offline mode's "Watch Downloads" chooser, so both pickers look alike.
+struct IOSProfileRows: Layout {
   private func dimensions(_ proposal: ProposedViewSize, count: Int) -> (
     width: CGFloat, columns: Int
   ) {
@@ -264,6 +268,7 @@ struct IOSPINView: View {
   let profile: IOSWatchingProfile
   @State private var pin = ""
   @State private var attempts = 0
+  @State private var showingRecovery = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.verticalSizeClass) private var verticalSizeClass
   private static let rows = [
@@ -275,28 +280,35 @@ struct IOSPINView: View {
   var body: some View {
     // Portrait: profile above the keypad, like the iPhone passcode screen. A phone on its side
     // has too little height for that, so the two sit next to each other.
-    Group {
-      if verticalSizeClass == .compact {
-        HStack(spacing: 48) {
-          identity
-          keypad
+    GeometryReader { geometry in
+      ScrollView {
+        Group {
+          if verticalSizeClass == .compact {
+            HStack(spacing: 48) {
+              identity
+              keypad
+            }
+          } else {
+            VStack(spacing: 28) {
+              identity
+              keypad
+            }
+          }
         }
-      } else {
-        VStack(spacing: 28) {
-          identity
-          keypad
-        }
+        .padding(IOSDesign.margin)
+        .frame(maxWidth: .infinity, minHeight: geometry.size.height)
       }
+      .scrollBounceBehavior(.basedOnSize)
     }
-    .padding(IOSDesign.margin)
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .overlay(alignment: .topLeading) {
+    // An inset, not an overlay: with large text the button would otherwise cover the avatar.
+    .safeAreaInset(edge: .top, spacing: 0) {
       Button {
         model.cancelProfileSelection()
       } label: {
         Label("Profiles", systemImage: "chevron.left").font(.body.weight(.semibold))
       }
       .tint(.white)
+      .frame(maxWidth: .infinity, alignment: .leading)
       .padding(.horizontal, IOSDesign.margin).padding(.top, 8)
       .accessibilityIdentifier("profile-back")
     }
@@ -305,6 +317,15 @@ struct IOSPINView: View {
       withAnimation(.linear(duration: 0.4)) { attempts += 1 }
     }
     .iosBackCommand { model.cancelProfileSelection() }
+    .alert("Forgot PIN?", isPresented: $showingRecovery) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(
+        profile.role == "owner"
+          ? "On the computer running your server, open Aurelia and choose Forgot PIN? on the owner profile. You need the Server Password. On a server without a screen, use its owner PIN recovery instructions."
+          : "Ask the server owner to set a new PIN for this profile in Settings › Profiles and Devices."
+      )
+    }
   }
 
   private var identity: some View {
@@ -327,6 +348,10 @@ struct IOSPINView: View {
           IOSErrorText(message: error).accessibilityIdentifier("profile-pin-error")
         }
       }.frame(minHeight: 22)
+      Button("Forgot PIN?") { showingRecovery = true }
+        .font(.subheadline.weight(.semibold))
+        .tint(.white)
+        .accessibilityIdentifier("profile-forgot-pin")
     }
     .frame(maxWidth: 300)
   }

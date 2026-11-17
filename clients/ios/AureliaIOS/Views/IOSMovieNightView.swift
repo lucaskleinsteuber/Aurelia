@@ -57,7 +57,6 @@ struct IOSMovieNightView: View {
         .frame(maxWidth: 560)
         .frame(maxWidth: .infinity)
       }
-      .scrollDisabled(session.screen == .swipe)
       HStack {
         Spacer()
         Button {
@@ -240,7 +239,9 @@ private struct IOSMovieNightStack: View {
             .brightness(index == 0 ? 0 : -0.25 * Double(index))
             .offset(index == 0 ? offset : .zero)
             .rotationEffect(.degrees(index == 0 ? Double(offset.width / 16) : 0))
-            .gesture(drag(width: geometry.size.width, card: card), isEnabled: index == 0)
+            .simultaneousGesture(
+              drag(width: geometry.size.width, card: card), including: index == 0 ? .all : .none
+            )
             .allowsHitTesting(index == 0)
             .accessibilityHidden(index != 0)
           }
@@ -279,11 +280,15 @@ private struct IOSMovieNightStack: View {
   private func drag(width: CGFloat, card: IOSMovieNightCard) -> some Gesture {
     DragGesture()
       .onChanged { value in
-        guard !flying else { return }
+        guard !flying, abs(value.translation.width) > abs(value.translation.height) else { return }
         offset = CGSize(width: value.translation.width, height: value.translation.height * 0.25)
       }
       .onEnded { value in
         guard !flying else { return }
+        guard abs(value.translation.width) > abs(value.translation.height) else {
+          offset = .zero
+          return
+        }
         if let choice = IOSMovieNightRules.choice(
           offset: value.translation.width, velocity: value.velocity.width, width: width)
         {

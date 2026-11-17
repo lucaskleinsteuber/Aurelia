@@ -14,11 +14,11 @@ struct IOSAdminServerView: View {
     IOSAdminLoader { client in
       async let status = client.serverStatus()
       async let health = client.serverHealth()
-      async let capabilities = try? client.serverCapabilities()
-      async let configuration = try? client.serverSettings()
+      async let capabilities = client.serverCapabilities()
+      async let configuration = client.serverSettings()
       return Overview(
         status: try await status, health: try await health,
-        capabilities: await capabilities, configuration: await configuration)
+        capabilities: try await capabilities, configuration: try await configuration)
     } content: { overview, reload in
       IOSAdminServerContent(overview: overview, reload: reload)
     }
@@ -31,7 +31,7 @@ private struct IOSAdminServerContent: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   @EnvironmentObject private var model: IOSAppModel
   let overview: IOSAdminServerView.Overview
-  let reload: () async -> Void
+  let reload: @MainActor @Sendable () async -> Void
   @State private var confirmation: IOSAdminConfirmation?
 
   private var canRestart: Bool {
@@ -122,7 +122,7 @@ private struct IOSAdminServerContent: View {
           IOSAdminToggleLabel("Intros and Credits", "Finds them so players can offer Skip Intro.")
         }
         NavigationLink {
-          IOSAdminSpeechView()
+          IOSAdminSpeechView(platform: overview.capabilities?.platform)
         } label: {
           IOSAdminToggleLabel("Speech Recognition", "Writes and syncs subtitles from speech.")
         }
@@ -436,7 +436,7 @@ private struct IOSAdminScrubPreviewsView: View {
 private struct IOSAdminScrubPreviewsForm: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   let settings: IOSScrubPreviewSettings
-  let reload: () async -> Void
+  let reload: @MainActor @Sendable () async -> Void
   @State private var draft: IOSUpdateScrubPreviews?
   @State private var confirmation: IOSAdminConfirmation?
 
@@ -545,8 +545,8 @@ private struct IOSAdminSegmentsView: View {
   var body: some View {
     IOSAdminLoader { client in
       async let settings = client.serverSegments()
-      async let series = (try? client.segmentSeries()) ?? []
-      return Overview(settings: try await settings, series: await series)
+      async let series = client.segmentSeries()
+      return Overview(settings: try await settings, series: try await series)
     } content: { overview, reload in
       IOSAdminSegmentsForm(overview: overview, reload: reload)
     }
@@ -558,7 +558,7 @@ private struct IOSAdminSegmentsView: View {
 private struct IOSAdminSegmentsForm: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   let overview: IOSAdminSegmentsView.Overview
-  let reload: () async -> Void
+  let reload: @MainActor @Sendable () async -> Void
 
   var body: some View {
     let settings = overview.settings
@@ -666,11 +666,13 @@ private struct IOSAdminSegmentsForm: View {
 
 /// Speech recognition: the model the server uses to write and sync subtitles.
 private struct IOSAdminSpeechView: View {
+  let platform: String?
+
   var body: some View {
     IOSAdminLoader {
       try await $0.serverSpeech()
     } content: { speech, reload in
-      IOSAdminSpeechForm(speech: speech, reload: reload)
+      IOSAdminSpeechForm(speech: speech, platform: platform, reload: reload)
     }
     .navigationTitle("Speech Recognition")
     .navigationBarTitleDisplayMode(.inline)
@@ -680,7 +682,8 @@ private struct IOSAdminSpeechView: View {
 private struct IOSAdminSpeechForm: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   let speech: IOSServerSpeech
-  let reload: () async -> Void
+  let platform: String?
+  let reload: @MainActor @Sendable () async -> Void
   @State private var confirmation: IOSAdminConfirmation?
 
   var body: some View {
@@ -688,7 +691,8 @@ private struct IOSAdminSpeechForm: View {
       if !speech.available {
         Section {
           Text(
-            "This server has no speech recognition. On Linux, install whisper.cpp from your distribution."
+            "Speech recognition isn’t available on this server."
+              + (platform == "linux" ? " Install whisper.cpp on the Linux server." : "")
           )
           .foregroundStyle(.secondary)
         }
@@ -757,11 +761,11 @@ private struct IOSAdminSpeechForm: View {
     .background(IOSDesign.canvas.ignoresSafeArea())
     .refreshable { await reload() }
     .adminConfirmation($confirmation)
-    .task(id: speech.downloading?.receivedBytes) {
-      guard speech.downloading != nil else { return }
-      try? await Task.sleep(for: .seconds(2))
-      await reload()
-    }
+    .adminPolling(
+      every: 2,
+      while: speech.downloading != nil
+        || speech.jobs.contains { IOSAdminPollingRules.speechJobIsActive($0.state) },
+      reload: reload)
   }
 }
 
@@ -882,7 +886,7 @@ private struct IOSAdminBackupsForm: View {
   let configuration: IOSServerConfiguration?
   let canRestore: Bool
   let encrypted: Bool
-  let reload: () async -> Void
+  let reload: @MainActor @Sendable () async -> Void
   @State private var passphrase = ""
   @State private var repeated = ""
   @State private var exported: URL?
@@ -1054,8 +1058,12 @@ private struct IOSAdminDiagnosticsView: View {
               if let data = await admin.value(
                 "Preparing the report…", { try await $0.serverDiagnosticsReport() })
               {
-                try? data.write(to: destination, options: .atomic)
-                report = destination
+                do {
+                  try data.write(to: destination, options: .atomic)
+                  report = destination
+                } catch {
+                  admin.alert = IOSAdministrationModel.message(error)
+                }
               }
             }
           }
@@ -1191,7 +1199,7 @@ struct IOSAdminFileWatchView: View {
 private struct IOSAdminFileWatchForm: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   let settings: IOSFileCheckSettings
-  let reload: () async -> Void
+  let reload: @MainActor @Sendable () async -> Void
 
   var body: some View {
     Form {
@@ -1245,12 +1253,9 @@ private struct IOSAdminFileWatchForm: View {
     .scrollContentBackground(.hidden)
     .background(IOSDesign.canvas.ignoresSafeArea())
     .refreshable { await reload() }
-    .task(id: settings) {
-      // Follows the progress while files are still waiting; ends when the page closes.
-      guard settings.enabled, settings.pendingCount > 0 || settings.running else { return }
-      try? await Task.sleep(for: .seconds(5))
-      if !Task.isCancelled { await reload() }
-    }
+    .adminPolling(
+      every: 5, while: settings.enabled && (settings.pendingCount > 0 || settings.running),
+      reload: reload)
   }
 
   private func save(_ request: IOSUpdateFileCheckSettings) {
