@@ -583,3 +583,9 @@ test("box set helpers format provider labels, stats, play labels, and continuous
   assert.equal(logic.adjacentItem(playlist, "e1", -1)?.id, "m1");
   assert.equal(logic.adjacentItem(playlist, "e2", 1), null);
 });
+
+test("Forgot PIN? sends the owner to the server's computer and everyone else to the owner", () => {
+  assert.match(logic.forgotPinMessage("owner"), /Server Password/);
+  assert.match(logic.forgotPinMessage("administrator"), /Ask the server owner/);
+  assert.match(logic.forgotPinMessage(undefined), /Ask the server owner/);
+});

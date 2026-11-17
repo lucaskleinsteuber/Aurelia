@@ -23,7 +23,7 @@ import { movedDestination } from "./server-move.js";
 import { adScene, cinemaActs, cinemaWanted, comingUp, curtain, nextAd, AD_SECONDS, CURTAIN_EARLIEST, CURTAIN_LONGEST_WAIT, CURTAIN_OPENING, LAST_AD_KEY, TRAILER_LONGEST_SECONDS, TRAILER_START_SECONDS } from "./cinema.js";
 import { loadPreferences } from "./player.js";
 import { applyAppearance, loadGeneral, sidebarShows, startPath, visibleTitles } from "./preferences.js";
-import { confirmSheet } from "./sheet.js";
+import { confirmSheet, openSheet } from "./sheet.js";
 
 const SVG = "http://www.w3.org/2000/svg";
 
@@ -636,7 +636,10 @@ function showPin(profile) {
       profilePicture(profile, "large"), h("span", { class: "profile-name pin-name" }, profile.name)),
     h("p", { class: "muted pin-prompt" }, "Enter your PIN"),
     form,
-    message)));
+    message,
+    h("button", { class: "link-button", type: "button", onclick: () => openSheet({
+      symbol: "lock", title: "Forgot PIN?", subtitle: logic.forgotPinMessage(profile.role), primary: "OK", cancel: null,
+    }) }, "Forgot PIN?"))));
   field.focus();
 }
 

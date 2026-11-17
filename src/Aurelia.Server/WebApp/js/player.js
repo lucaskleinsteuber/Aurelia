@@ -17,6 +17,7 @@ import {
   timelineValueText, trackForLanguage, volumeValueText, audioProfile, decibels, DIALOGUE_BOOST_CHOICES, VOLUME_LEVELING_CHOICES,
 } from "./logic.js";
 import { createSceneNotes } from "./player-notes.js";
+import { attachMediaSession, mediaMetadataFor } from "./media-session.js";
 import { createTrackChoices, matchingTrack } from "./track-choices.js";
 import { LiveSource, MediaSourceType, isTypeSupported, liveSupported } from "./live.js";
 import { HlsSource } from "./hls.js";
@@ -267,6 +268,26 @@ export class Player {
     this.element.focus?.();
     this.video.volume = this.preferences.defaultVolume;
     this.updateVolume();
+    // Media keys and the lock screen control this player while it is open.
+    this.mediaSession = attachMediaSession({
+      metadata: mediaMetadataFor(this.item, artworkUrl),
+      seekSeconds: this.preferences.seekInterval,
+      handlers: {
+        play: () => { if (this.video.paused || this.video.ended) this.toggle(); },
+        pause: () => { if (!this.video.paused) this.toggle(); },
+        stop: () => this.close(),
+        seekBy: (seconds) => this.skip(seconds),
+        seekTo: (seconds) => {
+          if (!Number.isFinite(this.video.duration)) return;
+          const target = Math.min(Math.max(0, seconds), this.video.duration);
+          this.movedTo(target);
+          this.video.currentTime = target;
+          this.reportToParty("seek");
+        },
+        previous: () => this.navigateEpisode("previous"),
+        next: () => this.navigateEpisode("next"),
+      },
+    });
     // Opening the player is a click, so the browser allows sound processing to start now.
     if (audioProfile(this.preferences).active) this.applySound();
     try {
@@ -814,6 +835,7 @@ export class Player {
   }
 
   updatePlayState() {
+    this.mediaSession?.update(this.video, !this.video.paused && !this.video.ended);
     const playing = !this.video.paused && !this.video.ended;
     this.keepAwake(playing);
     this.playButton.replaceChildren(icon(playing ? "pause" : "play", { size: 22 }));
@@ -825,6 +847,12 @@ export class Player {
 
   tick() {
     this.updateTime();
+    // The system's controls need the position only now and then; they move it on themselves.
+    const now = Date.now();
+    if (!this.mediaSessionUpdated || now - this.mediaSessionUpdated > 5000) {
+      this.mediaSessionUpdated = now;
+      this.mediaSession?.update(this.video, !this.video.paused);
+    }
     this.updateSkipIntro();
     this.updateUpNext();
     this.updateSuggestion();
@@ -1501,10 +1529,12 @@ export class Player {
 
   async updateEpisodeButtons() {
     const lookups = [[this.previous, this.previousButton], [this.next, this.nextButton]];
-    await Promise.all(lookups.map(async ([lookup, button]) => {
+    const found = await Promise.all(lookups.map(async ([lookup, button]) => {
       const item = lookup ? await lookup().catch(() => null) : null;
       if (!this.closed && button) button.disabled = !item;
+      return Boolean(item);
     }));
+    if (!this.closed) this.mediaSession?.setEpisodes(found[0], found[1]);
   }
 
   async navigateEpisode(direction) {
@@ -1782,6 +1812,7 @@ export class Player {
     if (this.closed) return;
     this.saveNow({ keepalive: true });
     this.closed = true;
+    this.mediaSession?.detach();
     this.sceneNotes.close();
     for (const timer of this.timers) {
       clearTimeout(timer);

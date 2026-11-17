@@ -8,6 +8,16 @@ export function isPin(text) {
 
 export const PIN_INCORRECT = "The PIN is incorrect.";
 
+/**
+ * What "Forgot PIN?" says, as on the Mac, iPhone, iPad and Apple TV. A browser never resets a PIN:
+ * the owner does it on the server's computer with the Server Password, everyone else asks the owner.
+ */
+export function forgotPinMessage(role) {
+  return role === "owner"
+    ? "On the computer running your server, open Aurelia and choose Forgot PIN? on the owner profile. You need the Server Password. On a server without a screen, use its owner PIN recovery instructions."
+    : "Ask the server owner to set a new PIN for this profile in Settings › Profiles and Devices.";
+}
+
 /** Matches the server's owner-only settings and full-library storage policy. */
 export function managementPermissions(profile) {
   const owner = profile?.role === "owner";
