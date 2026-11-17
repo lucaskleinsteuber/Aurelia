@@ -7,8 +7,9 @@ struct IOSProfilesView: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
+    // The glow fills the whole screen as a background. As a sibling in the ZStack it pulled the
+    // stack beneath the status bar, and the PIN screen's "Profiles" button sat over the clock.
     ZStack {
-      IOSAmbientBackground()
       if let profile = model.selectedProfile {
         IOSPINView(profile: profile).id(profile.id)
           .transition(.opacity)
@@ -16,6 +17,8 @@ struct IOSProfilesView: View {
         picker.transition(.opacity)
       }
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background { IOSAmbientBackground() }
     .animation(
       reduceMotion ? .easeOut(duration: 0.12) : .smooth(duration: 0.32),
       value: model.selectedProfile?.id)
@@ -64,8 +67,9 @@ struct IOSProfilesView: View {
   }
 }
 
-/// Center each row, including a single profile and the last partially filled row.
-private struct IOSProfileRows: Layout {
+/// Center each row, including a single profile and the last partially filled row; also the
+/// offline mode's "Watch Downloads" chooser, so both pickers look alike.
+struct IOSProfileRows: Layout {
   private func dimensions(_ proposal: ProposedViewSize, count: Int) -> (
     width: CGFloat, columns: Int
   ) {
@@ -292,18 +296,19 @@ struct IOSPINView: View {
           }
         }
         .padding(IOSDesign.margin)
-        .padding(.top, 44)
         .frame(maxWidth: .infinity, minHeight: geometry.size.height)
       }
       .scrollBounceBehavior(.basedOnSize)
     }
-    .overlay(alignment: .topLeading) {
+    // An inset, not an overlay: with large text the button would otherwise cover the avatar.
+    .safeAreaInset(edge: .top, spacing: 0) {
       Button {
         model.cancelProfileSelection()
       } label: {
         Label("Profiles", systemImage: "chevron.left").font(.body.weight(.semibold))
       }
       .tint(.white)
+      .frame(maxWidth: .infinity, alignment: .leading)
       .padding(.horizontal, IOSDesign.margin).padding(.top, 8)
       .accessibilityIdentifier("profile-back")
     }

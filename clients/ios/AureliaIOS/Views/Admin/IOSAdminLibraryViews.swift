@@ -216,6 +216,8 @@ private struct IOSAdminLibraryContent: View {
       confirmRemove(library)
     } label: {
       Label("Remove…", systemImage: "trash")
+        // A destructive row is red throughout, its symbol too, as "Reset Library…".
+        .foregroundStyle(.red)
     }
   }
 

@@ -355,6 +355,8 @@ struct IOSConnectionSettingsView: View {
           confirmingDisconnect = true
         } label: {
           Label("Disconnect This \(IOSDesign.deviceName)", systemImage: "xmark.circle")
+            // A destructive row is red throughout, its symbol too, as "Reset Library…".
+            .foregroundStyle(.red)
         }
         .accessibilityIdentifier("settings-disconnect")
       } footer: {

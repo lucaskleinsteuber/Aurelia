@@ -151,9 +151,8 @@ struct IOSOfflineModeView: View {
           .font(.footnote).foregroundStyle(.tertiary).multilineTextAlignment(.center)
           .frame(maxWidth: 420)
         }
-        LazyVGrid(
-          columns: [GridItem(.adaptive(minimum: 100, maximum: 160), spacing: 24)], spacing: 24
-        ) {
+        // Centered rows like "Who's watching?" (a lone profile sat at the left edge).
+        IOSProfileRows {
           ForEach(cards) { card in
             Button {
               if card.pinProtected {
@@ -179,7 +178,6 @@ struct IOSOfflineModeView: View {
             .accessibilityIdentifier("offline-profile-\(card.profileID)")
           }
         }
-        .frame(maxWidth: 640)
       }
       .padding(IOSDesign.margin).padding(.vertical, 32)
       .frame(maxWidth: .infinity)

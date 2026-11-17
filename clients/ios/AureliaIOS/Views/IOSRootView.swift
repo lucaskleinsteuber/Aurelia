@@ -337,6 +337,7 @@ struct IOSServerTrustView: View {
           Text(model.inspected?.info.name ?? "Aurelia Server").font(.title.bold())
             .multilineTextAlignment(.center)
           Text(model.inspected?.baseURL.host ?? "").font(.subheadline).foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
         }
         VStack(spacing: 10) {
           Text("Check that Aurelia on your Mac or Linux computer shows the same fingerprint.")

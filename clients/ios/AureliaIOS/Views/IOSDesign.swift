@@ -122,12 +122,17 @@ struct IOSButtonStyle: ButtonStyle {
   var kind: Kind = .secondary
   var fullWidth = false
   @Environment(\.isEnabled) private var enabled
+  @Environment(\.dynamicTypeSize) private var typeSize
 
   func makeBody(configuration: Configuration) -> some View {
+    // At accessibility text sizes a label wraps instead of ending in "…" ("Pair This iPh…").
+    let wraps = typeSize.isAccessibilitySize && kind != .icon
     configuration.label
       .font(kind == .row ? .body : .body.weight(.semibold))
-      .lineLimit(1)
+      .lineLimit(wraps ? 3 : 1)
+      .multilineTextAlignment(kind == .row ? .leading : .center)
       .padding(.horizontal, kind == .icon || kind == .row ? 0 : 20)
+      .padding(.vertical, wraps && kind != .row ? 8 : 0)
       .frame(maxWidth: fullWidth ? .infinity : nil)
       .frame(width: kind == .icon ? 48 : nil, height: kind == .icon ? 48 : nil)
       .frame(minHeight: kind == .icon || kind == .row ? nil : 48)
