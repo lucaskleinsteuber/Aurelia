@@ -112,29 +112,53 @@ struct IOSWishesView: View {
     .accessibilityIdentifier("wishes-page")
   }
 
+  @ViewBuilder
   private var headerRow: some View {
-    HStack(spacing: 12) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text(
-          model.isWishAdmin
-            ? "Titles requested by the household."
-            : "Request a movie or TV series for the library."
-        )
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
+    if dynamicTypeSize.isAccessibilitySize {
+      VStack(alignment: .leading, spacing: 12) {
+        headerDescription
+          .frame(maxWidth: .infinity, alignment: .leading)
+        composerToggle(expanded: true)
       }
-      Spacer(minLength: 8)
-      Button {
-        composerExpanded.toggle()
-        if composerExpanded && !providerEnabled { showManualForm = true }
-      } label: {
-        Label(
-          composerExpanded ? "Close" : "Make a Wish",
-          systemImage: composerExpanded ? "xmark" : "plus")
+    } else {
+      HStack(spacing: 12) {
+        headerDescription
+        Spacer(minLength: 8)
+        composerToggle(expanded: false)
       }
-      .buttonStyle(IOSButtonStyle(kind: composerExpanded ? .secondary : .primary))
-      .accessibilityIdentifier("wishes-toggle-composer")
     }
+  }
+
+  private var headerDescription: some View {
+    Text(
+      model.isWishAdmin
+        ? "Titles requested by the household."
+        : "Request a movie or TV series for the library."
+    )
+    .font(.subheadline)
+    .foregroundStyle(.secondary)
+    .fixedSize(horizontal: false, vertical: true)
+  }
+
+  private func composerToggle(expanded: Bool) -> some View {
+    Button {
+      composerExpanded.toggle()
+      if composerExpanded && !providerEnabled { showManualForm = true }
+    } label: {
+      Label {
+        Text(composerExpanded ? "Close" : "Make a Wish")
+          .lineLimit(expanded ? nil : 1)
+          .fixedSize(horizontal: false, vertical: true)
+      } icon: {
+        Image(systemName: composerExpanded ? "xmark" : "plus")
+      }
+      .labelStyle(.titleAndIcon)
+      .frame(minWidth: 44, maxWidth: expanded ? .infinity : nil, minHeight: 44)
+    }
+    .buttonStyle(
+      IOSButtonStyle(kind: composerExpanded ? .secondary : .primary, fullWidth: expanded)
+    )
+    .accessibilityIdentifier("wishes-toggle-composer")
   }
 
   private var filterBar: some View {
@@ -431,23 +455,20 @@ struct IOSWishesView: View {
     let isOwnWish = model.session?.user.id == wish.userId
 
     return VStack(alignment: .leading, spacing: 10) {
-      HStack(alignment: .top, spacing: 12) {
-        IOSWishPosterView(posterPath: wish.posterPath, kind: wish.kind, width: 62, height: 92)
+      wishHeaderLayout {
+        if !dynamicTypeSize.isAccessibilitySize
+          || wish.posterPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        {
+          IOSWishPosterView(posterPath: wish.posterPath, kind: wish.kind, width: 62, height: 92)
+            .accessibilityHidden(true)
+        }
 
         VStack(alignment: .leading, spacing: 4) {
           Text(wish.year.map { "\(wish.title) (\($0))" } ?? wish.title)
             .font(.headline)
+            .fixedSize(horizontal: false, vertical: true)
 
-          HStack(spacing: 6) {
-            badgePill(IOSWishPresentation.kindLabel(wish.kind))
-            badgePill(IOSWishPresentation.stateLabel(wish.state))
-            if let rating = wish.ageRating, !rating.isEmpty {
-              badgePill(rating)
-            }
-            if wish.state == .fulfilled && isOwnWish && wish.seenByWisherAt == nil {
-              badgePill("New")
-            }
-          }
+          wishBadges(wish, isOwnWish: isOwnWish)
 
           Text("Wished by \(wish.userName)")
             .font(.caption)
@@ -515,6 +536,47 @@ struct IOSWishesView: View {
     }
     .padding(14)
     .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+  }
+
+  private var wishHeaderLayout: AnyLayout {
+    if dynamicTypeSize.isAccessibilitySize {
+      AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+    } else {
+      AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+    }
+  }
+
+  @ViewBuilder
+  private func wishBadges(_ wish: IOSWishSummary, isOwnWish: Bool) -> some View {
+    if dynamicTypeSize.isAccessibilitySize {
+      VStack(alignment: .leading, spacing: 6) {
+        wishBadgeLabels(wish, isOwnWish: isOwnWish, wrapping: true)
+      }
+    } else {
+      ViewThatFits(in: .horizontal) {
+        HStack(spacing: 6) {
+          wishBadgeLabels(wish, isOwnWish: isOwnWish, wrapping: false)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        VStack(alignment: .leading, spacing: 6) {
+          wishBadgeLabels(wish, isOwnWish: isOwnWish, wrapping: true)
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func wishBadgeLabels(
+    _ wish: IOSWishSummary, isOwnWish: Bool, wrapping: Bool
+  ) -> some View {
+    badgePill(IOSWishPresentation.kindLabel(wish.kind), wrapping: wrapping)
+    badgePill(IOSWishPresentation.stateLabel(wish.state), wrapping: wrapping)
+    if let rating = wish.ageRating, !rating.isEmpty {
+      badgePill(rating, wrapping: wrapping)
+    }
+    if wish.state == .fulfilled && isOwnWish && wish.seenByWisherAt == nil {
+      badgePill("New", wrapping: wrapping)
+    }
   }
 
   @ViewBuilder
@@ -616,9 +678,11 @@ struct IOSWishesView: View {
       .contentShape(Rectangle())
   }
 
-  private func badgePill(_ text: String) -> some View {
+  private func badgePill(_ text: String, wrapping: Bool) -> some View {
     Text(text)
       .font(.caption2.weight(.semibold))
+      .lineLimit(wrapping ? nil : 1)
+      .fixedSize(horizontal: !wrapping, vertical: true)
       .padding(.horizontal, 7)
       .padding(.vertical, 2)
       .background(IOSDesign.raised, in: Capsule())
