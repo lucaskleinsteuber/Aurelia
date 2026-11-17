@@ -517,8 +517,8 @@ with the expected revision once the server answers and the profile is open, unle
 already has a newer position.
 
 Download tickets are created with `POST /api/v1/media/{id}/playback?purpose=download` (server
-2.20.0; older servers ignore it): nobody watches yet, so Smart Home hears no `playback.*` event
-and no scrub previews are made for the title.
+2.20.0; older servers ignore it): nobody watches yet, so no scrub previews are made for the
+title.
 
 ### Smaller downloads
 
@@ -697,22 +697,18 @@ New error codes: `403 device_blocked` (sign-in or pairing from a blocked device)
 Another Device), `403 passkey_invalid` (a signature or challenge that doesn't fit) and
 `409 passkey_needed_first`. See [SECURITY_MODEL.md](SECURITY_MODEL.md#face-id-and-touch-id-instead-of-the-server-password).
 
-## Smart Home
+## Turning the server off now
 
-`automation-v1` (server 2.16.0). Players send `POST /api/v1/playback/{ticketId}/state` with
-`{"state": "playing" | "paused" | "buffering" | "stopped" | "finished", "positionSeconds": n}` the
-moment the state changes; the server answers `204` at once (`404 playback_not_found` for an ended or
-foreign ticket). Clients send only changes, never block playback on the answer, and keep saving
-progress as before. "started" goes out on the first `playing`; a client that never reports gets it
-five seconds after the ticket was created.
+`power-now-v1` (owner). `GET /api/v1/server/power/now` answers `{"actions": [...]}`: what this
+server can do now, in the order an app offers them (`sleep`, `shutdown`, `stop`; empty for a
+server that something else starts and stops). `POST /api/v1/server/power/now` with
+`{"action": "sleep" | "shutdown" | "stop", "force": false}` does it; `409 power_action_unavailable`
+or `409 playback_active` (someone is watching; send `force: true` after asking) otherwise.
 
-The owner manages webhooks and integration keys under `/api/v1/server/automation` (overview),
-`…/webhooks` (create, `PUT`/`DELETE …/{id}`, `POST …/{id}/test`, `GET …/{id}/deliveries`,
-`POST …/{id}/secret`) and `…/tokens` (create, `DELETE …/{id}`). Creating and changing them needs a
-one-time approval. `POST /api/v1/server/power/now` with `{"action": "sleep" | "shutdown" | "stop",
-"force": false}` turns the server off; `409 power_action_unavailable` or `409 playback_active`
-otherwise. Keys (`Authorization: Bearer aur_it_…`) reach only `/api/v1/integration/*`. Payloads,
-signatures and retries: [AUTOMATION.md](AUTOMATION.md).
+Servers from 2.16.0 to 2.22 offered the same under `automation-v1` (Smart Home), whose overview
+`GET /api/v1/server/automation` listed the actions as `powerActions`. Smart Home (webhooks,
+integration keys, `/api/v1/integration/*` and the players' `POST /api/v1/playback/{ticketId}/state`)
+and Siri were removed; a server without them answers those addresses with `404`.
 
 ## Family Wishes
 

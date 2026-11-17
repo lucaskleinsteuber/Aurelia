@@ -74,12 +74,8 @@ its screens are its own:
   screen. *Server*: status, health in one line with details, restart, Performance, what the server
   does by itself (scrub previews, intros and credits, speech recognition, video conversion),
   maintenance (backups with check, encrypted backup through the share sheet and restore from a
-  file; background jobs; diagnostics) and network and limits. *Smart Home* (from 2.13.0, owner): webhooks for Home
-  Assistant with Send Test, deliveries and new secrets, keys for Home Assistant and shortcuts, the
-  network card to wake the server, and Sleep, Turn Off or Stop Now; the player tells the server at
-  once when it plays, pauses, buffers or ends ([AUTOMATION.md](AUTOMATION.md)). *Siri* (from 2.14.0):
-  Set Up Siri in Smart Home lets Siri turn the server on and off, play a title on the Apple TV
-  and say what plays, also with Aurelia closed ([AUTOMATION.md](AUTOMATION.md)). *Power* and
+  file; background jobs; diagnostics) and network and limits. *Power* adds *Right Now* for the
+  owner: Sleep, Turn Off or Stop Now without waiting for the unused minutes. *Power* and
   *Server Updates* say why when this server can't use them. The network is shown but changed on the server computer,
   because a change can cut the iPhone off. Visibility follows the server: the owner sees
   everything, administrators the library and metadata, and storage needs the whole library.

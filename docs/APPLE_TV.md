@@ -95,11 +95,7 @@ answers, the Apple TV connects by itself.
 A free Apple ID signs apps for seven days; after that the app no longer opens until you build and
 install it again. With a paid Apple Developer account the signature lasts a year.
 
-## Smart Home
+## Play On
 
-From 2.7.0 the Apple TV tells the server at once when a title plays, pauses, buffers or ends, so
-Home Assistant can dim the living room lights the moment the picture appears. Webhooks are set up
-by the owner on a Mac, iPhone, iPad, the Linux app or in a browser; see [AUTOMATION.md](AUTOMATION.md).
-
-From 2.8.0 it also follows pause, continue, seek and skip from another device or Siri on an
-iPhone, iPad or Mac (“Hey Siri, play in Aurelia”), while Aurelia is open on it.
+From 2.8.0 the Apple TV follows play, pause, continue, seek, skip and stop sent with **Play on…**
+from a Mac, the Linux app or a browser, while Aurelia is open on it.
