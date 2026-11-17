@@ -13,8 +13,9 @@ main() {
 set -euo pipefail
 
 repository=${AURELIA_REPOSITORY:-lucaskleinsteuber/Aurelia}
-# Tests point this at a local stand-in for GitHub's release list.
-releases=${AURELIA_RELEASES_URL:-https://api.github.com/repos/$repository/releases?per_page=30}
+# Tests point this at a local stand-in for GitHub's release list (its further pages are
+# releases-2.json and so on beside it).
+releases=${AURELIA_RELEASES_URL:-https://api.github.com/repos/$repository/releases?per_page=100}
 # The owner's minisign key, as in `aurelia update`. Every release must be signed with it: there is
 # no way around the signature, not even for old builds. Tests with a stand-in for GitHub sign with
 # their own key and name their own installed version.
@@ -71,18 +72,33 @@ work=$(mktemp -d /var/tmp/aurelia-get.XXXXXX)
 trap 'rm -rf "$work"' EXIT
 
 echo "Looking for the newest Aurelia Server..."
-curl -fsSL --retry 3 -H 'Accept: application/vnd.github+json' "$releases" -o "$work/releases.json" \
-  || fail "GitHub could not be reached. Check the internet connection and try again."
 # The stable release with the highest build that has a package for this computer and a checksum
 # list, with the address of the list's signature last (empty without one).
-newest=$(jq -r --arg arch "$arch" '
-  [ .[] | select((.draft | not) and (.prerelease | not))
-    | first(.assets[] | select(.name == "SHA256SUMS") | .browser_download_url) as $sums
-    | (first(.assets[] | select(.name == "SHA256SUMS.minisig") | .browser_download_url) // "") as $signature
-    | .assets[]
-    | (.name | capture("^Aurelia-Server-(?<version>[0-9][0-9.]*)-(?<build>[0-9]+)-linux-" + $arch + "\\.tar\\.gz$")) as $found
-    | [($found.build | tonumber), $found.version, .name, .browser_download_url, $sums, $signature] ]
-  | max_by(.[0]) // empty | .[0] |= tostring | join("\t")' "$work/releases.json")
+newest_in() {
+  jq -r --arg arch "$arch" '
+    [ .[] | select((.draft | not) and (.prerelease | not))
+      | first(.assets[] | select(.name == "SHA256SUMS") | .browser_download_url) as $sums
+      | (first(.assets[] | select(.name == "SHA256SUMS.minisig") | .browser_download_url) // "") as $signature
+      | .assets[]
+      | (.name | capture("^Aurelia-Server-(?<version>[0-9][0-9.]*)-(?<build>[0-9]+)-linux-" + $arch + "\\.tar\\.gz$")) as $found
+      | [($found.build | tonumber), $found.version, .name, .browser_download_url, $sums, $signature] ]
+    | max_by(.[0]) // empty | .[0] |= tostring | join("\t")' "$1"
+}
+# Releases come newest first, 100 to a page; betas of every product sit between the stable
+# servers, so further pages are read until one holds a stable server (at most five).
+newest=""
+for page in 1 2 3 4 5; do
+  case $releases in
+    *\?*) address="$releases&page=$page" ;;
+    *) address=$releases; [ "$page" = 1 ] || address="${releases%.json}-$page.json" ;;
+  esac
+  if ! curl -fsSL --retry 3 -H 'Accept: application/vnd.github+json' "$address" -o "$work/releases.json"; then
+    [ "$page" = 1 ] && fail "GitHub could not be reached. Check the internet connection and try again."
+    break
+  fi
+  newest=$(newest_in "$work/releases.json")
+  [ -z "$newest" ] && [ "$(jq length "$work/releases.json")" -ge 100 ] || break
+done
 [ -n "$newest" ] || fail "No Aurelia Server release for $arch was found on GitHub."
 IFS=$'\t' read -r build version name url sums_url signature_url <<<"$newest"
 # Never back to an older server than the one installed, even if only an older release is offered.

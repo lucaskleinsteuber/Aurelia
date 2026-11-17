@@ -93,4 +93,11 @@ if AURELIA_INSTALLED_VERSION_FILE="$work/downgrade/VERSION" install_from downgra
 grep -F 'is newer than the release found' "$work/downgrade/output" >/dev/null || fail "the refusal does not say why"
 printf '9.9.8 (400)\n' > "$work/downgrade/VERSION"
 AURELIA_INSTALLED_VERSION_FILE="$work/downgrade/VERSION" install_from downgrade || { cat "$work/downgrade/output" >&2; fail "a newer signed release was not installed"; }
+# More than a page of betas and other products before the stable server: the next page is read.
+release paged
+mv "$work/paged/releases.json" "$work/paged/releases-2.json"
+jq -n '[range(100) | {draft: false, prerelease: true, assets: [{name: "Aurelia-9.9.9-1-macOS-arm64.dmg", browser_download_url: "file:///nothing"}]}]' \
+  > "$work/paged/releases.json"
+install_from paged || { cat "$work/paged/output" >&2; fail "a stable server on the second page was not found"; }
+[ -e "$work/paged/installed" ] || fail "the package from the second page was not installed"
 echo "get-aurelia.sh: all checks passed."

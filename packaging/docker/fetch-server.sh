@@ -32,9 +32,8 @@ case "$2" in
 esac
 wanted=${3:-}
 work=$(mktemp -d)
-curl -fsSL --retry 3 -H 'Accept: application/vnd.github+json' \
-  "https://api.github.com/repos/$repository/releases?per_page=30" -o "$work/releases.json"
-newest=$(jq -r --arg arch "$arch" --arg wanted "$wanted" '
+newest_in() {
+  jq -r --arg arch "$arch" --arg wanted "$wanted" '
   [ .[] | select((.draft | not) and (.prerelease | not))
     | first(.assets[] | select(.name == "SHA256SUMS") | .browser_download_url) as $sums
     | (first(.assets[] | select(.name == "SHA256SUMS.minisig") | .browser_download_url) // "") as $signature
@@ -42,7 +41,17 @@ newest=$(jq -r --arg arch "$arch" --arg wanted "$wanted" '
     | (.name | capture("^Aurelia-Server-(?<version>[0-9][0-9.]*)-(?<build>[0-9]+)-linux-" + $arch + "\\.tar\\.gz$")) as $found
     | select($wanted == "" or $found.build == $wanted)
     | [($found.build | tonumber), $found.version, .name, .browser_download_url, $sums, $signature] ]
-  | max_by(.[0]) // empty | .[0] |= tostring | join("\t")' "$work/releases.json")
+  | max_by(.[0]) // empty | .[0] |= tostring | join("\t")' "$1"
+}
+# Releases come newest first, 100 to a page, with betas of every product between the stable
+# servers: further pages are read until one holds the wanted server (at most five).
+newest=""
+for page in 1 2 3 4 5; do
+  curl -fsSL --retry 3 -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/$repository/releases?per_page=100&page=$page" -o "$work/releases.json"
+  newest=$(newest_in "$work/releases.json")
+  [ -z "$newest" ] && [ "$(jq length "$work/releases.json")" -ge 100 ] || break
+done
 [ -n "$newest" ] || { echo "No stable Aurelia Server release for $arch${wanted:+ with build $wanted} was found." >&2; exit 1; }
 IFS=$'\t' read -r build version name url sums_url signature_url <<<"$newest"
 echo "Aurelia Server $version ($build) for $arch"

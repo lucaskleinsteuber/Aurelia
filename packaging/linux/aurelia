@@ -548,9 +548,10 @@ case "$command" in
       aarch64|arm64) arch=arm64 ;;
       *) arch=$(uname -m) ;;
     esac
-    # The latest release answers reliably. GitHub's list of releases often comes back empty
-    # although they exist, so it is only asked when the latest release has no package for this
-    # computer, and an empty answer is asked again a few times before it counts.
+    # The latest release answers reliably and is the newest stable server (the Mac app ships
+    # betas only). GitHub's list of releases often comes back empty although they exist, so it is
+    # only asked when the latest release has no package for this computer, and an empty answer is
+    # asked again a few times before it counts.
     newest=""
     beta_updates=false
     [ "$(cat "$channel_file" 2>/dev/null)" = beta ] && beta_updates=true
@@ -570,9 +571,16 @@ case "$command" in
     while [ -z "$newest" ] && [ "$attempt" -lt 4 ]; do
       if [ "$attempt" -gt 0 ]; then sleep 2; fi
       attempt=$(( attempt + 1 ))
-      status=$(github_fetch "$releases?per_page=30" "$work/releases.json")
-      [ "$status" = 200 ] || github_failed "$status" "the releases of $update_repository"
-      newest=$(newest_package "$work/releases.json")
+      # Newest first, 100 to a page; betas of every product sit between the stable servers, so
+      # further pages are read until one holds a server (at most five).
+      page=1
+      while :; do
+        status=$(github_fetch "$releases?per_page=100&page=$page" "$work/releases.json")
+        [ "$status" = 200 ] || github_failed "$status" "the releases of $update_repository"
+        newest=$(newest_package "$work/releases.json")
+        [ -z "$newest" ] && [ "$(jq length "$work/releases.json")" -ge 100 ] && [ "$page" -lt 5 ] || break
+        page=$(( page + 1 ))
+      done
     done
     status_checked_at=$(date +%s)
     if [ -z "$newest" ]; then
