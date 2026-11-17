@@ -16,12 +16,6 @@ public sealed class EndpointSecurityTests
         "GET /api/v1/capabilities",
         "GET /api/v1/health",
         "GET /api/v1/health/ready",
-        // Home Assistant and shortcuts: each checks an integration key with its own scope.
-        "GET /api/v1/integration/players",
-        "GET /api/v1/integration/search",
-        "GET /api/v1/integration/status",
-        "GET /api/v1/integration/titles/{id:guid}/episode",
-        "GET /api/v1/integration/titles/{id:guid}/next",
         "GET /api/v1/server/info",
         "GET,HEAD /api/v1/health/live",
         "POST /api/v1/auth/device-pairings/",
@@ -30,8 +24,6 @@ public sealed class EndpointSecurityTests
         "POST /api/v1/auth/device-pairings/{id:guid}/status",
         "POST /api/v1/auth/login",
         "POST /api/v1/auth/pair",
-        "POST /api/v1/integration/players/{deviceId}/commands",
-        "POST /api/v1/integration/power",
         "POST /api/v1/local/owner-pin",
         "POST /api/v1/setup/owner",
         // Moving a server (docs/SERVER_MOVE.md): between the two servers the move code and the

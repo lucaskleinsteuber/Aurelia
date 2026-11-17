@@ -26,9 +26,8 @@ import { serverSpeechSection } from "./speech-view.js";
 import { supportsFileChecks } from "./file-checks.js";
 import { renderDrives, renderFileProblems, serverFileChecksSection } from "./file-checks-view.js";
 import { supportsSecurity } from "./security.js";
-import { remoteUnlockPanel, securitySection } from "./security-view.js";
-import { supportsAutomation } from "./automation.js";
-import { smartHomeSections, unlocked } from "./automation-view.js";
+import { remoteUnlockPanel, securitySection, unlocked } from "./security-view.js";
+import { POWER_ACTIONS, powerNowActions, powerNowOptionsPath, supportsPowerNow } from "./power-now.js";
 import { confirmSheet, openSheet } from "./sheet.js";
 
 const CATEGORIES = [
@@ -39,7 +38,6 @@ const CATEGORIES = [
   { id: "profiles", label: "Profiles and Devices", symbol: "lock", adminOnly: false },
   { id: "server", label: "Server", symbol: "tv", adminOnly: true },
   { id: "power", label: "Power", symbol: "power", adminOnly: true, ownerOnly: true, needsPower: true },
-  { id: "smarthome", label: "Smart Home", symbol: "tv", adminOnly: true, ownerOnly: true, needsAutomation: true },
   { id: "updates", label: "Updates", symbol: "arrow", adminOnly: false },
   { id: "advanced", label: "Advanced", symbol: "gear", adminOnly: true },
   { id: "about", label: "About", symbol: "star", adminOnly: false },
@@ -82,7 +80,6 @@ export function createSettings(app) {
       page = "general";
     }
     if (page === "power" && !owner) page = "server";
-    if (page === "smarthome" && (!owner || !supportsAutomation(state.server?.capabilities))) page = "general";
 
     let sections = null;
     const needsManagement = canManage() && (["library", "metadata", "server", "advanced", "updates", "profiles"].includes(page) || searchQuery !== "");
@@ -119,7 +116,7 @@ export function createSettings(app) {
     }
     if (page === "power" && !powerAvailable) page = "general";
     const availableCategories = CATEGORIES.filter((c) => (!c.adminOnly || canManage()) && (!c.ownerOnly || owner)
-      && (!c.needsPower || powerAvailable) && (!c.needsAutomation || supportsAutomation(state.server?.capabilities)));
+      && (!c.needsPower || powerAvailable));
 
     const refresh = () => app.navigate(state.route, { replace: true, quiet: true });
 
@@ -349,7 +346,6 @@ export function createSettings(app) {
       case "profiles": return profilesPage(sections, refresh);
       case "server": return serverPage(sections, refresh);
       case "power": return h("div", { class: "settings-stack" }, ...powerSections(sections, refresh));
-      case "smarthome": return h("div", { class: "settings-stack" }, ...smartHomeSections({ api, app, kit: { section, row, value }, refresh }));
       case "updates": return updatesPage(sections, refresh);
       case "advanced": return advancedPage(sections, refresh);
       case "about": return h("div", { class: "settings-stack" }, ...aboutSections());
@@ -387,8 +383,6 @@ export function createSettings(app) {
       ...(canManage() && sections ? powerSections(sections, refresh) : []),
       ...updatesSections(sections, refresh),
       ...(canManage() && sections ? advancedSections(sections, refresh) : []),
-      // Smart Home too (audit S13).
-      ...(owner && supportsAutomation(state.server?.capabilities) ? smartHomeSections({ api, app, kit: { section, row, value }, refresh }) : []),
       ...aboutSections(),
     ];
   }
@@ -982,7 +976,51 @@ export function createSettings(app) {
         row("When Unused", mode), explanation, ...unused, wakeRow,
         h("div", { class: "button-row" }, save)),
       checkSection,
-    ];
+      powerNowSection(),
+    ].filter(Boolean);
+  }
+
+  /** Sleep, Turn Off or Stop Now for the owner; what this server can do is asked once the page shows. */
+  function powerNowSection() {
+    const capabilities = state.server?.capabilities;
+    if (state.profile?.role !== "owner" || !supportsPowerNow(capabilities)) return null;
+    const rows = h("div", {}, h("p", { class: "muted small" }, "Checking what this server can do…"));
+    const element = section("Right Now", "power", "Without waiting for the unused minutes.", rows);
+    (async () => {
+      let actions;
+      try {
+        actions = powerNowActions(await api.powerNowOptions(powerNowOptionsPath(capabilities), { signal: serverRead.signal }));
+      } catch (error) {
+        if (serverRead.signal.aborted) return;
+        clear(rows);
+        rows.append(h("p", { class: "error-text" }, error?.message ?? "What this server can do couldn't be read."));
+        return;
+      }
+      clear(rows);
+      if (!actions.length) {
+        rows.append(h("p", { class: "muted small" }, "This server can't turn itself off; it runs as a service that something else starts and stops."));
+        return;
+      }
+      for (const action of actions) {
+        const words = POWER_ACTIONS[action];
+        const button = h("button", { type: "button", class: action === "stop" ? "secondary-button" : "secondary-button danger" }, words.title);
+        button.addEventListener("click", async () => {
+          if (!(await confirmSheet({ symbol: "power", title: `${words.title}?`, message: words.detail, confirm: words.title }))) return;
+          try {
+            const result = await unlocked(api, () => api.powerNow(action));
+            if (result) app.toast(result.message);
+          } catch (error) {
+            if (error?.code === "playback_active" && await confirmSheet({ symbol: "warning", title: "Someone Is Watching",
+              message: "Turn it off anyway? Their playback stops.", confirm: words.title })) {
+              try { app.toast((await api.powerNow(action, true)).message); }
+              catch (forced) { if (!app.handleError(forced)) app.toast(forced.message); }
+            } else if (!app.handleError(error)) app.toast(error.message);
+          }
+        });
+        rows.append(row(words.title, button, words.detail));
+      }
+    })();
+    return element;
   }
 
   // MARK: Updates Sections

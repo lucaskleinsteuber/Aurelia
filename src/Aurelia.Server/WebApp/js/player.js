@@ -17,7 +17,6 @@ import {
   timelineValueText, trackForLanguage, volumeValueText, audioProfile, decibels, DIALOGUE_BOOST_CHOICES, VOLUME_LEVELING_CHOICES,
 } from "./logic.js";
 import { createSceneNotes } from "./player-notes.js";
-import { playerStateFor, shouldReport } from "./automation.js";
 import { createTrackChoices, matchingTrack } from "./track-choices.js";
 import { LiveSource, MediaSourceType, isTypeSupported, liveSupported } from "./live.js";
 import { HlsSource } from "./hls.js";
@@ -519,7 +518,6 @@ export class Player {
     on(video, "pause", () => {
       this.updatePlayState();
       this.saveNow();
-      this.reportState("pause");
       // Pausing during a stall ends the waiting: the ring goes, the stall timer stops (a pause is
       // not a slow connection) and a party stops waiting for this viewer (audit X11).
       this.element.classList.remove("waiting");
@@ -528,7 +526,6 @@ export class Player {
       this.together?.session()?.playerChanged();
     });
     on(video, "playing", () => {
-      this.reportState("playing");
       this.startScreen.hidden = true;
       this.element.classList.remove("waiting");
       this.endStall();
@@ -538,7 +535,6 @@ export class Player {
     on(video, "canplay", () => this.together?.session()?.playerChanged());
     on(video, "waiting", () => {
       this.element.classList.add("waiting");
-      this.reportState("waiting");
       this.beginStall();
       this.together?.session()?.playerChanged();
     });
@@ -559,10 +555,7 @@ export class Player {
         else this.listeners.push(() => video.remote.cancelWatchAvailability?.(id).catch?.(() => {}));
       }, () => {});
     }
-    on(video, "ended", () => {
-      this.reportState("ended");
-      this.finish();
-    });
+    on(video, "ended", () => this.finish());
     on(video, "error", () => this.videoFailed());
     on(this.timeline, "input", () => {
       if (Number.isFinite(video.duration)) {
@@ -1469,35 +1462,6 @@ export class Player {
     if (this.upNext.dataset.kind !== "credits") this.autoplayCancelled = true;
     this.creditsAnchor = null;
     this.upNext.hidden = true;
-  }
-
-  /**
-   * Smart Home: tells the server at once that the video plays, pauses, buffers or ended, so a
-   * light dims when the picture appears. Fire and forget; the regular progress saves stay.
-   */
-  reportState(event) {
-    const state = playerStateFor(event);
-    if (!state) return;
-    clearTimeout(this.bufferingReport);
-    this.timers.delete(this.bufferingReport);
-    // A seek waits a moment for its picture; only waiting that lasts is reported, so a light
-    // doesn't flicker with every jump (audit, player performance).
-    if (state === "buffering") {
-      this.bufferingReport = setTimeout(() => {
-        this.timers.delete(this.bufferingReport);
-        this.sendState(state);
-      }, 1500);
-      this.timers.add(this.bufferingReport);
-      return;
-    }
-    this.sendState(state);
-  }
-
-  sendState(state) {
-    if (!this.source || this.closed || !shouldReport(this.reportedState, state)) return;
-    this.reportedState = state;
-    const position = Number.isFinite(this.video.currentTime) ? Math.round(this.video.currentTime * 10) / 10 : undefined;
-    this.api.playbackState?.(this.source.id, state, position)?.catch?.(() => {});
   }
 
   async finish() {

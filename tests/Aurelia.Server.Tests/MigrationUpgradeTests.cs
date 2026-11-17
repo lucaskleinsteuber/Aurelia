@@ -146,6 +146,43 @@ public sealed class MigrationUpgradeTests
     }
 
     [Fact]
+    public async Task RemovingSmartHomeDropsWebhooksAndKeysAndKeepsProfiles()
+    {
+        var root = TestPaths.CreateDataDirectory();
+        Directory.CreateDirectory(root);
+        var options = new DbContextOptionsBuilder<AureliaDbContext>()
+            .UseSqlite($"Data Source={Path.Combine(root, "aurelia.db")};Pooling=False").Options;
+        try
+        {
+            await using var database = new AureliaDbContext(options);
+            await database.Database.GetService<IMigrator>().MigrateAsync("20261116071331_People");
+            var userId = Guid.NewGuid();
+            await database.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO Users (Id, Username, NormalizedUsername, PasswordHash, Role, CreatedAt, IsEnabled, AccessMode, AccessRevision, PinProtectionEnabled, ProfileRevision)
+                VALUES ({userId}, 'Kept', 'KEPT', 'unchanged-password-hash', 'Owner', 1, 1, 'EntireLibrary', 2, 0, 0);
+                """);
+            await database.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO AutomationWebhooks (Id, Name, Url, Preset, Events, DeviceIds, ProfileIds, IncludeTitles, ExcludeChildren, Enabled, ConsecutiveFailures, ProtectedSecret, CreatedAt, UpdatedAt)
+                VALUES ({Guid.NewGuid()}, 'Invented', 'https://receiver.invalid/hook', 'generic', 'playback.started', '', '', 1, 0, 1, 0, 'invented-secret', 1, 1);
+                """);
+            await database.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO IntegrationTokens (Id, Name, TokenHash, Scopes, UserId, CreatedAt)
+                VALUES ({Guid.NewGuid()}, 'Invented key', 'invented-hash', 'status', {userId}, 1);
+                """);
+
+            await database.Database.MigrateAsync();
+
+            foreach (var table in new[] { "AutomationWebhooks", "AutomationDeliveries", "IntegrationTokens" })
+            {
+                Assert.Equal(0L, await ScalarAsync(database, $"SELECT count(*) FROM sqlite_master WHERE name = '{table}'"));
+            }
+            var user = await database.Users.AsNoTracking().SingleAsync(candidate => candidate.Id == userId);
+            Assert.Equal(("unchanged-password-hash", 2), (user.PasswordHash, user.AccessRevision));
+        }
+        finally { SqliteConnection.ClearAllPools(); Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task MediaSegmentTimesUpgradeAddsAnEmptyTableAndKeepsExistingData()
     {
         var root = TestPaths.CreateDataDirectory();

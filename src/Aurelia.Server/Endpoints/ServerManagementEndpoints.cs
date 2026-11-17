@@ -32,6 +32,16 @@ public static class ServerManagementEndpoints
         server.MapPost("/updates/check", (ServerUpdateStore updates) => updates.RequestCheck());
         server.MapPost("/updates/install", (ServerUpdateStore updates) => updates.RequestInstall());
         server.MapPut("/power", (UpdateServerPowerSettingsRequest request, ServerPowerSettingsStore power) => power.Update(request));
+        // Sleep, Turn Off or Stop Now (Settings › Power, "power-now-v1").
+        server.MapGet("/power/now", (PowerNowService power) => new PowerNowOptions(power.Actions));
+        server.MapPost("/power/now", (PowerNowRequest request, PowerNowService power) =>
+        {
+            try { return Results.Ok(power.Request(request)); }
+            catch (PowerNowException exception)
+            {
+                return Results.Json(new ApiProblem(exception.Code, exception.Message), statusCode: exception.StatusCode);
+            }
+        });
         server.MapGet("/jobs", async (LibraryService libraries, MetadataService metadata, CancellationToken token) => new
         { scans = await libraries.ListScansAsync(null, false, 100, token), metadata = await metadata.ListJobsAsync(false, 100, token) });
         app.MapPost("/api/v1/metadata/jobs/{id:guid}/retry", (Guid id, MetadataService metadata, CancellationToken token) => metadata.RetryJobAsync(id, token))

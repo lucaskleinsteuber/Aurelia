@@ -10,7 +10,7 @@ public static class ServerFeatures
         "library-state-v1", "server-readiness-v1", "device-authorization-v1", "artwork-variants-v1",
         "catalog-pages-500-v1", PreviewStreams, WebApp, ProfilePersonalization, AgeLimits,
         WebPairingCode, CinemaTrailers, MovieNight, YearWrapped, MonthlyWrapped, MediaSegments, ServerSpeech, Suggestions,
-        ScreenTime, Wishes, Security, ServerPerformance, Automation, FileChecks, People,
+        ScreenTime, Wishes, Security, ServerPerformance, PowerNow, FileChecks, People,
     });
 
     /// <summary>
@@ -71,8 +71,12 @@ public static class ServerFeatures
     /// <summary>Response times and slow queries measured by the server ("server-performance-v1").</summary>
     public const string ServerPerformance = "server-performance-v1";
 
-    /// <summary>Smart Home: players report their state at once, webhooks, integration keys and turning off now.</summary>
-    public const string Automation = "automation-v1";
+    /// <summary>
+    /// Sleep, Turn Off or Stop Now for the owner in Settings › Power ("power-now-v1"):
+    /// `GET /api/v1/server/power/now` lists what this server can do, `POST` does it. Servers from
+    /// 2.16.0 to 2.22 offered the same under "automation-v1" (Smart Home, since removed).
+    /// </summary>
+    public const string PowerNow = "power-now-v1";
 
     /// <summary>
     /// The file watch: the server reads every file in the background, finds damaged, unreadable or

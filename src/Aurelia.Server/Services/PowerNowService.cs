@@ -1,9 +1,9 @@
 using Aurelia.Contracts;
 
-namespace Aurelia.Server.Services.Automation;
+namespace Aurelia.Server.Services;
 
 /// <summary>
-/// "Turn the server off now" from an app, Home Assistant or Siri. A Linux package server leaves a
+/// "Turn the server off now" from an owner's app (Settings › Power). A Linux package server leaves a
 /// power-now file that the aurelia-power-request path unit hands to aurelia-autosleep at once, which
 /// sleeps or turns the computer off as `aurelia sleep` would (it is woken with Wake-on-LAN). A server
 /// in the Mac or Linux app can only stop; it starts again when Aurelia is opened on that computer.
@@ -30,11 +30,11 @@ public sealed partial class PowerNowService(
     {
         var action = (request.Action ?? string.Empty).Trim().ToLowerInvariant();
         if (!Actions.Contains(action))
-            throw new AutomationException("power_action_unavailable", Actions.Count == 0
+            throw new PowerNowException("power_action_unavailable", Actions.Count == 0
                 ? "This server can't turn itself off. It runs as a service that something else starts and stops."
                 : "This server can't do that. " + Describe(Actions), 409);
         if (streams.PlaybackCount > 0 && !request.Force)
-            throw new AutomationException("playback_active", "Someone is watching right now. Turn it off anyway?", 409);
+            throw new PowerNowException("playback_active", "Someone is watching right now. Turn it off anyway?", 409);
         if (ServerHosting.ByApp(Hosting))
         {
             Stopping(logger, action);
@@ -61,4 +61,11 @@ public sealed partial class PowerNowService(
 
     [LoggerMessage(LogLevel.Information, "Asked to {Action} now.")]
     private static partial void Stopping(ILogger logger, string action);
+}
+
+/// <summary>A power action this server can't do now, as an API problem.</summary>
+public sealed class PowerNowException(string code, string message, int statusCode) : Exception(message)
+{
+    public string Code { get; } = code;
+    public int StatusCode { get; } = statusCode;
 }

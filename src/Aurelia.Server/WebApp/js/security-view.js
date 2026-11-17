@@ -5,7 +5,6 @@
 
 import { h, icon, clear } from "./dom.js";
 import { confirmSheet } from "./sheet.js";
-import { unlocked } from "./automation-view.js";
 import {
   SECURITY_LOG_FILTERS, newDeviceNote, remoteUnlockState, securityDeviceLine, securityEventText, securityEventsQuery,
   unansweredDevices
@@ -262,4 +261,56 @@ export function createSecurityAlerts({ api, toast, handleError }) {
   }
 
   return { start, stop };
+}
+
+/**
+ * Runs a management change; when management is locked, asks for the Server Password (or a
+ * confirmation on another device) once and runs it again. Returns undefined when cancelled.
+ */
+export async function unlocked(api, work, onCancel) {
+  try {
+    return await work();
+  } catch (error) {
+    if (error?.code !== "management_locked") throw error;
+  }
+  const ok = await new Promise((resolve) => {
+    const password = h("input", { type: "password", class: "text-field", autocomplete: "current-password", "aria-label": "Server Password" });
+    const message = h("p", { class: "error-text", role: "alert" });
+    const body = h("div", {});
+    const submit = h("button", { type: "button", class: "primary-button" }, "Unlock");
+    let settled = false;
+    const finish = (value) => { if (!settled) { settled = true; resolve(value); } dialog.close(); };
+    const dialog = h("dialog", { class: "sheet" },
+      h("h2", {}, "Unlock Server Management"),
+      h("p", { class: "muted small" }, "Enter the Server Password to make this change. Management stays unlocked for ten minutes."),
+      body, password, message,
+      h("div", { class: "button-row end" }, h("button", { type: "button", class: "secondary-button", onclick: () => finish(false) }, "Cancel"), submit));
+    submit.addEventListener("click", async () => {
+      if (!password.value) return;
+      submit.disabled = true;
+      try {
+        await api.unlockManagement(password.value);
+        finish(true);
+      } catch (error) {
+        submit.disabled = false;
+        if (error?.code === "passkey_required") {
+          password.hidden = true;
+          submit.hidden = true;
+          body.append(remoteUnlockPanel({ api, onUnlocked: () => finish(true) }));
+          return;
+        }
+        message.textContent = error?.code === "invalid_credentials" ? "The Server Password is incorrect." : error?.message ?? "";
+      } finally {
+        password.value = "";
+      }
+    });
+    password.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); submit.click(); } });
+    dialog.addEventListener("cancel", () => finish(false));
+    dialog.addEventListener("close", () => { if (!settled) { settled = true; resolve(false); } dialog.remove(); });
+    document.body.append(dialog);
+    dialog.showModal();
+    password.focus();
+  });
+  if (!ok) onCancel?.();
+  return ok ? work() : undefined;
 }

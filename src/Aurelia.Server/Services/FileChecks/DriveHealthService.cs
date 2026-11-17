@@ -6,7 +6,6 @@ using System.Xml;
 using System.Xml.Linq;
 using Aurelia.Contracts;
 using Aurelia.Server.Data;
-using Aurelia.Server.Services.Automation;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aurelia.Server.Services.FileChecks;
@@ -24,7 +23,6 @@ public sealed record DriveReport(string Key, string Name, DriveHealthState State
 /// </summary>
 public sealed partial class DriveHealthService(
     IServiceScopeFactory scopes,
-    AutomationEventBus events,
     ILogger<DriveHealthService> logger,
     TimeProvider? timeProvider = null) : BackgroundService
 {
@@ -100,7 +98,6 @@ public sealed partial class DriveHealthService(
                 var before = earlier.GetValueOrDefault(key, DriveHealthState.Good);
                 if (state is DriveHealthState.Failing or DriveHealthState.Warning && before is not (DriveHealthState.Failing or DriveHealthState.Warning))
                 {
-                    events.Publish(new AutomationEvent(AutomationEvents.DriveFailing, Guid.NewGuid(), now, Count: 1));
                     LogDriveWarning(logger, entry.Report.Name, state);
                 }
                 earlier[key] = state;

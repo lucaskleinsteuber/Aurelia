@@ -5,7 +5,6 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Aurelia.Contracts;
 using Aurelia.Server.Data;
-using Aurelia.Server.Services.Automation;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aurelia.Server.Services.FileChecks;
@@ -39,7 +38,6 @@ public sealed partial class FileCheckService : BackgroundService
     private readonly ActiveStreamRegistry streams;
     private readonly LibraryScanScheduler scans;
     private readonly MetadataJobScheduler metadataJobs;
-    private readonly AutomationEventBus events;
     private readonly ILogger<FileCheckService> logger;
     private readonly TimeProvider clock;
     private readonly string settingsPath;
@@ -81,7 +79,6 @@ public sealed partial class FileCheckService : BackgroundService
         ActiveStreamRegistry streams,
         LibraryScanScheduler scans,
         MetadataJobScheduler metadataJobs,
-        AutomationEventBus events,
         ILogger<FileCheckService> logger,
         TimeProvider? clock = null)
     {
@@ -91,7 +88,6 @@ public sealed partial class FileCheckService : BackgroundService
         this.streams = streams;
         this.scans = scans;
         this.metadataJobs = metadataJobs;
-        this.events = events;
         this.logger = logger;
         this.clock = clock ?? TimeProvider.System;
         settingsPath = Path.Combine(runtime.DataDirectory, SettingsFileName);
@@ -463,8 +459,6 @@ public sealed partial class FileCheckService : BackgroundService
             var isNew = !sameVersion || existing!.State != finding.State;
             if (isNew && finding.State is FileCheckState.Damaged or FileCheckState.Unreadable or FileCheckState.ChangedUnexpectedly)
             {
-                events.Publish(new AutomationEvent(AutomationEvents.FileDamaged, Guid.NewGuid(), now,
-                    Media: await PlaybackActivityTracker.MediaAsync(database, media, cancellationToken)));
                 LogProblem(logger, media.Id, finding.State);
             }
         }

@@ -8,8 +8,7 @@ namespace Aurelia.Server.Services;
 
 public sealed class PlaybackProgressService(
     AureliaDbContext database,
-    ScreenTimeService? screenTime = null,
-    Automation.PlaybackActivityTracker? activity = null)
+    ScreenTimeService? screenTime = null)
 {
     private const long MeaningfulProgressMilliseconds = 10_000;
     private const long CompletionWindowMilliseconds = 45_000;
@@ -99,7 +98,6 @@ public sealed class PlaybackProgressService(
             && request.PositionMilliseconds <= MeaningfulProgressMilliseconds;
 
         if (screenTime is not null) await screenTime.RecordProgressAsync(userId, media.Id, request.PositionMilliseconds, cancellationToken);
-        if (completed) activity?.Finished(userId, media.Id);
 
         var newPosition = completed || reset ? 0 : request.PositionMilliseconds;
         var changed = progress.PositionMilliseconds != newPosition || progress.IsCompleted != completed;
