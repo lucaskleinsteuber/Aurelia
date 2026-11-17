@@ -158,7 +158,7 @@ enum IOSWrapped {
     "gold": Accent(field: 0xF6B92B, ink: 0x1E1400, sticker: 0x1E1400),
     "rose": Accent(field: 0xFF4D88, ink: 0x22000F, sticker: 0x22000F),
     "mint": Accent(field: 0x33D39A, ink: 0x00180E, sticker: 0x00180E),
-    "ocean": Accent(field: 0x1D8BFF, ink: 0xFFFFFF, sticker: 0x0B1A3A),
+    "ocean": Accent(field: 0x1D8BFF, ink: 0x0B1A3A, sticker: 0x0B1A3A),
     "lime": Accent(field: 0xC4EE34, ink: 0x131A00, sticker: 0x131A00),
   ]
 

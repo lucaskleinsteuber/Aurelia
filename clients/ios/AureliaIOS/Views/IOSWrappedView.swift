@@ -45,14 +45,6 @@ struct IOSWrappedView: View {
     let accent = IOSWrapped.accent(slide?.accent ?? "night")
     ZStack {
       Color(wrappedHex: accent.field).ignoresSafeArea()
-      if let poster = slide?.poster {
-        IOSArtworkView(artwork: poster, width: 320, symbol: nil)
-          .blur(radius: 40)
-          .opacity(0.3)
-          .ignoresSafeArea()
-          .allowsHitTesting(false)
-          .accessibilityHidden(true)
-      }
       VStack(spacing: 0) {
         header(count: wrapped?.slides.count ?? 0, accent: accent)
         if let slide {
@@ -101,7 +93,7 @@ struct IOSWrappedView: View {
 
   private func content(_ slide: IOSWrappedSlide, accent: IOSWrapped.Accent) -> some View {
     VStack(alignment: .leading, spacing: 18) {
-      Text(slide.eyebrow).font(.subheadline.weight(.bold)).opacity(0.8)
+      Text(slide.eyebrow).font(.subheadline.weight(.bold))
       if slide.kind != "summary", let poster = slide.poster {
         IOSArtworkView(artwork: poster, width: 200)
           .frame(width: 140, height: 210)
@@ -167,7 +159,7 @@ struct IOSWrappedView: View {
       VStack(alignment: .leading, spacing: 16) {
         ForEach(facts, id: \.label) { fact in
           VStack(alignment: .leading, spacing: 4) {
-            Text(fact.label).opacity(0.72)
+            Text(fact.label)
             Text(fact.value).fontWeight(.heavy)
           }
           .accessibilityElement(children: .combine)
@@ -177,7 +169,7 @@ struct IOSWrappedView: View {
       Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
         ForEach(facts, id: \.label) { fact in
           GridRow {
-            Text(fact.label).opacity(0.72)
+            Text(fact.label)
             Text(fact.value).fontWeight(.heavy)
           }
           .accessibilityElement(children: .combine)
