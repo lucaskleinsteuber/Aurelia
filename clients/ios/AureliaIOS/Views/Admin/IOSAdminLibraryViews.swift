@@ -979,29 +979,43 @@ private struct IOSAdminImportPreviewView: View {
               editing = [item]
             }
           } label: {
-            HStack(spacing: 10) {
-              if selecting {
-                Image(systemName: selection.contains(item.id) ? "checkmark.circle.fill" : "circle")
-                  .foregroundStyle(selection.contains(item.id) ? Color.accentColor : .secondary)
-              }
-              Image(systemName: item.isDirectory ? "folder" : "film").foregroundStyle(.secondary)
-              VStack(alignment: .leading, spacing: 2) {
-                Text(item.title.isEmpty ? item.relativePath : item.title).foregroundStyle(.primary)
-                Text(item.relativePath.isEmpty ? "Storage root" : item.relativePath).font(.caption)
-                  .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                if item.status == "pending" || item.status == "error", !item.reason.isEmpty {
-                  Text(item.reason).font(.caption2).foregroundStyle(.orange).lineLimit(2)
+            Group {
+              if dynamicTypeSize.isAccessibilitySize {
+                accessibilityImportRow(item)
+              } else {
+                HStack(spacing: 10) {
+                  if selecting {
+                    Image(
+                      systemName: selection.contains(item.id) ? "checkmark.circle.fill" : "circle"
+                    )
+                    .foregroundStyle(selection.contains(item.id) ? Color.accentColor : .secondary)
+                  }
+                  Image(systemName: item.isDirectory ? "folder" : "film").foregroundStyle(
+                    .secondary)
+                  VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title.isEmpty ? item.relativePath : item.title).foregroundStyle(
+                      .primary)
+                    Text(item.relativePath.isEmpty ? "Storage root" : item.relativePath).font(
+                      .caption
+                    )
+                    .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    if item.status == "pending" || item.status == "error", !item.reason.isEmpty {
+                      Text(item.reason).font(.caption2).foregroundStyle(.orange).lineLimit(2)
+                    }
+                  }
+                  Spacer()
+                  Text(Self.kindLabel(item))
+                    .font(.caption)
+                    .foregroundStyle(
+                      item.status == "pending" || item.status == "error" ? Color.orange : .secondary
+                    )
                 }
               }
-              Spacer()
-              Text(Self.kindLabel(item))
-                .font(.caption)
-                .foregroundStyle(
-                  item.status == "pending" || item.status == "error" ? Color.orange : .secondary)
             }
             .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
+          .accessibilityAddTraits(selecting && selection.contains(item.id) ? .isSelected : [])
         }
       }
     }
@@ -1067,6 +1081,37 @@ private struct IOSAdminImportPreviewView: View {
         }
       }
     }
+  }
+
+  private func accessibilityImportRow(_ item: IOSImportPreviewItem) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(item.title.isEmpty ? item.relativePath : item.title)
+        .foregroundStyle(.primary)
+      Text(item.relativePath.isEmpty ? "Storage root" : item.relativePath)
+        .font(.caption).foregroundStyle(.secondary)
+      Text(Self.kindLabel(item))
+        .font(.caption)
+        .foregroundStyle(
+          item.status == "pending" || item.status == "error" ? Color.orange : .secondary)
+      if item.status == "pending" || item.status == "error", !item.reason.isEmpty {
+        Text(item.reason).font(.caption2).foregroundStyle(.orange)
+      }
+      if selecting {
+        Label {
+          Text(selection.contains(item.id) ? "Selected" : "Not Selected")
+        } icon: {
+          Image(systemName: selection.contains(item.id) ? "checkmark.circle.fill" : "circle")
+            .frame(minWidth: 44, minHeight: 44)
+        }
+        .font(.caption)
+        .foregroundStyle(selection.contains(item.id) ? Color.accentColor : .secondary)
+        .accessibilityHidden(true)
+      }
+    }
+    .lineLimit(nil)
+    .fixedSize(horizontal: false, vertical: true)
+    .multilineTextAlignment(.leading)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   static func kindLabel(_ item: IOSImportPreviewItem) -> String {
