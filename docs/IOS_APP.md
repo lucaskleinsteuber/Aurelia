@@ -19,6 +19,11 @@ its screens are its own:
   to that fingerprint.
 - **Profiles** open with their PIN; Home, Movies, TV Shows, Search, title pages, the Watchlist
   and people pages work like on the Apple TV.
+  Forgot PIN? explains who can reset it (the owner on the server computer with the Server
+  Password, everyone else through the owner); this screen never resets a PIN itself.
+- **Reads the app makes by itself** (refreshing after a change elsewhere, polling scans, wishes
+  and devices) carry `X-Aurelia-Background: 1`, so they don't count as use and a server can still
+  rest. Changes and pages the person opens always count.
 - **Playback** runs through MobileVLCKit and a small relay on `127.0.0.1` that adds the
   sign-in to each request and streams the bytes through; nothing is stored unless you download
   the title (see below). Progress, sound

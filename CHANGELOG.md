@@ -70,6 +70,10 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Fixed
 
+- iPhone & iPad: Me Too, removing a vote and declining a wish work again (the app used the wrong request), saving a profile with several changes no longer fails with a conflict, and an error while loading download qualities no longer starts the full-size original.
+- iPhone & iPad: reads the app makes by itself no longer count as using the server, so it can still rest; polling stops with its page, and late answers after a profile or filter change no longer replace newer ones.
+- iPhone & iPad: pairing keeps its buttons above the keyboard and wraps its steps, setup no longer sits under the Dynamic Island, the PIN screen's Profiles button no longer covers the clock, buttons wrap at large text sizes, and Forgot PIN? explains how to get a new one.
+- iPhone & iPad: titles without artwork no longer leave large empty areas on Home and their page, security banners no longer cover the iPad's tabs, Wrapped scrolls and has Previous and Next at large text sizes, choosing a server folder on iPad returns to the form, and an invalid device code keeps the sheet and the code.
 - Linux: Ctrl+F, Ctrl+/, Alt+Left and Esc work right after a profile opens and wherever the focus is; Esc closes Movie Night, and its close button no longer sits on the window's (it closed Aurelia).
 - Linux: reading pages and watching scans no longer count as using the server, so a server can still rest while Aurelia only shows a page; a title's page reloads less often and an older answer can't replace a newer one. Home's rows keep their position when the library changes.
 - Linux: Settings › Profiles and Devices › Web Browser shows the address for the home network when it is on; closing Edit Metadata without changes doesn't ask to discard them; a new profile's picture is no longer blue in the preview and another color once saved; the whisper.cpp note names the package for Debian, Fedora and Arch.
