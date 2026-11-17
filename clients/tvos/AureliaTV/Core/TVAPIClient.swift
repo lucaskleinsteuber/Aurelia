@@ -393,11 +393,6 @@ struct TVAPIClient: Sendable {
     return try Self.decode(TVMediaSuggestionsResponse.self, data: data).suggestions
   }
 
-  /// Sends a player state report (see TVAutomation.swift).
-  func sendPlaybackState(path: String, body: Data) async throws {
-    _ = try await send(path, method: "POST", body: body)
-  }
-
   func revokeTicket(id: UUID) async throws {
     _ = try await send("/api/v1/playback/\(id.uuidString)", method: "DELETE")
   }
