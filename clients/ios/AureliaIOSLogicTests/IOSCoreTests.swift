@@ -3,6 +3,54 @@ import Testing
 
 @Suite("iOS client contracts and transport")
 struct IOSCoreTests {
+  @Test func mediaPreflightReadsUseQueryItemsAndDecodeTheirResponses() async throws {
+    let trailer = itemJSON.replacingOccurrences(
+      of: "\"kind\":\"movie\"", with: "\"kind\":\"trailer\""
+    )
+    .replacingOccurrences(of: Self.mediaID.uuidString, with: Self.mutationID.uuidString)
+    let transport = IOSCoreFakeTransport(responses: [
+      response("{\"trailers\":[{\"trailer\":\(trailer),\"title\":\(itemJSON)}]}"),
+      response(
+        """
+        {"mediaId":"\(Self.mediaID)","suggestions":[{"item":\(itemJSON),"kind":"genre","reason":"Shared genre"}]}
+        """),
+    ])
+    let client = IOSAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    let trailers = try await client.cinemaTrailers(mediaID: Self.mediaID, count: 2)
+    let suggestions = try await client.suggestions(mediaID: Self.mediaID, limit: 4)
+    #expect(trailers.first?.trailer.kind == .trailer)
+    #expect(trailers.first?.title.id == Self.mediaID)
+    #expect(suggestions.first?.reason == "Shared genre")
+    let requests = await transport.requests.map(\.request)
+    #expect(requests.count == 2)
+    #expect(requests.allSatisfy { $0.httpMethod == "GET" })
+    #expect(
+      requests[0].url?.path
+        == "/api/v1/media/\(Self.mediaID.uuidString.lowercased())/cinema-trailers")
+    #expect(requests[0].url?.query == "count=2")
+    #expect(
+      requests[1].url?.path == "/api/v1/media/\(Self.mediaID.uuidString.lowercased())/suggestions")
+    #expect(requests[1].url?.query == "limit=4")
+  }
+
+  @Test(arguments: [(-5, 0, 1), (0, 0, 1), (3, 3, 3), (99, 3, 30)])
+  func mediaPreflightQuantitiesStayWithinTheServersBounds(
+    requested: Int, expectedTrailers: Int, expectedSuggestions: Int
+  ) async throws {
+    let transport = IOSCoreFakeTransport(responses: [
+      response("{\"trailers\":[]}"),
+      response("{\"mediaId\":\"\(Self.mediaID)\",\"suggestions\":[]}"),
+    ])
+    let client = IOSAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    _ = try await client.cinemaTrailers(mediaID: Self.mediaID, count: requested)
+    _ = try await client.suggestions(mediaID: Self.mediaID, limit: requested)
+    let requests = await transport.requests.map(\.request)
+    #expect(requests[0].url?.query == "count=\(expectedTrailers)")
+    #expect(requests[1].url?.query == "limit=\(expectedSuggestions)")
+  }
+
   @Test func automaticReadsAreMarkedWithoutMarkingMutationsOrLaterUserReads() async throws {
     let transport = IOSCoreFakeTransport(responses: Array(repeating: response("{}"), count: 5))
     let api = IOSAPIClient(

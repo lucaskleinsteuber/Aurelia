@@ -178,7 +178,7 @@ struct IOSWishAndSleepGoodNightTests {
       {"code":"already_in_library","message":"Already in the library.","mediaId":"\(Self.mediaID.uuidString)","title":"Quiet Orbit","kind":"movie"}
       """
     let summaryJSON = """
-      {"openCount":2,"newlyFulfilledCount":1}
+      {"openCount":2,"newlyFulfilledCount":0}
       """
     let transport = IOSWishFakeTransport(responses: [
       IOSHTTPResponse(
@@ -187,6 +187,7 @@ struct IOSWishAndSleepGoodNightTests {
         statusCode: 200, headers: [:], body: Data(searchJSON.utf8), fingerprint: Self.fingerprint),
       IOSHTTPResponse(
         statusCode: 409, headers: [:], body: Data(conflictJSON.utf8), fingerprint: Self.fingerprint),
+      IOSHTTPResponse(statusCode: 204, headers: [:], body: Data(), fingerprint: Self.fingerprint),
       IOSHTTPResponse(
         statusCode: 200, headers: [:], body: Data(summaryJSON.utf8), fingerprint: Self.fingerprint),
     ])
@@ -209,7 +210,63 @@ struct IOSWishAndSleepGoodNightTests {
     }
 
     let seen = try await client.markWishesSeen()
-    #expect(seen.newlyFulfilledCount == 1)
+    #expect(seen.newlyFulfilledCount == 0)
+    let requests = await transport.requests
+    #expect(requests.count == 5)
+    #expect(requests[3].httpMethod == "POST")
+    #expect(requests[3].url?.path == "/api/v1/wishes/seen")
+    #expect(requests[3].value(forHTTPHeaderField: "X-Aurelia-Background") == nil)
+    #expect(requests[4].httpMethod == "GET")
+    #expect(requests[4].url?.path == "/api/v1/wishes/summary")
+    #expect(requests[4].value(forHTTPHeaderField: "X-Aurelia-Background") == "1")
+  }
+
+  @Test func wishSupportAndResolutionUsePutWithoutMarkingTheMutationAsBackground() async throws {
+    func wish(_ supported: Bool, state: String = "open") -> IOSHTTPResponse {
+      let json = """
+        {"id":"\(Self.wishID)","userId":"\(Self.mediaID)","userName":"Mia","kind":"movie",
+        "title":"Moonlit Garden","year":2025,"state":"\(state)","createdAt":"2026-11-16T00:00:00Z",
+        "canSupport":true,"supportedByCaller":\(supported),"supporters":[],"suggestions":[]}
+        """
+      return IOSHTTPResponse(
+        statusCode: 200, headers: [:], body: Data(json.utf8), fingerprint: Self.fingerprint)
+    }
+    let transport = IOSWishFakeTransport(responses: [
+      wish(true), wish(false), wish(false, state: "declined"),
+    ])
+    let client = IOSAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    try await IOSAPIClient.withBackgroundRequests {
+      let supported = try await client.setWishSupport(id: Self.wishID, supported: true)
+      #expect(supported.supportedByCaller)
+      let removed = try await client.setWishSupport(id: Self.wishID, supported: false)
+      #expect(!removed.supportedByCaller)
+      let declined = try await client.updateWishState(
+        id: Self.wishID,
+        requestBody: .init(
+          state: .declined, resolutionNote: "Not available yet", fulfilledMediaItemId: nil))
+      #expect(declined.state == .declined)
+    }
+    let requests = await transport.requests
+    #expect(requests.count == 3)
+    #expect(requests.allSatisfy { $0.httpMethod == "PUT" })
+    #expect(requests.allSatisfy { $0.value(forHTTPHeaderField: "X-Aurelia-Background") == nil })
+    #expect(
+      requests.allSatisfy { $0.value(forHTTPHeaderField: "Content-Type") == "application/json" })
+    #expect(
+      requests[0].url?.path == "/api/v1/wishes/\(Self.wishID.uuidString.lowercased())/support")
+    #expect(requests[1].url?.path == requests[0].url?.path)
+    #expect(
+      requests[2].url?.path == "/api/v1/wishes/\(Self.wishID.uuidString.lowercased())/state")
+    let addBody = try #require(requests[0].httpBody)
+    let removeBody = try #require(requests[1].httpBody)
+    let stateBody = try #require(requests[2].httpBody)
+    let add = try #require(JSONSerialization.jsonObject(with: addBody) as? [String: Bool])
+    let remove = try #require(JSONSerialization.jsonObject(with: removeBody) as? [String: Bool])
+    #expect(add == ["supported": true])
+    #expect(remove == ["supported": false])
+    let state = try #require(JSONSerialization.jsonObject(with: stateBody) as? [String: String])
+    #expect(state == ["state": "declined", "resolutionNote": "Not available yet"])
   }
 
   @MainActor
@@ -327,8 +384,10 @@ struct IOSWishAndSleepGoodNightTests {
 
 private actor IOSWishFakeTransport: IOSHTTPTransport {
   private var queued: [IOSHTTPResponse]
+  private(set) var requests: [URLRequest] = []
   init(responses: [IOSHTTPResponse]) { queued = responses }
   func execute(_ request: URLRequest, trust: IOSTrustMode) async throws -> IOSHTTPResponse {
+    requests.append(request)
     guard !queued.isEmpty else { throw IOSCoreError.invalidResponse }
     return queued.removeFirst()
   }
