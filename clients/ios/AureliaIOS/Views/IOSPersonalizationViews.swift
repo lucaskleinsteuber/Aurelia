@@ -99,6 +99,9 @@ struct IOSNameAndPictureView: View {
 
   private var user: IOSUser? { model.session?.user }
   private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+  private var selectedBuiltin: (symbol: String, palette: String)? {
+    IOSProfilePictures.parse(pictureKey)
+  }
   private var changed: Bool {
     guard let user else { return false }
     return trimmed != user.shownName || pictureKey != user.pictureKey || photo != nil
@@ -133,11 +136,15 @@ struct IOSNameAndPictureView: View {
         Text("The name everyone sees on every device.")
       }
       Section("Picture") {
+        Text("Symbol").font(.caption).foregroundStyle(.secondary)
         LazyVGrid(
-          columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 6), spacing: 12
+          columns: [GridItem(.adaptive(minimum: 44, maximum: 52), spacing: 8)],
+          alignment: .leading, spacing: 8
         ) {
           ForEach(IOSProfilePictures.symbols, id: \.self) { symbol in
             let candidate = IOSProfilePictures.builtin(symbol: symbol, palette: palette)
+            let selected = selectedBuiltin?.symbol == symbol
+            let spokenPalette = selected ? (selectedBuiltin?.palette ?? palette) : palette
             Button {
               pictureKey = candidate
               photo = nil
@@ -151,38 +158,56 @@ struct IOSNameAndPictureView: View {
                 .overlay { IOSProfileSymbol(symbol: symbol, size: 40) }
                 .overlay {
                   Circle().strokeBorder(
-                    pictureKey == candidate ? Color.white : .clear, lineWidth: 2)
+                    selected ? Color.white : .clear, lineWidth: 2)
                 }
                 .frame(width: 40, height: 40)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Picture \(symbol)")
+            .accessibilityLabel("\(symbol.capitalized) picture")
+            .accessibilityValue("\(spokenPalette.capitalized) color")
+            .accessibilityAddTraits(selected ? .isSelected : [])
           }
         }
         .padding(.vertical, 6)
-        HStack(spacing: 10) {
-          ForEach(IOSProfilePictures.palettes, id: \.self) { candidate in
-            Button {
-              palette = candidate
-              if let builtin = IOSProfilePictures.parse(pictureKey) {
-                pictureKey = IOSProfilePictures.builtin(symbol: builtin.symbol, palette: candidate)
+        Text("Color").font(.caption).foregroundStyle(.secondary)
+        if let builtin = selectedBuiltin {
+          LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 44, maximum: 52), spacing: 8)],
+            alignment: .leading, spacing: 8
+          ) {
+            ForEach(IOSProfilePictures.palettes, id: \.self) { candidate in
+              let selected = builtin.palette == candidate
+              Button {
+                guard let actual = selectedBuiltin else { return }
+                palette = candidate
+                pictureKey = IOSProfilePictures.builtin(symbol: actual.symbol, palette: candidate)
+              } label: {
+                let colors = IOSProfilePicture.namedPalette(candidate)
+                Circle()
+                  .fill(
+                    LinearGradient(
+                      colors: [colors.0, colors.1], startPoint: .top, endPoint: .bottom)
+                  )
+                  .overlay {
+                    Circle().strokeBorder(selected ? Color.white : .clear, lineWidth: 2)
+                  }
+                  .frame(width: 28, height: 28)
+                  .frame(maxWidth: .infinity, minHeight: 44)
+                  .contentShape(Rectangle())
               }
-            } label: {
-              let colors = IOSProfilePicture.namedPalette(candidate)
-              Circle()
-                .fill(
-                  LinearGradient(colors: [colors.0, colors.1], startPoint: .top, endPoint: .bottom)
-                )
-                .overlay {
-                  Circle().strokeBorder(palette == candidate ? Color.white : .clear, lineWidth: 2)
-                }
-                .frame(width: 28, height: 28)
+              .buttonStyle(.plain)
+              .accessibilityLabel("\(candidate.capitalized) color")
+              .accessibilityValue("\(builtin.symbol.capitalized) picture")
+              .accessibilityAddTraits(selected ? .isSelected : [])
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Color \(candidate)")
           }
+          .padding(.vertical, 4)
+        } else {
+          Text("Choose a symbol to use a color.")
+            .font(.footnote).foregroundStyle(.secondary)
         }
-        .padding(.vertical, 4)
         PhotosPicker(selection: $photoItem, matching: .images) {
           Label("Choose Photo", systemImage: "photo")
         }
@@ -191,6 +216,7 @@ struct IOSNameAndPictureView: View {
           photo = nil
           preview = nil
         }
+        .accessibilityAddTraits(pictureKey == nil ? .isSelected : [])
       }
       Section {
         Button(working ? "Saving…" : "Save") { save() }
