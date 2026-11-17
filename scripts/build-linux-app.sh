@@ -4,6 +4,7 @@
 # icon, AppStream metadata, notices). The packages (.deb, .rpm, Arch, Flatpak) are made on Linux by
 # package-linux-app.sh: here when this computer is Linux, otherwise on the Linux computer named by
 # AURELIA_LINUX_PACKAGE_HOST (an ssh host; AURELIA_LINUX_PACKAGE_SSH_CONFIG may name its ssh_config).
+# With AURELIA_LINUX_PACKAGE_DOCKER=1 that host needs only Docker (package-linux-app-in-docker.sh).
 # Everything lands in Build/LinuxApp/<version>-<build>/ of the git-ignored Local workspace.
 set -euo pipefail
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -91,13 +92,17 @@ for linux_arch in $linux_arches; do
     ssh_options=(-o BatchMode=yes)
     [ -z "${AURELIA_LINUX_PACKAGE_SSH_CONFIG:-}" ] || ssh_options+=(-F "$AURELIA_LINUX_PACKAGE_SSH_CONFIG")
     remote_dir=".cache/aurelia-package/$version-$build"
+    # AURELIA_LINUX_PACKAGE_DOCKER=1: the host has Docker instead of the packaging tools (the owner's
+    # server while the laptop is off); the packages are made in a throwaway Arch Linux container there.
+    package_runner=package-linux-app.sh
+    [ "${AURELIA_LINUX_PACKAGE_DOCKER:-0}" = 1 ] && package_runner=package-linux-app-in-docker.sh
     ssh "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST" "rm -rf '$remote_dir' && mkdir -p '$remote_dir/packaging'"
     scp -q "${ssh_options[@]}" "$archive" "$repository_root/scripts/package-linux-app.sh" \
-      "$AURELIA_LINUX_PACKAGE_HOST:$remote_dir/"
+      "$repository_root/scripts/package-linux-app-in-docker.sh" "$AURELIA_LINUX_PACKAGE_HOST:$remote_dir/"
     scp -qr "${ssh_options[@]}" "$packaging/flatpak" "$AURELIA_LINUX_PACKAGE_HOST:$remote_dir/packaging/"
     # The login shell may not be bash (fish, zsh), so the script runs under an explicit bash.
     ssh "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST" \
-      "cd '$remote_dir' && AURELIA_LINUX_PACKAGE_FORMATS='$package_formats' bash package-linux-app.sh '${archive##*/}' out '$version' '$build' '$linux_arch'"
+      "cd '$remote_dir' && AURELIA_LINUX_PACKAGE_FORMATS='$package_formats' bash $package_runner '${archive##*/}' out '$version' '$build' '$linux_arch'"
     scp -q "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST:$remote_dir/out/*" "$output/"
     ssh "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST" "rm -rf '$remote_dir' && rmdir .cache/aurelia-package 2>/dev/null; true"
   else

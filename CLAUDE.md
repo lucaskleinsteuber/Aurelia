@@ -204,15 +204,21 @@ beginners. Delegate like that.
   with platform specifics behind small adapters. It shares only `src/Aurelia.Contracts`
   with the server and copies no Mac code. Verify it with `scripts/test-linux-app.sh`
   (formatting, warning-free build, headless Avalonia tests, which need no screen and no
-  question first), build it with `scripts/build-linux-app.sh` (packages made on Linux by
-  `scripts/package-linux-app.sh`) and install each verified test build on the owner's
-  CachyOS laptop (`Local/LinuxLaptop/ssh_config`) with `scripts/install-linux-app.sh`
-  without asking; installing replaces only the package. The laptop is not always on (owner,
-  16.11.2026): check first whether it answers (ssh with a short `ConnectTimeout`). When it is
-  off, make the packages on the owner's Linux server (`Local/LinuxServer/ssh_config`, Ubuntu
-  with Docker) in a throwaway container at low priority, without touching the Aurelia server
-  running there; if that is not possible, ask the owner to switch the laptop on. Never keep the
-  laptop awake or change its power settings. Synthetic data only, no real
+  question first) and build it with `scripts/build-linux-app.sh`. Its packages are always made
+  on the owner's Linux server (owner, 16.11.2026: slower, but the laptop's fans are too loud),
+  never on the laptop: `AURELIA_LINUX_PACKAGE_HOST=aurelia-test`,
+  `AURELIA_LINUX_PACKAGE_SSH_CONFIG=Local/LinuxServer/ssh_config` and
+  `AURELIA_LINUX_PACKAGE_DOCKER=1` run `scripts/package-linux-app.sh` there in a throwaway Arch
+  Linux container (`scripts/package-linux-app-in-docker.sh`) at the lowest priority, without
+  touching the Aurelia server running there. The server turns itself off when unused: wake it
+  with Wake-on-LAN (address in `Local/LinuxServer/wake-on-lan.txt`), and while the packages are
+  made pause only `aurelia-autosleep.timer` (with a fallback that starts it again after three
+  hours) and start it again right after; never change its power settings. Install each verified
+  test build on the owner's CachyOS laptop (`Local/LinuxLaptop/ssh_config`) with
+  `scripts/install-linux-app.sh` without asking when the laptop answers (ssh with a short
+  `ConnectTimeout`); installing replaces only the package. When it is off, don't ask to switch
+  it on just for that; say the build is ready to install. Never keep the laptop awake or change
+  its power settings. Synthetic data only, no real
   playback in tests. Hosting and network-trial tests use isolated server processes and temporary
   state; never start a second host over the installed server or use personal libraries for them.
   Publish its deb, rpm, Arch and Flatpak packages with `scripts/publish-release.sh --linux-app`

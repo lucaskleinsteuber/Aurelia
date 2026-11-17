@@ -93,7 +93,7 @@ Run what fits the parts you changed:
 |---|---|
 | Server and shared .NET code | restore, format verification, warning-free build, all tests |
 | Browser app (`src/Aurelia.Server/WebApp`) | `node --test "tests/WebApp/*.test.mjs"` |
-| Linux app (`clients/linux`) | `scripts/test-linux-app.sh`, `scripts/build-linux-app.sh` |
+| Linux app (`clients/linux`) | `scripts/test-linux-app.sh`, `scripts/build-linux-app.sh` (without a package host it makes only the archive; the deb, rpm, Arch and Flatpak packages are made by Claude Code on the owner's server, never on the laptop) |
 | iPhone and iPad (`clients/ios`) | `scripts/test-ios-logic.sh`, `scripts/build-ios.sh` |
 | Apple TV | warning-free simulator build and host logic tests |
 | Mac app | warning-free Swift build and unit and logic tests |

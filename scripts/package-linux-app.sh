@@ -154,9 +154,10 @@ package() {
   bsdtar -xpf "\$srcdir/tree.tar.gz" -C "\$pkgdir"
 }
 PKGBUILD
-# The tree is prebuilt, so an arm64 package is made on any Arch computer with its own CARCH.
+# The tree is prebuilt, so an arm64 package is made on any Arch computer with its own CARCH, and
+# makepkg needn't find the runtime dependencies here (--nodeps); they are still written into the package.
 sed -e "s/^CARCH=.*/CARCH=\"$rpm_arch\"/" -e "s/^CHOST=.*/CHOST=\"$rpm_arch-pc-linux-gnu\"/" /etc/makepkg.conf > "$work/arch/makepkg.conf"
-(cd "$work/arch" && PKGDEST="$work/arch" PKGEXT=.pkg.tar.zst makepkg --config "$work/arch/makepkg.conf" --force --noconfirm >/dev/null)
+(cd "$work/arch" && PKGDEST="$work/arch" PKGEXT=.pkg.tar.zst makepkg --config "$work/arch/makepkg.conf" --force --noconfirm --nodeps >/dev/null)
 cp "$work/arch/$name-$version-$build-$rpm_arch.pkg.tar.zst" "$output/$base-$rpm_arch.pkg.tar.zst"
 fi
 

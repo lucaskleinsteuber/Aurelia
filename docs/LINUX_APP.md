@@ -465,9 +465,16 @@ from the prebuilt arm64 tree on the same x64 computer (deb, rpm and Arch; no Fla
 
 On the Mac, set `AURELIA_LINUX_PACKAGE_HOST` to an Arch-family ssh host with `dpkg-deb`, `rpmbuild`,
 `makepkg`, `flatpak-builder`, the Freedesktop 26.08 Platform and SDK, and the LLVM 22 SDK extension.
-The full four-format build uses Arch's dependency-checked `makepkg`. Set
+`makepkg` packs the prebuilt tree with `--nodeps`: the runtime dependencies are written into the
+package without having to be installed on the packaging computer. Set
 `AURELIA_LINUX_PACKAGE_SSH_CONFIG` to its ssh configuration. Everything lands in
 `Local/Build/LinuxApp/<version>-<build>/`.
+
+A Linux host that has only Docker works too: with `AURELIA_LINUX_PACKAGE_DOCKER=1`,
+`scripts/package-linux-app-in-docker.sh` runs the same packaging there in a throwaway Arch Linux
+container at the lowest CPU and I/O priority, without ports or other containers. The Flatpak runtimes
+and module cache stay in the Docker volume `aurelia-package-cache` (the first build takes about an
+hour, later ones about 20 minutes); `docker volume rm aurelia-package-cache` removes them.
 
 ```bash
 scripts/install-linux-app.sh <ssh host>
