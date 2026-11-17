@@ -669,13 +669,15 @@ private struct IOSAdminTitleChooser: View {
               Image(systemName: "checkmark").foregroundStyle(.tint)
             }
           }
+          .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
       }
     }
     .searchable(text: $search)
     .scrollContentBackground(.hidden)
     .background(IOSDesign.canvas.ignoresSafeArea())
-    .navigationTitle("\(selection.count) Titles")
+    .navigationTitle("\(selection.count) \(selection.count == 1 ? "Title" : "Titles")")
     .navigationBarTitleDisplayMode(.inline)
     .task { await load() }
   }

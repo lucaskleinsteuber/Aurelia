@@ -999,7 +999,9 @@ private struct IOSAdminImportPreviewView: View {
                 .foregroundStyle(
                   item.status == "pending" || item.status == "error" ? Color.orange : .secondary)
             }
+            .contentShape(Rectangle())
           }
+          .buttonStyle(.plain)
         }
       }
     }

@@ -222,7 +222,7 @@ struct IOSSettingsRowLabel: View {
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
         Text(page.title)
-        Text(page.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+        Text(page.subtitle).font(.caption).foregroundStyle(Color.secondary).lineLimit(2)
       }
     }
     .padding(.vertical, 2)
