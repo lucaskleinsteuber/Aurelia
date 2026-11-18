@@ -170,6 +170,7 @@ struct IOSConnectionView: View {
           VStack(spacing: 10) {
             Image(systemName: "play.rectangle.fill").font(.system(size: 48))
               .foregroundStyle(.white.opacity(0.85))
+              .accessibilityHidden(true)
             Text("Aurelia").font(.largeTitle.bold())
             Text("Connect to the Aurelia server on your home network.")
               .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
@@ -200,7 +201,8 @@ struct IOSConnectionView: View {
                 Label(server.name, systemImage: "server.rack").foregroundStyle(.white)
                 Spacer()
                 Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
-                  .foregroundStyle(.tertiary)
+                  .foregroundStyle(.secondary)
+                  .accessibilityHidden(true)
               }
             }.disabled(model.isBusy)
           }
@@ -229,10 +231,11 @@ struct IOSConnectionView: View {
               Text("Connecting…")
             }
           } else {
-            Text("The address Aurelia on your Mac shows under Settings › Server.")
+            Text("The address Aurelia shows on your Mac or Linux computer under Settings › Server.")
           }
         }
       }
+      .scrollDismissesKeyboard(.interactively)
       .scrollContentBackground(.hidden)
       .background(IOSDesign.canvas.ignoresSafeArea())
     }
@@ -244,6 +247,7 @@ struct IOSConnectionView: View {
 struct IOSSavedServerView: View {
   @EnvironmentObject private var model: IOSAppModel
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let name: String
   let chooseOtherServer: () -> Void
 
@@ -254,6 +258,7 @@ struct IOSSavedServerView: View {
         if model.savedServerUnreachable {
           Image(systemName: "power").font(.system(size: 44, weight: .medium))
             .foregroundStyle(.secondary)
+            .accessibilityHidden(true)
           TimelineView(.periodic(from: .now, by: 1)) { context in
             if let sent = model.wakeSignalSentAt,
               IOSWakeOnLan.Waking.isWaking(since: sent, now: context.date)
@@ -264,7 +269,7 @@ struct IOSSavedServerView: View {
                 Text(IOSWakeOnLan.Waking.hint)
                   .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 Text(IOSWakeOnLan.Waking.elapsed(since: sent, now: context.date))
-                  .font(.footnote).monospacedDigit().foregroundStyle(.tertiary)
+                  .font(.footnote).monospacedDigit().foregroundStyle(.secondary)
               }
               .frame(maxWidth: 420)
             } else {
@@ -272,16 +277,18 @@ struct IOSSavedServerView: View {
                 Text(
                   model.savedServerAppHost.map { "Start Aurelia on Your \($0)" }
                     ?? "The Server Is Off"
-                ).font(.title.bold())
+                )
+                .font(.title.bold())
+                .multilineTextAlignment(.center)
                 Text(
                   model.savedServerAppHost.map {
                     "“\(name)” runs inside the Aurelia app on a \($0). Open Aurelia there, or wake the \($0), and Aurelia connects by itself."
                   }
-                    ?? "“\(name)” isn’t answering. Turn on the computer the server runs on, or open Aurelia on your Mac to wake it."
+                    ?? "“\(name)” isn’t answering. Turn on the computer the server runs on, or wake it from another device."
                 )
                 .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 Text("Aurelia connects by itself as soon as the server is on.")
-                  .font(.footnote).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+                  .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
               }
               .frame(maxWidth: 420)
             }
@@ -291,22 +298,14 @@ struct IOSSavedServerView: View {
               ProgressView("Wake signal sent. Waiting for the server…")
             } else if model.isBusy {
               ProgressView("Waiting for the server…")
+            } else if dynamicTypeSize.isAccessibilitySize {
+              VStack(spacing: 12) {
+                wakeActions(fullWidth: true)
+              }
             } else {
-              HStack(spacing: 12) {
-                if model.wakeOnLanStatus.canWake {
-                  Button {
-                    Task { await model.wakeServerNow() }
-                  } label: {
-                    Label("Wake Server", systemImage: "power")
-                  }
-                  .buttonStyle(IOSButtonStyle(kind: .primary))
-                  .accessibilityIdentifier("server-wake")
-                }
-                Button("Try Again") { Task { await model.reconnect(userInitiated: true) } }
-                  .buttonStyle(
-                    IOSButtonStyle(kind: model.wakeOnLanStatus.canWake ? .secondary : .primary)
-                  )
-                  .accessibilityIdentifier("tv-server-retry")
+              ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { wakeActions(fullWidth: false) }
+                VStack(spacing: 12) { wakeActions(fullWidth: true) }
               }
             }
           }.frame(minHeight: 56)
@@ -326,7 +325,9 @@ struct IOSSavedServerView: View {
           .accessibilityIdentifier("server-watch-downloads")
         }
         Button("Connect to Another Server", action: chooseOtherServer)
-          .font(.subheadline.weight(.semibold)).tint(.white.opacity(0.75))
+          .font(.subheadline.weight(.semibold)).tint(.white.opacity(0.8))
+          .frame(minHeight: 44)
+          .contentShape(Rectangle())
           .accessibilityIdentifier("tv-other-server")
       }
     }
@@ -341,6 +342,25 @@ struct IOSSavedServerView: View {
       }
     }
   }
+
+  @ViewBuilder
+  private func wakeActions(fullWidth: Bool) -> some View {
+    if model.wakeOnLanStatus.canWake {
+      Button {
+        Task { await model.wakeServerNow() }
+      } label: {
+        Label("Wake Server", systemImage: "power")
+      }
+      .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: fullWidth))
+      .accessibilityIdentifier("server-wake")
+    }
+    Button("Try Again") { Task { await model.reconnect(userInitiated: true) } }
+      .buttonStyle(
+        IOSButtonStyle(
+          kind: model.wakeOnLanStatus.canWake ? .secondary : .primary, fullWidth: fullWidth)
+      )
+      .accessibilityIdentifier("tv-server-retry")
+  }
 }
 
 struct IOSServerTrustView: View {
@@ -351,6 +371,7 @@ struct IOSServerTrustView: View {
       VStack(spacing: 22) {
         Spacer()
         Image(systemName: "lock.shield").font(.system(size: 44)).foregroundStyle(.secondary)
+          .accessibilityHidden(true)
         VStack(spacing: 6) {
           Text(model.inspected?.info.name ?? "Aurelia Server").font(.title.bold())
             .multilineTextAlignment(.center)
@@ -385,6 +406,7 @@ struct IOSPairingView: View {
   @EnvironmentObject private var model: IOSAppModel
   @State private var code = ""
   @FocusState private var focused: Bool
+  @ScaledMetric(relativeTo: .largeTitle) private var codeFontSize: CGFloat = 34
 
   var body: some View {
     IOSSetupScrollView {
@@ -392,6 +414,7 @@ struct IOSPairingView: View {
         Spacer()
         Image(systemName: IOSDesign.isPad ? "ipad.badge.checkmark" : "iphone.badge.checkmark")
           .font(.system(size: 44)).foregroundStyle(.secondary)
+          .accessibilityHidden(true)
         VStack(spacing: 6) {
           Text("Enter the Code").font(.title.bold())
             .multilineTextAlignment(.center)
@@ -404,16 +427,17 @@ struct IOSPairingView: View {
             text: "On the computer that runs Aurelia, open Settings › Profiles and Devices.")
           IOSPairingStep(
             number: 2,
-            text: "Click Create Code. On a Linux server without screen, run aurelia pair.")
+            text: "Click Create Code. On a Linux server without a screen, run aurelia pair.")
           IOSPairingStep(
             number: 3, text: "Type the 8 digits below. A code works once and for five minutes.")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         TextField("8-digit code", text: $code)
           .keyboardType(.numberPad).textContentType(.oneTimeCode)
-          .font(.system(size: 34, weight: .semibold, design: .monospaced))
+          .font(.system(size: min(codeFontSize, 42), weight: .semibold, design: .monospaced))
+          .minimumScaleFactor(0.6)
           .multilineTextAlignment(.center)
-          .padding(.vertical, 12).frame(maxWidth: .infinity)
+          .padding(.vertical, 12).padding(.horizontal, 12).frame(maxWidth: .infinity)
           .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
           .focused($focused)
           .onChange(of: code) { _, value in
@@ -427,9 +451,14 @@ struct IOSPairingView: View {
         Spacer()
         VStack(spacing: 10) {
           Button {
+            focused = false
             model.pair(code: code)
           } label: {
-            if model.isBusy { ProgressView() } else { Text("Pair This \(IOSDesign.deviceName)") }
+            if model.isBusy {
+              ProgressView().tint(.black).accessibilityLabel("Pairing")
+            } else {
+              Text("Pair This \(IOSDesign.deviceName)")
+            }
           }
           .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
           .disabled(code.count != 8 || model.isBusy)
@@ -438,6 +467,7 @@ struct IOSPairingView: View {
         }
       }
     }
+    .iosNumberPadDone { focused = false }
     .onAppear { focused = true }
     .iosBackCommand { model.cancelPairing() }
   }
@@ -466,13 +496,14 @@ struct IOSErrorText: View {
 
 /// Keeps setup actions reachable when the keyboard, rotation or larger text reduces the space.
 struct IOSSetupScrollView<Content: View>: View {
+  @Environment(\.horizontalSizeClass) private var sizeClass
   @ViewBuilder let content: Content
 
   var body: some View {
     GeometryReader { geometry in
       ScrollView {
         content
-          .padding(IOSDesign.margin)
+          .padding(IOSDesign.margin(for: sizeClass))
           .frame(maxWidth: 520)
           .frame(maxWidth: .infinity, minHeight: geometry.size.height)
       }

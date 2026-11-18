@@ -129,6 +129,7 @@ struct IOSNameAndPictureView: View {
       Section {
         TextField("Your Name", text: $name)
           .textInputAutocapitalization(.words)
+          .submitLabel(.done)
           .accessibilityIdentifier("own-profile-name")
       } header: {
         Text("Name")
@@ -228,6 +229,7 @@ struct IOSNameAndPictureView: View {
         }
       }
     }
+    .scrollDismissesKeyboard(.interactively)
     .scrollContentBackground(.hidden)
     .background(IOSDesign.canvas.ignoresSafeArea())
     .navigationTitle("Name and Picture")
@@ -453,6 +455,7 @@ struct IOSSetupIntroductionView: View {
     VStack(spacing: 24) {
       Image(systemName: "play.rectangle.fill").font(.system(size: 56))
         .foregroundStyle(.white.opacity(0.85))
+        .accessibilityHidden(true)
       heading(
         "Welcome to Aurelia",
         "Your movies and shows from your own server, on this iPhone or iPad. New here? A few steps set everything up."
@@ -475,7 +478,9 @@ struct IOSSetupIntroductionView: View {
       VStack(spacing: 14) {
         station("externaldrive.fill", "Your Files", "Movies and shows stay where they are.")
         station("server.rack", "Aurelia Server", "Runs on a Mac or Linux computer at home.")
-        station("iphone", "This Device", "Plays from the server on your home network.")
+        station(
+          IOSDesign.isPad ? "ipad" : "iphone", "This Device",
+          "Plays from the server on your home network.")
       }
       Button(replay ? "Done" : "Continue") {
         if replay { closed?() } else { page = .server }
@@ -483,7 +488,10 @@ struct IOSSetupIntroductionView: View {
       .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
       .accessibilityIdentifier("setup-continue")
       if !replay {
-        Button("Back") { page = .welcome }.tint(.white.opacity(0.75))
+        Button("Back") { page = .welcome }
+          .tint(.white.opacity(0.8))
+          .frame(minHeight: 44)
+          .contentShape(Rectangle())
       }
     }
   }
@@ -501,7 +509,10 @@ struct IOSSetupIntroductionView: View {
           .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
           .accessibilityIdentifier("setup-no-server")
       }
-      Button("Back") { page = .howItWorks }.tint(.white.opacity(0.75))
+      Button("Back") { page = .howItWorks }
+        .tint(.white.opacity(0.8))
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
     }
   }
 
@@ -512,12 +523,11 @@ struct IOSSetupIntroductionView: View {
         "Install Aurelia on the Mac or Linux computer whose drives hold your movies and shows, and choose to use it as the server."
       )
       if let image = IOSQRCode.image(for: IOSQRCode.downloadPage.absoluteString) {
-        Image(decorative: image, scale: 1)
+        Image(image, scale: 1, label: Text("QR code for the Aurelia download page"))
           .interpolation(.none).resizable().scaledToFit()
           .frame(width: 180, height: 180)
           .padding(14)
           .background(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-          .accessibilityLabel("QR code for the Aurelia download page")
       }
       Text("Scan this with the computer's camera, or open the download page on GitHub.")
         .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
@@ -528,7 +538,10 @@ struct IOSSetupIntroductionView: View {
       .accessibilityIdentifier("setup-no-server-github")
       Text("When the server runs, go back and choose Yes, Connect to It.")
         .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
-      Button("Back") { page = .server }.tint(.white.opacity(0.75))
+      Button("Back") { page = .server }
+        .tint(.white.opacity(0.8))
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
         .accessibilityIdentifier("setup-no-server-back")
     }
   }
@@ -542,8 +555,11 @@ struct IOSSetupIntroductionView: View {
 
   private func station(_ symbol: String, _ title: String, _ detail: String) -> some View {
     HStack(spacing: 14) {
-      Image(systemName: symbol).font(.title2).frame(width: 52, height: 52)
+      Image(systemName: symbol).font(.title2)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .frame(width: 52, height: 52)
         .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
         Text(title).font(.headline)
         Text(detail).font(.subheadline).foregroundStyle(.secondary)
@@ -556,33 +572,50 @@ struct IOSSetupIntroductionView: View {
 
 /// The guided connection's progress at the top of each screen.
 struct IOSSetupStepBar: View {
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let current: IOSSetupStep
 
   var body: some View {
     let steps = IOSSetupStep.allCases
     let index = steps.firstIndex(of: current) ?? 0
-    HStack(spacing: 8) {
-      ForEach(Array(steps.enumerated()), id: \.element) { position, step in
-        HStack(spacing: 4) {
-          ZStack {
-            Circle().fill(position <= index ? Color.accentColor : Color.white.opacity(0.2))
-            if position < index {
-              Image(systemName: "checkmark").font(.system(size: 8, weight: .bold))
-            } else {
-              Text("\(position + 1)").font(.system(size: 10, weight: .semibold))
+    Group {
+      if dynamicTypeSize.isAccessibilitySize {
+        Text("Step \(index + 1) of \(steps.count): \(current.title)")
+          .font(.footnote.weight(.semibold))
+          .multilineTextAlignment(.center)
+      } else {
+        HStack(spacing: 8) {
+          ForEach(Array(steps.enumerated()), id: \.element) { position, step in
+            HStack(spacing: 4) {
+              ZStack {
+                Circle().fill(position <= index ? Color.accentColor : Color.white.opacity(0.2))
+                if position < index {
+                  Image(systemName: "checkmark").font(.system(size: 8, weight: .bold))
+                } else {
+                  Text("\(position + 1)").font(.system(size: 10, weight: .semibold))
+                }
+              }
+              .foregroundStyle(.white).frame(width: 18, height: 18)
+              if position == index {
+                Text(step.title).font(.caption.weight(.semibold))
+              }
             }
-          }
-          .foregroundStyle(.white).frame(width: 18, height: 18)
-          if position == index {
-            Text(step.title).font(.caption.weight(.semibold))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(step.title), step \(position + 1) of \(steps.count)")
           }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(step.title), step \(position + 1) of \(steps.count)")
       }
     }
     .padding(.horizontal, 14).padding(.vertical, 7)
-    .background(.ultraThinMaterial, in: Capsule())
+    .background {
+      if reduceTransparency {
+        Capsule().fill(IOSDesign.surface)
+      } else {
+        Capsule().fill(.ultraThinMaterial)
+      }
+    }
+    .padding(.horizontal, 16)
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("setup-step-bar")
   }
@@ -656,34 +689,56 @@ struct IOSLibraryTour: View {
   @Binding var tab: Int
   let finished: () -> Void
   @State private var index = 0
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.horizontalSizeClass) private var sizeClass
 
   var body: some View {
     ZStack(alignment: .bottom) {
       Color.black.opacity(0.45).ignoresSafeArea()
         .onTapGesture {}
-      VStack(alignment: .leading, spacing: 10) {
-        Text(Self.stops[index].title).font(.headline)
-        Text(Self.stops[index].text).font(.subheadline).foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-        HStack {
-          Text("\(index + 1) of \(Self.stops.count)").font(.caption).foregroundStyle(.secondary)
-          Spacer()
-          Button("Skip Tour") { finished() }.font(.subheadline.weight(.semibold))
-            .tint(.white.opacity(0.75))
-            .accessibilityIdentifier("tour-skip")
-          Button(index == Self.stops.count - 1 ? "Done" : "Next") { advance() }
-            .buttonStyle(IOSButtonStyle(kind: .primary))
-            .accessibilityIdentifier("tour-next")
+      ScrollView {
+        VStack(alignment: .leading, spacing: 12) {
+          Text(Self.stops[index].title).font(.headline)
+          Text(Self.stops[index].text).font(.subheadline).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+          if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 10) {
+              Text("\(index + 1) of \(Self.stops.count)").font(.caption).foregroundStyle(.secondary)
+              Button(index == Self.stops.count - 1 ? "Done" : "Next") { advance() }
+                .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
+                .accessibilityIdentifier("tour-next")
+              Button("Skip Tour") { finished() }
+                .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
+                .accessibilityIdentifier("tour-skip")
+            }
+          } else {
+            HStack(spacing: 12) {
+              Text("\(index + 1) of \(Self.stops.count)").font(.caption).foregroundStyle(.secondary)
+              Spacer()
+              Button("Skip Tour") { finished() }
+                .font(.subheadline.weight(.semibold))
+                .tint(.white.opacity(0.8))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+                .accessibilityIdentifier("tour-skip")
+              Button(index == Self.stops.count - 1 ? "Done" : "Next") { advance() }
+                .buttonStyle(IOSButtonStyle(kind: .primary))
+                .accessibilityIdentifier("tour-next")
+            }
+          }
         }
+        .padding(18)
       }
-      .padding(18)
+      .scrollBounceBehavior(.basedOnSize)
+      .frame(maxHeight: 340)
+      .fixedSize(horizontal: false, vertical: true)
       .background(
         RoundedRectangle(cornerRadius: 18, style: .continuous)
           .fill(Color(red: 0.14, green: 0.15, blue: 0.17).opacity(0.97))
           .shadow(color: .black.opacity(0.5), radius: 20, y: 10)
       )
-      .padding(.horizontal, IOSDesign.margin)
-      .padding(.bottom, 90)
+      .padding(.horizontal, IOSDesign.margin(for: sizeClass))
+      .padding(.bottom, sizeClass == .regular ? 24 : 76)
       .frame(maxWidth: 520)
     }
     .accessibilityAddTraits(.isModal)
@@ -722,7 +777,7 @@ struct IOSPhotoCropSheet: View {
   var body: some View {
     NavigationStack {
       GeometryReader { geometry in
-        let side = min(geometry.size.width, geometry.size.height) - 48
+        let side = max(120, min(geometry.size.width, geometry.size.height) - 48)
         let liveZoom = min(max(zoom * pinching, 1), IOSPhotoCrop.maximumZoom)
         let live = IOSPhotoCrop.clamped(
           offset: CGSize(
@@ -736,8 +791,9 @@ struct IOSPhotoCropSheet: View {
             .frame(width: imageSize.width * scale, height: imageSize.height * scale)
             .offset(live)
           Rectangle().fill(.black.opacity(0.55))
+            .ignoresSafeArea()
             .mask {
-              Rectangle().overlay {
+              Rectangle().ignoresSafeArea().overlay {
                 Circle().frame(width: side, height: side).blendMode(.destinationOut)
               }
               .compositingGroup()
@@ -747,6 +803,11 @@ struct IOSPhotoCropSheet: View {
             .allowsHitTesting(false)
         }
         .frame(width: geometry.size.width, height: geometry.size.height)
+        .onChange(of: geometry.size) { _, newSize in
+          let newSide = max(120, min(newSize.width, newSize.height) - 48)
+          offset = IOSPhotoCrop.clamped(
+            offset: offset, imageSize: imageSize, side: newSide, zoom: zoom)
+        }
         .clipped()
         .contentShape(Rectangle())
         .gesture(

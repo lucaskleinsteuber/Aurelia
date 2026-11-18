@@ -6,18 +6,28 @@ import UniformTypeIdentifiers
 /// server moved here from another computer (docs/SERVER_MOVE.md).
 struct IOSServerSetupView: View {
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var moving = false
 
   var body: some View {
     NavigationStack {
       Form {
         Section {
-          Picker("Set Up", selection: $moving) {
-            Text("New Server").tag(false)
-            Text("Move from Another Server").tag(true)
+          if dynamicTypeSize.isAccessibilitySize {
+            Picker("Set Up", selection: $moving) {
+              Text("New Server").tag(false)
+              Text("Move from Another Server").tag(true)
+            }
+            .pickerStyle(.menu)
+            .disabled(model.setupSignedIn != nil)
+          } else {
+            Picker("Set Up", selection: $moving) {
+              Text("New Server").tag(false)
+              Text("Move Server").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .disabled(model.setupSignedIn != nil)
           }
-          .pickerStyle(.segmented)
-          .disabled(model.setupSignedIn != nil)
         } header: {
           Text(model.inspected?.info.name ?? "Aurelia Server")
         } footer: {
@@ -31,6 +41,7 @@ struct IOSServerSetupView: View {
           IOSNewServerForm()
         }
       }
+      .scrollDismissesKeyboard(.interactively)
       .scrollContentBackground(.hidden)
       .background(IOSDesign.canvas.ignoresSafeArea())
       .navigationTitle("Set Up Server")
@@ -41,6 +52,7 @@ struct IOSServerSetupView: View {
         }
       }
     }
+    .tint(.blue)
   }
 }
 
@@ -51,6 +63,7 @@ private struct IOSNewServerForm: View {
   @State private var password = ""
   @State private var again = ""
   @State private var pin = ""
+  @FocusState private var pinFocused: Bool
 
   private var problem: String? {
     IOSServerMoveText.setupProblem(
@@ -84,6 +97,7 @@ private struct IOSNewServerForm: View {
     }
     Section {
       SecureField("Viewing PIN", text: $pin).keyboardType(.numberPad)
+        .focused($pinFocused)
         .onChange(of: pin) { _, value in
           let digits = String(value.filter(\.isNumber).prefix(8))
           if digits != value { pin = digits }
@@ -96,13 +110,14 @@ private struct IOSNewServerForm: View {
     }
     Section {
       Button {
+        pinFocused = false
         model.setUpServer(code: code, ownerName: ownerName, password: password, pin: pin)
       } label: {
         HStack {
           Text(model.setupSignedIn == nil ? "Set Up Server" : "Save PIN and Continue")
           if model.isBusy {
             Spacer()
-            ProgressView()
+            ProgressView().tint(.black).accessibilityLabel("Setting up server")
           }
         }
       }
@@ -119,6 +134,7 @@ private struct IOSNewServerForm: View {
         Text("Storage locations are added next, in Settings › Library.")
       }
     }
+    .iosNumberPadDone { pinFocused = false }
   }
 }
 
@@ -126,6 +142,7 @@ private struct IOSNewServerForm: View {
 /// moving file and passphrase, then where the storage locations are on this computer.
 private struct IOSSetupMoveForm: View {
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var setupCode = ""
   @State private var withFile = false
   @State private var address = ""
@@ -210,7 +227,13 @@ private struct IOSSetupMoveForm: View {
       }
     }
     .fileImporter(isPresented: $importing, allowedContentTypes: [.data]) { result in
-      if case .success(let url) = result { file = url }
+      switch result {
+      case .success(let url):
+        file = url
+        error = nil
+      case .failure(let failure):
+        error = failure.localizedDescription
+      }
     }
   }
 
@@ -226,6 +249,7 @@ private struct IOSSetupMoveForm: View {
       Section(location.name) {
         Text("Was \(location.oldPath)").font(.footnote).foregroundStyle(.secondary)
         ForEach(location.suggestions) { suggestion in
+          let selected = paths[location.id] == suggestion.path
           Button {
             paths[location.id] = suggestion.path
             previews[location.id] = IOSMoveLocationMatch(
@@ -238,9 +262,10 @@ private struct IOSSetupMoveForm: View {
                   .font(.caption).foregroundStyle(.secondary)
               }
               Spacer()
-              if paths[location.id] == suggestion.path { Image(systemName: "checkmark") }
+              if selected { Image(systemName: "checkmark").accessibilityHidden(true) }
             }
           }
+          .accessibilityAddTraits(selected ? .isSelected : [])
         }
         TextField(
           "Folder on This Computer",
@@ -252,13 +277,26 @@ private struct IOSSetupMoveForm: View {
             })
         )
         .textInputAutocapitalization(.never).autocorrectionDisabled()
-        HStack {
+        if dynamicTypeSize.isAccessibilitySize {
           Button("Check Folder") { Task { await preview(location) } }
             .disabled((paths[location.id] ?? "").isEmpty || busy)
-          Spacer()
           Button("Later") {
             paths[location.id] = nil
             previews[location.id] = nil
+          }
+        } else {
+          HStack {
+            Button("Check Folder") { Task { await preview(location) } }
+              .buttonStyle(.borderless)
+              .frame(minHeight: 44)
+              .disabled((paths[location.id] ?? "").isEmpty || busy)
+            Spacer()
+            Button("Later") {
+              paths[location.id] = nil
+              previews[location.id] = nil
+            }
+            .buttonStyle(.borderless)
+            .frame(minHeight: 44)
           }
         }
         if let match = previews[location.id] {

@@ -5,6 +5,8 @@ import SwiftUI
 struct IOSProfilesView: View {
   @EnvironmentObject private var model: IOSAppModel
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.horizontalSizeClass) private var sizeClass
 
   var body: some View {
     // The glow fills the whole screen as a background. As a sibling in the ZStack it pulled the
@@ -29,7 +31,7 @@ struct IOSProfilesView: View {
       VStack(spacing: 32) {
         Text("Who’s watching?").font(.system(.largeTitle, weight: .bold))
           .multilineTextAlignment(.center)
-        IOSProfileRows {
+        IOSProfileRows(minimumColumnWidth: dynamicTypeSize.isAccessibilitySize ? 260 : 140) {
           ForEach(model.profiles) { profile in
             Button {
               model.openProfile(profile)
@@ -56,10 +58,10 @@ struct IOSProfilesView: View {
             Button("Try Again") { Task { await model.refreshProfiles() } }
               .buttonStyle(IOSButtonStyle()).disabled(model.isBusy)
           }
-          ProgressView().opacity(model.isBusy ? 1 : 0)
+          ProgressView().opacity(model.isBusy ? 1 : 0).accessibilityHidden(!model.isBusy)
         }
       }
-      .padding(.horizontal, IOSDesign.margin).padding(.vertical, 40)
+      .padding(.horizontal, IOSDesign.margin(for: sizeClass)).padding(.vertical, 40)
     }
   }
 }
@@ -67,12 +69,17 @@ struct IOSProfilesView: View {
 /// Center each row, including a single profile and the last partially filled row; also the
 /// offline mode's "Watch Downloads" chooser, so both pickers look alike.
 struct IOSProfileRows: Layout {
+  var minimumColumnWidth: CGFloat = 140
+
   private func dimensions(_ proposal: ProposedViewSize, count: Int) -> (
     width: CGFloat, columns: Int
   ) {
     let width = min(560, max(0, proposal.width ?? 560))
-    let columns = max(1, min(count, Int((width + 20) / 140)))
-    return (min(160, max(0, (width - CGFloat(columns - 1) * 20) / CGFloat(columns))), columns)
+    let columns = max(1, min(count, Int((width + 20) / max(100, minimumColumnWidth))))
+    let maxCellWidth: CGFloat = columns == 1 ? width : max(160, minimumColumnWidth)
+    return (
+      min(maxCellWidth, max(0, (width - CGFloat(columns - 1) * 20) / CGFloat(columns))), columns
+    )
   }
 
   func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -110,6 +117,7 @@ struct IOSProfileRows: Layout {
 
 /// Avatar with the name below and a small lock beside it, as on the Mac.
 private struct IOSProfileEntry: View {
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let profile: IOSWatchingProfile
 
   var body: some View {
@@ -120,11 +128,13 @@ private struct IOSProfileEntry: View {
       )
       .shadow(color: .black.opacity(0.3), radius: 12, y: 6)
       HStack(spacing: 4) {
-        Text(profile.name).font(.subheadline.weight(.semibold)).lineLimit(2)
+        Text(profile.name).font(.subheadline.weight(.semibold))
+          .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
           .multilineTextAlignment(.center)
         if profile.pinProtectionEnabled || profile.needsPinSetup {
           Image(systemName: "lock.fill").font(.caption2.weight(.semibold))
             .foregroundStyle(.secondary)
+            .accessibilityHidden(true)
         }
       }
       if let asleep = IOSScreenTimeText.closedLabel(profile.closedUntil) {
@@ -213,6 +223,7 @@ struct IOSProfilePicture: View {
 /// The Mac picker's slowly drifting wash of color, so no profile's titles show before unlock.
 struct IOSAmbientBackground: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   @State private var drift = false
 
   var body: some View {
@@ -220,21 +231,23 @@ struct IOSAmbientBackground: View {
       let size = max(geometry.size.width, geometry.size.height)
       ZStack {
         IOSDesign.canvas
-        glow(Color(red: 0.2, green: 0.26, blue: 0.62), diameter: size * 0.62)
-          .offset(
-            x: geometry.size.width * (drift ? -0.22 : -0.3),
-            y: geometry.size.height * (drift ? -0.24 : -0.16))
-        glow(Color(red: 0.05, green: 0.38, blue: 0.44), diameter: size * 0.55)
-          .offset(
-            x: geometry.size.width * (drift ? 0.3 : 0.22),
-            y: geometry.size.height * (drift ? 0.2 : 0.3))
-        glow(Color(red: 0.4, green: 0.16, blue: 0.44), diameter: size * 0.48)
-          .offset(
-            x: geometry.size.width * (drift ? 0.18 : 0.28),
-            y: geometry.size.height * (drift ? -0.3 : -0.2))
-        RadialGradient(
-          colors: [.clear, .black.opacity(0.35)], center: .center,
-          startRadius: size * 0.2, endRadius: size * 0.75)
+        if !reduceTransparency {
+          glow(Color(red: 0.2, green: 0.26, blue: 0.62), diameter: size * 0.62)
+            .offset(
+              x: geometry.size.width * (drift ? -0.22 : -0.3),
+              y: geometry.size.height * (drift ? -0.24 : -0.16))
+          glow(Color(red: 0.05, green: 0.38, blue: 0.44), diameter: size * 0.55)
+            .offset(
+              x: geometry.size.width * (drift ? 0.3 : 0.22),
+              y: geometry.size.height * (drift ? 0.2 : 0.3))
+          glow(Color(red: 0.4, green: 0.16, blue: 0.44), diameter: size * 0.48)
+            .offset(
+              x: geometry.size.width * (drift ? 0.18 : 0.28),
+              y: geometry.size.height * (drift ? -0.3 : -0.2))
+          RadialGradient(
+            colors: [.clear, .black.opacity(0.35)], center: .center,
+            startRadius: size * 0.2, endRadius: size * 0.75)
+        }
       }
       .frame(width: geometry.size.width, height: geometry.size.height)
     }
@@ -244,6 +257,13 @@ struct IOSAmbientBackground: View {
     .onAppear {
       guard !reduceMotion else { return }
       withAnimation(.easeInOut(duration: 16).repeatForever(autoreverses: true)) { drift = true }
+    }
+    .onChange(of: reduceMotion) { _, reduced in
+      if reduced {
+        withAnimation(nil) { drift = false }
+      } else {
+        withAnimation(.easeInOut(duration: 16).repeatForever(autoreverses: true)) { drift = true }
+      }
     }
   }
 
@@ -267,6 +287,9 @@ struct IOSPINView: View {
   @State private var attempts = 0
   @State private var showingRecovery = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   @Environment(\.verticalSizeClass) private var verticalSizeClass
   private static let rows = [
     ["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], ["delete", "0", "ok"],
@@ -278,21 +301,24 @@ struct IOSPINView: View {
     // Portrait: profile above the keypad, like the iPhone passcode screen. A phone on its side
     // has too little height for that, so the two sit next to each other.
     GeometryReader { geometry in
+      let metrics = IOSLayoutMetrics.pinKeyMetrics(
+        availableWidth: geometry.size.width, availableHeight: geometry.size.height,
+        isCompactHeight: verticalSizeClass == .compact)
       ScrollView {
         Group {
           if verticalSizeClass == .compact {
-            HStack(spacing: 48) {
+            HStack(spacing: min(40, max(20, geometry.size.width * 0.05))) {
               identity
-              keypad
+              keypad(metrics: metrics)
             }
           } else {
-            VStack(spacing: 28) {
+            VStack(spacing: metrics.diameter < 68 ? 18 : 28) {
               identity
-              keypad
+              keypad(metrics: metrics)
             }
           }
         }
-        .padding(IOSDesign.margin)
+        .padding(IOSDesign.margin(for: horizontalSizeClass))
         .frame(maxWidth: .infinity, minHeight: geometry.size.height)
       }
       .scrollBounceBehavior(.basedOnSize)
@@ -304,15 +330,17 @@ struct IOSPINView: View {
         model.cancelProfileSelection()
       } label: {
         Label("Profiles", systemImage: "chevron.left").font(.body.weight(.semibold))
+          .frame(minHeight: 44)
+          .contentShape(Rectangle())
       }
       .tint(.white)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.horizontal, IOSDesign.margin).padding(.top, 8)
+      .padding(.horizontal, IOSDesign.margin(for: horizontalSizeClass))
       .accessibilityIdentifier("profile-back")
     }
     .onChange(of: model.pinRejections) { _, _ in
       pin = ""
-      withAnimation(.linear(duration: 0.4)) { attempts += 1 }
+      withAnimation(reduceMotion ? nil : .linear(duration: 0.4)) { attempts += 1 }
     }
     .iosBackCommand { model.cancelProfileSelection() }
     .alert("Forgot PIN?", isPresented: $showingRecovery) {
@@ -327,21 +355,21 @@ struct IOSPINView: View {
   }
 
   private var identity: some View {
-    VStack(spacing: 12) {
+    VStack(spacing: verticalSizeClass == .compact ? 8 : 12) {
       IOSProfilePicture(
-        id: profile.id, name: profile.name, size: 72, pictureKey: profile.pictureKey,
-        pictureRevision: profile.pictureRevision
+        id: profile.id, name: profile.name, size: verticalSizeClass == .compact ? 56 : 72,
+        pictureKey: profile.pictureKey, pictureRevision: profile.pictureRevision
       )
       .shadow(color: .black.opacity(0.3), radius: 10, y: 5)
       VStack(spacing: 2) {
         Text(profile.name).font(.title3.weight(.semibold)).multilineTextAlignment(.center)
-          .lineLimit(2)
+          .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
         Text("Enter your PIN").font(.subheadline).foregroundStyle(.secondary)
       }
       pinField.modifier(IOSShakeEffect(travel: reduceMotion ? 0 : CGFloat(attempts)))
       ZStack {
         if model.isBusy {
-          ProgressView()
+          ProgressView().accessibilityLabel("Checking PIN")
         } else if let error = model.error {
           IOSErrorText(message: error).accessibilityIdentifier("profile-pin-error")
         }
@@ -349,6 +377,8 @@ struct IOSPINView: View {
       Button("Forgot PIN?") { showingRecovery = true }
         .font(.subheadline.weight(.semibold))
         .tint(.white)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
         .accessibilityIdentifier("profile-forgot-pin")
     }
     .frame(maxWidth: 300)
@@ -366,11 +396,13 @@ struct IOSPINView: View {
     .disabled(model.isBusy)
   }
 
-  private var keypad: some View {
-    Grid(horizontalSpacing: 24, verticalSpacing: 14) {
+  private func keypad(
+    metrics: (diameter: CGFloat, horizontalSpacing: CGFloat, verticalSpacing: CGFloat)
+  ) -> some View {
+    Grid(horizontalSpacing: metrics.horizontalSpacing, verticalSpacing: metrics.verticalSpacing) {
       ForEach(Self.rows, id: \.self) { row in
         GridRow {
-          ForEach(row, id: \.self) { key in keyButton(key) }
+          ForEach(row, id: \.self) { key in keyButton(key, diameter: metrics.diameter) }
         }
       }
     }
@@ -381,7 +413,7 @@ struct IOSPINView: View {
     ZStack {
       if pin.isEmpty {
         Text("PIN").font(.system(.title3, design: .rounded, weight: .medium))
-          .foregroundStyle(.tertiary)
+          .foregroundStyle(.secondary)
       } else {
         HStack(spacing: 12) {
           ForEach(0..<pin.count, id: \.self) { _ in
@@ -390,31 +422,39 @@ struct IOSPINView: View {
         }
       }
     }
-    .frame(width: 220, height: 50)
+    .padding(.horizontal, 20).padding(.vertical, 10)
+    .frame(minWidth: 200, minHeight: 50)
     .background {
-      Capsule().fill(.ultraThinMaterial)
-      Capsule().fill(Color.black.opacity(0.25))
+      if reduceTransparency {
+        Capsule().fill(IOSDesign.surface)
+      } else {
+        Capsule().fill(.ultraThinMaterial)
+        Capsule().fill(Color.black.opacity(0.25))
+      }
     }
-    .overlay { Capsule().strokeBorder(.white.opacity(0.16), lineWidth: 1.5) }
-    .animation(.easeOut(duration: 0.12), value: pin.count)
+    .overlay { Capsule().strokeBorder(.white.opacity(0.22), lineWidth: 1.5) }
+    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: pin.count)
     .accessibilityElement().accessibilityIdentifier("profile-pin")
     .accessibilityLabel("PIN").accessibilityValue("\(pin.count) digits entered")
   }
 
-  private func keyButton(_ key: String) -> some View {
+  private func keyButton(_ key: String, diameter: CGFloat) -> some View {
     Button {
       press(key)
     } label: {
       Group {
         switch key {
         case "delete":
-          Image(systemName: "delete.left").font(.system(size: 24, weight: .medium))
-        case "ok": Text("OK").font(.system(size: 22, weight: .semibold, design: .rounded))
-        default: Text(key).font(.system(size: 32, weight: .regular, design: .rounded))
+          Image(systemName: "delete.left")
+            .font(.system(size: diameter * 0.32, weight: .medium))
+        case "ok":
+          Text("OK").font(.system(size: diameter * 0.29, weight: .semibold, design: .rounded))
+        default:
+          Text(key).font(.system(size: diameter * 0.42, weight: .regular, design: .rounded))
         }
       }
     }
-    .buttonStyle(IOSPINKeyStyle(prominent: key == "ok"))
+    .buttonStyle(IOSPINKeyStyle(diameter: diameter, prominent: key == "ok"))
     .disabled(model.isBusy)
     .accessibilityIdentifier(key == "ok" ? "profile-continue" : "pin-key-\(key)")
     .accessibilityLabel(key == "delete" ? "Delete" : key == "ok" ? "Continue" : key)
@@ -425,7 +465,7 @@ struct IOSPINView: View {
     case "delete": if !pin.isEmpty { pin.removeLast() }
     case "ok":
       if pin.isEmpty {
-        withAnimation(.linear(duration: 0.4)) { attempts += 1 }
+        withAnimation(reduceMotion ? nil : .linear(duration: 0.4)) { attempts += 1 }
       } else {
         model.openProfile(profile, pin: pin)
       }
@@ -437,20 +477,34 @@ struct IOSPINView: View {
 
 /// Round keys like the iPhone's passcode pad: translucent at rest, light while pressed.
 private struct IOSPINKeyStyle: ButtonStyle {
+  var diameter: CGFloat = 76
   var prominent = false
   @Environment(\.isEnabled) private var enabled
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  @Environment(\.colorSchemeContrast) private var contrast
 
   func makeBody(configuration: Configuration) -> some View {
+    let fill =
+      reduceTransparency
+      ? (configuration.isPressed ? Color.white.opacity(0.45) : IOSDesign.surface)
+      : Color.white.opacity(configuration.isPressed ? 0.45 : prominent ? 0.24 : 0.13)
     configuration.label
       .foregroundStyle(.white)
-      .frame(width: 76, height: 76)
+      .frame(width: diameter, height: diameter)
       .background {
-        Circle().fill(.white.opacity(configuration.isPressed ? 0.45 : prominent ? 0.24 : 0.13))
+        Circle().fill(fill)
+          .overlay {
+            if contrast == .increased || reduceTransparency {
+              Circle().strokeBorder(.white.opacity(0.32), lineWidth: 1)
+            }
+          }
       }
       .contentShape(Circle())
       .opacity(enabled ? 1 : 0.4)
       .animation(
-        .easeOut(duration: configuration.isPressed ? 0.02 : 0.25), value: configuration.isPressed)
+        reduceMotion ? nil : .easeOut(duration: configuration.isPressed ? 0.02 : 0.25),
+        value: configuration.isPressed)
   }
 }
 
