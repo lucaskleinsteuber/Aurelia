@@ -19,6 +19,7 @@ struct IOSPlayerView: View {
   /// The playing title's scene notes; nil for downloads played without the server.
   @State private var notes: IOSSceneNotesModel?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
   init(makeController: @escaping @MainActor () -> IOSPlaybackController) {
     _controller = StateObject(wrappedValue: makeController())
@@ -89,22 +90,28 @@ struct IOSPlayerView: View {
         IOSWatchTogetherNotice(session: party)
       }
       if let preShow {
-        IOSCinemaPreShowView(show: preShow, reduceMotion: reduceMotion)
-          .ignoresSafeArea()
-          .transition(.opacity)
-          .overlay(alignment: .topLeading) {
-            Button {
-              preShow.stop()
-              controller.close()
-            } label: {
-              Image(systemName: "xmark").font(.headline).frame(width: 44, height: 44)
+        ZStack {
+          IOSCinemaPreShowView(show: preShow, reduceMotion: reduceMotion)
+          VStack {
+            HStack {
+              Button {
+                preShow.stop()
+                controller.close()
+              } label: {
+                Image(systemName: "xmark").font(.headline).frame(width: 44, height: 44)
+              }
+              .buttonStyle(.glass)
+              .accessibilityLabel("Close")
+              Spacer()
             }
-            .buttonStyle(.glass).padding(16)
-            .accessibilityLabel("Close")
+            .padding(.horizontal, 16).padding(.top, 8)
+            Spacer()
           }
+        }
+        .transition(.opacity)
       }
     }
-    .animation(.easeInOut(duration: 0.45), value: controller.isStarting)
+    .animation(reduceMotion ? nil : .easeInOut(duration: 0.45), value: controller.isStarting)
     .persistentSystemOverlays(controller.controlsVisible ? .automatic : .hidden)
     // The iPad keeps the status bar in every orientation; time and date stay out of the picture.
     .statusBarHidden(true)
@@ -122,7 +129,7 @@ struct IOSPlayerView: View {
     .overlay(alignment: .topTrailing) {
       if let notes, preShow == nil, controller.errorMessage == nil {
         IOSSceneNoteCue(notes: notes, position: controller.position)
-          .padding(.top, controller.controlsVisible ? 64 : 16).padding(.trailing, 16)
+          .padding(.top, controller.controlsVisible ? 68 : 16).padding(.trailing, 16)
       }
     }
     .onChange(of: controller.suggestionToStart) { _, item in
@@ -160,79 +167,176 @@ struct IOSPlayerView: View {
   }
 
   private var controls: some View {
-    ZStack {
-      LinearGradient(
-        stops: [
-          .init(color: .black.opacity(0.55), location: 0),
-          .init(color: .clear, location: 0.3),
-          .init(color: .clear, location: 0.55),
-          .init(color: .black.opacity(0.75), location: 1),
-        ], startPoint: .top, endPoint: .bottom
-      ).ignoresSafeArea()
-        // A tap on the picture hides the controls again.
-        .contentShape(Rectangle()).onTapGesture { controller.hideControls() }
-        .accessibilityHidden(true)
-      VStack(spacing: 0) {
-        topBar
-        Spacer(minLength: 12)
-        if controller.errorMessage == nil { transport }
-        Spacer(minLength: 12)
-        bottomBar
+    GeometryReader { geometry in
+      ZStack {
+        LinearGradient(
+          stops: [
+            .init(color: .black.opacity(0.55), location: 0),
+            .init(color: .clear, location: 0.3),
+            .init(color: .clear, location: 0.55),
+            .init(color: .black.opacity(0.75), location: 1),
+          ], startPoint: .top, endPoint: .bottom
+        ).ignoresSafeArea()
+          // A tap on the picture hides the controls again.
+          .contentShape(Rectangle()).onTapGesture { controller.hideControls() }
+          .accessibilityHidden(true)
+        VStack(spacing: 0) {
+          topBar(availableWidth: geometry.size.width)
+          Spacer(minLength: 12)
+          if controller.errorMessage == nil { transport }
+          Spacer(minLength: 12)
+          bottomBar
+        }
+        .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 8)
       }
-      .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 8)
     }
     .disabled(controller.isClosing)
   }
 
-  private var topBar: some View {
-    HStack(spacing: 10) {
+  private var trailingTopBarCount: Int {
+    var count = 3  // rate, audio, sleep
+    if !controller.chapters.isEmpty { count += 1 }
+    if notes != nil { count += 1 }
+    if !controller.isOffline { count += 2 }  // watchTogether, AirPlay
+    if controller.canPictureInPicture { count += 1 }
+    return count
+  }
+
+  private func topBar(availableWidth: CGFloat) -> some View {
+    let compact = IOSLayoutMetrics.playerUsesOverflowMenu(
+      availableWidth: availableWidth, trailingItemCount: trailingTopBarCount)
+    return HStack(spacing: 8) {
       glassButton("Close", symbol: "xmark", id: "close") { controller.close() }
-      Spacer()
-      GlassEffectContainer(spacing: 10) {
-        HStack(spacing: 10) {
-          Button {
-            open(.rate)
-          } label: {
-            Text(rateTitle(controller.playbackRate)).font(.footnote.weight(.semibold))
-              .monospacedDigit().padding(.horizontal, 12).frame(height: 36)
-          }
-          .buttonStyle(.plain)
-          .glassEffect(.regular.interactive(), in: Capsule())
-          .accessibilityIdentifier("player-rate").accessibilityLabel("Playback Rate")
-          glassButton(
-            "Audio and Subtitles",
-            symbol: controller.selectedSubtitle < 0 ? "captions.bubble" : "captions.bubble.fill",
-            id: "audio"
-          ) { open(.audio) }
-          .disabled(controller.audioTracks.isEmpty && controller.subtitleTracks.isEmpty)
-          glassButton(
-            "Sleep Timer", symbol: controller.sleepTimer == .off ? "moon.zzz" : "moon.zzz.fill",
-            id: "sleep"
-          ) { open(.sleep) }
-          if !controller.chapters.isEmpty {
-            glassButton("Chapters", symbol: "list.bullet", id: "chapters") { open(.chapters) }
-          }
-          if notes != nil {
-            glassButton("Scene Notes", symbol: "bookmark", id: "notes") { open(.notes) }
-          }
-          // Watch Together: start a party for this title, or leave the one this device is in.
-          if !controller.isOffline {
-            watchTogetherButton
-          }
-          if controller.canPictureInPicture {
-            glassButton("Picture in Picture", symbol: "pip.enter", id: "pip") {
-              controller.startPictureInPicture()
+      Spacer(minLength: 8)
+      GlassEffectContainer(spacing: 8) {
+        HStack(spacing: 8) {
+          if compact {
+            glassButton(
+              "Audio and Subtitles",
+              symbol: controller.selectedSubtitle < 0 ? "captions.bubble" : "captions.bubble.fill",
+              id: "audio"
+            ) { open(.audio) }
+            .disabled(controller.audioTracks.isEmpty && controller.subtitleTracks.isEmpty)
+            if controller.canPictureInPicture {
+              glassButton("Picture in Picture", symbol: "pip.enter", id: "pip") {
+                controller.startPictureInPicture()
+              }
             }
-          }
-          if !controller.isOffline {
-            IOSAirPlayButton()
-              .frame(width: 36, height: 36)
-              .glassEffect(.regular.interactive(), in: Circle())
-              .accessibilityLabel("AirPlay").accessibilityIdentifier("player-airplay")
+            if !controller.isOffline {
+              IOSAirPlayButton()
+                .frame(width: 44, height: 44)
+                .glassEffect(.regular.interactive(), in: Circle())
+                .accessibilityLabel("AirPlay").accessibilityIdentifier("player-airplay")
+            }
+            overflowMenu
+          } else {
+            rateButton
+            glassButton(
+              "Audio and Subtitles",
+              symbol: controller.selectedSubtitle < 0 ? "captions.bubble" : "captions.bubble.fill",
+              id: "audio"
+            ) { open(.audio) }
+            .disabled(controller.audioTracks.isEmpty && controller.subtitleTracks.isEmpty)
+            glassButton(
+              "Sleep Timer", symbol: controller.sleepTimer == .off ? "moon.zzz" : "moon.zzz.fill",
+              id: "sleep", value: controller.sleepTimer.title
+            ) { open(.sleep) }
+            if !controller.chapters.isEmpty {
+              glassButton("Chapters", symbol: "list.bullet", id: "chapters") { open(.chapters) }
+            }
+            if notes != nil {
+              glassButton("Scene Notes", symbol: "bookmark", id: "notes") { open(.notes) }
+            }
+            // Watch Together: start a party for this title, or leave the one this device is in.
+            if !controller.isOffline {
+              watchTogetherButton
+            }
+            if controller.canPictureInPicture {
+              glassButton("Picture in Picture", symbol: "pip.enter", id: "pip") {
+                controller.startPictureInPicture()
+              }
+            }
+            if !controller.isOffline {
+              IOSAirPlayButton()
+                .frame(width: 44, height: 44)
+                .glassEffect(.regular.interactive(), in: Circle())
+                .accessibilityLabel("AirPlay").accessibilityIdentifier("player-airplay")
+            }
           }
         }
       }
     }
+  }
+
+  private var rateButton: some View {
+    Button {
+      open(.rate)
+    } label: {
+      Text(rateTitle(controller.playbackRate)).font(.footnote.weight(.semibold))
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .monospacedDigit().padding(.horizontal, 12).frame(minHeight: 44)
+    }
+    .buttonStyle(.plain)
+    .glassEffect(.regular.interactive(), in: Capsule())
+    .accessibilityIdentifier("player-rate")
+    .accessibilityLabel("Playback Rate")
+    .accessibilityValue(rateTitle(controller.playbackRate))
+  }
+
+  private var overflowMenu: some View {
+    Menu {
+      Button {
+        open(.rate)
+      } label: {
+        Label(
+          "Playback Speed (\(rateTitle(controller.playbackRate)))", systemImage: "gauge.with.needle"
+        )
+      }
+      Button {
+        open(.sleep)
+      } label: {
+        Label(
+          controller.sleepTimer == .off
+            ? "Sleep Timer" : "Sleep Timer (\(controller.sleepTimer.title))",
+          systemImage: controller.sleepTimer == .off ? "moon.zzz" : "moon.zzz.fill")
+      }
+      if !controller.chapters.isEmpty {
+        Button {
+          open(.chapters)
+        } label: {
+          Label("Chapters", systemImage: "list.bullet")
+        }
+      }
+      if notes != nil {
+        Button {
+          open(.notes)
+        } label: {
+          Label("Scene Notes", systemImage: "bookmark")
+        }
+      }
+      if !controller.isOffline {
+        Button {
+          Task {
+            if model.watchParty?.state != nil {
+              await model.leaveWatchTogether()
+            } else {
+              await model.startWatchTogether(with: controller)
+            }
+          }
+        } label: {
+          Label(
+            model.watchParty?.state != nil ? "Leave Watch Together" : "Start Watch Together",
+            systemImage: model.watchParty?.state != nil ? "person.2.fill" : "person.2")
+        }
+      }
+    } label: {
+      Image(systemName: "ellipsis").font(.system(size: 16, weight: .semibold))
+        .frame(width: 44, height: 44).contentShape(Circle())
+    }
+    .buttonStyle(.plain)
+    .glassEffect(.regular.interactive(), in: Circle())
+    .accessibilityLabel("More playback controls")
+    .accessibilityIdentifier("player-more")
   }
 
   private var watchTogetherButton: some View {
@@ -267,7 +371,7 @@ struct IOSPlayerView: View {
           } else {
             Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
               .font(.system(size: 40, weight: .semibold))
-              .contentTransition(.symbolEffect(.replace))
+              .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
           }
         }
         .frame(width: 64, height: 64).contentShape(Rectangle())
@@ -284,7 +388,8 @@ struct IOSPlayerView: View {
 
   private var bottomBar: some View {
     VStack(alignment: .leading, spacing: 6) {
-      Text(controller.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+      Text(controller.title).font(.subheadline.weight(.semibold))
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
       if let error = controller.errorMessage {
         Text(error).font(.footnote).foregroundStyle(.secondary)
         HStack(spacing: 10) {
@@ -387,22 +492,39 @@ struct IOSPlayerView: View {
               controller.setScrubbing(false)
             })
       }
-      .frame(height: 24)
-      .animation(.easeOut(duration: 0.15), value: controller.isScrubbing)
-      HStack {
-        Text(
-          IOSPlayerPolicy.timeLabel(milliseconds: controller.scrubPosition ?? controller.position)
-        )
-        Spacer()
-        if let endsAt = IOSPlayerPolicy.endTimeLabel(
-          position: controller.position, duration: controller.duration,
-          rate: controller.playbackRate, now: Date())
-        {
-          Text(endsAt).accessibilityIdentifier("player-ends-at")
-          Spacer()
+      .frame(height: 44)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: controller.isScrubbing)
+      let endsAt = IOSPlayerPolicy.endTimeLabel(
+        position: controller.position, duration: controller.duration,
+        rate: controller.playbackRate, now: Date())
+      if dynamicTypeSize.isAccessibilitySize {
+        VStack(alignment: .leading, spacing: 2) {
+          HStack {
+            Text(
+              IOSPlayerPolicy.timeLabel(
+                milliseconds: controller.scrubPosition ?? controller.position))
+            Spacer()
+            Text(IOSPlayerPolicy.timeLabel(milliseconds: controller.duration))
+          }
+          if let endsAt {
+            Text(endsAt).accessibilityIdentifier("player-ends-at")
+          }
         }
-        Text(IOSPlayerPolicy.timeLabel(milliseconds: controller.duration))
-      }.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+      } else {
+        HStack {
+          Text(
+            IOSPlayerPolicy.timeLabel(
+              milliseconds: controller.scrubPosition ?? controller.position))
+          Spacer()
+          if let endsAt {
+            Text(endsAt).accessibilityIdentifier("player-ends-at")
+            Spacer()
+          }
+          Text(IOSPlayerPolicy.timeLabel(milliseconds: controller.duration))
+        }
+        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+      }
     }
     .disabled(!controller.canSeek)
     .accessibilityElement(children: .ignore)
@@ -527,21 +649,30 @@ struct IOSPlayerView: View {
     .buttonStyle(.glass)
     .accessibilityHint("Jumps to the end of the intro")
     .accessibilityIdentifier("player-skip-intro")
-    .padding(.trailing, 16).padding(.bottom, controller.controlsVisible ? 120 : 16)
+    .padding(.trailing, 16)
+    .padding(
+      .bottom,
+      controller.controlsVisible ? (dynamicTypeSize.isAccessibilitySize ? 180 : 132) : 16
+    )
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-    .animation(.easeOut(duration: 0.2), value: controller.controlsVisible)
+    .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: controller.controlsVisible)
   }
 
   /// After a movie or a series' last episode, from the credits on: the server's suggestion,
   /// without a countdown.
   private func suggestionCard(_ suggestion: IOSMediaSuggestion) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
+    let actionLayout =
+      dynamicTypeSize.isAccessibilitySize
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+      : AnyLayout(HStackLayout(spacing: 8))
+    return VStack(alignment: .leading, spacing: 8) {
       Text("UP NEXT").font(.caption2.weight(.bold)).tracking(1)
         .foregroundStyle(.secondary)
-      Text(suggestion.item.title).font(.subheadline.weight(.semibold)).lineLimit(2)
+      Text(suggestion.item.title).font(.subheadline.weight(.semibold))
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
       Text(IOSPlayerPolicy.suggestionCaption(suggestion)).font(.caption).foregroundStyle(.secondary)
-        .lineLimit(2)
-      HStack(spacing: 8) {
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+      actionLayout {
         Button {
           controller.playSuggestion(suggestion.item)
         } label: {
@@ -562,9 +693,9 @@ struct IOSPlayerView: View {
       .font(.footnote.weight(.semibold))
     }
     .padding(14)
-    .frame(width: 300, alignment: .leading)
+    .frame(maxWidth: 320, alignment: .leading)
     .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    .padding(.trailing, 16).padding(.bottom, 16)
+    .padding(.horizontal, 16).padding(.bottom, 16)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("player-suggestion")
@@ -588,24 +719,27 @@ struct IOSPlayerView: View {
         center: .init(x: 0.5, y: 0.35), startRadius: 20, endRadius: 600
       )
       .ignoresSafeArea()
-      VStack(spacing: 16) {
-        Image(systemName: "moon.stars.fill")
-          .font(.system(size: 64))
-          .foregroundStyle(Color(red: 0.95, green: 0.89, blue: 0.66))
-          .shadow(color: Color(red: 0.95, green: 0.89, blue: 0.66).opacity(0.45), radius: 20)
-          .accessibilityHidden(true)
-        Text(words.title).font(.largeTitle.weight(.bold)).foregroundStyle(.white)
-        if !words.text.isEmpty {
-          Text(words.text).font(.title3).foregroundStyle(.white.opacity(0.75))
+      IOSCenteredScrollView {
+        VStack(spacing: 16) {
+          Image(systemName: "moon.stars.fill")
+            .font(.system(size: 64))
+            .foregroundStyle(Color(red: 0.95, green: 0.89, blue: 0.66))
+            .shadow(color: Color(red: 0.95, green: 0.89, blue: 0.66).opacity(0.45), radius: 20)
+            .accessibilityHidden(true)
+          Text(words.title).font(.largeTitle.weight(.bold)).foregroundStyle(.white)
+          if !words.text.isEmpty {
+            Text(words.text).font(.title3).foregroundStyle(.white.opacity(0.82))
+          }
+          Button("Done") { goodNightDone() }
+            .buttonStyle(.glassProminent).tint(.white).foregroundStyle(.black)
+            .controlSize(.large)
+            .padding(.top, 8)
+            .accessibilityIdentifier("player-good-night-done")
         }
-        Button("Done") { goodNightDone() }
-          .buttonStyle(.glassProminent)
-          .controlSize(.large)
-          .padding(.top, 8)
-          .accessibilityIdentifier("player-good-night-done")
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: 520)
+        .padding(32)
       }
-      .multilineTextAlignment(.center)
-      .padding(32)
     }
     .contentShape(Rectangle())
     .onTapGesture {
@@ -638,12 +772,17 @@ struct IOSPlayerView: View {
 
   private var suggestionEndScreen: some View {
     let list = Array(controller.suggestions.prefix(3))
+    let columns = [
+      GridItem(
+        .adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 150 : 108, maximum: 180),
+        spacing: 16, alignment: .top)
+    ]
     return ZStack {
-      Color.black.opacity(0.82).ignoresSafeArea()
+      Color.black.opacity(0.84).ignoresSafeArea()
       ScrollView {
         VStack(spacing: 20) {
-          Text("What's Next").font(.title.weight(.bold))
-          HStack(alignment: .top, spacing: 16) {
+          Text("What's Next").font(.title.weight(.bold)).accessibilityAddTraits(.isHeader)
+          LazyVGrid(columns: columns, spacing: 16) {
             ForEach(Array(list.enumerated()), id: \.element.id) { index, suggestion in
               Button {
                 controller.playSuggestion(suggestion.item)
@@ -651,15 +790,16 @@ struct IOSPlayerView: View {
                 VStack(alignment: .leading, spacing: 6) {
                   IOSPosterLabel(item: suggestion.item)
                   Text(IOSPlayerPolicy.suggestionCaption(suggestion)).font(.caption2)
-                    .foregroundStyle(.secondary).lineLimit(2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                 }
-                .frame(width: index == 0 ? 140 : 110)
               }
               .buttonStyle(.plain)
               .accessibilityHint("Watch now")
               .accessibilityIdentifier("player-end-suggestion-\(index)")
             }
           }
+          .frame(maxWidth: 560)
           Button("Done") { controller.doneWithSuggestions() }
             .buttonStyle(.glass)
             .accessibilityIdentifier("player-end-suggestions-done")
@@ -673,11 +813,16 @@ struct IOSPlayerView: View {
   }
 
   private func upNextCard(_ upNext: IOSUpNext) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
+    let actionLayout =
+      dynamicTypeSize.isAccessibilitySize
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+      : AnyLayout(HStackLayout(spacing: 8))
+    return VStack(alignment: .leading, spacing: 8) {
       Text("UP NEXT").font(.caption2.weight(.bold)).tracking(1)
         .foregroundStyle(.secondary)
-      Text(upNext.title).font(.subheadline.weight(.semibold)).lineLimit(2)
-      HStack(spacing: 8) {
+      Text(upNext.title).font(.subheadline.weight(.semibold))
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+      actionLayout {
         Button {
           controller.playNextNow()
         } label: {
@@ -697,9 +842,9 @@ struct IOSPlayerView: View {
       .font(.footnote.weight(.semibold))
     }
     .padding(14)
-    .frame(width: 250, alignment: .leading)
+    .frame(maxWidth: 300, alignment: .leading)
     .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    .padding(.trailing, 16).padding(.bottom, 16)
+    .padding(.horizontal, 16).padding(.bottom, 16)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("player-up-next")
@@ -824,7 +969,7 @@ struct IOSPlayerView: View {
     let sections = sections(menu)
     let rows = sections.reduce(0) { $0 + $1.rows.count }
     let height = min(
-      CGFloat(rows) * 44 + CGFloat(sections.filter { $0.title != nil }.count) * 34 + 72, 520)
+      CGFloat(rows) * 44 + CGFloat(sections.filter { $0.title != nil }.count) * 34 + 84, 520)
     return VStack(spacing: 0) {
       HStack {
         Text(menuTitle(menu)).font(.headline)
@@ -833,18 +978,20 @@ struct IOSPlayerView: View {
           controller.trackMenu = nil
         } label: {
           Image(systemName: "xmark").font(.footnote.weight(.bold))
-            .frame(width: 30, height: 30)
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+            .frame(width: 44, height: 44)
         }
         .buttonStyle(.glass).buttonBorderShape(.circle)
         .accessibilityLabel("Done").accessibilityIdentifier("player-tracks-done")
       }
-      .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 2)
+      .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 4)
       ScrollView {
         VStack(alignment: .leading, spacing: 0) {
           ForEach(Array(sections.enumerated()), id: \.offset) { index, section in
             if let title = section.title {
               Text(title).font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
-                .padding(.horizontal, 16).frame(height: 34, alignment: .bottomLeading)
+                .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             ForEach(section.rows) { row in
               Button {
@@ -853,10 +1000,15 @@ struct IOSPlayerView: View {
                 HStack(spacing: 10) {
                   Image(systemName: "checkmark").font(.footnote.weight(.semibold))
                     .opacity(row.selected ? 1 : 0).frame(width: 16)
-                  Text(row.title).lineLimit(1).truncationMode(.middle)
+                    .accessibilityHidden(true)
+                  Text(row.title)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                    .truncationMode(.middle)
+                    .multilineTextAlignment(.leading)
                   Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 16).frame(height: 44).contentShape(Rectangle())
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .frame(minHeight: 44).contentShape(Rectangle())
               }
               .buttonStyle(.plain)
               .accessibilityIdentifier("player-option-\(row.id)")
@@ -865,12 +1017,14 @@ struct IOSPlayerView: View {
             if index < sections.count - 1 { Divider().padding(.top, 4) }
           }
         }
-        .padding(.bottom, 8)
+        .padding(.bottom, 12)
       }
       .scrollBounceBehavior(.basedOnSize)
     }
-    .presentationDetents([.height(height)])
-    .presentationDragIndicator(.hidden)
+    .presentationDetents(
+      dynamicTypeSize.isAccessibilitySize ? [.medium, .large] : [.height(height), .large]
+    )
+    .presentationDragIndicator(.visible)
     .accessibilityIdentifier("player-tracks")
   }
 
@@ -911,18 +1065,21 @@ struct IOSPlayerView: View {
   }
 
   private func glassButton(
-    _ title: String, symbol: String, id: String, action: @escaping () -> Void
+    _ title: String, symbol: String, id: String, value: String? = nil,
+    action: @escaping () -> Void
   ) -> some View {
     Button {
       controller.userInteracted()
       action()
     } label: {
-      Image(systemName: symbol).font(.system(size: 15, weight: .semibold))
-        .frame(width: 36, height: 36).contentShape(Circle())
+      Image(systemName: symbol).font(.system(size: 16, weight: .semibold))
+        .frame(width: 44, height: 44).contentShape(Circle())
     }
     .buttonStyle(.plain)
     .glassEffect(.regular.interactive(), in: Circle())
-    .accessibilityLabel(title).accessibilityIdentifier("player-\(id)")
+    .accessibilityLabel(title)
+    .accessibilityValue(value ?? "")
+    .accessibilityIdentifier("player-\(id)")
   }
 
   private func transportButton(
@@ -947,12 +1104,13 @@ extension IOSPlaybackController.TrackMenu: Identifiable {
 
 private struct IOSPlayerSymbolStyle: ButtonStyle {
   @Environment(\.isEnabled) private var enabled
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   func makeBody(configuration: Configuration) -> some View {
     configuration.label.foregroundStyle(.white)
       .shadow(color: .black.opacity(0.35), radius: 8)
       .opacity(enabled ? (configuration.isPressed ? 0.6 : 1) : 0.35)
-      .scaleEffect(configuration.isPressed ? 0.9 : 1)
-      .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.9 : 1)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
   }
 }
 
@@ -975,17 +1133,22 @@ private struct IOSSkipIndicator {
 
 /// A white arc that turns and gently grows and shrinks while a title starts.
 private struct IOSStartRing: View {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   var body: some View {
-    TimelineView(.animation) { context in
-      let time = context.date.timeIntervalSinceReferenceDate
-      let rotation = time.truncatingRemainder(dividingBy: 0.9) / 0.9 * 360
-      let length = 0.42 + 0.26 * sin(time * 2 * .pi / 1.8)
-      ZStack {
-        Circle().stroke(.white.opacity(0.12), lineWidth: 4)
-        Circle()
-          .trim(from: 0, to: length)
-          .stroke(.white, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-          .rotationEffect(.degrees(rotation - 90))
+    if reduceMotion {
+      ProgressView().tint(.white).controlSize(.large)
+    } else {
+      TimelineView(.animation) { context in
+        let time = context.date.timeIntervalSinceReferenceDate
+        let rotation = time.truncatingRemainder(dividingBy: 0.9) / 0.9 * 360
+        let length = 0.42 + 0.26 * sin(time * 2 * .pi / 1.8)
+        ZStack {
+          Circle().stroke(.white.opacity(0.12), lineWidth: 4)
+          Circle()
+            .trim(from: 0, to: length)
+            .stroke(.white, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+            .rotationEffect(.degrees(rotation - 90))
+        }
       }
     }
   }
@@ -993,6 +1156,7 @@ private struct IOSStartRing: View {
 
 /// A short notice at the top of the picture when someone in the party acts, such as "Mia paused".
 private struct IOSWatchTogetherNotice: View {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @ObservedObject var session: IOSWatchTogetherSession
 
   var body: some View {
@@ -1011,7 +1175,7 @@ private struct IOSWatchTogetherNotice: View {
       Spacer()
     }
     .padding(.top, 64)
-    .animation(.easeInOut(duration: 0.3), value: text)
+    .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: text)
     .allowsHitTesting(false)
   }
 }
@@ -1036,6 +1200,7 @@ private struct IOSSceneNoteCue: View {
 /// Scene notes of this title: tap one to jump there, add one at the current moment or as a range
 /// from it, edit the text, swipe to delete.
 private struct IOSSceneNotesSheet: View {
+  @Environment(\.dismiss) private var dismiss
   @ObservedObject var notes: IOSSceneNotesModel
   let position: Int64
   let jump: (Int64) -> Void
@@ -1086,10 +1251,12 @@ private struct IOSSceneNotesSheet: View {
             }
             .swipeActions {
               Button("Delete", role: .destructive) { Task { await notes.delete(note) } }
+                .tint(.red)
               Button("Edit") {
                 editText = note.text
                 editing = note
               }
+              .tint(.blue)
             }
             .accessibilityHint("Jumps to this note. Swipe to edit or delete.")
           }
@@ -1097,11 +1264,15 @@ private struct IOSSceneNotesSheet: View {
           if let message = notes.message { Text(message).foregroundStyle(.orange) }
         }
       }
+      .scrollDismissesKeyboard(.interactively)
       .navigationTitle("Scene Notes")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .topBarLeading) {
           Button("Reload") { Task { await notes.reload() } }
+        }
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Done") { dismiss() }
         }
       }
       .alert(
@@ -1116,6 +1287,7 @@ private struct IOSSceneNotesSheet: View {
         }
       }
     }
+    .tint(.blue)
     .presentationDetents([.medium, .large])
   }
 }

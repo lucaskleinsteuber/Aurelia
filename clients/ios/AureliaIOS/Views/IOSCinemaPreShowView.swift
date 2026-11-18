@@ -4,35 +4,39 @@ import UIKit
 /// Cinema mode's pre-show over the player: an ad, trailers and the curtain before the film.
 /// Copied from the Mac app, with Skip and Start Film to tap.
 struct IOSCinemaPreShowView: View {
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @ObservedObject var show: IOSCinemaPreShow
   let reduceMotion: Bool
 
   var body: some View {
     ZStack {
       // Once the curtain opens, the film playing behind it shows through.
-      if !isFeature || show.curtainOpensAt == nil { Color.black }
-      switch show.act {
-      case .ad(let ad):
-        TimelineView(.animation) { context in
-          IOSCinemaAdScene(
-            ad: ad, time: context.date.timeIntervalSince(show.actStarted), motion: !reduceMotion)
-        }
-        .id(ad.rawValue)
-        .transition(.opacity)
-      case .trailer(let trailer):
-        IOSCinemaTrailerScene(show: show, trailer: trailer)
-          .id(trailer.trailer.id)
+      if !isFeature || show.curtainOpensAt == nil { Color.black.ignoresSafeArea() }
+      Group {
+        switch show.act {
+        case .ad(let ad):
+          TimelineView(.animation) { context in
+            IOSCinemaAdScene(
+              ad: ad, time: context.date.timeIntervalSince(show.actStarted), motion: !reduceMotion)
+          }
+          .id(ad.rawValue)
           .transition(.opacity)
-      case .feature(let title):
-        TimelineView(.animation) { context in
-          IOSCinemaCurtain(
-            title: title, time: context.date.timeIntervalSince(show.actStarted),
-            opensAt: show.curtainOpensAt, motion: !reduceMotion)
+        case .trailer(let trailer):
+          IOSCinemaTrailerScene(show: show, trailer: trailer, reduceMotion: reduceMotion)
+            .id(trailer.trailer.id)
+            .transition(.opacity)
+        case .feature(let title):
+          TimelineView(.animation) { context in
+            IOSCinemaCurtain(
+              title: title, time: context.date.timeIntervalSince(show.actStarted),
+              opensAt: show.curtainOpensAt, motion: !reduceMotion)
+          }
+          .transition(.opacity)
+        case nil:
+          EmptyView()
         }
-        .transition(.opacity)
-      case nil:
-        EmptyView()
       }
+      .ignoresSafeArea()
       chrome
     }
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: show.act)
@@ -57,39 +61,48 @@ struct IOSCinemaPreShowView: View {
       HStack {
         if let label {
           Text(label.uppercased())
-            .font(.system(size: 11, weight: .semibold)).tracking(1.4)
-            .foregroundStyle(.white.opacity(0.85))
-            .padding(.horizontal, 10).padding(.vertical, 5)
-            .background(.black.opacity(0.35), in: Capsule())
-            .overlay(Capsule().strokeBorder(.white.opacity(0.25)))
+            .font(.caption2.weight(.semibold)).tracking(1.4)
+            .foregroundStyle(.white.opacity(0.9))
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(.black.opacity(0.45), in: Capsule())
+            .overlay(Capsule().strokeBorder(.white.opacity(0.28)))
+            // Sit beside the player's top-leading Close button instead of behind it.
+            .padding(.leading, 56)
         }
         Spacer()
       }
+      .frame(minHeight: 44)
       Spacer()
-      HStack(spacing: 10) {
-        Spacer()
-        if !isFeature {
-          Button {
-            show.skip()
-          } label: {
-            Label("Skip", systemImage: "forward.end.fill")
+      if !isFeature {
+        let actionLayout =
+          dynamicTypeSize.isAccessibilitySize
+          ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 10))
+          : AnyLayout(HStackLayout(spacing: 10))
+        HStack {
+          Spacer()
+          actionLayout {
+            Button {
+              show.skip()
+            } label: {
+              Label("Skip", systemImage: "forward.end.fill")
+            }
+            .buttonStyle(.glass)
+            .accessibilityHint("Moves on to the next part")
+            .accessibilityIdentifier("cinema-skip")
+            Button {
+              show.startFilm()
+            } label: {
+              Label("Start Film", systemImage: "play.fill")
+            }
+            .buttonStyle(.glassProminent).tint(.white).foregroundStyle(.black)
+            .accessibilityHint("Leaves out the rest and starts the film")
+            .accessibilityIdentifier("cinema-start-film")
           }
-          .buttonStyle(.glass)
-          .accessibilityHint("Moves on to the next part")
-          .accessibilityIdentifier("cinema-skip")
-          Button {
-            show.startFilm()
-          } label: {
-            Label("Start Film", systemImage: "play.fill")
-          }
-          .buttonStyle(.glassProminent).tint(.white).foregroundStyle(.black)
-          .accessibilityHint("Leaves out the rest and starts the film")
-          .accessibilityIdentifier("cinema-start-film")
+          .font(.subheadline.weight(.semibold))
         }
       }
-      .font(.subheadline.weight(.semibold))
     }
-    .padding(20)
+    .padding(.horizontal, 16).padding(.vertical, 8)
     .opacity(show.act == nil ? 0 : 1)
   }
 }
@@ -189,10 +202,12 @@ private struct IceCreamAd: View {
       VStack {
         Spacer()
         Text("*The foyer is your kitchen. Aurelia does not sell ice cream and never has.")
-          .font(.system(size: 2.1 * unit, weight: .medium))
-          .foregroundStyle(berry.opacity(0.7))
+          .font(.system(size: max(11, 2.1 * unit), weight: .medium))
+          .multilineTextAlignment(.center)
+          .foregroundStyle(berry.opacity(0.8))
           .opacity(shown(t, 11.8, 20))
-          .padding(.bottom, 5 * unit)
+          .padding(.horizontal, 20)
+          .padding(.bottom, max(76, 5 * unit))
       }
     }
   }
@@ -200,7 +215,7 @@ private struct IceCreamAd: View {
   private var cone: some View {
     ZStack(alignment: .bottom) {
       ForEach(0..<5, id: \.self) { index in
-        let angle = Double(index) * 72 + time * 40
+        let angle = Double(index) * 72 + (motion ? time * 40 : 0)
         Image(systemName: "sparkle")
           .font(.system(size: 4 * unit))
           .foregroundStyle(.white)
@@ -259,7 +274,7 @@ private struct IceCreamAd: View {
       VStack(alignment: .leading, spacing: 2 * unit) {
         Text("Feeling warm?")
           .font(.system(size: 8 * unit, weight: .bold, design: .rounded))
-        Text("Ninety minutes is a long t.")
+        Text("Ninety minutes is a long time.")
           .font(.system(size: 4.2 * unit, weight: .medium, design: .rounded))
           .opacity(ease(t, 2.2))
       }
@@ -325,10 +340,12 @@ private struct PopcornAd: View {
       VStack {
         Spacer()
         Text("*Rustling the bag in the dark is included at no extra cost.")
-          .font(.system(size: 2.1 * unit, weight: .medium))
-          .foregroundStyle(.white.opacity(0.6))
+          .font(.system(size: max(11, 2.1 * unit), weight: .medium))
+          .multilineTextAlignment(.center)
+          .foregroundStyle(.white.opacity(0.7))
           .opacity(shown(t, 12, 20))
-          .padding(.bottom, 6 * unit)
+          .padding(.horizontal, 20)
+          .padding(.bottom, max(76, 6 * unit))
       }
     }
   }
@@ -437,11 +454,11 @@ private struct PhonesAd: View {
         center: UnitPoint(x: 0.36, y: 0.5), startRadius: 0, endRadius: 60 * unit)
       seats
       Text("A MESSAGE FROM YOUR CINEMA")
-        .font(.system(size: 2.6 * unit, weight: .semibold)).tracking(0.7 * unit)
-        .foregroundStyle(.white.opacity(0.55))
+        .font(.system(size: max(11, 2.6 * unit), weight: .semibold)).tracking(0.7 * unit)
+        .foregroundStyle(.white.opacity(0.65))
         .opacity(shown(t, 0.3, 7.7))
         .frame(maxHeight: .infinity, alignment: .top)
-        .padding(.top, 10 * unit)
+        .padding(.top, max(72, 10 * unit))
       HStack(alignment: .center, spacing: 12 * unit) {
         phone
         ZStack(alignment: .leading) {
@@ -536,6 +553,7 @@ private struct PhonesAd: View {
 private struct IOSCinemaTrailerScene: View {
   @ObservedObject var show: IOSCinemaPreShow
   let trailer: IOSCinemaTrailer
+  let reduceMotion: Bool
 
   /// The title card stays at least this long, even when the trailer starts at once.
   private static let titleCardSeconds = 2.5
@@ -558,29 +576,30 @@ private struct IOSCinemaTrailerScene: View {
           HStack(spacing: 7) {
             IOSCinemaMark().frame(width: 15, height: 15)
             Text(["In Your Library", year].compactMap { $0 }.joined(separator: " · ").uppercased())
-              .font(.system(size: 12, weight: .bold)).tracking(1.1)
-              .foregroundStyle(.white.opacity(0.78))
+              .font(.caption.weight(.bold)).tracking(1.1)
+              .foregroundStyle(.white.opacity(0.8))
           }
           Text(trailer.title.title)
-            .font(.system(size: 28, weight: .bold))
+            .font(.title2.weight(.bold))
             .foregroundStyle(.white)
             .lineLimit(2)
           if !trailer.title.genres.isEmpty {
             Text(trailer.title.genres.prefix(2).joined(separator: " · "))
-              .font(.system(size: 14, weight: .semibold))
-              .foregroundStyle(.white.opacity(0.75))
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(.white.opacity(0.78))
           }
         }
-        .frame(maxWidth: 560, alignment: .leading)
+        .frame(maxWidth: 520, alignment: .leading)
         .shadow(color: .black.opacity(0.5), radius: 10)
-        .padding(.leading, 40).padding(.bottom, 40)
+        .padding(.horizontal, 24).padding(.bottom, 84)
         .opacity(card ? 0 : 1)
+        .accessibilityElement(children: .combine)
         if card {
           IOSCinemaComingUp(title: trailer.title.title, year: year)
             .transition(.opacity)
         }
       }
-      .animation(.easeInOut(duration: 0.5), value: card)
+      .animation(reduceMotion ? nil : .easeInOut(duration: 0.5), value: card)
     }
   }
 }
@@ -602,18 +621,18 @@ private struct IOSCinemaComingUp: View {
       VStack(spacing: 14) {
         IOSCinemaMark().frame(width: 44, height: 44)
         Text("COMING UP")
-          .font(.system(size: 13, weight: .bold)).tracking(1.6)
-          .foregroundStyle(.white.opacity(0.7))
+          .font(.caption.weight(.bold)).tracking(1.6)
+          .foregroundStyle(.white.opacity(0.75))
         Text(title)
-          .font(.system(size: 34, weight: .bold))
+          .font(.largeTitle.weight(.bold))
           .foregroundStyle(.white)
           .multilineTextAlignment(.center)
-          .lineLimit(2)
+          .lineLimit(3)
         if let year {
-          Text(year).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white.opacity(0.6))
+          Text(year).font(.subheadline.weight(.semibold)).foregroundStyle(.white.opacity(0.7))
         }
       }
-      .padding(.horizontal, 60)
+      .padding(.horizontal, 28)
     }
   }
 }

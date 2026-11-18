@@ -5,6 +5,8 @@ import SwiftUI
 struct IOSPlayOnView: View {
   @EnvironmentObject private var model: IOSAppModel
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   let mediaID: UUID
   let title: String
 
@@ -51,11 +53,15 @@ struct IOSPlayOnView: View {
             Task { await start(on: player) }
           } label: {
             HStack(spacing: 14) {
-              Image(systemName: player.symbol).font(.title3).frame(width: 32)
+              Image(systemName: player.symbol).font(.title3)
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                .frame(width: 32)
+                .accessibilityHidden(true)
               VStack(alignment: .leading, spacing: 2) {
                 Text(player.deviceName).font(.body.weight(.semibold))
                 Text("\(player.kindTitle) · \(player.statusText)")
-                  .font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+                  .font(.footnote).foregroundStyle(.secondary)
+                  .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
               }
               Spacer()
             }
@@ -75,72 +81,79 @@ struct IOSPlayOnView: View {
   }
 
   private func remote(_ player: IOSRemotePlayer) -> some View {
-    VStack(spacing: 22) {
-      VStack(spacing: 6) {
-        Image(systemName: player.symbol).font(.system(size: 40, weight: .light))
-        Text(player.title ?? title).font(.headline).multilineTextAlignment(.center)
-          .lineLimit(2)
-        Text(player.isPlaying ? (player.isPaused ? "Paused" : "Playing") : "Starting…")
-          .font(.subheadline).foregroundStyle(.secondary)
-      }
-      if let duration = player.durationSeconds, duration > 0 {
-        VStack(spacing: 4) {
-          Slider(
-            value: Binding(
-              get: { scrub ?? min(player.positionSeconds ?? 0, duration) },
-              set: { scrub = $0 }),
-            in: 0...duration,
-            onEditingChanged: { editing in
-              guard !editing, let target = scrub else { return }
-              scrub = nil
-              send(.seek(milliseconds: Int64(target * 1_000)))
+    ScrollView {
+      VStack(spacing: 22) {
+        VStack(spacing: 6) {
+          Image(systemName: player.symbol).font(.system(size: 40, weight: .light))
+            .accessibilityHidden(true)
+          Text(player.title ?? title).font(.headline).multilineTextAlignment(.center)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+          Text(player.isPlaying ? (player.isPaused ? "Paused" : "Playing") : "Starting…")
+            .font(.subheadline).foregroundStyle(.secondary)
+        }
+        if let duration = player.durationSeconds, duration > 0 {
+          VStack(spacing: 4) {
+            Slider(
+              value: Binding(
+                get: { scrub ?? min(player.positionSeconds ?? 0, duration) },
+                set: { scrub = $0 }),
+              in: 0...duration,
+              onEditingChanged: { editing in
+                guard !editing, let target = scrub else { return }
+                scrub = nil
+                send(.seek(milliseconds: Int64(target * 1_000)))
+              }
+            )
+            .accessibilityLabel("Playback Position").accessibilityIdentifier("play-on-position")
+            if let text = IOSRemotePlaybackText.position(
+              scrub ?? player.positionSeconds, of: duration)
+            {
+              Text(text).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
-          )
-          .accessibilityLabel("Playback Position").accessibilityIdentifier("play-on-position")
-          if let text = IOSRemotePlaybackText.position(
-            scrub ?? player.positionSeconds, of: duration)
-          {
-            Text(text).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
           }
         }
-      }
-      HStack(spacing: 34) {
-        remoteButton("Back 10 Seconds", symbol: "gobackward.10", id: "back") {
-          send(.skip(milliseconds: -10_000))
+        HStack(spacing: 24) {
+          remoteButton("Back 10 Seconds", symbol: "gobackward.10", id: "back") {
+            send(.skip(milliseconds: -10_000))
+          }
+          remoteButton(
+            player.isPaused || !player.isPlaying ? "Play" : "Pause",
+            symbol: player.isPaused || !player.isPlaying ? "play.fill" : "pause.fill", id: "toggle",
+            size: 28, diameter: 60
+          ) {
+            send(player.isPaused || !player.isPlaying ? .resume : .pause)
+          }
+          remoteButton("Forward 10 Seconds", symbol: "goforward.10", id: "forward") {
+            send(.skip(milliseconds: 10_000))
+          }
         }
-        remoteButton(
-          player.isPaused || !player.isPlaying ? "Play" : "Pause",
-          symbol: player.isPaused || !player.isPlaying ? "play.fill" : "pause.fill", id: "toggle",
-          size: 34
-        ) {
-          send(player.isPaused || !player.isPlaying ? .resume : .pause)
+        Button("Stop Playback", systemImage: "stop.fill", role: .destructive) {
+          send(.stop)
+          controlled = nil
         }
-        remoteButton("Forward 10 Seconds", symbol: "goforward.10", id: "forward") {
-          send(.skip(milliseconds: 10_000))
-        }
+        .buttonStyle(IOSButtonStyle(kind: .secondary))
+        .accessibilityIdentifier("play-on-stop")
+        if let error { Text(error).font(.footnote).foregroundStyle(.orange) }
       }
-      Button("Stop Playback", systemImage: "stop.fill", role: .destructive) {
-        send(.stop)
-        controlled = nil
-      }
-      .buttonStyle(IOSButtonStyle(kind: .secondary))
-      .accessibilityIdentifier("play-on-stop")
-      if let error { Text(error).font(.footnote).foregroundStyle(.orange) }
-      Spacer(minLength: 0)
+      .padding(24)
+      .frame(maxWidth: 520)
+      .frame(maxWidth: .infinity)
     }
-    .padding(24)
-    .frame(maxWidth: 520)
-    .frame(maxWidth: .infinity)
+    .scrollBounceBehavior(.basedOnSize)
   }
 
   private func remoteButton(
-    _ label: String, symbol: String, id: String, size: CGFloat = 24, action: @escaping () -> Void
+    _ label: String, symbol: String, id: String, size: CGFloat = 22, diameter: CGFloat = 52,
+    action: @escaping () -> Void
   ) -> some View {
     Button(action: action) {
       Image(systemName: symbol).font(.system(size: size, weight: .medium))
-        .frame(width: 60, height: 60).contentShape(Circle())
+        .foregroundStyle(.white)
+        .frame(width: diameter, height: diameter)
+        .background(reduceTransparency ? IOSDesign.surface : IOSDesign.raised, in: Circle())
+        .contentShape(Circle())
     }
-    .buttonStyle(IOSButtonStyle(kind: .icon))
+    .buttonStyle(IOSContentButtonStyle())
     .accessibilityLabel(label).accessibilityIdentifier("play-on-\(id)")
   }
 
