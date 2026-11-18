@@ -68,6 +68,45 @@ struct OfflineDownloadTests {
   }
 
   @Test
+  func downloadsWaitTheirTurnAndAWaitingOneCanBeCancelled() throws {
+    let (downloads, root) = try store()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let profile = StoredServerProfile(
+      serverId: UUID(), name: "Synthetic", baseURL: URL(string: "https://fixture.invalid")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64), token: "test-only",
+      sessionId: UUID(), expiresAt: "2099-01-01T00:00:00Z",
+      user: UserSummary(
+        id: UUID(), username: "synthetic", role: .owner, createdAt: "2026-01-01T00:00:00Z"))
+    func episode(_ number: Int) -> CatalogItemSummary {
+      CatalogItemSummary(
+        id: UUID(), kind: .episode, title: "Episode \(number)", originalTitle: nil, year: 2020,
+        overview: nil, genres: [], poster: nil, backdrop: nil, availability: .available,
+        isFavorite: false, progress: nil, addedAt: "2026-10-03T00:00:00Z",
+        parentTitle: "Invented Show", seasonNumber: 1, episodeNumber: number)
+    }
+    let (first, second, third) = (episode(1), episode(2), episode(3))
+    for item in [first, second, third] {
+      downloads.download(item, subtitle: "S1 E\(item.episodeNumber ?? 0)", profile: profile)
+    }
+    // Only the first runs; the others wait in their order and the Downloads page says so.
+    #expect(!downloads.isWaiting(first.id))
+    #expect(downloads.waiting == [second.id, third.id])
+    #expect(downloads.active.count == 3)
+
+    downloads.cancel(second.id)
+    #expect(downloads.waiting == [third.id])
+    #expect(downloads.active[second.id] == nil)
+
+    // Ending the running one starts the next waiting one.
+    downloads.cancel(first.id)
+    #expect(downloads.waiting.isEmpty)
+    #expect(!downloads.isWaiting(third.id))
+    #expect(downloads.active[third.id] != nil)
+    downloads.cancel(third.id)
+    #expect(downloads.active.isEmpty)
+  }
+
+  @Test
   func aTitleWhoseFileIsGoneIsForgotten() throws {
     let (first, root) = try store()
     defer { try? FileManager.default.removeItem(at: root) }

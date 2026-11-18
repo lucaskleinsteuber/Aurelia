@@ -1024,6 +1024,29 @@ struct AppSettingsView: View {
           .accessibilityIdentifier("playback-sub-lang")
         }
 
+        LabeledContent("Subtitle Size") {
+          Picker("Subtitle Size", selection: $playbackPreferences.preferences.subtitleSize) {
+            ForEach(SubtitleSize.allCases) { Text($0.title).tag($0) }
+          }
+          .labelsHidden()
+          .frame(width: 160)
+          .accessibilityIdentifier("playback-subtitle-size")
+        }
+
+        LabeledContent("Subtitle Background") {
+          Picker(
+            "Subtitle Background", selection: $playbackPreferences.preferences.subtitleBackground
+          ) {
+            ForEach(SubtitleBackground.allCases) { Text($0.title).tag($0) }
+          }
+          .labelsHidden()
+          .frame(width: 160)
+          .accessibilityIdentifier("playback-subtitle-background")
+        }
+        Text("Subtitle size and background apply from the next title you open.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+
         Divider()
 
         HStack {

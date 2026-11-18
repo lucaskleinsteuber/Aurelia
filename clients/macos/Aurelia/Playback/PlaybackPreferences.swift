@@ -157,6 +157,9 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
   var playSuggestionsAutomatically = false
   /// Shows the quiet Good-Night screen when playback ends at a sleep timer.
   var showGoodNightOnSleepTimer = false
+  /// How large subtitles are and what is behind them; applies from the next title.
+  var subtitleSize: SubtitleSize = .medium
+  var subtitleBackground: SubtitleBackground = .transparent
 
   /// Kept for code and settings from 2.8 and 2.9, where this was a single switch.
   var skipIntrosAutomatically: Bool {
@@ -229,7 +232,7 @@ extension PlaybackPreferences {
     case defaultAudioLanguage, defaultSubtitleLanguage, dialogueBoost, volumeLeveling
     case fillsScreen, cinemaMode, cinemaAds, cinemaTrailers, streamingQuality
     case skipIntrosAutomatically, introSkipping, upNextAtCredits, playSuggestionsAutomatically
-    case showGoodNightOnSleepTimer
+    case showGoodNightOnSleepTimer, subtitleSize, subtitleBackground
   }
 
   /// Settings saved before a newer option existed keep their values; the new option starts off.
@@ -274,6 +277,11 @@ extension PlaybackPreferences {
       try container.decodeIfPresent(Bool.self, forKey: .playSuggestionsAutomatically) ?? false
     showGoodNightOnSleepTimer =
       try container.decodeIfPresent(Bool.self, forKey: .showGoodNightOnSleepTimer) ?? false
+    subtitleSize =
+      (try? container.decodeIfPresent(SubtitleSize.self, forKey: .subtitleSize)) ?? .medium
+    subtitleBackground =
+      (try? container.decodeIfPresent(SubtitleBackground.self, forKey: .subtitleBackground))
+      ?? .transparent
   }
   func encode(to encoder: Encoder) throws {
     var values = encoder.container(keyedBy: CodingKeys.self)
@@ -301,6 +309,8 @@ extension PlaybackPreferences {
     try values.encode(upNextAtCredits, forKey: .upNextAtCredits)
     try values.encode(playSuggestionsAutomatically, forKey: .playSuggestionsAutomatically)
     try values.encode(showGoodNightOnSleepTimer, forKey: .showGoodNightOnSleepTimer)
+    try values.encode(subtitleSize, forKey: .subtitleSize)
+    try values.encode(subtitleBackground, forKey: .subtitleBackground)
   }
 
 }

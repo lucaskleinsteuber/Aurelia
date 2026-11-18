@@ -136,9 +136,12 @@ final class VLCPlaybackEngine: PlaybackEngine {
   init(
     playerFactory: @escaping @MainActor () -> VLCMediaPlayer = {
       // A player is created for every title, so a changed night mode applies to the next load.
-      VLCPlaybackEngine.makePlayer(
-        dialogueBoost: PlaybackPreferencesStore.shared.preferences.dialogueBoost,
-        volumeLeveling: PlaybackPreferencesStore.shared.preferences.volumeLeveling)
+      let preferences = PlaybackPreferencesStore.shared.preferences
+      return VLCPlaybackEngine.makePlayer(
+        extraOptions: SubtitleAppearance.vlcOptions(
+          size: preferences.subtitleSize, background: preferences.subtitleBackground),
+        dialogueBoost: preferences.dialogueBoost,
+        volumeLeveling: preferences.volumeLeveling)
     }
   ) {
     self.playerFactory = playerFactory

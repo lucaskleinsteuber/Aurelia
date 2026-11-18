@@ -469,6 +469,7 @@ struct MediaDetailView: View {
               includeContinueWatching: false, subjectPrefix: "Series")
             Divider()
             AddToCollectionMenu(item: detail.item, seasonNumber: season.number)
+            seasonDownloadButton(season)
           }
         } label: {
           HStack(spacing: 6) {
@@ -544,6 +545,22 @@ struct MediaDetailView: View {
           season.supplements,
           parentTitle: "\(detail.item.title) · Season \(season.number)")
       }
+    }
+  }
+
+  /// Downloads every episode of the season not on this Mac yet, one after another.
+  @ViewBuilder
+  private func seasonDownloadButton(_ season: SeasonPresentation) -> some View {
+    let missing = season.episodes.map(\.item).filter {
+      $0.isPlayable && !OfflineDownloads.shared.isDownloaded($0.id)
+        && OfflineDownloads.shared.active[$0.id] == nil
+    }
+    if !missing.isEmpty {
+      Divider()
+      Button("Download \(seasonTitle(season.number))", systemImage: "arrow.down.circle") {
+        model.download(episodes: missing)
+      }
+      .accessibilityIdentifier("season-download")
     }
   }
 

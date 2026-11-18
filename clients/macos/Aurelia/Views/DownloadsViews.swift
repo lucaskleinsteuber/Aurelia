@@ -42,9 +42,15 @@ struct DownloadsPage: View {
             LazyVGrid(
               columns: [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: 16)], spacing: 16
             ) {
-              ForEach(downloads.active.keys.sorted(), id: \.self) { id in
+              // The one downloading first, then the waiting ones in their order.
+              ForEach(
+                downloads.active.keys.filter { !downloads.isWaiting($0) }.sorted()
+                  + downloads.waiting,
+                id: \.self
+              ) { id in
                 ActiveDownloadCard(
-                  name: downloads.activeNames[id] ?? "Title", share: downloads.active[id] ?? 0
+                  name: downloads.activeNames[id] ?? "Title", share: downloads.active[id] ?? 0,
+                  waiting: downloads.isWaiting(id)
                 ) { downloads.cancel(id) }
               }
             }
@@ -146,6 +152,7 @@ private struct DownloadStorageSummary: View {
 private struct ActiveDownloadCard: View {
   let name: String
   let share: Double
+  var waiting = false
   let cancel: () -> Void
 
   var body: some View {
@@ -162,7 +169,8 @@ private struct ActiveDownloadCard: View {
       .frame(width: 38, height: 38)
       VStack(alignment: .leading, spacing: 3) {
         Text(name).font(.headline).lineLimit(1)
-        Text("\(Int(share * 100)) % downloaded").font(.caption).foregroundStyle(.secondary)
+        Text(waiting ? "Waiting" : "\(Int(share * 100)) % downloaded").font(.caption)
+          .foregroundStyle(.secondary)
           .monospacedDigit()
       }
       Spacer(minLength: 8)
@@ -472,7 +480,11 @@ struct DownloadMenuItems: View {
   var body: some View {
     if item.kind == .movie || item.kind == .episode {
       if let share = downloads.active[item.id] {
-        Button("Cancel Download (\(Int(share * 100)) %)", systemImage: "xmark.circle") {
+        Button(
+          downloads.isWaiting(item.id)
+            ? "Cancel Download (Waiting)" : "Cancel Download (\(Int(share * 100)) %)",
+          systemImage: "xmark.circle"
+        ) {
           downloads.cancel(item.id)
         }
       } else if downloads.isDownloaded(item.id) {

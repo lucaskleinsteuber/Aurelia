@@ -2964,6 +2964,65 @@ final class AppModel: ObservableObject {
     }
   }
 
+  /// Downloads episodes one after another, such as a whole season: the quality is chosen once for
+  /// all, and each further episode gets the nearest quality the server offers for it.
+  func download(episodes: [CatalogItemSummary]) {
+    let downloads = OfflineDownloads.shared
+    let wanted = episodes.filter {
+      ($0.kind == .movie || $0.kind == .episode) && $0.isPlayable && !downloads.isDownloaded($0.id)
+        && downloads.active[$0.id] == nil
+    }
+    guard let profile, let first = wanted.first else { return }
+    let others = Array(wanted.dropFirst())
+    let preference =
+      UserDefaults.standard.string(forKey: DownloadQualityPreference.key)
+      ?? DownloadQualityPreference.ask
+    guard libraryCapabilities.contains(ServerFeatureNames.convertedDownloads),
+      preference != DownloadQualityPreference.original
+    else {
+      for item in wanted { startDownload(item) }
+      return
+    }
+    Task {
+      let options = try? await APIClient(profile: profile).downloadOptions(mediaId: first.id)
+      guard self.profile?.serverId == profile.serverId else { return }
+      switch DownloadQualityPreference.resolve(preference, options: options) {
+      case .original:
+        for item in wanted { startDownload(item) }
+      case .ask:
+        if let options {
+          downloadChoice = PendingDownloadChoice(item: first, options: options, others: others)
+        }
+      case .converted(let quality):
+        startDownload(
+          first, quality: quality, audio: options?.audioTrack,
+          expectedBytes: options?.qualities.first { $0.id == quality }?.estimatedBytes)
+        await startDownloads(others, quality: quality)
+      }
+    }
+  }
+
+  /// Starts further episodes in `quality`, or the nearest one the server offers for each; nil
+  /// keeps their original files.
+  func startDownloads(_ items: [CatalogItemSummary], quality: String?) async {
+    guard let profile else { return }
+    for item in items {
+      guard let quality else {
+        startDownload(item)
+        continue
+      }
+      let options = try? await APIClient(profile: profile).downloadOptions(mediaId: item.id)
+      guard self.profile?.serverId == profile.serverId else { return }
+      if case .converted(let own) = DownloadQualityPreference.resolve(quality, options: options) {
+        startDownload(
+          item, quality: own, audio: options?.audioTrack,
+          expectedBytes: options?.qualities.first { $0.id == own }?.estimatedBytes)
+      } else {
+        startDownload(item)
+      }
+    }
+  }
+
   /// Starts a download in the chosen quality; nil keeps the original file.
   func startDownload(
     _ item: CatalogItemSummary, quality: String? = nil, audio: Int? = nil,

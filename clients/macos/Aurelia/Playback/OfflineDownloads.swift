@@ -73,6 +73,9 @@ final class OfflineDownloads: ObservableObject {
   @Published private(set) var active: [UUID: Double] = [:]
   /// The names of the titles downloading now, for the Downloads page.
   @Published private(set) var activeNames: [UUID: String] = [:]
+  /// Titles waiting for the one downloading now, in their order. One download runs at a time, so a
+  /// whole season never takes all of a profile's streams and the TV keeps playing meanwhile.
+  @Published private(set) var waiting: [UUID] = []
   @Published var errorMessage: String?
   /// Space taken by download folders no listed title uses, kept only after the list of downloads
   /// was damaged; the Downloads page offers to remove it.
@@ -83,6 +86,17 @@ final class OfflineDownloads: ObservableObject {
   /// The current attempt per title. A cancelled download finishes later and then only cleans up
   /// after itself, never after a download of the same title started again meanwhile (audit C-L9).
   private var attempts: [UUID: UUID] = [:]
+  private var queued: [UUID: QueuedDownload] = [:]
+
+  private struct QueuedDownload {
+    let item: CatalogItemSummary
+    let subtitle: String?
+    let profile: StoredServerProfile
+    let series: CatalogItemSummary?
+    let quality: String?
+    let audio: Int?
+    let expectedBytes: Int64?
+  }
 
   init(root: URL? = nil) {
     // Inside this app's own (sandboxed) Application Support, never next to the media.
@@ -138,7 +152,9 @@ final class OfflineDownloads: ObservableObject {
     series: CatalogItemSummary? = nil, quality: String? = nil, audio: Int? = nil,
     expectedBytes: Int64? = nil
   ) {
-    guard let userId = profile.user?.id, tasks[item.id] == nil else { return }
+    guard let userId = profile.user?.id, tasks[item.id] == nil, queued[item.id] == nil else {
+      return
+    }
     if let existing = title(item.id) {
       // One copy per title on this Mac: say so, rather than doing nothing.
       if existing.userId != userId {
@@ -146,6 +162,28 @@ final class OfflineDownloads: ObservableObject {
       }
       return
     }
+    let request = QueuedDownload(
+      item: item, subtitle: subtitle, profile: profile, series: series, quality: quality,
+      audio: audio, expectedBytes: expectedBytes)
+    guard tasks.isEmpty else {
+      queued[item.id] = request
+      waiting.append(item.id)
+      active[item.id] = 0
+      activeNames[item.id] = subtitle.map { "\(item.title) · \($0)" } ?? item.title
+      errorMessage = nil
+      return
+    }
+    start(request, userId: userId)
+  }
+
+  /// Whether a download waits for the one before it.
+  func isWaiting(_ id: UUID) -> Bool { queued[id] != nil }
+
+  private func start(_ request: QueuedDownload, userId: UUID) {
+    let (item, subtitle, profile, series) = (
+      request.item, request.subtitle, request.profile, request.series
+    )
+    let (quality, audio, expectedBytes) = (request.quality, request.audio, request.expectedBytes)
     active[item.id] = 0
     activeNames[item.id] = subtitle.map { "\(item.title) · \($0)" } ?? item.title
     errorMessage = nil
@@ -172,16 +210,38 @@ final class OfflineDownloads: ObservableObject {
       self.active[item.id] = nil
       self.activeNames[item.id] = nil
       self.tasks[item.id] = nil
+      self.startNext()
+    }
+  }
+
+  /// Starts the next waiting download once nothing downloads.
+  private func startNext() {
+    while tasks.isEmpty, let next = waiting.first {
+      waiting.removeFirst()
+      guard let request = queued.removeValue(forKey: next) else { continue }
+      guard let userId = request.profile.user?.id, title(next) == nil else {
+        active[next] = nil
+        activeNames[next] = nil
+        continue
+      }
+      start(request, userId: userId)
     }
   }
 
   func cancel(_ id: UUID) {
+    if queued.removeValue(forKey: id) != nil {
+      waiting.removeAll { $0 == id }
+      active[id] = nil
+      activeNames[id] = nil
+      return
+    }
     tasks[id]?.cancel()
     tasks[id] = nil
     attempts[id] = nil
     active[id] = nil
     activeNames[id] = nil
     try? FileManager.default.removeItem(at: folder(for: id))
+    startNext()
   }
 
   /// Removes the downloaded file; progress not yet sent stays with the title until removal.

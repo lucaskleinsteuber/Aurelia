@@ -4,6 +4,13 @@ import SwiftUI
 struct PendingDownloadChoice: Identifiable {
   let item: CatalogItemSummary
   let options: DownloadOptionsResponse
+  /// Further episodes of a season, downloaded after `item` in the same quality where offered.
+  var others: [CatalogItemSummary] = []
+
+  var title: String {
+    others.isEmpty
+      ? item.title : "\(item.parentTitle ?? item.title) · \(others.count + 1) Episodes"
+  }
 
   var id: UUID { item.id }
 }
@@ -28,7 +35,7 @@ struct DownloadQualitySheet: View {
 
   var body: some View {
     AureliaSheet(
-      title: "Download \(choice.item.title)",
+      title: "Download \(choice.title)",
       subtitle: "Choose how large the copy on this Mac should be.",
       symbol: "arrow.down.circle",
       primary: AureliaSheetAction(title: "Download", action: start),
@@ -81,6 +88,8 @@ struct DownloadQualitySheet: View {
     model.startDownload(
       choice.item, quality: converted, audio: converted == nil ? nil : audio,
       expectedBytes: choice.options.qualities.first { $0.id == quality }?.estimatedBytes)
+    let others = choice.others
+    if !others.isEmpty { Task { await model.startDownloads(others, quality: converted) } }
     dismiss()
   }
 }
