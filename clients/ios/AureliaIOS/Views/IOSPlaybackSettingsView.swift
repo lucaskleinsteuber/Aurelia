@@ -94,6 +94,30 @@ struct IOSPlaybackSettingsView: View {
         }
       }
       Section {
+        Picker("Default Audio Language", selection: $value.defaultAudioLanguage) {
+          ForEach([IOSPlaybackLanguage.original] + IOSPlaybackLanguage.choices, id: \.self) {
+            Text(IOSPlaybackLanguage.title($0)).tag($0)
+          }
+        }.accessibilityIdentifier("settings-audio-language")
+        Picker("Default Subtitle Language", selection: $value.defaultSubtitleLanguage) {
+          ForEach([IOSPlaybackLanguage.off] + IOSPlaybackLanguage.choices, id: \.self) {
+            Text(IOSPlaybackLanguage.title($0)).tag($0)
+          }
+        }.accessibilityIdentifier("settings-subtitle-language")
+        Picker("Subtitle Size", selection: $value.subtitleSize) {
+          ForEach(IOSSubtitleSize.allCases) { Text($0.title).tag($0) }
+        }.accessibilityIdentifier("settings-subtitle-size")
+        Picker("Subtitle Background", selection: $value.subtitleBackground) {
+          ForEach(IOSSubtitleBackground.allCases) { Text($0.title).tag($0) }
+        }.accessibilityIdentifier("settings-subtitle-background")
+      } header: {
+        Text("Audio & Subtitles")
+      } footer: {
+        Text(
+          "The default languages apply until you choose tracks in the player; a series keeps its own choice. Subtitle size and background apply from the next title you open."
+        )
+      }
+      Section {
         Picker("Playback Rate", selection: $value.defaultPlaybackRate) {
           ForEach(IOSPlaybackPreferences.supportedRates, id: \.self) { rate in
             Text(rate == 1 ? "Normal" : String(format: "%gx", rate)).tag(rate)
@@ -129,6 +153,7 @@ struct IOSPlaybackSettingsView: View {
       Button("Forget Choices", role: .destructive) {
         value.preferredAudioTrack = nil
         value.preferredSubtitleTrack = nil
+        value.subtitleTrackChosen = false
         if let server = model.connection?.serverID, let profile = model.session?.user.id {
           model.environment.preferences.forgetSeriesChoices(serverID: server, profileID: profile)
         }

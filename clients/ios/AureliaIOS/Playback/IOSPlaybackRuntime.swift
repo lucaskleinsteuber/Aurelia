@@ -81,7 +81,7 @@ struct IOSPlaybackRuntime {
 
   static func live() -> Self {
     Self(
-      engine: IOSVideoEngine(),
+      engine: IOSHandoffEngine(),
       makeRelay: { url, fingerprint, token in
         try IOSStreamRelay(
           sourceURL: url, publicKeyFingerprint: fingerprint, authorizationToken: token)

@@ -218,7 +218,7 @@ struct IOSHomeView: View {
       content: { request in
         if let connection = model.connection, let session = model.session {
           IOSPlayerView(makeController: {
-            IOSPlaybackController(
+            let controller = IOSPlaybackController(
               connection: connection, session: session, mediaID: request.target.id,
               title: request.title, outbox: model.environment.outbox,
               api: model.makeClient(connection: connection, session: session),
@@ -234,6 +234,8 @@ struct IOSHomeView: View {
                 model.handleSessionFailure(failure)
                 playback = nil
               })
+            controller.nowPlayingArtwork = request.target.poster
+            return controller
           })
         }
       }

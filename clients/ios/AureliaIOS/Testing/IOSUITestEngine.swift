@@ -169,15 +169,17 @@
       subtitleTracks = delayed ? [] : availableSubtitles
       if !audioPreferenceApplied, !audioTracks.isEmpty {
         audioPreferenceApplied = true
-        if let track = IOSPlaybackTrack.matching(preferences.preferredAudioTrack, in: audioTracks) {
-          audioTrackID = track.id
+        if case .track(let id) = IOSTrackSelection.audio(preferences, tracks: audioTracks) {
+          audioTrackID = id
         }
       }
       if !subtitlePreferenceApplied, !subtitleTracks.isEmpty {
         subtitlePreferenceApplied = true
-        subtitleTrackID =
-          IOSPlaybackTrack.matching(preferences.preferredSubtitleTrack, in: subtitleTracks)?.id
-          ?? -1
+        if case .track(let id) = IOSTrackSelection.subtitle(preferences, tracks: subtitleTracks) {
+          subtitleTrackID = id
+        } else {
+          subtitleTrackID = -1
+        }
       }
       if let pendingAudio, time >= pendingAudio.readyAt {
         audioTrackID = pendingAudio.id

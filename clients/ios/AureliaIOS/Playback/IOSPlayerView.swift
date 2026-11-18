@@ -1,3 +1,4 @@
+import AVKit
 import SwiftUI
 import UIKit
 
@@ -42,6 +43,9 @@ struct IOSPlayerView: View {
         .accessibilityHidden(true)
       if controller.isStarting && controller.errorMessage == nil {
         startScreen.transition(.opacity)
+      }
+      if let reason = controller.systemPhase.reason {
+        systemPlaybackNote(reason)
       }
       if !controller.controlsVisible || controller.isStarting {
         Color.clear.contentShape(Rectangle()).ignoresSafeArea()
@@ -214,6 +218,17 @@ struct IOSPlayerView: View {
           // Watch Together: start a party for this title, or leave the one this device is in.
           if !controller.isOffline {
             watchTogetherButton
+          }
+          if controller.canPictureInPicture {
+            glassButton("Picture in Picture", symbol: "pip.enter", id: "pip") {
+              controller.startPictureInPicture()
+            }
+          }
+          if !controller.isOffline {
+            IOSAirPlayButton()
+              .frame(width: 36, height: 36)
+              .glassEffect(.regular.interactive(), in: Circle())
+              .accessibilityLabel("AirPlay").accessibilityIdentifier("player-airplay")
           }
         }
       }
@@ -876,6 +891,25 @@ struct IOSPlayerView: View {
     return [5, 10, 15, 30, 45, 60, 75, 90].contains(seconds) ? "\(base).\(seconds)" : base
   }
 
+  /// While Apple's player has the title: where it plays, and that its sound and subtitles are
+  /// the stream's own.
+  private func systemPlaybackNote(_ reason: IOSSystemPlaybackReason) -> some View {
+    VStack(spacing: 8) {
+      Image(systemName: reason == .airPlay ? "airplayvideo" : "pip")
+        .font(.system(size: 34, weight: .light))
+      Text(reason == .airPlay ? "Playing on AirPlay" : "Playing in Picture in Picture")
+        .font(.headline)
+      Text("The server's stream plays with the title's default sound and without subtitles.")
+        .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+    }
+    .foregroundStyle(.white)
+    .padding(24)
+    .frame(maxWidth: 360)
+    .allowsHitTesting(false)
+    .accessibilityElement(children: .combine)
+    .accessibilityIdentifier("player-system-playback")
+  }
+
   private func glassButton(
     _ title: String, symbol: String, id: String, action: @escaping () -> Void
   ) -> some View {
@@ -1084,4 +1118,18 @@ private struct IOSSceneNotesSheet: View {
     }
     .presentationDetents([.medium, .large])
   }
+}
+
+/// The system's AirPlay button: choosing an Apple TV moves the title to Apple's player, which
+/// sends the picture there (IOSHandoffEngine).
+struct IOSAirPlayButton: UIViewRepresentable {
+  func makeUIView(context: Context) -> AVRoutePickerView {
+    let picker = AVRoutePickerView()
+    picker.prioritizesVideoDevices = true
+    picker.tintColor = .white
+    picker.activeTintColor = .systemBlue
+    return picker
+  }
+
+  func updateUIView(_ view: AVRoutePickerView, context: Context) {}
 }

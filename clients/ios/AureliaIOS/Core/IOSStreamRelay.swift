@@ -37,6 +37,9 @@ final class IOSStreamRelay: @unchecked Sendable {
   /// "preview" for timeline frames, which the server counts apart from playback streams.
   private let streamPurpose: String?
   private let sessionFactory: SessionFactory
+  /// 127.0.0.1, or this device's network address for AirPlay, where only HLS is answered.
+  private let host: String
+  private let hlsOnly: Bool
   private var sourceURL: URL
   private var listener: NWListener?
   private var startContinuation: CheckedContinuation<URL, Error>?
@@ -57,8 +60,11 @@ final class IOSStreamRelay: @unchecked Sendable {
     publicKeyFingerprint: String,
     authorizationToken: String? = nil,
     streamPurpose: String? = nil,
+    networkAddress: String? = nil,
     sessionFactory: @escaping SessionFactory = IOSStreamRelay.productionSession
   ) throws {
+    self.host = networkAddress ?? "127.0.0.1"
+    self.hlsOnly = networkAddress != nil
     self.sourceURL = sourceURL
     self.publicKeyFingerprint = publicKeyFingerprint
     self.authorizationToken = authorizationToken
@@ -78,7 +84,8 @@ final class IOSStreamRelay: @unchecked Sendable {
   func subtitleURL(index: Int) -> URL? {
     let port = lock.withLock { listener?.port?.rawValue }
     guard let port else { return nil }
-    return URL(string: "http://127.0.0.1:\(port)/subtitles/\(secret)/\(index)")
+    guard !hlsOnly else { return nil }
+    return URL(string: "http://\(host):\(port)/subtitles/\(secret)/\(index)")
   }
 
   private func startListener() async throws -> URL {
@@ -97,7 +104,7 @@ final class IOSStreamRelay: @unchecked Sendable {
         do {
           let parameters = NWParameters.tcp
           parameters.requiredLocalEndpoint = .hostPort(
-            host: NWEndpoint.Host("127.0.0.1"),
+            host: NWEndpoint.Host(host),
             port: .any)
           let created = try NWListener(using: parameters)
           listener = created
@@ -168,7 +175,7 @@ final class IOSStreamRelay: @unchecked Sendable {
         startContinuation = nil
         return (
           continuation,
-          URL(string: "http://127.0.0.1:\(port.rawValue)/stream/\(secret)")
+          URL(string: "http://\(host):\(port.rawValue)/stream/\(secret)")
         )
       }
       if let continuation = result.0, let url = result.1 {
@@ -235,7 +242,8 @@ final class IOSStreamRelay: @unchecked Sendable {
           return
         }
         do {
-          let request = try IOSRelayRequest.parse(requestData, secret: self.secret)
+          let request = try IOSRelayRequest.parse(
+            requestData, secret: self.secret, host: self.host, hlsOnly: self.hlsOnly)
           self.beginUpstream(request, connection: connection, id: id)
         } catch {
           self.reject(connection, id: id, status: 400, reason: "Bad Request")

@@ -244,7 +244,11 @@ struct IOSRelayRequest: Equatable, Sendable {
     return components.url
   }
 
-  static func parse(_ data: Data, secret: String) throws -> Self {
+  /// `host` is the address the relay listens on; a relay for AirPlay (`hlsOnly`) on this device's
+  /// network address answers only the server's HLS files, never the original or its subtitles.
+  static func parse(
+    _ data: Data, secret: String, host expectedHost: String = "127.0.0.1", hlsOnly: Bool = false
+  ) throws -> Self {
     guard data.count <= 32_768, let text = String(data: data, encoding: .utf8),
       text.hasSuffix("\r\n\r\n")
     else { throw IOSRelayRequestError.invalidRequest }
@@ -258,13 +262,13 @@ struct IOSRelayRequest: Equatable, Sendable {
     let subtitlePrefix = "/subtitles/\(secret)/"
     var subtitleIndex: Int?
     var hlsPath: String?
-    if parts[1] == Substring(streamPrefix) {
+    if parts[1] == Substring(streamPrefix), !hlsOnly {
       subtitleIndex = nil
     } else if parts[1].hasPrefix(streamPrefix + "/"),
       isAllowedHLSPath(String(parts[1].dropFirst(streamPrefix.count + 1)))
     {
       hlsPath = String(parts[1].dropFirst(streamPrefix.count + 1))
-    } else if parts[1].hasPrefix(subtitlePrefix) {
+    } else if parts[1].hasPrefix(subtitlePrefix), !hlsOnly {
       let suffix = parts[1].dropFirst(subtitlePrefix.count)
       guard digits(suffix), let idx = Int(suffix) else { throw IOSRelayRequestError.invalidRequest }
       subtitleIndex = idx
@@ -281,7 +285,8 @@ struct IOSRelayRequest: Equatable, Sendable {
       else { throw IOSRelayRequestError.invalidRequest }
       headers[name] = value
     }
-    guard let host = headers["host"], validHost(host), headers["content-length"] == nil,
+    guard let host = headers["host"], validHost(host, expected: expectedHost),
+      headers["content-length"] == nil,
       headers["transfer-encoding"] == nil, headers["upgrade"] == nil,
       headers["range"].map(validRange) ?? true
     else { throw IOSRelayRequestError.invalidRequest }
@@ -294,10 +299,10 @@ struct IOSRelayRequest: Equatable, Sendable {
     value.utf8.allSatisfy { (48...57).contains($0) }
   }
 
-  private static func validHost(_ host: String) -> Bool {
-    if host == "127.0.0.1" { return true }
-    guard host.hasPrefix("127.0.0.1:") else { return false }
-    let port = host.dropFirst("127.0.0.1:".count)
+  private static func validHost(_ host: String, expected: String) -> Bool {
+    if host == expected { return true }
+    guard host.hasPrefix(expected + ":") else { return false }
+    let port = host.dropFirst(expected.count + 1)
     return !port.isEmpty && digits(port) && UInt16(port).map { $0 > 0 } == true
   }
 

@@ -68,6 +68,11 @@ final class IOSPlaybackController: ObservableObject {
   @Published private(set) var previewSourceURL: URL?
   @Published private(set) var previewsParallel = false
   @Published private(set) var supportsServerScrubPreviews = false
+  /// The poster the lock screen and Control Center show; the next episode brings its own.
+  @Published var nowPlayingArtwork: IOSArtwork?
+  /// Whether the title plays in VLC or, for Picture in Picture or AirPlay, in Apple's player.
+  @Published private(set) var systemPhase: IOSSystemPlaybackPhase = .vlc
+  @Published private(set) var canPictureInPicture = false
   @Published private(set) var currentMediaID: UUID {
     didSet { if currentMediaID != oldValue { watchStateObserver?() } }
   }
@@ -75,7 +80,7 @@ final class IOSPlaybackController: ObservableObject {
     didSet { userInteracted() }
   }
 
-  private let api: IOSAPIClient
+  let api: IOSAPIClient
   private let connection: IOSStoredConnection
   private let session: IOSProfileSession
   private var mediaID: UUID
@@ -100,6 +105,10 @@ final class IOSPlaybackController: ObservableObject {
   private let onSessionFailure: @MainActor (Error) -> Void
   private let outbox: IOSProgressOutbox
   private var relay: (any IOSPlaybackRelay)?
+  /// The relay on this device's network address while an AirPlay receiver reads the HLS stream.
+  private var networkRelay: (any IOSPlaybackRelay)?
+  private var networkRelayURL: URL?
+  private var streamSourceURL: URL?
   private var previewRelay: (any IOSPlaybackRelay)?
   private var previewRelayTask: Task<Void, Never>?
   private var scrubRepeats = 0
@@ -179,6 +188,13 @@ final class IOSPlaybackController: ObservableObject {
             seriesID: $0, serverID: connection.serverID, profileID: session.user.id)
         }))
     scope = IOSProgressScope(connection: connection, session: session)
+    if let handoff = engine as? IOSHandoffEngine {
+      handoff.onPhaseChange = { [weak self] phase, message in
+        guard let self, !self.closed else { return }
+        self.systemPhase = phase
+        if let message { self.progressMessage = message }
+      }
+    }
     engine.onUpdate = { [weak self] in self?.updateFromEngine() }
     engine.onTerminal = { [weak self] terminal in self?.engineTerminated(terminal) }
   }
@@ -200,6 +216,7 @@ final class IOSPlaybackController: ObservableObject {
   func start() {
     guard !started, !closed else { return }
     started = true
+    if runtime.managesAudioSession { IOSNowPlayingCoordinator.shared.register(self) }
     let operation = generation
     openingTask = Task { [weak self] in
       guard let self else { return }
@@ -363,6 +380,7 @@ final class IOSPlaybackController: ObservableObject {
             preferences.preferredAudioTrack = preference
           } else {
             preferences.preferredSubtitleTrack = preference
+            preferences.subtitleTrackChosen = true
           }
           persistPreferences()
           if let seriesID {
@@ -705,6 +723,8 @@ final class IOSPlaybackController: ObservableObject {
 
   func background() {
     guard !closed else { return }
+    // Picture in Picture and AirPlay go on while the app is away.
+    if systemPhase.continuesInBackground { return }
     backgroundSave = UIApplication.shared.beginBackgroundTask(withName: "Save Aurelia progress") {
       [weak self] in
       self?.endBackgroundSave()
@@ -750,6 +770,7 @@ final class IOSPlaybackController: ObservableObject {
     guard !closed else { return }
     isClosing = true
     closed = true
+    IOSNowPlayingCoordinator.shared.unregister(self)
     generation = UUID()
     stopResources()
     let ticketID = ticket?.id
@@ -807,6 +828,15 @@ final class IOSPlaybackController: ObservableObject {
       }
       relay?.stop()
       relay = secureRelay
+      stopNetworkRelay()
+      streamSourceURL = url
+      if let handoff = engine as? IOSHandoffEngine {
+        handoff.isSystemPlaybackAvailable = adaptiveStreaming
+        handoff.networkStream = { [weak self] in
+          guard let self else { throw CancellationError() }
+          return try await self.startNetworkRelay()
+        }
+      }
       startPreviewRelay(sourceURL: url)
       if let previous = ticket?.id { Task { [api] in try? await api.revokeTicket(id: previous) } }
       ticket = created
@@ -896,6 +926,8 @@ final class IOSPlaybackController: ObservableObject {
       &duration,
       engine.duration > 0 ? engine.duration : (ticket?.progress.durationMilliseconds ?? 0))
     assignIfChanged(&canSeek, engine.isSeekable && duration > 0)
+    assignIfChanged(
+      &canPictureInPicture, (engine as? IOSHandoffEngine)?.canStartPictureInPicture == true)
     assignIfChanged(&audioTracks, engine.audioTracks)
     assignIfChanged(&subtitleTracks, engine.subtitleTracks)
     assignIfChanged(&selectedAudio, engine.audioTrackID)
@@ -987,6 +1019,39 @@ final class IOSPlaybackController: ObservableObject {
       }
       previewSourceURL = url
     }
+  }
+
+  /// The stream address an AirPlay receiver can reach: a second relay on this device's Wi-Fi
+  /// address that answers only this ticket's HLS files.
+  private func startNetworkRelay() async throws -> URL {
+    if let networkRelayURL, networkRelay != nil { return networkRelayURL }
+    guard let source = streamSourceURL, let address = IOSSystemPlayback.networkAddress() else {
+      throw IOSStreamRelayError.unavailable
+    }
+    let created = try IOSStreamRelay(
+      sourceURL: source, publicKeyFingerprint: connection.fingerprint,
+      authorizationToken: session.token, networkAddress: address)
+    let url = try await created.start()
+    guard !closed, streamSourceURL != nil else {
+      created.stop()
+      throw CancellationError()
+    }
+    networkRelay?.stop()
+    networkRelay = created
+    networkRelayURL = url
+    return url
+  }
+
+  private func stopNetworkRelay() {
+    networkRelay?.stop()
+    networkRelay = nil
+    networkRelayURL = nil
+  }
+
+  /// Picture in Picture: the title moves to Apple's player at this position.
+  func startPictureInPicture() {
+    (engine as? IOSHandoffEngine)?.startPictureInPicture()
+    userInteracted()
   }
 
   private func stopPreviewRelay() {
@@ -1089,6 +1154,7 @@ final class IOSPlaybackController: ObservableObject {
     engine.stop()
     relay?.stop()
     relay = nil
+    stopNetworkRelay()
     stopPreviewRelay()
     isPlaying = false
     isLoading = true
@@ -1149,6 +1215,8 @@ final class IOSPlaybackController: ObservableObject {
         }
         let url = try api.validatedStreamURL(path: renewed.streamPath)
         relay?.updateSourceURL(url)
+        networkRelay?.updateSourceURL(url)
+        streamSourceURL = url
         previewRelay?.updateSourceURL(url)
         ticket = renewed
         Task { [api] in try? await api.revokeTicket(id: current.id) }
@@ -1205,10 +1273,12 @@ final class IOSPlaybackController: ObservableObject {
     engine.stop()
     relay?.stop()
     relay = nil
+    stopNetworkRelay()
     stopPreviewRelay()
     if let id = ticket?.id { Task { [api] in try? await api.revokeTicket(id: id) } }
     ticket = nil
     if queue.first?.id == next.id { queue.removeFirst() }
+    nowPlayingArtwork = next.poster
     mediaID = next.id
     currentMediaID = next.id
     isStarting = true
@@ -1282,6 +1352,7 @@ final class IOSPlaybackController: ObservableObject {
     engine.stop()
     relay?.stop()
     relay = nil
+    stopNetworkRelay()
     stopPreviewRelay()
     if let id = ticket?.id { Task { [api] in try? await api.revokeTicket(id: id) } }
     ticket = nil
@@ -1335,6 +1406,7 @@ final class IOSPlaybackController: ObservableObject {
     engine.stop()
     relay?.stop()
     relay = nil
+    stopNetworkRelay()
     stopPreviewRelay()
     engine.onUpdate = nil
     engine.onTerminal = nil

@@ -95,7 +95,7 @@ struct IOSDetailView: View {
         let target = request.item
         if let connection = model.connection, let session = model.session {
           IOSPlayerView(makeController: {
-            IOSPlaybackController(
+            let controller = IOSPlaybackController(
               connection: connection, session: session, mediaID: target.id,
               title: target.episodeLabel.map { "\(item.title) · \($0)" } ?? target.title,
               outbox: model.environment.outbox,
@@ -112,6 +112,8 @@ struct IOSDetailView: View {
                 model.handleSessionFailure(failure)
                 playing = nil
               }, startOver: request.startOver)
+            controller.nowPlayingArtwork = target.poster ?? item.poster
+            return controller
           })
         }
       }

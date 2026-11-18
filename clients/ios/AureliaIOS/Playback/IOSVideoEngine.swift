@@ -92,7 +92,10 @@ final class IOSVideoEngine: IOSPlaybackEngine {
 
   func load(url: URL, resumeAt: Int64, paused: Bool) {
     stop()
-    player = Self.makePlayer(leveling: preferences.volumeLeveling)
+    player = Self.makePlayer(
+      leveling: preferences.volumeLeveling,
+      subtitles: IOSSubtitleAppearance.vlcOptions(
+        size: preferences.subtitleSize, background: preferences.subtitleBackground))
     let processing = AudioProcessing(
       dialogue: preferences.dialogueBoost, leveling: preferences.volumeLeveling)
     audioProcessingError = nil
@@ -268,22 +271,25 @@ final class IOSVideoEngine: IOSPlaybackEngine {
 
   private func applyTrackPreferences() {
     if !appliedAudioPreference, !audioTracks.isEmpty {
-      if let track = IOSPlaybackTrack.matching(preferences.preferredAudioTrack, in: audioTracks) {
-        pendingAudio = (track.id, now + 2)
-        player.currentAudioTrackIndex = track.id
+      // A remembered track can arrive in a later parse update; keep checking until it does.
+      switch IOSTrackSelection.audio(preferences, tracks: audioTracks) {
+      case .track(let id):
+        pendingAudio = (id, now + 2)
+        player.currentAudioTrackIndex = id
+        appliedAudioPreference = true
+      case .wait: break
+      case .keep, .off: appliedAudioPreference = true
       }
-      // The matching track can arrive in a later parse update; keep checking
-      // until a match exists. No preference means the driver's default audio.
-      appliedAudioPreference = preferences.preferredAudioTrack == nil || pendingAudio != nil
     }
     if !appliedSubtitlePreference, !subtitleTracks.isEmpty {
-      if let preference = preferences.preferredSubtitleTrack {
-        if let track = IOSPlaybackTrack.matching(preference, in: subtitleTracks) {
-          pendingSubtitle = (track.id, now + 2)
-          player.currentVideoSubTitleIndex = track.id
-          appliedSubtitlePreference = true
-        }
-      } else {
+      switch IOSTrackSelection.subtitle(preferences, tracks: subtitleTracks) {
+      case .track(let id):
+        pendingSubtitle = (id, now + 2)
+        player.currentVideoSubTitleIndex = id
+        appliedSubtitlePreference = true
+      case .wait: break
+      case .keep: appliedSubtitlePreference = true
+      case .off:
         pendingSubtitle = (-1, now + 2)
         player.currentVideoSubTitleIndex = -1
         appliedSubtitlePreference = true
@@ -332,11 +338,13 @@ final class IOSVideoEngine: IOSPlaybackEngine {
     _ = makePlayer().state
   }
 
-  private static func makePlayer(leveling: VolumeLeveling = .off) -> VLCMediaPlayer {
+  private static func makePlayer(leveling: VolumeLeveling = .off, subtitles: [String] = [])
+    -> VLCMediaPlayer
+  {
     let player = VLCMediaPlayer(
       options: [
         "--quiet", "--no-video-title-show", "--no-play-and-pause", "--no-metadata-network-access",
-      ] + leveling.options)
+      ] + leveling.options + subtitles)
 
     return player
   }

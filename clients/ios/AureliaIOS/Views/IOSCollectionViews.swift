@@ -265,7 +265,7 @@ struct IOSCollectionView: View {
         if let connection = model.connection, let session = model.session {
           let target = req.item
           IOSPlayerView(makeController: {
-            IOSPlaybackController(
+            let controller = IOSPlaybackController(
               connection: connection, session: session, mediaID: target.id,
               title: target.episodeLabel.map {
                 "\(target.parentTitle ?? target.title) · \($0)"
@@ -285,6 +285,8 @@ struct IOSCollectionView: View {
                 playback = nil
               },
               startOver: req.startOver)
+            controller.nowPlayingArtwork = target.poster
+            return controller
           })
         }
       }
