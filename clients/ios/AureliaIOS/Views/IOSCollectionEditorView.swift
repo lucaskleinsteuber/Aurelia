@@ -14,6 +14,10 @@ struct IOSCollectionEditorView: View {
   @State private var sortMode = "custom"
   @State private var isShared = false
   @State private var members: [EditableMember] = []
+  /// A Smart List chooses its titles by rules; the server keeps it up to date.
+  @State private var isSmart = false
+  @State private var rules = IOSSmartRules()
+  @State private var genreEntry = ""
   @State private var stagedCover: StagedArtwork?
   @State private var stagedBackdrop: StagedArtwork?
   @State private var removeCover = false
@@ -62,6 +66,7 @@ struct IOSCollectionEditorView: View {
 
   private var canSave: Bool {
     IOSCollectionRules.cleanedName(name) != nil && !saving && !uploadingArtwork
+      && (!isSmart || rules.problem == nil)
   }
 
   var body: some View {
@@ -71,8 +76,13 @@ struct IOSCollectionEditorView: View {
           TextField("Name", text: $name)
           TextField("Overview", text: $overview, axis: .vertical)
             .lineLimit(2...5)
+          Toggle("Smart List", isOn: $isSmart)
+            .onChange(of: isSmart) { _, smart in
+              if smart, sortMode == "custom" { sortMode = "release" }
+            }
+            .accessibilityIdentifier("collection-smart")
           Picker("Sort Order", selection: $sortMode) {
-            Text("Custom").tag("custom")
+            if !isSmart { Text("Custom").tag("custom") }
             Text("Release Date").tag("release")
             Text("Title").tag("title")
           }
@@ -88,46 +98,10 @@ struct IOSCollectionEditorView: View {
           }
         }
 
-        Section {
-          Button {
-            showingMemberPicker = true
-          } label: {
-            Label("Add Movies, Shows or Seasons…", systemImage: "plus.circle")
-          }
-
-          if members.isEmpty {
-            Text("Optional: add titles now or later from any movie, show or season.")
-              .font(.footnote).foregroundStyle(.secondary)
-          } else {
-            ForEach(members) { member in
-              HStack(spacing: 10) {
-                Image(
-                  systemName: member.seasonNumber != nil
-                    ? "tv" : member.kind == .movie ? "film" : "tv.fill"
-                )
-                .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 2) {
-                  Text(member.title).font(.body).lineLimit(1)
-                  if let subtitle = member.subtitle {
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                  }
-                }
-              }
-            }
-            .onMove { offsets, destination in
-              members.move(fromOffsets: offsets, toOffset: destination)
-              sortMode = "custom"
-            }
-            .onDelete { offsets in
-              members.remove(atOffsets: offsets)
-            }
-          }
-        } header: {
-          HStack {
-            Text("Titles (\(members.count))")
-            Spacer()
-            if members.count > 1 { EditButton() }
-          }
+        if isSmart {
+          smartRulesSections
+        } else {
+          membersSection
         }
 
         if let error {
@@ -264,6 +238,140 @@ struct IOSCollectionEditorView: View {
     }
   }
 
+  private var membersSection: some View {
+    Section {
+      Button {
+        showingMemberPicker = true
+      } label: {
+        Label("Add Movies, Shows or Seasons…", systemImage: "plus.circle")
+      }
+
+      if members.isEmpty {
+        Text("Optional: add titles now or later from any movie, show or season.")
+          .font(.footnote).foregroundStyle(.secondary)
+      } else {
+        ForEach(members) { member in
+          HStack(spacing: 10) {
+            Image(
+              systemName: member.seasonNumber != nil
+                ? "tv" : member.kind == .movie ? "film" : "tv.fill"
+            )
+            .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+              Text(member.title).font(.body).lineLimit(1)
+              if let subtitle = member.subtitle {
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+              }
+            }
+          }
+        }
+        .onMove { offsets, destination in
+          members.move(fromOffsets: offsets, toOffset: destination)
+          sortMode = "custom"
+        }
+        .onDelete { offsets in
+          members.remove(atOffsets: offsets)
+        }
+      }
+    } header: {
+      HStack {
+        Text("Titles (\(members.count))")
+        Spacer()
+        if members.count > 1 { EditButton() }
+      }
+    }
+  }
+
+  @ViewBuilder private var smartRulesSections: some View {
+    Section {
+      Picker("Titles", selection: $rules.kind) {
+        Text("Movies and Shows").tag(String?.none)
+        Text("Movies").tag(Optional("movie"))
+        Text("Shows").tag(Optional("series"))
+      }
+      Picker("Match", selection: $rules.combination) {
+        Text("All Rules").tag("and")
+        Text("Any Rule").tag("or")
+      }
+      .pickerStyle(.segmented)
+    } header: {
+      Text("Rules")
+    } footer: {
+      Text(rules.summary)
+    }
+    Section("Genres") {
+      ForEach(rules.genres, id: \.self) { Text($0) }
+        .onDelete { rules.genres.remove(atOffsets: $0) }
+      HStack {
+        TextField("Add Genre, such as Comedy", text: $genreEntry)
+          .onSubmit(addGenre)
+        Button("Add", action: addGenre)
+          .disabled(genreEntry.trimmingCharacters(in: .whitespaces).isEmpty)
+      }
+    }
+    Section("Time and Rating") {
+      Picker("Decade", selection: $rules.decade) {
+        Text("Any").tag(Int?.none)
+        ForEach(IOSSmartRules.decades, id: \.self) { Text("\($0)s").tag(Optional($0)) }
+      }
+      HStack {
+        TextField("From Year", text: yearBinding(\.yearMin)).keyboardType(.numberPad)
+        TextField("Until Year", text: yearBinding(\.yearMax)).keyboardType(.numberPad)
+      }
+      Picker("Rated at Least", selection: $rules.ratingMin) {
+        Text("Any").tag(Double?.none)
+        ForEach([5.0, 6.0, 7.0, 7.5, 8.0, 9.0], id: \.self) {
+          Text($0.formatted()).tag(Optional($0))
+        }
+      }
+      Picker("Added", selection: $rules.addedWithinDays) {
+        Text("Any Time").tag(Int?.none)
+        ForEach(IOSSmartRules.addedChoices, id: \.self) {
+          Text("In the Last \($0) Days").tag(Optional($0))
+        }
+      }
+    }
+    Section {
+      Picker("Watched", selection: $rules.watchedState) {
+        Text("Any").tag(String?.none)
+        Text("Unwatched").tag(Optional("unwatched"))
+        Text("In Progress").tag(Optional("inProgress"))
+        Text("Watched").tag(Optional("watched"))
+      }
+      Toggle("Favorites Only", isOn: $rules.favoritesOnly)
+      Toggle("Watchlist Only", isOn: $rules.watchlistOnly)
+      TextField(
+        "Title Contains",
+        text: Binding(get: { rules.textContains ?? "" }, set: { rules.textContains = $0 }))
+    } header: {
+      Text("For This Profile")
+    } footer: {
+      if let problem = rules.problem {
+        Text(problem).foregroundStyle(.orange)
+      } else {
+        Text(
+          "The server picks the titles and keeps the list up to date. Watched, favorites and the watchlist count for whoever looks at it."
+        )
+      }
+    }
+  }
+
+  private func yearBinding(_ key: WritableKeyPath<IOSSmartRules, Int?>) -> Binding<String> {
+    Binding(
+      get: { rules[keyPath: key].map(String.init) ?? "" },
+      set: { rules[keyPath: key] = Int(String($0.filter(\.isNumber).prefix(4))) })
+  }
+
+  private func addGenre() {
+    let clean = genreEntry.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !clean.isEmpty,
+      !rules.genres.contains(where: { $0.caseInsensitiveCompare(clean) == .orderedSame })
+    {
+      rules.genres.append(clean)
+    }
+    genreEntry = ""
+  }
+
   private func populateInitialState() {
     guard !initialized else { return }
     initialized = true
@@ -272,6 +380,8 @@ struct IOSCollectionEditorView: View {
       overview = existing.overview ?? ""
       sortMode = existing.sortMode
       isShared = existing.isShared
+      isSmart = existing.isSmart
+      rules = IOSSmartRules.decode(existing.rulesJson)
       members = existing.members.map { member in
         let subtitle: String? =
           if let season = member.seasonNumber {
@@ -362,15 +472,17 @@ struct IOSCollectionEditorView: View {
     defer { saving = false }
     let payload = IOSSaveCollection(
       name: cleanedName,
-      mediaIds: members.filter { $0.seasonNumber == nil }.map(\.mediaId),
-      isSmart: existing?.isSmart ?? false,
+      mediaIds: isSmart ? nil : members.filter { $0.seasonNumber == nil }.map(\.mediaId),
+      isSmart: isSmart,
       isShared: isShared,
-      rulesJson: existing?.rulesJson,
+      rulesJson: isSmart ? rules.json : nil,
       overview: IOSCollectionRules.cleanedOverview(overview),
-      sortMode: sortMode,
-      members: members.map {
-        IOSCollectionMemberInput(mediaId: $0.mediaId, seasonNumber: $0.seasonNumber)
-      })
+      sortMode: isSmart && sortMode == "custom" ? "release" : sortMode,
+      members: isSmart
+        ? nil
+        : members.map {
+          IOSCollectionMemberInput(mediaId: $0.mediaId, seasonNumber: $0.seasonNumber)
+        })
     var detailsSaved = false
     do {
       let saved = try await saveRecovery.saveDetails(
