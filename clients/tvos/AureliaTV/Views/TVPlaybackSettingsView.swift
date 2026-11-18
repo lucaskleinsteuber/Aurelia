@@ -88,6 +88,39 @@ struct TVPlaybackSettingsView: View {
           }
           Spacer().frame(height: 18)
           row(
+            "Default Audio Language", value: TVPlaybackLanguage.title(value.defaultAudioLanguage),
+            id: "settings-audio-language"
+          ) {
+            value.defaultAudioLanguage = Self.next(
+              after: value.defaultAudioLanguage,
+              in: [TVPlaybackLanguage.original] + TVPlaybackLanguage.choices)
+          }
+          row(
+            "Default Subtitle Language",
+            value: TVPlaybackLanguage.title(value.defaultSubtitleLanguage),
+            id: "settings-subtitle-language"
+          ) {
+            value.defaultSubtitleLanguage = Self.next(
+              after: value.defaultSubtitleLanguage,
+              in: [TVPlaybackLanguage.off] + TVPlaybackLanguage.choices)
+          }
+          row("Subtitle Size", value: value.subtitleSize.title, id: "settings-subtitle-size") {
+            value.subtitleSize = Self.next(after: value.subtitleSize, in: TVSubtitleSize.allCases)
+          }
+          row(
+            "Subtitle Background", value: value.subtitleBackground.title,
+            id: "settings-subtitle-background"
+          ) {
+            value.subtitleBackground = Self.next(
+              after: value.subtitleBackground, in: TVSubtitleBackground.allCases)
+          }
+          Text(
+            "The default languages apply until you choose tracks in the player; a series keeps its own choice. Subtitle size and background apply from the next title."
+          )
+          .font(.system(size: 22)).foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10)
+          Spacer().frame(height: 18)
+          row(
             "Default Playback Rate", value: String(format: "%gx", value.defaultPlaybackRate),
             id: "settings-rate"
           ) {
@@ -105,6 +138,7 @@ struct TVPlaybackSettingsView: View {
           row("Forget Audio & Subtitle Preferences", value: nil, id: "settings-forget-tracks") {
             value.preferredAudioTrack = nil
             value.preferredSubtitleTrack = nil
+            value.subtitleTrackChosen = false
             if let server = model.connection?.serverID, let profile = model.session?.user.id {
               model.environment.preferences.forgetSeriesChoices(
                 serverID: server, profileID: profile)

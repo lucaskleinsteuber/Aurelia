@@ -31,7 +31,8 @@ like the Aurelia Mac app. Version 2.0.0 includes (installation for everyone: [do
 
 Open `AureliaTV.xcodeproj` and select the **AureliaTV** scheme. The TV client has
 its own project, bundle identifier and version; it does not share an application
-library with the Mac client. Server and user administration remain on the Mac and Linux apps.
+library with the Mac client. Owners and administrators can manage the server from the Apple TV
+too; protected changes are confirmed on another device or with the Server Password.
 
 From the repository root:
 

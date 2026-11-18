@@ -408,6 +408,28 @@ struct TVAPIClient: Sendable {
     return try? Self.decode(TVSleepTimerEndedResponse.self, data: data)
   }
 
+  /// Sets a new PIN for the signed-in profile; the current one is needed when it has a PIN.
+  func changeProfilePIN(current: String?, new: String) async throws {
+    struct Payload: Encodable {
+      let pinProtectionEnabled: Bool
+      let currentPin: String?
+      let pin: String?
+    }
+    _ = try await send(
+      "/api/v1/profile/pin-protection", method: "PUT",
+      body: JSONEncoder().encode(
+        Payload(pinProtectionEnabled: true, currentPin: current, pin: new)))
+  }
+  /// Turns the PIN off; the server allows this only for profiles that are not Owner or Admin.
+  func removeProfilePIN(current: String) async throws {
+    struct Payload: Encodable {
+      let pinProtectionEnabled: Bool
+      let currentPin: String?
+    }
+    _ = try await send(
+      "/api/v1/profile/pin-protection", method: "PUT",
+      body: JSONEncoder().encode(Payload(pinProtectionEnabled: false, currentPin: current)))
+  }
   /// Family wishes visible to this profile.
   func wishes(state: TVWishState? = nil, offset: Int = 0, limit: Int = TVWishPresentation.pageSize)
     async throws -> TVWishListResponse
@@ -421,6 +443,88 @@ struct TVAPIClient: Sendable {
     }
     return try Self.decode(
       TVWishListResponse.self, data: await send("/api/v1/wishes", query: query))
+  }
+
+  /// People in the library's credits, those in the most titles first ("people-v1").
+  func people(query search: String, offset: Int, limit: Int) async throws -> TVPeoplePage {
+    var query = [
+      URLQueryItem(name: "offset", value: String(offset)),
+      URLQueryItem(name: "limit", value: String(limit)),
+    ]
+    let trimmed = search.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmed.isEmpty { query.append(URLQueryItem(name: "query", value: trimmed)) }
+    return try Self.decode(TVPeoplePage.self, data: await send("/api/v1/people", query: query))
+  }
+  /// A person's life and the titles TMDB knows them for; empty without TMDB.
+  func personProfile(key: String) async throws -> TVPersonProfile {
+    try Self.decode(
+      TVPersonProfile.self,
+      data: await send("/api/v1/people/profile", query: [URLQueryItem(name: "key", value: key)]))
+  }
+  func wishSummary() async throws -> TVWishSummaryResponse {
+    try await get("/api/v1/wishes/summary")
+  }
+
+  func wishSearch(query text: String, kind: TVMediaKind? = nil) async throws
+    -> TVWishSearchResponse
+  {
+    var query = [URLQueryItem(name: "query", value: text)]
+    if let kind {
+      query.append(URLQueryItem(name: "kind", value: kind.rawValue))
+    }
+    return try Self.decode(
+      TVWishSearchResponse.self, data: await send("/api/v1/wishes/search", query: query))
+  }
+
+  func createWish(_ requestBody: TVCreateWishRequest) async throws -> TVCreateWishOutcome {
+    var req = try request("/api/v1/wishes", authentication: .profile)
+    req.httpMethod = "POST"
+    req.httpBody = try JSONEncoder().encode(requestBody)
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    try Task.checkCancellation()
+    let response = try await transport.execute(req, trust: .pinned(fingerprint))
+    try Task.checkCancellation()
+    if let actual = response.fingerprint,
+      actual.caseInsensitiveCompare(fingerprint) != .orderedSame
+    {
+      throw TVCoreError.identityMismatch
+    }
+    if response.statusCode == 409,
+      let problem = try? JSONDecoder().decode(
+        TVWishAlreadyInLibraryProblem.self, from: response.body),
+      problem.code == "already_in_library"
+    {
+      return .alreadyInLibrary(problem)
+    }
+    try Self.requireSuccess(response)
+    return .created(try Self.decode(TVCreateWishResponse.self, data: response.body))
+  }
+
+  func deleteWish(id: UUID) async throws {
+    _ = try await send("/api/v1/wishes/\(id.uuidString.lowercased())", method: "DELETE")
+  }
+
+  func setWishSupport(id: UUID, supported: Bool) async throws -> TVWishSummary {
+    let body = try JSONEncoder().encode(TVSetWishSupportRequest(supported: supported))
+    let data = try await send(
+      "/api/v1/wishes/\(id.uuidString.lowercased())/support", method: "PUT", body: body)
+    return try Self.decode(TVWishSummary.self, data: data)
+  }
+
+  func updateWishState(id: UUID, requestBody: TVUpdateWishStateRequest) async throws
+    -> TVWishSummary
+  {
+    let body = try JSONEncoder().encode(requestBody)
+    let data = try await send(
+      "/api/v1/wishes/\(id.uuidString.lowercased())/state", method: "PUT", body: body)
+    return try Self.decode(TVWishSummary.self, data: data)
+  }
+
+  @discardableResult
+  func markWishesSeen() async throws -> TVWishSummaryResponse {
+    // The mutation returns 204, not a summary. Reload the resulting badge counts separately.
+    _ = try await send("/api/v1/wishes/seen", method: "POST")
+    return try await TVAPIClient.withBackgroundRequests { try await wishSummary() }
   }
 
   /// Server-proxied poster thumbnail for a wish.
@@ -597,6 +701,46 @@ struct TVAPIClient: Sendable {
 
   func deleteWatchTogether(_ path: String) async throws {
     _ = try await send(path, method: "DELETE")
+  }
+
+  // Server administration (TVAdminAPI.swift). A protected change is refused with
+  // `approval_required` before anything happens; the app then gets a one-time approval for exactly
+  // this method, address and body and sends it once more.
+  func adminData(
+    _ path: String, method: String = "GET", query: [URLQueryItem] = [], body: Data? = nil,
+    contentType: String = "application/json", longRunning: Bool = false
+  ) async throws -> Data {
+    var base = try request(path, query: query, authentication: .profile)
+    if longRunning { base.timeoutInterval = 75 }
+    guard let url = base.url else { throw TVCoreError.invalidAddress }
+    return try await TVApprovalExecutor.execute { approval in
+      var request = base
+      request.httpMethod = method
+      request.httpBody = body
+      if body != nil { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
+      if let approval { request.setValue(approval, forHTTPHeaderField: "X-Aurelia-Approval") }
+      return try await execute(request).body
+    } approve: {
+      struct Confirmation: Encodable {
+        let action: String
+        let payloadHash: String
+      }
+      struct Approval: Decodable { let token: String }
+      let confirmation = Confirmation(
+        action: try TVApprovalExecutor.action(method: method, url: url),
+        payloadHash: TVApprovalExecutor.payloadHash(body))
+      let data = try await send(
+        "/api/v1/management/approval", method: "POST", body: JSONEncoder().encode(confirmation))
+      let token = try Self.decode(Approval.self, data: data).token
+      guard (16...1024).contains(token.utf8.count), !token.contains(where: \.isWhitespace) else {
+        throw TVCoreError.invalidResponse
+      }
+      return token
+    }
+  }
+
+  static func decodeAdmin<Value: Decodable>(_ type: Value.Type, data: Data) throws -> Value {
+    try decode(type, data: data)
   }
 
   private enum Authentication { case none, device, profile }

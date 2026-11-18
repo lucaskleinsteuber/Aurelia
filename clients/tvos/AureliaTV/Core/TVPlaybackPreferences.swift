@@ -67,6 +67,14 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
   var preferredAudioTrack: TVPlaybackTrackPreference?
   // nil explicitly means Off, matching the default on the Mac.
   var preferredSubtitleTrack: TVPlaybackTrackPreference?
+  /// A subtitle track (or Off) was chosen on this profile; until then the default language counts.
+  var subtitleTrackChosen = false
+  /// "original" or a language code (`TVPlaybackLanguage.choices`), until a track is chosen.
+  var defaultAudioLanguage = TVPlaybackLanguage.original
+  /// "off" or a language code, until a subtitle track is chosen.
+  var defaultSubtitleLanguage = TVPlaybackLanguage.off
+  var subtitleSize: TVSubtitleSize = .medium
+  var subtitleBackground: TVSubtitleBackground = .transparent
   /// Softens loud scenes and lifts quiet dialogue.
   var dialogueBoost: DialogueBoost = .off
   var volumeLeveling: VolumeLeveling = .off
@@ -97,6 +105,10 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
     value.cinemaTrailers = min(max(value.cinemaTrailers, 0), 3)
     value.controlsDelay = value.controlsDelay.isFinite ? min(max(value.controlsDelay, 1), 10) : 4
     value.seekInterval = min(max(value.seekInterval, 5), 60)
+    value.defaultAudioLanguage = TVPlaybackLanguage.normalized(
+      value.defaultAudioLanguage, fallback: TVPlaybackLanguage.original)
+    value.defaultSubtitleLanguage = TVPlaybackLanguage.normalized(
+      value.defaultSubtitleLanguage, fallback: TVPlaybackLanguage.off)
     value.preferredAudioTrack = value.preferredAudioTrack.map {
       TVPlaybackTrackPreference(language: $0.language, title: $0.title)
     }
@@ -113,6 +125,8 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
     case seekInterval, preferredAudioTrack, preferredSubtitleTrack, nightMode, dialogueBoost,
       volumeLeveling, streamingQuality, introSkipping, upNextAtCredits, cinemaMode, cinemaAds,
       cinemaTrailers, playSuggestionsAutomatically, showGoodNightOnSleepTimer
+    case subtitleTrackChosen, defaultAudioLanguage, defaultSubtitleLanguage, subtitleSize,
+      subtitleBackground
   }
 
   init(from decoder: Decoder) throws {
@@ -144,6 +158,19 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
       try values.decodeIfPresent(Bool.self, forKey: .playSuggestionsAutomatically) ?? false
     showGoodNightOnSleepTimer =
       try values.decodeIfPresent(Bool.self, forKey: .showGoodNightOnSleepTimer) ?? false
+    subtitleTrackChosen =
+      try values.decodeIfPresent(Bool.self, forKey: .subtitleTrackChosen) ?? false
+    defaultAudioLanguage =
+      try values.decodeIfPresent(String.self, forKey: .defaultAudioLanguage)
+      ?? TVPlaybackLanguage.original
+    defaultSubtitleLanguage =
+      try values.decodeIfPresent(String.self, forKey: .defaultSubtitleLanguage)
+      ?? TVPlaybackLanguage.off
+    subtitleSize =
+      (try? values.decodeIfPresent(TVSubtitleSize.self, forKey: .subtitleSize)) ?? .medium
+    subtitleBackground =
+      (try? values.decodeIfPresent(TVSubtitleBackground.self, forKey: .subtitleBackground))
+      ?? .transparent
   }
 
   func encode(to encoder: Encoder) throws {
@@ -166,6 +193,11 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
     try values.encode(cinemaTrailers, forKey: .cinemaTrailers)
     try values.encode(playSuggestionsAutomatically, forKey: .playSuggestionsAutomatically)
     try values.encode(showGoodNightOnSleepTimer, forKey: .showGoodNightOnSleepTimer)
+    try values.encode(subtitleTrackChosen, forKey: .subtitleTrackChosen)
+    try values.encode(defaultAudioLanguage, forKey: .defaultAudioLanguage)
+    try values.encode(defaultSubtitleLanguage, forKey: .defaultSubtitleLanguage)
+    try values.encode(subtitleSize, forKey: .subtitleSize)
+    try values.encode(subtitleBackground, forKey: .subtitleBackground)
   }
 
   /// These preferences with a series' own track choices, where it has them.
@@ -173,7 +205,10 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
     guard let choice else { return self }
     var value = self
     if let audio = choice.audio { value.preferredAudioTrack = audio }
-    if choice.subtitleChosen { value.preferredSubtitleTrack = choice.subtitle }
+    if choice.subtitleChosen {
+      value.preferredSubtitleTrack = choice.subtitle
+      value.subtitleTrackChosen = true
+    }
     return value
   }
 }

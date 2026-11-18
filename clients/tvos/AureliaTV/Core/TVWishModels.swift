@@ -61,14 +61,149 @@ struct TVWishListResponse: Codable, Equatable, Sendable {
   let providerEnabled: Bool
 }
 
+struct TVWishSummaryResponse: Codable, Equatable, Sendable {
+  let openCount: Int
+  let newlyFulfilledCount: Int
+}
+
+struct TVWishSearchHit: Codable, Equatable, Identifiable, Sendable {
+  let provider: String
+  let providerMediaId: String
+  let kind: TVMediaKind
+  let title: String
+  let year: Int?
+  let overview: String?
+  let posterPath: String?
+  let posterUrl: String?
+  let alreadyInLibrary: Bool
+  let existingMediaId: UUID?
+  let alreadyWished: Bool
+  let existingWishId: UUID?
+  let supportedByCaller: Bool
+
+  var id: String { "\(provider):\(providerMediaId):\(kind.rawValue)" }
+}
+
+struct TVWishSearchResponse: Codable, Equatable, Sendable {
+  let results: [TVWishSearchHit]
+  let providerEnabled: Bool
+}
+
+struct TVCreateWishRequest: Encodable, Sendable {
+  let kind: TVMediaKind
+  let title: String
+  let year: Int?
+  let provider: String?
+  let providerMediaId: String?
+  let overview: String?
+  let posterPath: String?
+  let note: String?
+}
+
+struct TVCreateWishResponse: Codable, Equatable, Sendable {
+  let wish: TVWishSummary
+  let mergedIntoExistingSupport: Bool
+}
+
+struct TVWishAlreadyInLibraryProblem: Codable, Equatable, Sendable {
+  let code: String
+  let message: String
+  let mediaId: UUID
+  let title: String
+  let kind: TVMediaKind
+}
+
+enum TVCreateWishOutcome: Equatable, Sendable {
+  case created(TVCreateWishResponse)
+  case alreadyInLibrary(TVWishAlreadyInLibraryProblem)
+}
+
+struct TVSetWishSupportRequest: Encodable, Sendable {
+  let supported: Bool
+}
+
+struct TVUpdateWishStateRequest: Encodable, Sendable {
+  let state: TVWishState
+  let resolutionNote: String?
+  let fulfilledMediaItemId: UUID?
+}
+
 struct TVSleepTimerEndedResponse: Codable, Equatable, Sendable {
   let powerMode: String
   let afterSleepTimer: Bool
   let minutes: Int
 }
 
+struct TVWishNotificationEvent: Equatable, Sendable {
+  enum Kind: Equatable, Sendable {
+    case newWishes
+    case wishFulfilled
+  }
+
+  let kind: Kind
+  let title: String
+  let body: String
+}
+
+enum TVWishPreferenceKeys {
+  static let wishNotificationsEnabled = "aurelia.ios.wishes.notificationsEnabled"
+  static let wishNotificationsPrompted = "aurelia.ios.wishes.notificationsPrompted"
+}
+
 enum TVWishPresentation {
   static let pageSize = 30
+
+  static func isAdministrator(_ user: TVUser?) -> Bool {
+    guard let role = user?.role.lowercased() else { return false }
+    return role == "owner" || role == "admin"
+  }
+
+  static func badgeCount(summary: TVWishSummaryResponse?, isAdmin: Bool) -> Int {
+    guard let summary else { return 0 }
+    let fulfilled = max(0, summary.newlyFulfilledCount)
+    let open = max(0, summary.openCount)
+    return isAdmin ? open + fulfilled : fulfilled
+  }
+
+  static func notificationEvent(
+    previous: TVWishSummaryResponse?,
+    current: TVWishSummaryResponse,
+    isAdmin: Bool,
+    latestWish: TVWishSummary? = nil
+  ) -> TVWishNotificationEvent? {
+    guard let previous else { return nil }
+    if current.newlyFulfilledCount > previous.newlyFulfilledCount {
+      let added = current.newlyFulfilledCount - previous.newlyFulfilledCount
+      if added == 1, let wish = latestWish {
+        return TVWishNotificationEvent(
+          kind: .wishFulfilled,
+          title: "Your wish is here",
+          body: "\(wish.title) is now in the library.")
+      }
+      return TVWishNotificationEvent(
+        kind: .wishFulfilled,
+        title: "Your wish is here",
+        body: added == 1
+          ? "One of your wished titles is now in the library."
+          : "\(added) of your wished titles are now in the library.")
+    }
+    if isAdmin && current.openCount > previous.openCount {
+      let added = current.openCount - previous.openCount
+      if added == 1, let wish = latestWish {
+        return TVWishNotificationEvent(
+          kind: .newWishes,
+          title: "New wish: \(wish.title)",
+          body: "From \(wish.userName).")
+      }
+      return TVWishNotificationEvent(
+        kind: .newWishes,
+        title: "New family wish",
+        body: added == 1
+          ? "Someone added a new wish to the list."
+          : "\(added) new wishes were added to the list.")
+    }
+    return nil
+  }
 
   static func kindLabel(_ kind: TVMediaKind) -> String {
     kind == .series ? "TV Series" : "Movie"
@@ -89,9 +224,26 @@ enum TVWishPresentation {
     }
   }
 
+  static func parseYear(_ input: String) -> (year: Int?, error: String?) {
+    let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty { return (nil, nil) }
+    guard trimmed.count == 4, trimmed.allSatisfy(\.isNumber), let value = Int(trimmed),
+      (1888...2100).contains(value)
+    else {
+      return (nil, "Enter a four-digit year between 1888 and 2100, or leave it blank.")
+    }
+    return (value, nil)
+  }
+
   static func describeError(_ error: Error) -> String {
     if let api = error as? TVCoreError {
-      return api.errorDescription ?? "Couldn't load wishes. Try again."
+      if api.problemCode == "wish_age_restricted" {
+        return api.errorDescription ?? "This profile cannot wish for titles above its age limit."
+      }
+      if api.problemCode == "provider_disabled" {
+        return "TMDB search is off on the server. Add your wish manually."
+      }
+      return api.errorDescription ?? "Couldn't update wishes. Try again."
     }
     if (error as? URLError) != nil {
       return "The server isn't answering."

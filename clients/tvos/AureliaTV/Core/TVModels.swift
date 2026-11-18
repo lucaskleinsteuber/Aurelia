@@ -223,6 +223,21 @@ struct TVCapabilities: Codable, Equatable, Sendable {
   var supportsAdaptiveStreaming: Bool { capabilities?.contains("adaptive-streaming-v1") == true }
   /// Family wishes for titles not yet in the library.
   var supportsWishes: Bool { capabilities?.contains("wishes-v1") == true }
+  /// Scene notes the household wrote for moments of a title; the TV shows them.
+  var sceneNotes: Bool? = nil
+  /// Everyone in the library's credits, and a person's life and other titles from TMDB.
+  var supportsPeople: Bool { capabilities?.contains("people-v1") == true }
+  /// Bedtime and daily limits for children's profiles, set by the owner.
+  var supportsScreenTime: Bool { capabilities?.contains("screen-time-v1") == true }
+  /// New-device notices, the security log and Face ID / Touch ID for management.
+  var supportsSecurity: Bool { capabilities?.contains("security-v1") == true }
+  var supportsServerPerformance: Bool {
+    capabilities?.contains("server-performance-v1") == true
+  }
+  /// Sleep, Turn Off or Stop Now for the owner.
+  var supportsPowerNow: Bool { capabilities?.contains("power-now-v1") == true }
+  var supportsServerSpeech: Bool { capabilities?.contains("server-speech-v1") == true }
+  var supportsMediaSegments: Bool { capabilities?.contains("media-segments-v2") == true }
 }
 
 struct TVUser: Codable, Equatable, Sendable {
@@ -514,6 +529,40 @@ struct TVPersonDetailResponse: Codable, Equatable, Sendable {
   let subtitle: String?
   let profile: TVArtwork?
   let items: [TVCatalogItem]
+}
+
+/// One person in People ("people-v1"): everyone TMDB identified in the library's credits.
+struct TVPersonSummary: Codable, Equatable, Identifiable, Sendable {
+  let name: String
+  let personKey: String
+  let profile: TVArtwork?
+  let titleCount: Int
+  let department: String?
+
+  var id: String { personKey }
+}
+
+struct TVPeoplePage: Codable, Equatable, Sendable {
+  let items: [TVPersonSummary]
+  let total: Int
+  let offset: Int
+  let limit: Int
+}
+
+/// A person's life from TMDB and the titles they are known for that the library doesn't have.
+struct TVPersonProfile: Codable, Equatable, Sendable {
+  let about: TVPersonAbout?
+  let knownFor: [TVWishSearchHit]
+}
+
+struct TVPersonAbout: Codable, Equatable, Sendable {
+  let biography: String?
+  let birthday: String?
+  let deathday: String?
+  let placeOfBirth: String?
+  let knownForDepartment: String?
+  let provider: String
+  let providerPersonId: String
 }
 
 enum TVCatalogPageValidator {

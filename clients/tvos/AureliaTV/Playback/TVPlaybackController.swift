@@ -343,6 +343,7 @@ final class TVPlaybackController: ObservableObject {
             preferences.preferredAudioTrack = preference
           } else {
             preferences.preferredSubtitleTrack = preference
+            preferences.subtitleTrackChosen = true
           }
           persistPreferences()
           if let seriesID {

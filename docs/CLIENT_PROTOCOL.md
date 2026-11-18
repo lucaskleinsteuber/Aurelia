@@ -724,7 +724,7 @@ Servers with capability `wishes-v1` let household profiles request movies and TV
 
 ## People
 
-Since server 2.22.0, capability `people-v1` adds People to every app except Apple TV.
+Since server 2.22.0, capability `people-v1` adds People to every app.
 
 - `GET /api/v1/people?query=&offset=&limit=` (up to 120 per page) lists the people TMDB identified
   in the credits of the movies and shows this profile may see, those in the most titles first and

@@ -419,7 +419,7 @@ struct TVPINView: View {
 }
 
 /// Round keys like the passcode pads in Apple's apps: glassy at rest, white when focused.
-private struct TVPINKeyStyle: ButtonStyle {
+struct TVPINKeyStyle: ButtonStyle {
   var prominent = false
   @Environment(\.isFocused) private var focused
   @Environment(\.isEnabled) private var enabled

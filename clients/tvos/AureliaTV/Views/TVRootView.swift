@@ -360,6 +360,20 @@ struct TVConnectionMenu: View {
             Label("Playback Settings", systemImage: "play.rectangle").frame(width: 560)
           }.accessibilityIdentifier("profile-playback-settings")
           NavigationLink {
+            TVChangePINView()
+          } label: {
+            Label("Change PIN", systemImage: "lock.rotation").frame(width: 560)
+          }.accessibilityIdentifier("profile-pin")
+          if TVAdminPermissions(
+            role: model.session?.user.role, accessMode: model.session?.user.accessMode
+          ).administrator {
+            NavigationLink {
+              TVServerAdminView()
+            } label: {
+              Label("Server", systemImage: "server.rack").frame(width: 560)
+            }.accessibilityIdentifier("profile-server")
+          }
+          NavigationLink {
             TVWatchHistoryView()
           } label: {
             Label("Watch History", systemImage: "clock.arrow.circlepath").frame(width: 560)

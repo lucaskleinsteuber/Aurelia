@@ -13,8 +13,11 @@
 - Keep UI text in English. Use Aurelia's opaque `#202326` canvas, large artwork,
   restrained controls, native focus behavior and remote navigation. Focus alone
   must never start playback.
-- Do not add server or account administration to this client. Device approval
-  remains on an already connected Mac; selecting a profile is a separate step.
+- Server administration is allowed here (owner's decision, 17.11.2026): owners and
+  administrators manage the server with the remote, and protected changes are unlocked with
+  Confirm on Another Device or the Server Password, as in Linux and the browser. Adding new
+  devices (pairing approval) still happens on an already connected Mac, iPhone or Linux app;
+  selecting a profile is a separate step.
 - Keep device credentials in the TV client's Keychain and profile credentials
   in memory. Never log credentials, pairing codes, secrets or private URLs.
 - Video remains at the server's original location. A relay may stream bounded
