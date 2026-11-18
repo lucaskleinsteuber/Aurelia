@@ -15,6 +15,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
+- Server: a new server can be set up from an app with the setup code from the server computer (`setup-code-v1`), as from a browser; the app keeps the sign-in it gets back.
 - Linux: Settings › Playback › Subtitle Size and Subtitle Background, as in the browser; they apply from the next title. Download Season in a series' season menu loads its episodes one after another in one chosen quality; downloads now run one at a time, and the Downloads page shows the waiting ones.
 - Mac: Settings › Playback › Subtitle Size and Subtitle Background, as in the browser; they apply from the next title. Download Season in a series' season menu loads its episodes one after another in one chosen quality; downloads now run one at a time, and the Downloads page shows the waiting ones.
 - Browser: the PIN screen has Forgot PIN?, which says how to get a new PIN, as in the apps. Media keys, Chrome's and Edge's media controls and the lock screen on Android, iPhone and iPad show the title with its poster and play, pause, skip, seek and change episodes.

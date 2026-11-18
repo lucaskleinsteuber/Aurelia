@@ -20,6 +20,11 @@ public static class ApiEndpointMappings
         api.MapGet("/server/info", ServerInfoAsync);
         api.MapPost("/setup/owner", SetupOwnerAsync)
             .RequireRateLimiting("authentication");
+        // A new server set up from an app with the code from the server computer, like the browser.
+        api.MapGet("/setup/code", async (AureliaDbContext database, CancellationToken token) =>
+            new WebSetupStatusResponse(await BrowserSetup.OpenAsync(database, token)));
+        api.MapPost("/setup/code", SetupWithCodeAsync)
+            .RequireRateLimiting("authentication");
 
         var authentication = api.MapGroup("/auth");
         authentication.MapPost("/login", LoginAsync)
@@ -309,6 +314,22 @@ public static class ApiEndpointMappings
         }
 
         return result;
+    }
+
+    private static Task<IResult> SetupWithCodeAsync(
+        HttpContext context,
+        SetupWithCodeRequest request,
+        BrowserSetup setup,
+        AccountService accounts,
+        AureliaDbContext database,
+        CancellationToken cancellationToken)
+    {
+        context.Response.Headers.CacheControl = "no-store";
+        // The Server Password and the new credential travel only over the pinned HTTPS connection.
+        if (!context.Request.IsHttps && context.Connection.RemoteIpAddress is { } ip && !System.Net.IPAddress.IsLoopback(ip))
+            return Task.FromResult<IResult>(Problem("https_required", "Setting up a server requires its HTTPS address.", StatusCodes.Status403Forbidden));
+        return ExecuteAsync(() => setup.CreateOwnerAsync(
+            request.Code, request.OwnerName, request.Password, request.DeviceName, accounts, database, cancellationToken));
     }
 
     private static Task<IResult> CurrentUserAsync(

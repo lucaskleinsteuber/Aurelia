@@ -22,3 +22,9 @@ public sealed record WebSetupStatusResponse(bool Open);
 
 /// <summary>The setup code from the server computer, and the owner's name and Server Password.</summary>
 public sealed record WebSetupRequest(string Code, string OwnerName, string Password, string DeviceName);
+
+/// <summary>
+/// The same for an app (`POST /api/v1/setup/code`), which keeps the device credential it gets back
+/// as after pairing.
+/// </summary>
+public sealed record SetupWithCodeRequest(string Code, string OwnerName, string Password, string DeviceName);

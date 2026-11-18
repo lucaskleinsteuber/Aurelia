@@ -26,6 +26,9 @@ public sealed class EndpointSecurityTests
         "POST /api/v1/auth/pair",
         "POST /api/v1/local/owner-pin",
         "POST /api/v1/setup/owner",
+        // A new server set up from an app with the one-time code from the server computer.
+        "GET /api/v1/setup/code",
+        "POST /api/v1/setup/code",
         // Moving a server (docs/SERVER_MOVE.md): between the two servers the move code and the
         // bundle's token are the credentials; on a new server without an owner, the setup code
         // or an app host's bootstrap token.

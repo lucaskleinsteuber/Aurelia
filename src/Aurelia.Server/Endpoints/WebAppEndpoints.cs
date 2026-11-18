@@ -62,12 +62,8 @@ public static class WebAppEndpoints
             new WebSetupStatusResponse(await BrowserSetup.OpenAsync(database, token)));
         web.MapPost("/setup", async (WebSetupRequest request, BrowserSetup setup, AccountService accounts, AureliaDbContext database, HttpContext context) =>
         {
-            if (!await BrowserSetup.OpenAsync(database, context.RequestAborted))
-                throw new AccountException("server_already_setup", "This server already has an owner. Ask them for a code instead.", 409);
-            if (!setup.Matches(request.Code))
-                throw new AccountException("setup_code_invalid", "That setup code is not right. Check it on the server computer: sudo aurelia setup --browser", 403);
-            var credential = await accounts.SetupOwnerAsync(new SetupOwnerRequest(request.OwnerName, request.Password, request.DeviceName), context.RequestAborted);
-            setup.Finish();
+            var credential = await setup.CreateOwnerAsync(
+                request.Code, request.OwnerName, request.Password, request.DeviceName, accounts, database, context.RequestAborted);
             WebCookies.Set(context, WebCookies.Device, credential.Token, credential.ExpiresAt);
             return Results.NoContent();
         }).RequireRateLimiting("authentication");

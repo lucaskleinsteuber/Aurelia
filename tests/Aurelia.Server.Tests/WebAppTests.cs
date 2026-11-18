@@ -110,6 +110,65 @@ public sealed class WebAppTests
     }
 
     [Fact]
+    public async Task ANewServerIsSetUpFromAnAppWithTheSameCodeAndTheAppKeepsTheCredential()
+    {
+        using var factory = new AureliaServerFactory(configureServices: services =>
+            services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter, NetworkAddressFilter>());
+        using var app = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
+        using (var status = await app.GetAsync("/api/v1/setup/code"))
+            Assert.True((await ApiTestClient.ReadAsync<WebSetupStatusResponse>(status)).Open);
+        var path = Path.Combine(factory.DataDirectory, BrowserSetup.FileName);
+        var code = (await File.ReadAllTextAsync(path)).Trim();
+
+        // Plain HTTP from another computer would carry the Server Password unprotected.
+        using (var plain = factory.CreateClient())
+        using (var insecure = await plain.PostAsJsonAsync("/api/v1/setup/code",
+                   new SetupWithCodeRequest(code, "invented-owner", "a long invented server password", "Invented iPhone"), ApiTestClient.JsonOptions))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, insecure.StatusCode);
+            Assert.Contains("https_required", await insecure.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        }
+        using (var wrong = await app.PostAsJsonAsync("/api/v1/setup/code",
+                   new SetupWithCodeRequest("AAAAA-AAAAA", "invented-owner", "a long invented server password", "Invented iPhone"), ApiTestClient.JsonOptions))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, wrong.StatusCode);
+            Assert.Contains("setup_code_invalid", await wrong.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        }
+        AuthenticationResponse owner;
+        using (var created = await app.PostAsJsonAsync("/api/v1/setup/code",
+                   new SetupWithCodeRequest(code, "invented-owner", "a long invented server password", "Invented iPhone"), ApiTestClient.JsonOptions))
+        {
+            Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+            Assert.True(created.Headers.CacheControl?.NoStore);
+            owner = await ApiTestClient.ReadAsync<AuthenticationResponse>(created);
+        }
+        Assert.Equal(UserRole.Owner, owner.User.Role);
+        Assert.False(File.Exists(path));
+        // The credential works like one from pairing: the app sees the owner's profile.
+        using (var profiles = await app.SendAsync(ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/profiles", owner.Token)))
+            Assert.Equal(HttpStatusCode.OK, profiles.StatusCode);
+        using (var status = await app.GetAsync("/api/v1/setup/code"))
+            Assert.False((await ApiTestClient.ReadAsync<WebSetupStatusResponse>(status)).Open);
+        using (var again = await app.PostAsJsonAsync("/api/v1/setup/code",
+                   new SetupWithCodeRequest(code, "someone-else", "another long invented password", "Invented iPad"), ApiTestClient.JsonOptions))
+            Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+    }
+
+    /// <summary>Makes every test request come from another computer on the network.</summary>
+    private sealed class NetworkAddressFilter : Microsoft.AspNetCore.Hosting.IStartupFilter
+    {
+        public Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> next) => app =>
+        {
+            Microsoft.AspNetCore.Builder.UseExtensions.Use(app, (context, following) =>
+            {
+                context.Connection.RemoteIpAddress = IPAddress.Parse("192.168.77.20");
+                return following(context);
+            });
+            next(app);
+        };
+    }
+
+    [Fact]
     public void TenWrongSetupCodesMakeANewOne()
     {
         var directory = TestPaths.CreateDataDirectory();

@@ -86,7 +86,8 @@
       "server-performance-v1",
       "power-now-v1",
       "file-checks-v1",
-      "people-v1"
+      "people-v1",
+      "setup-code-v1"
     ]
   },
   "problem": {

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Aurelia.Contracts;
 using Aurelia.Server.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -30,6 +31,23 @@ public sealed partial class BrowserSetup(ServerRuntimeOptions runtime, TimeProvi
     /// <summary>Whether a browser may still set this server up: nobody owns it yet.</summary>
     public static async Task<bool> OpenAsync(AureliaDbContext database, CancellationToken token) =>
         !await database.Users.AnyAsync(token);
+
+    /// <summary>
+    /// Creates the first owner when the code is right. The browser keeps the credential in its
+    /// cookie, an app in its keychain; both come here.
+    /// </summary>
+    public async Task<AuthenticationResponse> CreateOwnerAsync(
+        string? supplied, string ownerName, string password, string deviceName,
+        AccountService accounts, AureliaDbContext database, CancellationToken token)
+    {
+        if (!await OpenAsync(database, token))
+            throw new AccountException("server_already_setup", "This server already has an owner. Ask them for a code instead.", 409);
+        if (!Matches(supplied))
+            throw new AccountException("setup_code_invalid", "That setup code is not right. Check it on the server computer: sudo aurelia setup --browser", 403);
+        var credential = await accounts.SetupOwnerAsync(new SetupOwnerRequest(ownerName, password, deviceName), token);
+        Finish();
+        return credential;
+    }
 
     /// <summary>The current code, made (and written down) when there is none or it expired.</summary>
     public string Current()

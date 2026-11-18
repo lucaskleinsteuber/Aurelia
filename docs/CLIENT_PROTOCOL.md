@@ -85,6 +85,14 @@ server_already_setup`. `setup-browser` (the server command behind `aurelia setup
 turns on network access before an owner exists; until then the network reaches only anonymous
 endpoints.
 
+With `setup-code-v1` the iPhone and iPad app sets a new server up with the same code:
+`GET /api/v1/setup/code` answers `{open}` and `POST /api/v1/setup/code` with `{code, ownerName,
+password, deviceName}` creates the owner and answers with the device credential (`{user,
+sessionId, token, expiresAt}`, as `/auth/pair` does, `Cache-Control: no-store`). It needs the
+pinned HTTPS connection unless it comes from the server computer itself (`403 https_required`),
+shares the code's limits with the browser and answers `409 server_already_setup` once an owner
+exists. Neither route sets the server's name; that stays a host setting.
+
 The browser app ([WEB_APP.md](WEB_APP.md)) is served by the server from `/` and `/web/`. It
 signs in with the main device's pairing code like every other client, but no script ever sees
 a credential:

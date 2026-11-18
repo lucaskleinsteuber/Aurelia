@@ -10,7 +10,7 @@ public static class ServerFeatures
         "library-state-v1", "server-readiness-v1", "device-authorization-v1", "artwork-variants-v1",
         "catalog-pages-500-v1", PreviewStreams, WebApp, ProfilePersonalization, AgeLimits,
         WebPairingCode, CinemaTrailers, MovieNight, YearWrapped, MonthlyWrapped, MediaSegments, ServerSpeech, Suggestions,
-        ScreenTime, Wishes, Security, ServerPerformance, PowerNow, FileChecks, People,
+        ScreenTime, Wishes, Security, ServerPerformance, PowerNow, FileChecks, People, SetupCode,
     });
 
     /// <summary>
@@ -77,6 +77,13 @@ public static class ServerFeatures
     /// 2.16.0 to 2.22 offered the same under "automation-v1" (Smart Home, since removed).
     /// </summary>
     public const string PowerNow = "power-now-v1";
+
+    /// <summary>
+    /// A new server can be set up from an iPhone or iPad with the setup code from the server
+    /// computer ("setup-code-v1"): `POST /api/v1/setup/code` creates the owner and answers with the
+    /// device credential, as pairing does. The browser uses the same code through its own route.
+    /// </summary>
+    public const string SetupCode = "setup-code-v1";
 
     /// <summary>
     /// The file watch: the server reads every file in the background, finds damaged, unreadable or
