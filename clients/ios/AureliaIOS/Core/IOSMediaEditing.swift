@@ -377,13 +377,14 @@ struct IOSMediaSegmentsDetail: Codable, Equatable, Sendable {
   let creditsStartMilliseconds: Int64?
   let creditsSource: String
 
-  /// "Found by the server", "From chapters", "Set by hand" or "Not found".
-  static func sourceText(_ source: String) -> String {
+  /// "Found by the server", "From chapters", "Set by hand", "Not found" or, while the server has
+  /// not looked at the title yet, "Not examined yet".
+  static func sourceText(_ source: String, examined: Bool = true) -> String {
     switch source.lowercased() {
     case "detected": "Found by the server"
     case "chapters": "From chapters"
     case "manual": "Set by hand"
-    default: "Not found"
+    default: examined ? "Not found" : "Not examined yet"
     }
   }
 }

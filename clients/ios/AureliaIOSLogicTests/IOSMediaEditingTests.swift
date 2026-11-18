@@ -20,6 +20,12 @@ import Testing
       relativeSourcePath: "Film.mkv", automaticValues: found)
   }
 
+  @Test func aTitleTheServerHasNotExaminedIsNotSaidToHaveNoIntro() {
+    #expect(IOSMediaSegmentsDetail.sourceText("none", examined: false) == "Not examined yet")
+    #expect(IOSMediaSegmentsDetail.sourceText("none") == "Not found")
+    #expect(IOSMediaSegmentsDetail.sourceText("manual", examined: false) == "Set by hand")
+  }
+
   @Test func changesBecomeManualAndFoundValuesComeBack() {
     var draft = IOSMetadataDraft(document: document)
     #expect(!draft.isDirty && !draft.canSave)

@@ -106,6 +106,8 @@ private struct IOSNewServerForm: View {
           }
         }
       }
+      .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
+      .listRowBackground(Color.clear)
       .disabled(problem != nil || model.isBusy)
       .accessibilityIdentifier("setup-submit")
     } footer: {

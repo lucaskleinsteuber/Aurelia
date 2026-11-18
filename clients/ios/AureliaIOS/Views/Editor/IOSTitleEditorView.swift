@@ -333,6 +333,8 @@ struct IOSTitleEditorView: View {
       }
       .frame(width: field == "poster" ? 48 : 96, height: field == "poster" ? 72 : 54)
       .clipShape(RoundedRectangle(cornerRadius: 6))
+      // Both pictures sit in a column as wide as the backdrop, so the two labels line up.
+      .frame(width: 96, alignment: .leading)
       VStack(alignment: .leading, spacing: 2) {
         Text(label)
         Text(draft.isManual(field) ? "Chosen here" : "Found by the server")

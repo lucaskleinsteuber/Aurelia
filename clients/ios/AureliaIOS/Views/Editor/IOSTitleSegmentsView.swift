@@ -24,11 +24,11 @@ struct IOSTitleSegmentsView: View {
               segments.introEndMilliseconds.map {
                 "\(IOSSegmentTrim.label(start)) – \(IOSSegmentTrim.label($0))"
               }
-            }, source: segments.introSource)
+            }, source: segments.introSource, examined: segments.analyzed || !segments.canAnalyze)
           row(
             "Credits",
             value: segments.creditsStartMilliseconds.map { "from \(IOSSegmentTrim.label($0))" },
-            source: segments.creditsSource)
+            source: segments.creditsSource, examined: segments.analyzed || !segments.canAnalyze)
         } footer: {
           if !segments.analyzed, segments.canAnalyze {
             Text("The server has not examined this title yet. It does so in the background.")
@@ -96,11 +96,12 @@ struct IOSTitleSegmentsView: View {
     }
   }
 
-  private func row(_ label: String, value: String?, source: String) -> some View {
+  private func row(_ label: String, value: String?, source: String, examined: Bool) -> some View {
     LabeledContent {
       VStack(alignment: .trailing, spacing: 2) {
         Text(value ?? "None").monospacedDigit()
-        Text(IOSMediaSegmentsDetail.sourceText(source)).font(.footnote).foregroundStyle(.secondary)
+        Text(IOSMediaSegmentsDetail.sourceText(source, examined: examined)).font(.footnote)
+          .foregroundStyle(.secondary)
       }
     } label: {
       Text(label)
