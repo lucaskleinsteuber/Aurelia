@@ -2,7 +2,7 @@
   import Foundation
 
   enum TVUITestScenario: String, Sendable {
-    case library, profiles, delayed, offline, limitedTracks, nextEpisode, showcase
+    case library, profiles, delayed, offline, limitedTracks, nextEpisode, showcase, admin
     static var current: Self? {
       guard ProcessInfo.processInfo.arguments.contains("--aurelia-ui-testing") else { return nil }
       return ProcessInfo.processInfo.environment["AURELIA_TV_UI_SCENARIO"].flatMap(
@@ -32,6 +32,43 @@
       TVProfileSession(
         user: TVUser(id: profileID, username: "Test Viewer", role: "viewer"),
         sessionId: profileID, token: String(repeating: "P", count: 43), expiresAt: expiry)
+    }
+    /// The owner's profile, for the scenario that exercises Profile › Server.
+    static var adminSession: TVProfileSession {
+      TVProfileSession(
+        user: TVUser(id: profileID, username: "Test Owner", role: "owner"),
+        sessionId: profileID, token: String(repeating: "P", count: 43), expiresAt: expiry)
+    }
+    static func adminStatus() -> [String: Any] {
+      [
+        "state": "running", "version": "2.24.0", "uptimeSeconds": 93_784.0, "activeStreams": 1,
+        "databaseBytes": 52_428_800, "users": 3, "libraries": 2, "freeDiskBytes": 214_748_364_800,
+        "certificateExpiresAt": NSNull(), "networkAddresses": ["192.0.2.10"],
+      ]
+    }
+    static func adminHealth() -> [String: Any] {
+      [
+        "uptimeSeconds": 93_784.0, "freeDiskBytes": 214_748_364_800, "databaseBytes": 52_428_800,
+        "scrubPreviewTitleCount": 12, "scrubPreviewBytes": 10_485_760,
+        "scrubPreviewPendingCount": 0, "activeLiveConversions": 0, "activeStreams": 1,
+        "offlineMediaCount": 2, "lastScan": NSNull(),
+        "backgroundJobs": ["activeScans": 0, "activeMetadataJobs": 0, "activeScrubPreviewJobs": 0],
+        "recentIssues": [], "backup": NSNull(),
+      ]
+    }
+    static func adminPerformance() -> [String: Any] {
+      [
+        "since": stamp, "slowRequestMilliseconds": 500, "slowQueryMilliseconds": 100,
+        "requests": 1_284, "p95Milliseconds": 84.0,
+        "endpoints": [
+          [
+            "method": "GET", "route": "/api/v1/catalog/items/{mediaId:guid}", "count": 400,
+            "errors": 0, "slowCount": 2, "medianMilliseconds": 18.0, "p95Milliseconds": 120.0,
+            "maxMilliseconds": 310.0, "queriesPerRequest": 3.0,
+          ]
+        ],
+        "slowQueries": [],
+      ]
     }
     static func episodeID(season: Int, episode: Int) -> UUID {
       UUID(
@@ -236,6 +273,16 @@
           return TVHTTPResponse(
             statusCode: 200, headers: [:], body: data, fingerprint: TVUITestFixtures.fingerprint)
         }
+      } else if path == "/api/v1/server/status" {
+        body = TVUITestFixtures.adminStatus()
+      } else if path == "/api/v1/server/health" {
+        body = TVUITestFixtures.adminHealth()
+      } else if path == "/api/v1/server/health/performance" {
+        if request.httpMethod == "DELETE" {
+          return TVHTTPResponse(
+            statusCode: 204, headers: [:], body: Data(), fingerprint: TVUITestFixtures.fingerprint)
+        }
+        body = TVUITestFixtures.adminPerformance()
       } else if path == "/api/v1/home" {
         body = [
           "continueWatching": hidden.contains(TVUITestFixtures.seriesID)

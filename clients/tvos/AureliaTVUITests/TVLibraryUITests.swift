@@ -202,6 +202,24 @@ final class TVLibraryUITests: XCTestCase {
   }
 
   @MainActor
+  func testOwnerSeesServerAdministrationWithStatusAndPerformance() {
+    let app = launch("admin")
+    defer { app.terminate() }
+    selectTab(app, title: "Test Owner")
+    select(app.buttons["profile-server"], in: app)
+    XCTAssertTrue(app.buttons["admin-status"].waitForExistence(timeout: 8))
+    XCTAssertTrue(app.buttons["admin-performance"].exists)
+    XCTAssertTrue(app.buttons["admin-power"].exists)
+    select(app.buttons["admin-status"], in: app)
+    XCTAssertTrue(app.buttons["admin-restart"].waitForExistence(timeout: 8))
+    XCTAssertTrue(app.staticTexts["Aurelia Server 2.24.0"].exists)
+    capture(app, "Server - Status and Health")
+    remote.press(.menu)
+    select(app.buttons["admin-performance"], in: app)
+    XCTAssertTrue(app.buttons["performance-reset"].waitForExistence(timeout: 8))
+  }
+
+  @MainActor
   func testPlaybackPreferencesPersistOnReentry() {
     let app = launch()
     defer { app.terminate() }

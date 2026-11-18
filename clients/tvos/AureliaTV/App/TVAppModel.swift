@@ -166,14 +166,16 @@ final class TVAppModel: ObservableObject {
           formatVersion: 2, minimumClientVersion: "1.0",
           capabilities: [
             "device-authorization-v1", "library-state-v1", "watchlist-people-v1",
-            "scrub-previews-v1",
+            "scrub-previews-v1", "server-performance-v1",
           ])
         if scenario == .profiles {
           phase = .profiles
           await refreshProfiles()
         } else {
           let fixture =
-            scenario == .showcase ? TVShowcaseTransport.session : TVUITestFixtures.session
+            scenario == .showcase
+            ? TVShowcaseTransport.session
+            : scenario == .admin ? TVUITestFixtures.adminSession : TVUITestFixtures.session
           session = fixture
           phase = .library
           activateProgress(connection: TVUITestFixtures.connection, session: fixture)
