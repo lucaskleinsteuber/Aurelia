@@ -242,6 +242,10 @@ struct IOSCapabilities: Codable, Equatable, Sendable {
   var supportsWishes: Bool { capabilities?.contains("wishes-v1") == true }
   /// People: everyone in the library's credits, and a person's life and other titles from TMDB.
   var supportsPeople: Bool { capabilities?.contains("people-v1") == true }
+  /// Play On: send a title to another player and control it from here.
+  var supportsRemotePlayback: Bool { capabilities?.contains("remote-playback-v1") == true }
+  /// A new server can be set up here with the code from the server computer.
+  var supportsSetupCode: Bool { capabilities?.contains("setup-code-v1") == true }
 }
 
 struct IOSUser: Codable, Equatable, Sendable {

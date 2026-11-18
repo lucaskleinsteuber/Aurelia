@@ -15,6 +15,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
+- iPhone & iPad: Play On… in a title's More menu starts it on another Aurelia player signed in to the server (Apple TV, Mac, Linux, browser) and turns the sheet into its remote with play and pause, skipping, the position and stop. Commands from other devices now also pause, resume, seek and skip on an iPhone or iPad.
 - iPhone & iPad: Settings › Playback › Audio & Subtitles has Default Audio Language, Default Subtitle Language, Subtitle Size and Subtitle Background; the languages apply until you choose tracks, a series keeps its own choice. The lock screen and Control Center show the playing title with its poster and play, pause, skip, seek and the next episode. Picture in Picture and AirPlay to an Apple TV move the title to Apple's player at the same position, over the server's live conversion (with the title's default sound and without subtitles), and back when they end.
 - Server: a new server can be set up from an app with the setup code from the server computer (`setup-code-v1`), as from a browser; the app keeps the sign-in it gets back.
 - Linux: Settings › Playback › Subtitle Size and Subtitle Background, as in the browser; they apply from the next title. Download Season in a series' season menu loads its episodes one after another in one chosen quality; downloads now run one at a time, and the Downloads page shows the waiting ones.

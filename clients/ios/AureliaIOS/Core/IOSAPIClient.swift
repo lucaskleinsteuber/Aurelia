@@ -759,6 +759,33 @@ struct IOSAPIClient: Sendable {
       "/api/v1/devices/player/heartbeat", method: "POST", body: try JSONEncoder().encode(body))
   }
 
+  /// The other players signed in to this server, without this device (Play On).
+  func remotePlayers(currentDeviceId: String) async throws -> [IOSRemotePlayer] {
+    try await get(
+      "/api/v1/devices/players",
+      query: [URLQueryItem(name: "currentDeviceId", value: currentDeviceId)])
+  }
+
+  func remotePlayerStatus(deviceId: String) async throws -> IOSRemotePlayer {
+    try await get("/api/v1/devices/players/\(Self.pathSegment(deviceId))/status")
+  }
+
+  @discardableResult
+  func sendRemoteCommand(_ action: IOSRemoteAction, to deviceId: String) async throws
+    -> IOSRemotePlaybackCommandResponse
+  {
+    try await post(
+      "/api/v1/devices/players/\(Self.pathSegment(deviceId))/commands", payload: action.request,
+      authentication: .profile)
+  }
+
+  /// A device id as one path segment; ids are the server's own, this keeps them inert.
+  static func pathSegment(_ value: String) -> String {
+    var allowed = CharacterSet.urlPathAllowed
+    allowed.remove(charactersIn: "/?#")
+    return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+  }
+
   func pollPlayerCommands(deviceId: String, waitMs: Int = 0) async throws
     -> [IOSRemotePlaybackCommand]
   {

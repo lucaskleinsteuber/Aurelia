@@ -7,6 +7,8 @@ struct IOSDetailView: View {
   let initial: IOSCatalogItem
   var selectedEpisodeID: UUID? = nil
   @StateObject private var actions = IOSLibraryActions()
+  /// The title to start on another player (Play On).
+  @State private var playOn: IOSCatalogItem?
   @State private var launching = false
   @State private var launchTask: Task<Void, Never>?
   @State private var navigationID = UUID()
@@ -118,6 +120,11 @@ struct IOSDetailView: View {
         }
       }
     )
+    .sheet(item: $playOn) { target in
+      IOSPlayOnView(
+        mediaID: target.id,
+        title: target.episodeLabel.map { "\(item.title) · \($0)" } ?? target.title)
+    }
     .modifier(IOSLibraryActionPresentation(actions: actions))
     .onDisappear {
       launchTask?.cancel()
@@ -215,6 +222,12 @@ struct IOSDetailView: View {
                 playTarget(startOver: true)
               }
               .accessibilityIdentifier("detail-start-over")
+            }
+            if model.supportsRemotePlayback, let target = plan?.target, target.isPlayable {
+              Button("Play On…", systemImage: "airplayvideo") {
+                playOn = target
+              }
+              .accessibilityIdentifier("detail-play-on")
             }
             IOSMediaContextActions(item: item, actions: actions, includeFavorite: false)
             if item.kind == .series, let selectedSeason {

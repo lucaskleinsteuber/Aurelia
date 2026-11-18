@@ -46,6 +46,7 @@ final class IOSAppModel: ObservableObject {
   var supportsAdaptiveStreaming: Bool { capabilities?.supportsAdaptiveStreaming ?? false }
   var supportsWishes: Bool { capabilities?.supportsWishes ?? false }
   var supportsPeople: Bool { capabilities?.supportsPeople ?? false }
+  var supportsRemotePlayback: Bool { capabilities?.supportsRemotePlayback ?? false }
   var isWishAdmin: Bool { IOSWishPresentation.isAdministrator(session?.user) }
   @Published private(set) var wishSummary: IOSWishSummaryResponse?
   @Published var wishNotificationsEnabled: Bool = IOSWishNotificationCenter.shared
@@ -1110,16 +1111,25 @@ final class IOSAppModel: ObservableObject {
           let commands = try await api.pollPlayerCommands(deviceId: deviceId, waitMs: 10000)
           guard !Task.isCancelled, self.session?.sessionId == sessionID else { return }
           for cmd in commands {
-            if cmd.action.lowercased() == "play", let mediaId = cmd.mediaId {
+            switch IOSRemoteAction(cmd) {
+            case .play(let mediaId):
               if let item = try? await api.summary(id: mediaId) {
                 guard !Task.isCancelled, self.session?.sessionId == sessionID else { return }
                 self.remotePlaybackItem = item
               }
-            } else if cmd.action.lowercased() == "stop" {
-              await MainActor.run { [weak self] in
-                self?.remotePlaybackItem = nil
-                self?.stopPlayer()
-              }
+            case .stop:
+              self.remotePlaybackItem = nil
+              self.stopPlayer()
+            case .pause:
+              if let player = self.openPlayer, player.isPlaying { player.togglePlayPause() }
+            case .resume:
+              if let player = self.openPlayer, !player.isPlaying { player.togglePlayPause() }
+            case .seek(let milliseconds):
+              self.openPlayer?.seek(to: milliseconds)
+            case .skip(let milliseconds):
+              self.openPlayer?.seek(by: milliseconds, revealControls: false)
+            case nil:
+              break
             }
           }
           // Older servers and test transports can answer an empty long poll immediately.
