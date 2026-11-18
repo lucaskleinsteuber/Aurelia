@@ -5,7 +5,7 @@ import UIKit
 
 @MainActor
 final class TVPlaybackController: ObservableObject {
-  enum TrackMenu: Equatable { case audio, subtitles, rate, sleep }
+  enum TrackMenu: Equatable { case audio, subtitles, rate, sleep, chapters, notes }
 
   let engine: any TVPlaybackEngine
   private let runtime: TVPlaybackRuntime
@@ -66,6 +66,12 @@ final class TVPlaybackController: ObservableObject {
   @Published private(set) var currentMediaID: UUID {
     didSet { if currentMediaID != oldValue { watchStateObserver?() } }
   }
+  /// The file's chapters, read once the picture moves; empty without any.
+  @Published private(set) var chapters: [TVPlaybackChapter] = []
+  private var chaptersRead = false
+  /// This profile's scene notes for the title, shown at their moment (view only on the TV).
+  @Published private(set) var sceneNotes: [TVSceneNote] = []
+  var showsSceneNotes = false
   @Published var trackMenu: TrackMenu? {
     didSet { userInteracted() }
   }
@@ -288,6 +294,31 @@ final class TVPlaybackController: ObservableObject {
       return
     }
     assignIfChanged(&showsSkipIntro, shown && upNext == nil && !introDeclined)
+  }
+
+  /// Jumps to the start of a chapter from the Chapters menu.
+  func selectChapter(_ chapter: TVPlaybackChapter) {
+    trackMenu = nil
+    seek(to: chapter.timeOffsetMilliseconds)
+  }
+
+  /// Jumps to a scene note's moment from the Scene Notes menu.
+  func selectSceneNote(_ note: TVSceneNote) {
+    trackMenu = nil
+    seek(to: note.startMilliseconds)
+  }
+
+  /// The note to show at this moment, if any.
+  var currentSceneNote: TVSceneNote? {
+    TVSceneNotePolicy.cue(sceneNotes, position: position)
+  }
+
+  func loadSceneNotes() async {
+    guard showsSceneNotes else { return }
+    let media = currentMediaID
+    if let notes = try? await api.sceneNotes(mediaID: media), media == currentMediaID {
+      sceneNotes = notes
+    }
   }
 
   func seek(to milliseconds: Int64) {
@@ -865,6 +896,10 @@ final class TVPlaybackController: ObservableObject {
     assignIfChanged(&canSeek, engine.isSeekable && duration > 0)
     assignIfChanged(&audioTracks, engine.audioTracks)
     assignIfChanged(&subtitleTracks, engine.subtitleTracks)
+    if !chaptersRead, engine.hasObservedPlayback, duration > 0 {
+      chaptersRead = true
+      assignIfChanged(&chapters, engine.chapters)
+    }
     assignIfChanged(&selectedAudio, engine.audioTrackID)
     assignIfChanged(&selectedSubtitle, engine.subtitleTrackID)
     assignIfChanged(&audioSelectionPending, engine.audioSelectionPending)
@@ -1181,6 +1216,10 @@ final class TVPlaybackController: ObservableObject {
     if queue.first?.id == next.id { queue.removeFirst() }
     mediaID = next.id
     currentMediaID = next.id
+    chapters = []
+    chaptersRead = false
+    sceneNotes = []
+    Task { [weak self] in await self?.loadSceneNotes() }
     isStarting = true
     scrubPosition = nil
     upNext = nil

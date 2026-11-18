@@ -125,3 +125,30 @@ private actor TVAdminTestTransport: TVHTTPTransport {
     return responses.removeFirst()
   }
 }
+
+/// Chapters and scene notes in the Apple TV player. Invented times only.
+@Suite struct TVChaptersAndNotesTests {
+  private let chapters = [
+    TVPlaybackChapter(
+      index: 0, title: "Opening", timeOffsetMilliseconds: 0, durationMilliseconds: 60_000),
+    TVPlaybackChapter(
+      index: 1, title: "Middle", timeOffsetMilliseconds: 60_000, durationMilliseconds: 60_000),
+    TVPlaybackChapter(
+      index: 2, title: "End", timeOffsetMilliseconds: 150_000, durationMilliseconds: 50_000),
+  ]
+
+  @Test func theCurrentChapterAndItsMarks() {
+    #expect(TVChapterPolicy.current(chapters, position: 90_000)?.title == "Middle")
+    #expect(TVChapterPolicy.current(chapters, position: 0)?.title == "Opening")
+    #expect(TVChapterPolicy.markers(chapters, duration: 200_000) == [0.3, 0.75])
+    #expect(TVChapterPolicy.markers(Array(chapters.prefix(1)), duration: 200_000).isEmpty)
+  }
+
+  @Test func aSceneNoteShowsAtItsMoment() {
+    let note = TVSceneNote(
+      id: UUID(), mediaId: UUID(), startMilliseconds: 30_000, endMilliseconds: nil,
+      text: "Invented line", revision: 1)
+    #expect(TVSceneNotePolicy.cue([note], position: 33_000)?.text == "Invented line")
+    #expect(TVSceneNotePolicy.cue([note], position: 40_000) == nil)
+  }
+}

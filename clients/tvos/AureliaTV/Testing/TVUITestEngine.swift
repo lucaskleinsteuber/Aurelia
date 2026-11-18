@@ -12,6 +12,20 @@
     var isSeekable: Bool { machine.state.isSeekable }
     var position: Int64 { machine.state.position }
     var duration: Int64 { machine.state.duration }
+    /// Invented chapters, so the Chapters menu and the timeline marks can be seen in UI tests.
+    var chapters: [TVPlaybackChapter] {
+      guard isActive, rawDuration > 60_000 else { return [] }
+      return [
+        TVPlaybackChapter(
+          index: 0, title: "Opening", timeOffsetMilliseconds: 0, durationMilliseconds: 600_000),
+        TVPlaybackChapter(
+          index: 1, title: "The Invented Middle", timeOffsetMilliseconds: 600_000,
+          durationMilliseconds: rawDuration / 2),
+        TVPlaybackChapter(
+          index: 2, title: "Finale", timeOffsetMilliseconds: rawDuration * 3 / 4,
+          durationMilliseconds: rawDuration / 4),
+      ]
+    }
     var hasObservedPlayback: Bool { machine.state.hasObservedPlayback }
     var progressPosition: Int64? { machine.state.progressPosition }
     private(set) var audioTracks: [TVPlaybackTrack] = []

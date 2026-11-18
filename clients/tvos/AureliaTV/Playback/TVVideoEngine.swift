@@ -231,6 +231,30 @@ final class TVVideoEngine: TVPlaybackEngine {
     onTerminal?(rawState == .ended ? .ended : .failed)
   }
 
+  /// The chapters of the current title, as on the Mac and iPhone (VLC's chapter descriptions).
+  var chapters: [TVPlaybackChapter] {
+    guard player.media != nil else { return [] }
+    let titleIndex = player.currentTitleIndex
+    guard titleIndex >= 0 else { return [] }
+    return player.chapterDescriptions(ofTitle: titleIndex).enumerated().compactMap { offset, raw in
+      guard let values = raw as? [AnyHashable: Any] else { return nil }
+      let time = Self.chapterTime(values[VLCChapterDescriptionTimeOffset])
+      let duration = Self.chapterTime(values[VLCChapterDescriptionDuration])
+      let supplied =
+        (values[VLCChapterDescriptionName] as? String)?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      return TVPlaybackChapter(
+        index: Int32(offset), title: supplied.isEmpty ? "Chapter \(offset + 1)" : supplied,
+        timeOffsetMilliseconds: max(0, time), durationMilliseconds: max(0, duration))
+    }
+  }
+
+  private static func chapterTime(_ value: Any?) -> Int64 {
+    if let value = value as? NSNumber { return value.int64Value }
+    if let value = value as? VLCTime { return value.value?.int64Value ?? 0 }
+    return 0
+  }
+
   private func applyResume() {
     guard let resume = pendingResume, player.isSeekable,
       decoderState == .playing || decoderState == .paused || decoderState == .buffering

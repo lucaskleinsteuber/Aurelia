@@ -430,6 +430,12 @@ struct TVAPIClient: Sendable {
       "/api/v1/profile/pin-protection", method: "PUT",
       body: JSONEncoder().encode(Payload(pinProtectionEnabled: false, currentPin: current)))
   }
+  /// This profile's scene notes for a title; the Apple TV only shows them.
+  func sceneNotes(mediaID: UUID) async throws -> [TVSceneNote] {
+    try Self.decode(
+      [TVSceneNote].self, data: await send("/api/v1/media/\(mediaID.uuidString)/notes"))
+  }
+
   /// Family wishes visible to this profile.
   func wishes(state: TVWishState? = nil, offset: Int = 0, limit: Int = TVWishPresentation.pageSize)
     async throws -> TVWishListResponse

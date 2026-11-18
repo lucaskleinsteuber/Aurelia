@@ -23,6 +23,8 @@ protocol TVPlaybackEngine: AnyObject {
   var audioTrackID: Int32 { get }
   var subtitleTrackID: Int32 { get }
   var audioProcessingError: String? { get }
+  /// The file's chapters once the decoder has read them; empty without any.
+  var chapters: [TVPlaybackChapter] { get }
   func applyDialogueBoost(_ mode: DialogueBoost) -> AudioChangeResult
   func applyPreferences(_ preferences: TVPlaybackPreferences)
   func sample()
@@ -44,6 +46,7 @@ extension TVPlaybackEngine {
     if paused { pause() }
   }
   var audioProcessingError: String? { nil }
+  var chapters: [TVPlaybackChapter] { [] }
   func applyDialogueBoost(_ mode: DialogueBoost) -> AudioChangeResult { .applied }
   func addSubtitleSlave(url: URL) {}
 }

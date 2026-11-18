@@ -7,6 +7,8 @@ struct TVDetailView: View {
   var selectedEpisodeID: UUID? = nil
   @StateObject private var actions = TVLibraryActions()
   @State private var launching = false
+  /// Subtitles… for administrators: the movie, or the episode that plays next.
+  @State private var subtitlesFor: TVCatalogItem?
   @State private var launchTask: Task<Void, Never>?
   @State private var navigationID = UUID()
   @State private var detail: TVCatalogDetail?
@@ -37,6 +39,12 @@ struct TVDetailView: View {
   }
   private var item: TVCatalogItem { model.overlay(detail?.item ?? initial) }
   private var seasons: [TVSeason] { detail?.seasons ?? [] }
+  /// The title whose subtitles Subtitles… changes: a movie, or a series' next episode.
+  private var subtitleTarget: TVCatalogItem? {
+    if item.kind == .movie { return item }
+    if let target = plan?.target, target.kind == .episode { return target }
+    return nil
+  }
   private var joinableParties: [TVWatchPartySummary] {
     let ids = Set([item.id] + seasons.flatMap { $0.episodes.map(\.item.id) })
     return model.watchParties.filter { ids.contains($0.mediaId) }
@@ -92,6 +100,11 @@ struct TVDetailView: View {
       .onChange(of: focused) { _, value in
         // Moving across the season bar switches the shelf at once, like the TV app.
         if case .season(let number) = value, number != selectedSeason { selectSeason(number) }
+      }
+      .fullScreenCover(item: $subtitlesFor) { target in
+        TVTitleSubtitlesPage(
+          mediaID: target.id,
+          title: target.episodeLabel.map { "\(item.title) · \($0)" } ?? target.title)
       }
       .sheet(isPresented: $showingAbout) {
         if let detail { TVAboutSheet(detail: detail) }
@@ -205,6 +218,9 @@ struct TVDetailView: View {
               }
             }
             TVMediaContextActions(item: item, actions: actions, includeFavorite: false)
+            if model.isWishAdmin, let target = subtitleTarget {
+              Button("Subtitles…", systemImage: "captions.bubble") { subtitlesFor = target }
+            }
             if item.kind == .series, let selectedSeason {
               let name = selectedSeason == 0 ? "Specials" : "Season \(selectedSeason)"
               Button("Mark \(name) as Watched") { seasonWatch(true) }

@@ -17,6 +17,7 @@ struct TVPlayerView: View {
 
   private enum Control: Hashable {
     case surface, close, backward, play, forward, timeline, audio, subtitles, rate, sleep, together,
+      chapters, notes,
       retry,
       closeMenu, upNextPlay, upNextCancel, skipIntro, suggestionPlay, suggestionCredits,
       suggestionDone, endDone, goodNightDone
@@ -27,6 +28,8 @@ struct TVPlayerView: View {
     case subtitleTrack(Int32)
     case rateOption(Double)
     case sleepOption(Int)
+    case chapterOption(Int32)
+    case noteOption(UUID)
     var isTransport: Bool { self == .backward || self == .play || self == .forward }
   }
 
@@ -39,6 +42,19 @@ struct TVPlayerView: View {
       Color.black.ignoresSafeArea()
       TVVideoSurface(engine: controller.engine).ignoresSafeArea().accessibilityIdentifier(
         "player-surface")
+      if let note = controller.currentSceneNote, controller.trackMenu == nil {
+        VStack {
+          Label(note.text, systemImage: "bookmark.fill")
+            .font(.system(size: 26, weight: .semibold)).lineLimit(3)
+            .padding(.horizontal, 28).padding(.vertical, 16)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+            .frame(maxWidth: 1100)
+          Spacer()
+        }
+        .padding(.top, 70)
+        .allowsHitTesting(false)
+        .accessibilityIdentifier("player-scene-note")
+      }
       if controller.isStarting && controller.errorMessage == nil {
         startScreen.transition(.opacity)
       }
@@ -104,6 +120,10 @@ struct TVPlayerView: View {
       configurePreviews()
     }
     .task { await startWithPreShow() }
+    .task {
+      controller.showsSceneNotes = model.capabilities?.sceneNotes == true
+      await controller.loadSceneNotes()
+    }
     .onChange(of: controller.isStarting) { _, starting in
       if !starting { preShow?.filmStarted() }
     }
@@ -192,12 +212,19 @@ struct TVPlayerView: View {
       case .subtitles: focus = .subtitleTrack(controller.selectedSubtitle)
       case .rate: focus = .rateOption(controller.playbackRate)
       case .sleep: focus = .sleepOption(sleepValue)
+      case .chapters:
+        focus = .chapterOption(
+          TVChapterPolicy.current(controller.chapters, position: controller.position)?.index
+            ?? controller.chapters.first?.index ?? 0)
+      case .notes: focus = controller.sceneNotes.first.map { .noteOption($0.id) } ?? .closeMenu
       case nil:
         switch previous {
         case .audio: focus = .audio
         case .subtitles: focus = .subtitles
         case .rate: focus = .rate
         case .sleep: focus = .sleep
+        case .chapters: focus = .chapters
+        case .notes: focus = .notes
         case nil: focus = .play
         }
       }
@@ -233,6 +260,14 @@ struct TVPlayerView: View {
             "Sleep Timer", symbol: controller.sleepTimer == .off ? "moon.zzz" : "moon.zzz.fill",
             id: .sleep
           ) { controller.trackMenu = .sleep }
+          if !controller.chapters.isEmpty {
+            icon("Chapters", symbol: "list.bullet", id: .chapters) {
+              controller.trackMenu = .chapters
+            }
+          }
+          if !controller.sceneNotes.isEmpty {
+            icon("Scene Notes", symbol: "bookmark", id: .notes) { controller.trackMenu = .notes }
+          }
           // Watch Together: start a party for this title, or leave the one this Apple TV is in.
           icon(
             model.watchParty?.state != nil ? "Leave Watch Together" : "Start Watch Together",
@@ -361,6 +396,15 @@ struct TVPlayerView: View {
             Capsule().fill(.white.opacity(0.25))
             Capsule().fill(.white.opacity(focus == .timeline ? 1 : 0.75)).frame(
               width: geometry.size.width * fraction)
+            // Where each chapter begins.
+            ForEach(
+              Array(
+                TVChapterPolicy.markers(controller.chapters, duration: controller.duration)
+                  .enumerated()), id: \.offset
+            ) { _, mark in
+              Rectangle().fill(.black.opacity(0.6)).frame(width: 3)
+                .offset(x: geometry.size.width * mark - 1.5)
+            }
             if controller.scrubPosition != nil {
               // Where playback is now, while the bar shows where Select would jump.
               Capsule().fill(.white.opacity(0.45))
@@ -767,6 +811,24 @@ struct TVPlayerView: View {
                     timer.title, selected: controller.sleepTimer == timer, id: .sleepOption(value)
                   ) { controller.setSleepTimer(timer) }.id(value)
                 }
+              case .chapters:
+                let current = TVChapterPolicy.current(
+                  controller.chapters, position: controller.position)
+                ForEach(controller.chapters) { chapter in
+                  option(
+                    "\(chapter.title) · \(TVPlayerPolicy.timeLabel(milliseconds: chapter.timeOffsetMilliseconds))",
+                    selected: current?.index == chapter.index, id: .chapterOption(chapter.index)
+                  ) { controller.selectChapter(chapter) }.id(chapter.index)
+                }
+              case .notes:
+                ForEach(
+                  controller.sceneNotes.sorted { $0.startMilliseconds < $1.startMilliseconds }
+                ) { note in
+                  option(
+                    "\(TVSceneNotePolicy.label(note)) · \(note.text)", selected: false,
+                    id: .noteOption(note.id)
+                  ) { controller.selectSceneNote(note) }.id(note.id)
+                }
               }
             }.padding(10)
           }.frame(maxHeight: 460)
@@ -776,6 +838,12 @@ struct TVPlayerView: View {
               case .subtitles: proxy.scrollTo(controller.selectedSubtitle, anchor: .center)
               case .rate: proxy.scrollTo(controller.playbackRate, anchor: .center)
               case .sleep: proxy.scrollTo(sleepValue, anchor: .center)
+              case .chapters:
+                proxy.scrollTo(
+                  TVChapterPolicy.current(controller.chapters, position: controller.position)?
+                    .index,
+                  anchor: .center)
+              case .notes: break
               }
             }
         }
@@ -793,6 +861,8 @@ struct TVPlayerView: View {
     case .subtitles: "Subtitles"
     case .rate: "Playback Rate"
     case .sleep: "Sleep Timer"
+    case .chapters: "Chapters"
+    case .notes: "Scene Notes"
     }
   }
   private func option(_ title: String, selected: Bool, id: Control, action: @escaping () -> Void)

@@ -359,3 +359,27 @@ enum TVSleepTimerGoodNightPolicy {
     closesWholeProfile && !showsSleepTimerGoodNight
   }
 }
+
+/// A chapter of the playing file, as the decoder reports it.
+struct TVPlaybackChapter: Identifiable, Equatable, Sendable {
+  let index: Int32
+  let title: String
+  let timeOffsetMilliseconds: Int64
+  let durationMilliseconds: Int64
+
+  var id: Int32 { index }
+}
+
+enum TVChapterPolicy {
+  /// The chapter playing at `position`: the last one that began at or before it.
+  static func current(_ chapters: [TVPlaybackChapter], position: Int64) -> TVPlaybackChapter? {
+    chapters.last { $0.timeOffsetMilliseconds <= position }
+  }
+
+  /// Where the timeline marks each chapter's start, 0 to 1; the first chapter at 0 gets no mark.
+  static func markers(_ chapters: [TVPlaybackChapter], duration: Int64) -> [Double] {
+    guard duration > 0, chapters.count > 1 else { return [] }
+    return chapters.map { Double($0.timeOffsetMilliseconds) / Double(duration) }
+      .filter { $0 > 0.001 && $0 < 0.999 }
+  }
+}
