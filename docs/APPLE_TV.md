@@ -83,6 +83,25 @@ joined from their phones, how far each has swiped, and the match as a ticket wit
 selected, so one click starts it. The remote can swipe too (**Swipe with the Remote**). Back
 leaves the night.
 
+The player also has **Chapters** (a menu and marks on the timeline) and shows the profile's
+**Scene Notes** at their moment, with a list to jump to them; the notes are written on the other
+apps. Settings › Playback sets the default audio and subtitle languages and the subtitles' size
+and background. The profile page has **Change PIN**; a **People** tab lists everyone in the
+library's credits, and a person's page shows Known For with Wish or Me Too. **Wishes** has Make a
+Wish (a TMDB search with the keyboard or dictation), Me Too, and for administrators In Library and
+Decline; Home says when a wish arrived.
+
+### Managing the server
+
+For the owner and administrators the profile page opens **Server**: Status and Health with
+Restart, Performance, Background Work, Power with the Wake-on-LAN check and Sleep, Turn Off or
+Stop Now, Server Updates, Screen Time with Today's extras, Review Matches and New Devices, and
+Subtitles… on a title's page. A protected change first asks to unlock management for ten minutes:
+**Confirm on Another Device** shows a four-digit code that an iPhone, iPad or Mac with Face ID or
+Touch ID confirms, or the Server Password is typed with the TV keyboard. While Aurelia is open on
+Home, the owner hears about a new device with That Was Me or Block. Adding new devices still
+happens on a Mac, an iPhone or the Linux app.
+
 ## When the server is off
 
 The Apple TV shows *The Server Is Off* and sends a Wake-on-LAN packet to the server's last

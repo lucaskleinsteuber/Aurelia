@@ -17,6 +17,11 @@ its screens are its own:
   that the main device shows (*Settings › Profiles and Devices › Create Code* on a Mac or
   Linux computer, or `aurelia pair` on a Linux server). The server's certificate is pinned
   to that fingerprint.
+- **A new server** (`setup-code-v1`) is set up right in the app: the setup code from the server
+  computer (`sudo aurelia setup --browser`), the owner's name, the Server Password and a viewing
+  PIN, as in a browser. *Move from Another Server* takes a whole server in instead, with the old
+  server's move code and address or its moving file and passphrase, then where the storage
+  locations are now (docs/SERVER_MOVE.md).
 - **Profiles** open with their PIN; Home, Movies, TV Shows, Search, title pages, the Watchlist
   and people pages work like on the Apple TV.
   Forgot PIN? explains who can reset it (the owner on the server computer with the Server
@@ -32,11 +37,26 @@ its screens are its own:
   sleep timer behave as on the Apple TV. A file's **chapters** appear as a menu and as marks on
   the timeline, and **scene notes** are listed, added at the current moment or as a range,
   edited, deleted with a swipe and shown at their moment, private to the profile.
+  Settings › Playback › Audio & Subtitles sets the default audio and subtitle languages (until
+  you choose tracks; a series keeps its own choice) and the subtitles' size and background (from
+  the next title). The lock screen and Control Center show the title with its poster, and play,
+  pause, skip, seek and the next episode work from there.
+- **Picture in Picture and AirPlay**: VLC can't hand its picture to either, so tapping one moves
+  the title to Apple's player at the same position, over the server's live conversion
+  (`adaptive-streaming-v1`), and back to VLC when it ends. That stream has the title's default
+  sound and no subtitles. For AirPlay a second relay listens on the device's Wi-Fi address while
+  it lasts, with its own secret, and answers only that ticket's HLS files; the original file and
+  its subtitles never leave the device.
+- **Play On…** in a title's More menu starts it on another Aurelia player of the server and turns
+  the sheet into its remote (play, pause, skipping, position, stop). Other devices' commands also
+  pause, resume, seek and skip here.
 - **Movie Night** shows *Tonight's program*: the host picks kind, genre, era and length right in
   the lobby card and deals; everyone else sees the choice.
 - **Collections**: Add to Collection… in a title's menu chooses your own collections or starts a
-  new one; a collection's page renames or deletes it and removes titles. Smart lists stay on the
-  Mac and in the browser.
+  new one; a collection's page edits it (cover, backdrop, description, order, seasons and single
+  episodes) or deletes it. **Smart Lists** are made there too: movies or shows, genres, a decade
+  or years, a minimum rating, when added, watched, favorites, the watchlist and words in the title,
+  matching all rules or any.
 - **Name and Picture** crops a chosen photo to a circle (drag and pinch) before it is uploaded.
 - **Screens** are built for iPhone and iPad rather than taken from the TV: a tab bar with Home,
   Movies, TV Shows, Search and Settings (People opens from Search, so the tab bar keeps five
@@ -81,8 +101,11 @@ its screens are its own:
   everything, administrators the library and metadata, and storage needs the whole library.
   Changes that the server protects ask once for the Server Password (or Face ID), which unlocks
   management for ten minutes and is never stored; the app then asks the server for a one-time
-  approval of exactly that change. Changing titles one by one (the metadata editor, artwork)
-  stays on the Mac and in the browser.
+  approval of exactly that change. *Edit…* on a title's page changes one title: its metadata, cast
+  and crew, a poster and backdrop chosen from Photos and cropped, another video file of its
+  storage location, its subtitles (downloaded, from OpenSubtitles, or written by the server from
+  speech or synced to it) and its intro and credits times over a strip of pictures. The owner
+  also finds *Move to a New Server* and, on a storage location, *Location Moved…*.
 - **Wake Server**: when the saved server doesn't answer, *Wake Server* sends a Wake-on-LAN packet
   now and every ten seconds for two minutes and connects as soon as it answers. Settings › Server
   shows whether waking can work (how many network cards the server reported) and sends one packet
