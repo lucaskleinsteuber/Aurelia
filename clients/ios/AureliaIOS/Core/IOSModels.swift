@@ -246,6 +246,10 @@ struct IOSCapabilities: Codable, Equatable, Sendable {
   var supportsRemotePlayback: Bool { capabilities?.contains("remote-playback-v1") == true }
   /// A new server can be set up here with the code from the server computer.
   var supportsSetupCode: Bool { capabilities?.contains("setup-code-v1") == true }
+  /// Intro and credits times that administrators can correct.
+  var supportsMediaSegments: Bool { capabilities?.contains("media-segments-v2") == true }
+  /// The server writes subtitles from speech and syncs them to it (whisper.cpp).
+  var supportsServerSpeech: Bool { capabilities?.contains("server-speech-v1") == true }
 }
 
 struct IOSUser: Codable, Equatable, Sendable {

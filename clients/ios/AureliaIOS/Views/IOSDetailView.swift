@@ -9,6 +9,8 @@ struct IOSDetailView: View {
   @StateObject private var actions = IOSLibraryActions()
   /// The title to start on another player (Play On).
   @State private var playOn: IOSCatalogItem?
+  /// Edit… for administrators.
+  @State private var editing = false
   @State private var launching = false
   @State private var launchTask: Task<Void, Never>?
   @State private var navigationID = UUID()
@@ -120,6 +122,9 @@ struct IOSDetailView: View {
         }
       }
     )
+    .sheet(isPresented: $editing, onDismiss: { Task { await load(background: true) } }) {
+      IOSTitleEditorView(mediaID: item.id, title: item.title)
+    }
     .sheet(item: $playOn) { target in
       IOSPlayOnView(
         mediaID: target.id,
@@ -222,6 +227,12 @@ struct IOSDetailView: View {
                 playTarget(startOver: true)
               }
               .accessibilityIdentifier("detail-start-over")
+            }
+            if IOSAdminPermissions(
+              role: model.session?.user.role, accessMode: model.session?.user.accessMode
+            ).administrator {
+              Button("Edit…", systemImage: "pencil") { editing = true }
+                .accessibilityIdentifier("detail-edit")
             }
             if model.supportsRemotePlayback, let target = plan?.target, target.isPlayable {
               Button("Play On…", systemImage: "airplayvideo") {
