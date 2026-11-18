@@ -340,7 +340,9 @@ struct TVDetailView: View {
             ForEach(people) { person in
               if model.supportsWatchlist {
                 NavigationLink {
-                  TVPersonDetailView(name: person.name)
+                  TVPersonDetailView(
+                    name: person.name,
+                    personKey: person.id.hasPrefix("unidentified:") ? nil : person.id)
                 } label: {
                   TVPersonLabel(person: person)
                 }.buttonStyle(TVPortraitButtonStyle())

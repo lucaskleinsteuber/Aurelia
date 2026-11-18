@@ -280,3 +280,34 @@ extension TVScreenTimeText {
     return (title, text)
   }
 }
+
+/// Wish or Me Too for a title the library doesn't have, from Known For or the wish search.
+enum TVWishActions {
+  enum Outcome: Equatable, Sendable {
+    case wished(UUID?)
+    /// The title is in the library already; the server says where.
+    case inLibrary(String)
+  }
+
+  static func wish(_ hit: TVWishSearchHit, client: TVAPIClient) async throws -> Outcome {
+    if hit.alreadyWished, let existing = hit.existingWishId {
+      _ = try await client.setWishSupport(id: existing, supported: true)
+      return .wished(existing)
+    }
+    switch try await client.createWish(
+      TVCreateWishRequest(
+        kind: hit.kind, title: hit.title, year: hit.year, provider: hit.provider,
+        providerMediaId: hit.providerMediaId, overview: hit.overview, posterPath: hit.posterPath,
+        note: nil))
+    {
+    case .created(let created): return .wished(created.wish.id)
+    case .alreadyInLibrary(let problem): return .inLibrary(problem.message)
+    }
+  }
+
+  /// "Wish", "Me Too" or "Wished" for a Known For card.
+  static func label(_ hit: TVWishSearchHit) -> String {
+    if hit.alreadyWished && hit.supportedByCaller { return "Wished" }
+    return hit.alreadyWished ? "Me Too" : "Wish"
+  }
+}

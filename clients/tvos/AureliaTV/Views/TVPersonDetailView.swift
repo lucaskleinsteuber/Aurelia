@@ -3,7 +3,11 @@ import SwiftUI
 struct TVPersonDetailView: View {
   @EnvironmentObject private var model: TVAppModel
   let name: String
+  var personKey: String? = nil
   @State private var person: TVPersonDetailResponse?
+  @State private var profile: TVPersonProfile?
+  @State private var wishing: String?
+  @State private var wishMessage: String?
   @State private var loading = true
   @State private var error: String?
 
@@ -24,6 +28,13 @@ struct TVPersonDetailView: View {
                 Text(subtitle)
                   .font(.system(size: 26, weight: .medium))
                   .foregroundStyle(.secondary)
+              }
+              if let life = TVPeoplePresentation.life(profile?.about) {
+                Text(life).font(.system(size: 24)).foregroundStyle(.secondary)
+              }
+              if let biography = profile?.about?.biography, !biography.isEmpty {
+                Text(biography).font(.system(size: 22)).foregroundStyle(.secondary)
+                  .lineLimit(4).frame(maxWidth: 1200, alignment: .leading)
               }
             }
           }
@@ -57,6 +68,9 @@ struct TVPersonDetailView: View {
             ContentUnavailableView("No Titles Found", systemImage: "film")
               .padding(.top, 60)
           }
+          if let knownFor = profile?.knownFor, !knownFor.isEmpty {
+            knownForRow(knownFor)
+          }
         } else if loading {
           ProgressView()
             .frame(maxWidth: .infinity)
@@ -79,15 +93,86 @@ struct TVPersonDetailView: View {
     .task { await load() }
   }
 
+  /// Titles TMDB knows this person for that the library doesn't have, each to wish for.
+  private func knownForRow(_ hits: [TVWishSearchHit]) -> some View {
+    VStack(alignment: .leading, spacing: 24) {
+      TVSectionHeader(title: "Known For", count: hits.count)
+        .padding(.horizontal, TVDesign.pagePadding)
+      if let wishMessage {
+        TVErrorText(message: wishMessage).padding(.horizontal, TVDesign.pagePadding)
+      }
+      ScrollView(.horizontal) {
+        LazyHStack(alignment: .top, spacing: 48) {
+          ForEach(hits) { hit in
+            Button {
+              Task { await wish(hit) }
+            } label: {
+              VStack(alignment: .leading, spacing: 10) {
+                TVWishPosterThumbnail(posterPath: hit.posterPath, kind: hit.kind)
+                  .frame(width: TVDesign.posterWidth, height: TVDesign.posterWidth * 1.5)
+                  .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                Text(hit.title).font(.system(size: 22, weight: .semibold)).lineLimit(1)
+                Label(
+                  wishing == hit.id ? "Wishing…" : TVWishActions.label(hit),
+                  systemImage: hit.alreadyWished && hit.supportedByCaller ? "checkmark" : "gift"
+                )
+                .font(.system(size: 20, weight: .semibold)).foregroundStyle(.secondary)
+              }
+              .frame(width: TVDesign.posterWidth)
+            }
+            .buttonStyle(.borderless)
+            .disabled(wishing != nil || (hit.alreadyWished && hit.supportedByCaller))
+            .accessibilityIdentifier("known-for-\(hit.id)")
+          }
+        }
+        .padding(.horizontal, TVDesign.pagePadding)
+        .padding(.vertical, 16)
+      }
+      .scrollIndicators(.hidden)
+      .scrollClipDisabled()
+      .focusSection()
+    }
+  }
+
   private func load() async {
     guard let client = model.client else { return }
     loading = true
     error = nil
     do {
-      person = try await client.personDetail(name: name)
+      person = try await client.personDetail(name: name, key: personKey)
     } catch {
       self.error = error.localizedDescription
     }
     loading = false
+    // Without TMDB, or while it is away, the page shows the library's titles only.
+    if model.capabilities?.supportsPeople == true, TVPeoplePresentation.hasProfile(personKey),
+      let personKey, let loaded = try? await client.personProfile(key: personKey)
+    {
+      profile = loaded
+    }
+  }
+
+  private func wish(_ hit: TVWishSearchHit) async {
+    guard let client = model.client else { return }
+    wishing = hit.id
+    wishMessage = nil
+    defer { wishing = nil }
+    do {
+      switch try await TVWishActions.wish(hit, client: client) {
+      case .wished(let id):
+        if let current = profile {
+          profile = TVPersonProfile(
+            about: current.about,
+            knownFor: current.knownFor.map {
+              $0.id == hit.id ? TVPeoplePresentation.wished($0, wishId: id) : $0
+            })
+        }
+        await model.refreshWishSummary()
+      case .inLibrary(let message):
+        wishMessage = message
+      }
+    } catch {
+      if !(error is CancellationError) { wishMessage = error.localizedDescription }
+    }
   }
 }

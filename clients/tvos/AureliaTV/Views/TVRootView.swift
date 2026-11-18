@@ -1,11 +1,12 @@
 import SwiftUI
 
-private enum TVLibraryTab: Hashable { case home, movies, shows, search, wishes, profile }
+private enum TVLibraryTab: Hashable { case home, movies, shows, search, people, wishes, profile }
 
 struct TVRootView: View {
   @EnvironmentObject private var model: TVAppModel
   @State private var tab: TVLibraryTab = .home
   @State private var introductionReplay = false
+  @StateObject private var securityAlerts = TVSecurityAlertCenter()
 
   private var guide: TVSetupGuide { model.setupGuide }
   private var tabIndex: Binding<Int> {
@@ -74,6 +75,11 @@ struct TVRootView: View {
           NavigationStack { TVBrowseDestination(section: .search) }.tabItem {
             Label("Search", systemImage: "magnifyingglass")
           }.tag(TVLibraryTab.search)
+          if model.supportsPeople {
+            NavigationStack { TVPeopleView() }
+              .tabItem { Label("People", systemImage: "person.2") }
+              .tag(TVLibraryTab.people)
+          }
           if model.supportsWishes {
             NavigationStack { TVWishesView() }
               .tabItem { Label("Wishes", systemImage: "sparkles") }
@@ -84,6 +90,40 @@ struct TVRootView: View {
               Label(model.session?.user.shownName ?? "Profile", systemImage: "person.crop.circle")
             }
             .tag(TVLibraryTab.profile)
+        }
+        .task(id: model.session?.sessionId) {
+          await model.refreshWishSummary()
+          if model.capabilities?.supportsSecurity == true, model.session?.user.role == "owner" {
+            securityAlerts.start { [model] in model.client }
+          } else {
+            securityAlerts.stop()
+          }
+        }
+        .alert(
+          "A New Device Signed In",
+          isPresented: Binding(
+            get: { securityAlerts.device != nil && !model.playerPresented },
+            set: { if !$0, let id = securityAlerts.device?.id { securityAlerts.handled(id) } })
+        ) {
+          if let device = securityAlerts.device {
+            Button("That Was Me") {
+              securityAlerts.handled(device.id)
+              Task { try? await model.client?.acknowledgeDevice(id: device.id) }
+            }
+            if device.canBlock {
+              Button("Block", role: .destructive) {
+                securityAlerts.handled(device.id)
+                Task { _ = try? await model.client?.blockDevice(id: device.id) }
+              }
+            }
+            Button("Later", role: .cancel) { securityAlerts.handled(device.id) }
+          }
+        } message: {
+          if let device = securityAlerts.device {
+            Text(
+              "\(device.deviceName) opened \(device.userName) on \(model.connection?.name ?? "the server"). "
+                + TVSecurityText.deviceLine(platform: device.platform, ipAddress: device.ipAddress))
+          }
         }
         .overlay {
           if guide.tourPending, !guide.isGuiding {

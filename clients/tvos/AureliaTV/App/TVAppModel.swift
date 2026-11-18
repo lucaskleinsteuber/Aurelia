@@ -45,6 +45,25 @@ final class TVAppModel: ObservableObject {
   var supportsAdaptiveStreaming: Bool { capabilities?.supportsAdaptiveStreaming ?? false }
   var supportsCollectionsV3: Bool { capabilities?.supportsCollectionsV3 ?? false }
   var supportsWishes: Bool { capabilities?.supportsWishes ?? false }
+  var supportsPeople: Bool { capabilities?.supportsPeople ?? false }
+  var isWishAdmin: Bool { TVWishPresentation.isAdministrator(session?.user) }
+  /// Open wishes and the ones newly in the library, for the Home notice "Your wish is here".
+  @Published private(set) var wishSummary: TVWishSummaryResponse?
+
+  func refreshWishSummary() async {
+    guard supportsWishes, let client else { return }
+    if let summary = try? await TVAPIClient.withBackgroundRequests(operation: {
+      try await client.wishSummary()
+    }) {
+      wishSummary = summary
+    }
+  }
+
+  /// The newly fulfilled wishes were seen: the notice goes away on every device of this profile.
+  func markWishesSeen() async {
+    guard let client else { return }
+    if let summary = try? await client.markWishesSeen() { wishSummary = summary }
+  }
   @Published private(set) var homeLoading = false
   @Published private(set) var homeError: String?
   @Published private(set) var libraryRefresh = UUID()

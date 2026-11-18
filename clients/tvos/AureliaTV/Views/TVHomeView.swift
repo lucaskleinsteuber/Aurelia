@@ -56,6 +56,28 @@ struct TVHomeView: View {
     }.padding(.horizontal, TVDesign.pagePadding)
   }
 
+  /// "Your wish is here": titles wished for are now in the library.
+  private func wishHere(_ count: Int) -> some View {
+    NavigationLink {
+      TVWishesView()
+    } label: {
+      HStack(spacing: 24) {
+        Image(systemName: "sparkles").font(.system(size: 40))
+        VStack(alignment: .leading, spacing: 4) {
+          Text(count == 1 ? "Your wish is here" : "\(count) of your wishes are here")
+            .font(.system(size: 30, weight: .bold))
+          Text("Now in the library. Open Wishes to see them.").font(.system(size: 22))
+            .opacity(0.7)
+        }
+        Spacer()
+      }
+      .padding(.horizontal, 34).padding(.vertical, 22).frame(maxWidth: 1200)
+    }
+    .buttonStyle(TVButtonStyle(kind: .row))
+    .padding(.horizontal, TVDesign.pagePadding)
+    .accessibilityIdentifier("home-wish-here")
+  }
+
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 54) {
@@ -66,6 +88,7 @@ struct TVHomeView: View {
             Text("Home").font(.system(size: 52, weight: .bold))
               .padding(.horizontal, TVDesign.pagePadding).padding(.top, 170)
           }
+          if let newly = model.wishSummary?.newlyFulfilledCount, newly > 0 { wishHere(newly) }
           if !model.watchParties.isEmpty { watchTogether }
           if model.supportsMovieNight { movieNightRow }
           // Same order as the Mac Home page.
