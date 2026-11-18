@@ -136,8 +136,11 @@ builder.Services.AddSingleton<ServerPerformanceStore>();
 builder.Services.AddHostedService(services => services.GetRequiredService<ServerPerformanceStore>());
 builder.Services.AddSingleton<SlowQueryInterceptor>();
 builder.Services.AddDbContext<AureliaDbContext>((services, options) =>
-    options.UseSqlite(connectionString).AddInterceptors(services.GetRequiredService<DatabaseSaveSignal>(), services.GetRequiredService<DatabaseCommitSignal>(),
-        SqliteWriteMode.Interceptor, services.GetRequiredService<SlowQueryInterceptor>()));
+    // Single queries are the default; naming it keeps Entity Framework from warning about it at
+    // every start (queries that need a split say so with AsSplitQuery).
+    options.UseSqlite(connectionString, sqlite => sqlite.UseQuerySplittingBehavior(QuerySplittingBehavior.SingleQuery))
+        .AddInterceptors(services.GetRequiredService<DatabaseSaveSignal>(), services.GetRequiredService<DatabaseCommitSignal>(),
+            SqliteWriteMode.Interceptor, services.GetRequiredService<SlowQueryInterceptor>()));
 builder.Services.AddSingleton<TokenService>();
 builder.Services.AddSingleton<SessionActivityRecorder>();
 builder.Services.AddSingleton<DatabaseBackupService>();
