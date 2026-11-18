@@ -4,11 +4,15 @@ import UIKit
 
 @MainActor
 final class IOSAppModel: ObservableObject {
-  enum Phase { case connection, trust, pairing, profiles, library }
+  enum Phase { case connection, trust, pairing, setup, profiles, library }
   @Published private(set) var phase: Phase = .connection
   @Published private(set) var connection: IOSStoredConnection?
   @Published private(set) var session: IOSProfileSession?
   @Published private(set) var inspected: IOSInspectedServer?
+  /// The inspected server has no owner yet and can be set up here (setup-code-v1).
+  @Published private(set) var inspectedNeedsSetup = false
+  /// The owner made during setup, while the viewing PIN still has to be set.
+  @Published private(set) var setupSignedIn: IOSStoredConnection?
   @Published private(set) var pairing: IOSPairingStart?
   @Published private(set) var profiles: [IOSWatchingProfile] = []
   @Published private(set) var isBusy = false
@@ -247,13 +251,14 @@ final class IOSAppModel: ObservableObject {
         try validate(capabilities)
         guard current(run) else { return }
         self.capabilities = capabilities
-        guard candidate.info.isSetup else {
+        guard candidate.info.isSetup || capabilities.supportsSetupCode else {
           throw IOSCoreError.server(
             status: 409, code: "setup_required",
             message:
               "Set up this server in Aurelia on the Mac or Linux computer that runs it first.",
             retryAfter: nil)
         }
+        inspectedNeedsSetup = !candidate.info.isSetup
         inspected = candidate
         phase = .trust
         browser.stop()
@@ -386,7 +391,63 @@ final class IOSAppModel: ObservableObject {
     retireWork()
     error = nil
     pairing = nil
-    phase = .pairing
+    phase = inspectedNeedsSetup ? .setup : .pairing
+  }
+
+  /// A client for the inspected server before this device is signed in (setup and moves).
+  func inspectedClient() -> IOSAPIClient? {
+    inspected.map { makeClient(inspected: $0) }
+  }
+
+  /// Sets up the inspected server: the first owner with the code from the server computer, this
+  /// device signed in, and the owner's viewing PIN.
+  func setUpServer(code: String, ownerName: String, password: String, pin: String) {
+    guard !isBusy, let inspected, let setupCode = IOSServerMoveText.setupCode(code) else { return }
+    let run = beginWork()
+    task = Task {
+      defer { finish(run) }
+      do {
+        // A try whose PIN step failed already created the owner: only the PIN is sent again.
+        let paired: IOSStoredConnection
+        if let signedIn = setupSignedIn {
+          paired = signedIn
+        } else {
+          let auth = try await makeClient(inspected: inspected).setupOwner(
+            code: setupCode, ownerName: ownerName.trimmingCharacters(in: .whitespacesAndNewlines),
+            password: password, deviceName: deviceName)
+          guard current(run) else { return }
+          paired = try inspected.connection(authentication: auth)
+          try saveCredentials(paired)
+          connection = paired
+          setupSignedIn = paired
+        }
+        try await makeClient(connection: paired).initializeProfiles(password: password, pin: pin)
+        setupSignedIn = nil
+        inspectedNeedsSetup = false
+        guard current(run) else { return }
+        IOSWakeOnLan.rememberResolving(
+          serverID: inspected.info.serverId, info: inspected.info,
+          hosts: [inspected.baseURL.host].compactMap { $0 })
+        try await loadProfiles(run: run)
+      } catch {
+        if let failure = error as? IOSCoreError,
+          let text = IOSServerMoveText.problem(failure.problemCode)
+        {
+          if current(run) { self.error = text }
+        } else {
+          show(error, run: run)
+        }
+      }
+    }
+  }
+
+  /// After a move into the inspected server: it restarts with the old server's data, and this
+  /// device connects again like any other.
+  func finishedMoveIntoServer() {
+    inspectedNeedsSetup = false
+    inspected = nil
+    phase = .connection
+    startDiscovery()
   }
 
   /// Pairs this device with the code from the main device.
@@ -431,6 +492,7 @@ final class IOSAppModel: ObservableObject {
     }
     pairing = nil
     inspected = nil
+    inspectedNeedsSetup = false
     phase = .connection
     startDiscovery()
     Task {

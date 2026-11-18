@@ -153,6 +153,16 @@ private struct IOSAdminServerContent: View {
           IOSAdminToggleLabel("Backups", "Automatic backups, Back Up Now, export and restore.")
         }
         .accessibilityIdentifier("admin-backups")
+        if admin.permissions.owner {
+          NavigationLink {
+            IOSAdminServerMoveView()
+          } label: {
+            IOSAdminToggleLabel(
+              "Move to a New Server",
+              "Everything moves to another computer; media stays where it is.")
+          }
+          .accessibilityIdentifier("admin-move")
+        }
         NavigationLink {
           IOSAdminJobsView()
         } label: {

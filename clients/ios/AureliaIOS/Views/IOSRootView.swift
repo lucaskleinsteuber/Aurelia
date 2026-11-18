@@ -68,6 +68,7 @@ struct IOSRootView: View {
         }
       case .trust: IOSServerTrustView().safeAreaInset(edge: .top, spacing: 0) { stepBar(.approve) }
       case .pairing: IOSPairingView().safeAreaInset(edge: .top, spacing: 0) { stepBar(.approve) }
+      case .setup: IOSServerSetupView()
       case .profiles: IOSProfilesView().safeAreaInset(edge: .top, spacing: 0) { stepBar(.profile) }
       case .library:
         VStack(spacing: 0) {

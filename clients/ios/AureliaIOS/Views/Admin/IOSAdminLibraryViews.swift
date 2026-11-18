@@ -517,6 +517,22 @@ private struct IOSAdminStorageLocationForm: View {
       } header: {
         Text("Recent Scans")
       }
+      if admin.permissions.owner {
+        Section {
+          NavigationLink {
+            IOSAdminRelocateView(library: library.id, name: library.name, oldPath: library.path) {
+              await reload()
+            }
+          } label: {
+            Label("Location Moved…", systemImage: "arrow.right.doc.on.clipboard")
+          }
+          .accessibilityIdentifier("storage-relocate")
+        } footer: {
+          Text(
+            "When the files now live in another folder, point the location there; titles, progress and favorites stay."
+          )
+        }
+      }
       Section {
         Button("Remove Storage Location…", role: .destructive) {
           confirmation = IOSAdminConfirmation(
@@ -1734,6 +1750,150 @@ private struct IOSMetadataMatchView: View {
         self.error = IOSAdministrationModel.message(error)
         searching = false
       }
+    }
+  }
+}
+
+/// Storage Location Moved: points a location at the folder that now holds its files. Aurelia
+/// compares a few sample files first; only the server's database changes, the media is only read.
+private struct IOSAdminRelocateView: View {
+  @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.dismiss) private var dismiss
+  let library: UUID
+  let name: String
+  let oldPath: String
+  let moved: @MainActor @Sendable () async -> Void
+
+  @State private var suggestions: IOSMoveLocationSuggestions?
+  @State private var path = ""
+  @State private var preview: IOSMoveLocationMatch?
+  @State private var confirmedEmpty = false
+  @State private var busy = false
+  @State private var error: String?
+  @State private var done: IOSRelocateResult?
+
+  private var decision: IOSRelocateDecision {
+    IOSRelocateDecision(preview: preview, confirmedEmpty: confirmedEmpty)
+  }
+
+  var body: some View {
+    Form {
+      Section {
+        LabeledContent("Was", value: oldPath).font(.footnote)
+      }
+      Section {
+        if let suggestions {
+          if suggestions.suggestions.isEmpty {
+            Text("No folder with these files was found. Type the new folder below.")
+              .foregroundStyle(.secondary)
+          }
+          ForEach(suggestions.suggestions) { suggestion in
+            Button {
+              choose(suggestion.path)
+              preview = IOSMoveLocationMatch(
+                sampled: suggestions.sampled, matched: suggestion.matched)
+            } label: {
+              VStack(alignment: .leading, spacing: 2) {
+                Text(suggestion.path).font(.footnote.monospaced()).foregroundStyle(.primary)
+                Text(IOSRelocateDecision.matchText(suggestion.matched, of: suggestions.sampled))
+                  .font(.caption).foregroundStyle(.secondary)
+              }
+            }
+          }
+        } else {
+          HStack {
+            ProgressView()
+            Text("Looking for the files…").foregroundStyle(.secondary)
+          }
+        }
+      } header: {
+        Text("Suggestions")
+      }
+      Section {
+        TextField("New Folder, with Its Whole Path", text: Binding(get: { path }, set: choose))
+          .font(.footnote.monospaced())
+          .textInputAutocapitalization(.never).autocorrectionDisabled()
+          .accessibilityIdentifier("relocate-path")
+        Button("Check Folder") { Task { await check() } }
+          .disabled(path.trimmingCharacters(in: .whitespaces).isEmpty || busy)
+      } footer: {
+        Text(decision.text)
+      }
+      Section {
+        if decision.needsSecondConfirmation, !confirmedEmpty, preview != nil {
+          Button("Use Anyway…", role: .destructive) { confirmedEmpty = true }
+        }
+        Button {
+          Task { await relocate() }
+        } label: {
+          HStack {
+            Text("Use This Folder")
+            if busy {
+              Spacer()
+              ProgressView()
+            }
+          }
+        }
+        .disabled(!decision.canConfirm || busy)
+        .accessibilityIdentifier("relocate-confirm")
+      } footer: {
+        if let done {
+          Text("\(done.titles) titles now point at the new folder. A scan checks them.")
+        } else if let error {
+          Text(error).foregroundStyle(.orange)
+        }
+      }
+    }
+    .scrollContentBackground(.hidden)
+    .background(IOSDesign.canvas.ignoresSafeArea())
+    .navigationTitle("\(name) Moved")
+    .navigationBarTitleDisplayMode(.inline)
+    .task {
+      let id = library
+      do {
+        suggestions = try await admin.run { try await $0.relocateSuggestions(library: id) }
+      } catch is CancellationError {
+      } catch {
+        suggestions = IOSMoveLocationSuggestions(sampled: 0, suggestions: [])
+        self.error = IOSServerMoveText.message(error)
+      }
+    }
+  }
+
+  private func choose(_ value: String) {
+    path = value
+    preview = nil
+    confirmedEmpty = false
+  }
+
+  private func check() async {
+    busy = true
+    defer { busy = false }
+    let id = library
+    let folder = path.trimmingCharacters(in: .whitespaces)
+    do {
+      preview = try await admin.run { try await $0.relocatePreview(library: id, path: folder) }
+      error = nil
+    } catch is CancellationError {
+    } catch {
+      self.error = IOSServerMoveText.message(error)
+    }
+  }
+
+  private func relocate() async {
+    busy = true
+    defer { busy = false }
+    let id = library
+    let folder = path.trimmingCharacters(in: .whitespaces)
+    let force = decision.force
+    do {
+      done = try await admin.run { try await $0.relocate(library: id, path: folder, force: force) }
+      error = nil
+      await moved()
+      dismiss()
+    } catch is CancellationError {
+    } catch {
+      self.error = IOSServerMoveText.message(error)
     }
   }
 }

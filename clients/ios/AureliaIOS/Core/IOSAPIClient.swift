@@ -964,6 +964,66 @@ struct IOSAPIClient: Sendable {
     return request
   }
 
+  // MARK: Setting up a new server
+
+  /// Whether the server still waits for its first owner (setup-code-v1).
+  func setupOpen() async throws -> Bool {
+    struct Status: Decodable { let open: Bool }
+    let status: Status = try await get("/api/v1/setup/code", authentication: .none)
+    return status.open
+  }
+
+  /// Creates the first owner with the code from the server computer; the answer is this device's
+  /// sign-in, as after pairing.
+  func setupOwner(code: String, ownerName: String, password: String, deviceName: String)
+    async throws -> IOSAuthentication
+  {
+    struct Payload: Encodable {
+      let code: String
+      let ownerName: String
+      let password: String
+      let deviceName: String
+    }
+    let value: IOSAuthentication = try await post(
+      "/api/v1/setup/code",
+      payload: Payload(
+        code: code, ownerName: ownerName, password: password,
+        deviceName: String(deviceName.prefix(128))),
+      authentication: .none)
+    guard (32...256).contains(value.token.utf8.count), !value.token.contains(where: \.isWhitespace)
+    else { throw IOSCoreError.invalidResponse }
+    return value
+  }
+
+  /// The new owner's viewing PIN, right after setup, with this device's new sign-in.
+  func initializeProfiles(password: String, pin: String) async throws {
+    struct Payload: Encodable {
+      let password: String
+      let pin: String
+    }
+    _ = try await send(
+      "/api/v1/profiles/initialize", method: "POST",
+      body: JSONEncoder().encode(Payload(password: password, pin: pin)), authentication: .device)
+  }
+
+  /// A request of the new server's move import, with the setup code instead of a sign-in.
+  func setupMoveData(
+    _ path: String = "", method: String = "GET", body: Data? = nil, setupCode: String
+  ) async throws -> Data {
+    var request = try setupMoveRequest(path, method: method, setupCode: setupCode)
+    request.httpBody = body
+    if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+    return try await execute(request, using: transport).body
+  }
+
+  /// The bare request for `/api/v1/setup/move…`, also for uploading a moving file.
+  func setupMoveRequest(_ path: String, method: String, setupCode: String) throws -> URLRequest {
+    var request = try request("/api/v1/setup/move" + path, authentication: .none)
+    request.httpMethod = method
+    request.setValue(setupCode, forHTTPHeaderField: "X-Aurelia-Setup-Code")
+    return request
+  }
+
   static func decodeAdmin<Value: Decodable>(_ type: Value.Type, data: Data) throws -> Value {
     try decode(type, data: data)
   }
