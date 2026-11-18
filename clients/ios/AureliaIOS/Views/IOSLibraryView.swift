@@ -30,12 +30,13 @@ struct IOSPosterLabel: View {
         Text(item.cardSubtitle).font(.caption).foregroundStyle(.secondary)
           .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : (item.kind == .episode ? 2 : 1))
         if item.kind == .episode, let availability = item.availabilityMessage {
-          Text(availability).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+          Text(availability).font(.caption).foregroundStyle(.secondary)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
         }
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .opacity(item.isPlayable || item.kind == .series ? 1 : 0.6)
+    .opacity(item.isPlayable || item.kind == .series ? 1 : 0.72)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(item.title)
     .accessibilityValue(item.accessibilitySummary)
@@ -69,6 +70,7 @@ struct IOSItemBadges: View {
 struct IOSArtworkView: View {
   @EnvironmentObject private var model: IOSAppModel
   @Environment(\.displayScale) private var displayScale
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   let artwork: IOSArtwork?
   let width: Int
   var symbol: String? = "film"
@@ -101,7 +103,7 @@ struct IOSArtworkView: View {
         }
       }
       .clipped()
-      .animation(.easeOut(duration: 0.2), value: image != nil)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: image != nil)
       .task(id: key) {
         image = nil
         guard let artwork, let api = model.client, key != nil else { return }

@@ -8,7 +8,9 @@ final class IOSLibraryActions: ObservableObject {
     let watched: Bool
     let sessionID: UUID
     var title: String {
-      "Mark \(state.affectedCount) episodes as \(watched ? "watched" : "unwatched")?"
+      let count = IOSLayoutMetrics.countPhrase(
+        state.affectedCount, singular: "episode", plural: "episodes")
+      return "Mark \(count) as \(watched ? "watched" : "unwatched")?"
     }
   }
   struct AddCollectionTarget: Identifiable {
@@ -140,10 +142,15 @@ struct IOSLibraryActionPresentation: ViewModifier {
       ) { Task { await actions.confirm(pending, model: model) } }
       Button("Cancel", role: .cancel) { actions.pending = nil }
     } message: { pending in
+      let single = pending.state.affectedCount == 1
       Text(
         !pending.watched
-          ? "Playback positions for these episodes will be reset. Favorites, collections and scene notes are kept."
-          : "The selected episodes will be marked as watched.")
+          ? (single
+            ? "Playback position for this episode will be reset. Favorites, collections and scene notes are kept."
+            : "Playback positions for these episodes will be reset. Favorites, collections and scene notes are kept.")
+          : (single
+            ? "This episode will be marked as watched."
+            : "The selected episodes will be marked as watched."))
     }
     .alert(
       "Couldn't Update Title",

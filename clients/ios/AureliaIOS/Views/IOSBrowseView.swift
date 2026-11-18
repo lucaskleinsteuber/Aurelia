@@ -17,6 +17,8 @@ private struct IOSBrowseLoadKey: Equatable {
 
 struct IOSLibraryGrid: View {
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.horizontalSizeClass) private var sizeClass
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @ObservedObject var listing: IOSLibraryListing
   let title: String
   @State private var search = ""
@@ -49,11 +51,19 @@ struct IOSLibraryGrid: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 14) {
         if !querySummary.isEmpty {
-          HStack(spacing: 10) {
-            Text(querySummary).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
-            Spacer(minLength: 8)
+          let filterLayout =
+            dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 10))
+          filterLayout {
+            Text(querySummary).font(.footnote).foregroundStyle(.secondary)
+              .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+            if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
             Button("Clear") { query = listing.section.defaultQuery }
-              .font(.footnote.weight(.semibold)).accessibilityIdentifier("browse-clear")
+              .font(.footnote.weight(.semibold))
+              .frame(minHeight: 44)
+              .contentShape(Rectangle())
+              .accessibilityIdentifier("browse-clear")
           }
         }
         if listing.items.isEmpty && !listing.loading && listing.error == nil
@@ -67,7 +77,9 @@ struct IOSLibraryGrid: View {
               search.isEmpty ? "No titles match this view." : "No titles match “\(search)”.")
           ).padding(.top, 40)
         }
-        LazyVGrid(columns: IOSDesign.gridColumns, spacing: 20) {
+        LazyVGrid(
+          columns: IOSDesign.gridColumns(for: sizeClass, typeSize: dynamicTypeSize), spacing: 20
+        ) {
           ForEach(listing.items) { original in
             let item = model.overlay(original)
             NavigationLink {
@@ -93,11 +105,16 @@ struct IOSLibraryGrid: View {
             .accessibilityIdentifier("browse-loading")
         }
         if let error = listing.error {
-          IOSErrorText(message: error)
-          Button("Try Again") { loadNext() }.buttonStyle(IOSButtonStyle())
+          VStack(spacing: 12) {
+            IOSErrorText(message: error)
+            Button("Try Again") { loadNext() }.buttonStyle(IOSButtonStyle())
+          }
+          .frame(maxWidth: .infinity)
+          .padding(.vertical, 16)
         }
-      }.padding(.horizontal, IOSDesign.margin).padding(.vertical, 8)
+      }.padding(.horizontal, IOSDesign.margin(for: sizeClass)).padding(.vertical, 8)
     }
+    .scrollDismissesKeyboard(.interactively)
     .scrollPosition(id: $scrollAnchor, anchor: .top)
     .background(IOSDesign.canvas.ignoresSafeArea())
     .navigationTitle(title)
@@ -178,6 +195,8 @@ private struct IOSBrowseFilters: View {
   @Environment(\.dismiss) private var dismiss
   @Binding var query: IOSBrowseQuery
   let section: IOSBrowseSection
+  @FocusState private var numberFieldFocused: Bool
+
   var body: some View {
     NavigationStack {
       Form {
@@ -195,9 +214,11 @@ private struct IOSBrowseFilters: View {
           text: Binding(get: { query.genre ?? "" }, set: { query.genre = $0.isEmpty ? nil : $0 })
         ).accessibilityIdentifier("filter-genre")
         TextField("Year From", text: year(\.yearFrom)).keyboardType(.numberPad)
+          .focused($numberFieldFocused)
           .accessibilityIdentifier("filter-year-from")
-        TextField("Year To", text: year(\.yearTo)).keyboardType(.numberPad).accessibilityIdentifier(
-          "filter-year-to")
+        TextField("Year To", text: year(\.yearTo)).keyboardType(.numberPad)
+          .focused($numberFieldFocused)
+          .accessibilityIdentifier("filter-year-to")
         Picker("Watch Status", selection: $query.watchState) {
           ForEach(IOSWatchFilter.allCases, id: \.self) { Text($0.title).tag($0) }
         }.disabled(section == .continueWatching)
@@ -212,6 +233,8 @@ private struct IOSBrowseFilters: View {
           Button("Reset Filters & Sort", role: .destructive) { query = section.defaultQuery }
         }
       }
+      .scrollDismissesKeyboard(.interactively)
+      .iosNumberPadDone { numberFieldFocused = false }
       .navigationTitle("Filter & Sort")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -223,6 +246,8 @@ private struct IOSBrowseFilters: View {
         }
       }
     }
+    .tint(.blue)
+    .onDisappear { query = section.constrain(query) }
     .presentationDetents([.medium, .large])
   }
   private func year(_ path: WritableKeyPath<IOSBrowseQuery, Int?>) -> Binding<String> {

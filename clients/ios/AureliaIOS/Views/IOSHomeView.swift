@@ -5,6 +5,8 @@ import SwiftUI
 struct IOSHomeView: View {
   @EnvironmentObject private var model: IOSAppModel
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.horizontalSizeClass) private var sizeClass
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @StateObject private var actions = IOSLibraryActions()
   @State private var playback: IOSHomePlayback?
   @State private var launching = false
@@ -17,11 +19,12 @@ struct IOSHomeView: View {
   @State private var failedHeroArtwork: IOSArtwork?
   /// The server returns at most this many items in Home's catalog shelves.
   private static let shelfLimit = 30
+  private var margin: CGFloat { IOSDesign.margin(for: sizeClass) }
 
   /// Parties others started at home, to join with one tap.
   private var watchTogether: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Text("Watch Together").font(.title2.bold())
+      Text("Watch Together").font(.title2.bold()).accessibilityAddTraits(.isHeader)
       ForEach(model.watchParties) { party in
         Button {
           Task { await model.joinWatchTogether(party) }
@@ -31,7 +34,9 @@ struct IOSHomeView: View {
         .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
         .accessibilityIdentifier("home-watch-together")
       }
-    }.padding(.horizontal, IOSDesign.margin)
+    }
+    .frame(maxWidth: IOSLayoutMetrics.readableContentMaxWidth, alignment: .leading)
+    .padding(.horizontal, margin)
   }
 
   /// Starts a Movie Night, or joins one someone else started.
@@ -41,15 +46,17 @@ struct IOSHomeView: View {
       movieNight = IOSMovieNightLaunch(joining: open)
     } label: {
       HStack(spacing: 14) {
-        ZStack {
-          RoundedRectangle(cornerRadius: 5).fill(Color(red: 1, green: 0.30, blue: 0.35))
-            .frame(width: 22, height: 32).rotationEffect(.degrees(-12)).offset(x: -10)
-          RoundedRectangle(cornerRadius: 5).fill(IOSDesign.raised).frame(width: 22, height: 32)
-          RoundedRectangle(cornerRadius: 5).fill(Color(red: 1, green: 0.79, blue: 0.24))
-            .frame(width: 22, height: 32).rotationEffect(.degrees(12)).offset(x: 10)
+        if !dynamicTypeSize.isAccessibilitySize {
+          ZStack {
+            RoundedRectangle(cornerRadius: 5).fill(Color(red: 1, green: 0.30, blue: 0.35))
+              .frame(width: 22, height: 32).rotationEffect(.degrees(-12)).offset(x: -10)
+            RoundedRectangle(cornerRadius: 5).fill(IOSDesign.raised).frame(width: 22, height: 32)
+            RoundedRectangle(cornerRadius: 5).fill(Color(red: 1, green: 0.79, blue: 0.24))
+              .frame(width: 22, height: 32).rotationEffect(.degrees(12)).offset(x: 10)
+          }
+          .frame(width: 46, height: 40)
+          .accessibilityHidden(true)
         }
-        .frame(width: 46, height: 40)
-        .accessibilityHidden(true)
         VStack(alignment: .leading, spacing: 2) {
           Text(open.map { "\($0.hostName)'s Movie Night is on" } ?? "Can't decide what to watch?")
             .font(.body.weight(.semibold))
@@ -59,13 +66,14 @@ struct IOSHomeView: View {
           .font(.caption).foregroundStyle(.secondary)
         }
         Spacer()
-        Image(systemName: "chevron.right").foregroundStyle(.secondary)
+        Image(systemName: "chevron.right").foregroundStyle(.secondary).accessibilityHidden(true)
       }
       .padding(14)
       .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
     .buttonStyle(.plain)
-    .padding(.horizontal, IOSDesign.margin)
+    .frame(maxWidth: IOSLayoutMetrics.readableContentMaxWidth, alignment: .leading)
+    .padding(.horizontal, margin)
     .accessibilityIdentifier("home-movie-night")
   }
 
@@ -75,12 +83,16 @@ struct IOSHomeView: View {
       IOSWishesView()
     } label: {
       HStack(spacing: 14) {
-        ZStack {
-          RoundedRectangle(cornerRadius: 10, style: .continuous).fill(IOSDesign.raised)
-            .frame(width: 44, height: 40)
-          Image(systemName: "sparkles").font(.headline).foregroundStyle(.white)
+        if !dynamicTypeSize.isAccessibilitySize {
+          ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous).fill(IOSDesign.raised)
+              .frame(width: 44, height: 40)
+            Image(systemName: "sparkles").font(.headline)
+              .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+              .foregroundStyle(.white)
+          }
+          .accessibilityHidden(true)
         }
-        .accessibilityHidden(true)
         VStack(alignment: .leading, spacing: 2) {
           Text("Family Wishes").font(.body.weight(.semibold))
           Text(
@@ -102,13 +114,14 @@ struct IOSHomeView: View {
             .padding(.vertical, 3)
             .background(.white, in: Capsule())
         }
-        Image(systemName: "chevron.right").foregroundStyle(.secondary)
+        Image(systemName: "chevron.right").foregroundStyle(.secondary).accessibilityHidden(true)
       }
       .padding(14)
       .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
     .buttonStyle(.plain)
-    .padding(.horizontal, IOSDesign.margin)
+    .frame(maxWidth: IOSLayoutMetrics.readableContentMaxWidth, alignment: .leading)
+    .padding(.horizontal, margin)
     .accessibilityIdentifier("home-wishes")
   }
 
@@ -122,12 +135,14 @@ struct IOSHomeView: View {
               showsArtwork: showsHeroArtwork,
               artworkUnavailable: { failedHeroArtwork = hero.backdrop ?? hero.poster })
           } else {
-            Text("Home").font(.largeTitle.bold())
-              .padding(.horizontal, IOSDesign.margin).padding(.top, 12)
+            Text("Home").font(.largeTitle.bold()).accessibilityAddTraits(.isHeader)
+              .padding(.horizontal, margin).padding(.top, 12)
           }
           if !model.watchParties.isEmpty { watchTogether }
           if model.supportsMonthlyWrapped, IOSWrapped.monthIsNew() {
-            IOSMonthlyWrappedButton { monthlyWrapped = $0 }.padding(.horizontal, IOSDesign.margin)
+            IOSMonthlyWrappedButton { monthlyWrapped = $0 }
+              .frame(maxWidth: IOSLayoutMetrics.readableContentMaxWidth, alignment: .leading)
+              .padding(.horizontal, margin)
           }
           if model.supportsMovieNight { movieNightStrip }
           if model.supportsWishes { familyWishesStrip }
@@ -167,7 +182,7 @@ struct IOSHomeView: View {
             Button("Try Again") { Task { await model.loadHome() } }.buttonStyle(IOSButtonStyle())
           }
           .frame(maxWidth: .infinity)
-          .padding(.horizontal, IOSDesign.margin).padding(.top, model.home == nil ? 120 : 0)
+          .padding(.horizontal, margin).padding(.top, model.home == nil ? 120 : 0)
         }
       }.padding(.bottom, 32)
     }
@@ -303,7 +318,7 @@ struct IOSHomeView: View {
       Button("OK", role: .cancel) { unavailable = nil }
     } message: { item in
       Text(
-        "\(item.availabilityMessage ?? "This title can't be played right now.") Connect the drive on your Mac, then try again."
+        "\(item.availabilityMessage ?? "This title can't be played right now.") Connect the drive on your server computer, then try again."
       )
     }
   }
@@ -396,7 +411,8 @@ struct IOSHomeView: View {
                 NavigationLink {
                   IOSDetailView(id: item.detailID, initial: item)
                 } label: {
-                  IOSPosterLabel(item: item).frame(width: IOSDesign.posterWidth)
+                  IOSPosterLabel(item: item)
+                    .frame(width: IOSDesign.posterWidth(for: sizeClass, typeSize: dynamicTypeSize))
                 }
               }
             }
@@ -426,7 +442,8 @@ struct IOSHomeView: View {
           NavigationLink {
             IOSDetailView(id: item.detailID, initial: item)
           } label: {
-            IOSPosterLabel(item: item).frame(width: IOSDesign.posterWidth)
+            IOSPosterLabel(item: item)
+              .frame(width: IOSDesign.posterWidth(for: sizeClass, typeSize: dynamicTypeSize))
           }.buttonStyle(IOSContentButtonStyle())
             .accessibilityIdentifier("home-genre-\(row.genre)-\(item.id)")
             .contextMenu { IOSMediaContextActions(item: item, actions: actions) }
@@ -443,7 +460,8 @@ struct IOSHomeView: View {
           NavigationLink {
             IOSCollectionView(collection: collection)
           } label: {
-            IOSCollectionCard(collection: collection).frame(width: IOSDesign.posterWidth)
+            IOSCollectionCard(collection: collection)
+              .frame(width: IOSDesign.posterWidth(for: sizeClass, typeSize: dynamicTypeSize))
           }.buttonStyle(IOSContentButtonStyle()).accessibilityIdentifier(
             "collection-\(collection.id)")
         }
@@ -456,11 +474,19 @@ struct IOSHomeView: View {
 /// with the title and one main action, like the Apple TV app on iPhone.
 private struct IOSHomeHero: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.horizontalSizeClass) private var sizeClass
+  @Environment(\.verticalSizeClass) private var verticalSizeClass
   let item: IOSCatalogItem
   let launching: Bool
   let play: (IOSCatalogItem) -> Void
   let showsArtwork: Bool
   let artworkUnavailable: () -> Void
+
+  private var heroHeight: CGFloat {
+    IOSLayoutMetrics.heroBackdropHeight(
+      isRegularWidth: sizeClass == .regular, isCompactHeight: verticalSizeClass == .compact,
+      isAccessibilitySize: dynamicTypeSize.isAccessibilitySize)
+  }
 
   @ViewBuilder
   var body: some View {
@@ -491,7 +517,7 @@ private struct IOSHomeHero: View {
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(.horizontal, IOSDesign.margin).padding(.top, 12)
+    .padding(.horizontal, IOSDesign.margin(for: sizeClass)).padding(.top, 12)
   }
 
   private var featureText: some View {
@@ -509,22 +535,30 @@ private struct IOSHomeHero: View {
   }
 
   private var artworkHero: some View {
-    ZStack(alignment: .bottom) {
-      IOSHeroBackdrop(
-        artwork: item.backdrop ?? item.poster, onUnavailable: artworkUnavailable)
-      VStack(spacing: 10) {
-        IOSEyebrow(text: eyebrow)
-        Text(item.parentTitle ?? item.title).font(.system(.largeTitle, weight: .bold))
-          .multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.8)
-        if !item.genres.isEmpty {
-          Text(item.genres.prefix(3).joined(separator: " · ")).font(.subheadline)
-            .foregroundStyle(.white.opacity(0.75))
-        }
-        mainAction.padding(.top, 6)
+    VStack(spacing: 10) {
+      Spacer(minLength: verticalSizeClass == .compact ? 24 : 72)
+      IOSEyebrow(text: eyebrow)
+      Text(item.parentTitle ?? item.title).font(.system(.largeTitle, weight: .bold))
+        .multilineTextAlignment(.center)
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+        .minimumScaleFactor(0.8)
+        .fixedSize(horizontal: false, vertical: true)
+      if !item.genres.isEmpty {
+        Text(item.genres.prefix(3).joined(separator: " · ")).font(.subheadline)
+          .foregroundStyle(.white.opacity(0.85))
+          .multilineTextAlignment(.center)
       }
-      .padding(.horizontal, IOSDesign.margin).padding(.bottom, 8)
+      mainAction.padding(.top, 6)
     }
-    .frame(maxWidth: .infinity)
+    .padding(.horizontal, IOSDesign.margin(for: sizeClass)).padding(.bottom, 12)
+    .frame(maxWidth: IOSLayoutMetrics.readableContentMaxWidth)
+    .frame(maxWidth: .infinity, minHeight: heroHeight, alignment: .bottom)
+    .background {
+      IOSHeroBackdrop(
+        artwork: item.backdrop ?? item.poster,
+        strengthenScrim: dynamicTypeSize.isAccessibilitySize,
+        onUnavailable: artworkUnavailable)
+    }
   }
 
   private var mainAction: some View {
@@ -559,6 +593,7 @@ private struct IOSHomeHero: View {
 /// Wide artwork that fills the top of a page and fades into the canvas below.
 struct IOSHeroBackdrop: View {
   let artwork: IOSArtwork?
+  var strengthenScrim = false
   var onUnavailable: (() -> Void)?
   var body: some View {
     GeometryReader { geometry in
@@ -566,45 +601,74 @@ struct IOSHeroBackdrop: View {
         .frame(width: geometry.size.width, height: geometry.size.height)
         .overlay {
           LinearGradient(
-            stops: [
-              .init(color: .black.opacity(0.35), location: 0),
-              .init(color: .clear, location: 0.25),
-              .init(color: .clear, location: 0.45),
-              .init(color: IOSDesign.canvas.opacity(0.75), location: 0.78),
-              .init(color: IOSDesign.canvas, location: 1),
-            ], startPoint: .top, endPoint: .bottom)
+            stops: strengthenScrim
+              ? [
+                .init(color: .black.opacity(0.55), location: 0),
+                .init(color: .black.opacity(0.35), location: 0.3),
+                .init(color: IOSDesign.canvas.opacity(0.82), location: 0.72),
+                .init(color: IOSDesign.canvas, location: 1),
+              ]
+              : [
+                .init(color: .black.opacity(0.35), location: 0),
+                .init(color: .clear, location: 0.25),
+                .init(color: .clear, location: 0.45),
+                .init(color: IOSDesign.canvas.opacity(0.75), location: 0.78),
+                .init(color: IOSDesign.canvas, location: 1),
+              ],
+            startPoint: .top, endPoint: .bottom)
         }
     }
-    .frame(height: IOSDesign.isPad ? 560 : 470)
     .accessibilityHidden(true)
   }
 }
 
 /// A wide Continue Watching card: artwork with progress, the title and what comes next below.
 struct IOSContinueCard: View {
+  @Environment(\.horizontalSizeClass) private var sizeClass
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   let item: IOSCatalogItem
+
+  private var cardWidth: CGFloat {
+    IOSDesign.landscapeWidth(for: sizeClass)
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
       IOSArtworkView(
         artwork: item.backdrop ?? item.poster, width: 640, symbol: "play.rectangle",
         placeholderTitle: item.parentTitle ?? item.title
       )
-      .frame(width: IOSDesign.landscapeWidth, height: IOSDesign.landscapeWidth * 9 / 16)
+      .frame(width: cardWidth, height: cardWidth * 9 / 16)
       .overlay(alignment: .bottomLeading) {
         if let fraction = item.progressFraction {
           IOSProgressBar(fraction: fraction).padding(.horizontal, 10).padding(.bottom, 10)
         }
       }
       .overlay(alignment: .topTrailing) {
-        Image(systemName: "play.fill").font(.title3).foregroundStyle(.white)
-          .frame(width: 44, height: 44).background(.ultraThinMaterial, in: Circle())
+        Image(systemName: "play.fill").font(.title3)
+          .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+          .foregroundStyle(.white)
+          .frame(width: 44, height: 44)
+          .background {
+            if reduceTransparency {
+              Circle().fill(IOSDesign.canvas.opacity(0.88))
+            } else {
+              Circle().fill(.ultraThinMaterial)
+              Circle().fill(.black.opacity(0.25))
+            }
+          }
           .padding(10)
+          .accessibilityHidden(true)
       }
       .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
-      Text(item.parentTitle ?? item.title).font(.footnote.weight(.semibold)).lineLimit(1)
-      Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+      Text(item.parentTitle ?? item.title).font(.footnote.weight(.semibold))
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+      Text(detail).font(.caption).foregroundStyle(.secondary)
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
     }
-    .frame(width: IOSDesign.landscapeWidth, alignment: .leading)
+    .frame(width: cardWidth, alignment: .leading)
+    .accessibilityElement(children: .combine)
   }
   private var detail: String {
     if let message = item.availabilityMessage { return message }

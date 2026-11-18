@@ -5,6 +5,8 @@ import SwiftUI
 /// Cast & Crew.
 struct IOSPeopleView: View {
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.horizontalSizeClass) private var sizeClass
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var search = ""
   @State private var people: [IOSPersonSummary] = []
   @State private var total = 0
@@ -14,9 +16,14 @@ struct IOSPeopleView: View {
   /// Counts searches; an answer for an older search is dropped.
   @State private var generation = 0
 
-  private static let columns = [
-    GridItem(.adaptive(minimum: IOSDesign.isPad ? 120 : 96), spacing: 12, alignment: .top)
-  ]
+  private var columns: [GridItem] {
+    let minimum = IOSLayoutMetrics.peopleGridMinimum(
+      isRegularWidth: sizeClass == .regular,
+      isAccessibilitySize: dynamicTypeSize.isAccessibilitySize)
+    return [GridItem(.adaptive(minimum: minimum), spacing: 12, alignment: .top)]
+  }
+
+  private var margin: CGFloat { IOSDesign.margin(for: sizeClass) }
 
   var body: some View {
     ScrollView {
@@ -28,7 +35,8 @@ struct IOSPeopleView: View {
             IOSErrorText(message: error)
             Button("Try Again") { Task { await load(reset: true) } }.buttonStyle(IOSButtonStyle())
           }
-          .padding(.horizontal, IOSDesign.margin).padding(.top, 60)
+          .frame(maxWidth: .infinity)
+          .padding(.horizontal, margin).padding(.top, 60)
         } else if people.isEmpty {
           ContentUnavailableView(
             search.isEmpty ? "No People Yet" : "No One Found",
@@ -41,7 +49,7 @@ struct IOSPeopleView: View {
           )
           .padding(.top, 40)
         } else {
-          LazyVGrid(columns: Self.columns, spacing: 20) {
+          LazyVGrid(columns: columns, spacing: 20) {
             ForEach(people) { person in
               NavigationLink {
                 IOSPersonDetailView(name: person.name, personKey: person.personKey)
@@ -55,20 +63,23 @@ struct IOSPeopleView: View {
               }
             }
           }
-          .padding(.horizontal, IOSDesign.margin)
+          .padding(.horizontal, margin)
           if loadingMore {
             ProgressView().frame(maxWidth: .infinity)
           } else if let error {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(spacing: 12) {
               IOSErrorText(message: error)
               Button("Try Again") { Task { await load(reset: false) } }
                 .buttonStyle(IOSButtonStyle())
-            }.padding(.horizontal, IOSDesign.margin)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, margin)
           }
         }
       }
       .padding(.vertical, 12)
     }
+    .scrollDismissesKeyboard(.interactively)
     .background(IOSDesign.canvas.ignoresSafeArea())
     .navigationTitle("People")
     .searchable(text: $search, prompt: "Find a Person")
@@ -114,15 +125,19 @@ struct IOSPeopleView: View {
 }
 
 private struct IOSPeopleCard: View {
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let person: IOSPersonSummary
   var body: some View {
     VStack(spacing: 6) {
       IOSArtworkView(artwork: person.profile, width: 320, symbol: "person.fill")
         .frame(width: 84, height: 84).clipShape(Circle())
         .overlay(Circle().stroke(.white.opacity(0.08), lineWidth: 0.5))
-      Text(person.name).font(.caption.weight(.semibold)).lineLimit(1)
+      Text(person.name).font(.caption.weight(.semibold))
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+        .multilineTextAlignment(.center)
       Text(IOSPeoplePresentation.role(person)).font(.caption2).foregroundStyle(.secondary)
-        .lineLimit(1)
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+        .multilineTextAlignment(.center)
     }
     .frame(maxWidth: .infinity)
     .accessibilityElement(children: .combine)

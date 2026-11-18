@@ -4,6 +4,9 @@ import SwiftUI
 /// titles they are known for that the library doesn't have, with Wish and Me Too.
 struct IOSPersonDetailView: View {
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.horizontalSizeClass) private var sizeClass
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   let name: String
   var personKey: String?
   @State private var person: IOSPersonDetailResponse?
@@ -13,6 +16,7 @@ struct IOSPersonDetailView: View {
   @State private var biographyOpen = false
   @State private var wishing: String?
   @State private var wishMessage: String?
+  private var margin: CGFloat { IOSDesign.margin(for: sizeClass) }
 
   private var showsProfile: Bool {
     model.supportsPeople && IOSPeoplePresentation.hasProfile(personKey)
@@ -27,6 +31,7 @@ struct IOSPersonDetailView: View {
               .frame(width: 120, height: 120).clipShape(Circle())
               .overlay(Circle().stroke(.white.opacity(0.08), lineWidth: 0.5))
             Text(person.name).font(.title2.weight(.bold)).multilineTextAlignment(.center)
+              .accessibilityAddTraits(.isHeader)
             if let subtitle = person.subtitle, !subtitle.isEmpty {
               Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -36,7 +41,7 @@ struct IOSPersonDetailView: View {
                 .multilineTextAlignment(.center)
             }
           }
-          .padding(.horizontal, IOSDesign.margin).padding(.top, 12)
+          .padding(.horizontal, margin).padding(.top, 12)
 
           if let biography = profile?.about?.biography?.trimmingCharacters(
             in: .whitespacesAndNewlines),
@@ -49,7 +54,10 @@ struct IOSPersonDetailView: View {
             VStack(alignment: .leading, spacing: 10) {
               IOSSectionHeader(
                 title: showsProfile ? "In Your Library" : "Appears In", count: person.items.count)
-              LazyVGrid(columns: IOSDesign.gridColumns, spacing: 20) {
+              LazyVGrid(
+                columns: IOSDesign.gridColumns(for: sizeClass, typeSize: dynamicTypeSize),
+                spacing: 20
+              ) {
                 ForEach(person.items) { item in
                   NavigationLink {
                     IOSDetailView(id: item.detailID, initial: item)
@@ -60,7 +68,7 @@ struct IOSPersonDetailView: View {
                   .accessibilityIdentifier("person-work-\(item.id)")
                 }
               }
-              .padding(.horizontal, IOSDesign.margin)
+              .padding(.horizontal, margin)
             }
           } else {
             ContentUnavailableView("No Titles Found", systemImage: "film").padding(.top, 40)
@@ -76,7 +84,8 @@ struct IOSPersonDetailView: View {
             IOSErrorText(message: error)
             Button("Try Again") { Task { await load() } }.buttonStyle(IOSButtonStyle())
           }
-          .padding(.horizontal, IOSDesign.margin).padding(.top, 60)
+          .frame(maxWidth: .infinity)
+          .padding(.horizontal, margin).padding(.top, 60)
         }
       }
       .padding(.bottom, 32)
@@ -93,48 +102,55 @@ struct IOSPersonDetailView: View {
   }
 
   private func biographySection(_ biography: String) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Text("Biography").font(.title3.weight(.bold))
+    let collapsible = biography.count > (dynamicTypeSize.isAccessibilitySize ? 100 : 240)
+    return VStack(alignment: .leading, spacing: 8) {
+      Text("Biography").font(.title3.weight(.bold)).accessibilityAddTraits(.isHeader)
       Text(biography)
         .font(.subheadline)
         .foregroundStyle(.secondary)
-        .lineLimit(biographyOpen ? nil : 5)
+        .lineLimit(biographyOpen || !collapsible ? nil : 5)
       HStack(spacing: 12) {
-        if biography.count > 280 {
+        if collapsible {
           Button(biographyOpen ? "Less" : "More") { biographyOpen.toggle() }
             .font(.subheadline.weight(.semibold))
             .tint(.white)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
-        Text("From TMDB").font(.caption).foregroundStyle(.tertiary)
+        Text("From TMDB").font(.caption).foregroundStyle(.secondary)
       }
     }
+    .frame(maxWidth: IOSLayoutMetrics.readableContentMaxWidth, alignment: .leading)
+    .padding(.horizontal, margin)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(.horizontal, IOSDesign.margin)
   }
 
   private func knownForSection(_ hits: [IOSWishSearchHit]) -> some View {
-    VStack(alignment: .leading, spacing: 10) {
+    let cardWidth = IOSDesign.posterWidth(for: sizeClass, typeSize: dynamicTypeSize)
+    return VStack(alignment: .leading, spacing: 10) {
       IOSSectionHeader(title: "Known For", count: hits.count)
       if let wishMessage {
         Text(wishMessage).font(.footnote).foregroundStyle(.secondary)
-          .padding(.horizontal, IOSDesign.margin)
+          .padding(.horizontal, margin)
       }
       IOSShelf {
         ForEach(hits) { hit in
           VStack(alignment: .leading, spacing: 5) {
             IOSWishPosterView(
-              posterPath: hit.posterPath, kind: hit.kind, width: IOSDesign.posterWidth,
-              height: IOSDesign.posterWidth * 1.5)
-            Text(hit.title).font(.caption.weight(.semibold)).lineLimit(1)
+              posterPath: hit.posterPath, kind: hit.kind, width: cardWidth,
+              height: cardWidth * 1.5)
+            Text(hit.title).font(.caption.weight(.semibold))
+              .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
             Text(
               [hit.year.map(String.init), hit.kind == .series ? "TV Show" : "Movie"].compactMap {
                 $0
               }.joined(separator: " · ")
             )
-            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            .font(.caption2).foregroundStyle(.secondary)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
             if model.supportsWishes { wishControl(hit) }
           }
-          .frame(width: IOSDesign.posterWidth, alignment: .leading)
+          .frame(width: cardWidth, alignment: .leading)
           .accessibilityIdentifier("known-for-\(hit.id)")
         }
       }
@@ -150,13 +166,16 @@ struct IOSPersonDetailView: View {
       Button {
         Task { await wish(hit) }
       } label: {
-        Label(hit.alreadyWished ? "Me Too" : "Wish", systemImage: "gift").font(
-          .caption.weight(.semibold))
+        Label(hit.alreadyWished ? "Me Too" : "Wish", systemImage: "gift")
+          .font(.caption.weight(.semibold))
+          .frame(minHeight: 36)
       }
       .buttonStyle(.bordered)
-      .controlSize(.small)
       .tint(.white)
+      .frame(minHeight: 44)
       .disabled(wishing != nil)
+      .accessibilityLabel(
+        hit.alreadyWished ? "Me Too for \(hit.title)" : "Wish for \(hit.title)")
     }
   }
 
@@ -176,7 +195,7 @@ struct IOSPersonDetailView: View {
     guard showsProfile, let personKey, let client = model.client else { return }
     // Without TMDB, or while it is away, the page shows the library's titles only.
     if let loaded = try? await client.personProfile(key: personKey), !Task.isCancelled {
-      withAnimation(.easeOut(duration: 0.2)) { profile = loaded }
+      withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { profile = loaded }
     }
   }
 

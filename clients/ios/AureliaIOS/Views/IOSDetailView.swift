@@ -3,10 +3,15 @@ import SwiftUI
 struct IOSDetailView: View {
   @EnvironmentObject private var model: IOSAppModel
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.horizontalSizeClass) private var sizeClass
+  @Environment(\.verticalSizeClass) private var verticalSizeClass
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  @Environment(\.colorSchemeContrast) private var contrast
   let id: UUID
   let initial: IOSCatalogItem
   var selectedEpisodeID: UUID? = nil
   @StateObject private var actions = IOSLibraryActions()
+  private var margin: CGFloat { IOSDesign.margin(for: sizeClass) }
   /// The title to start on another player (Play On).
   @State private var playOn: IOSCatalogItem?
   /// Edit… for administrators.
@@ -46,7 +51,7 @@ struct IOSDetailView: View {
           VStack(alignment: .leading, spacing: 12) {
             IOSErrorText(message: error)
             Button("Try Again") { Task { await load() } }.buttonStyle(IOSButtonStyle())
-          }.padding(.horizontal, IOSDesign.margin)
+          }.padding(.horizontal, margin)
         }
         if item.kind == .series && !seasons.isEmpty {
           episodes
@@ -85,7 +90,7 @@ struct IOSDetailView: View {
       Button("OK") { unavailable = nil }
     } message: { item in
       Text(
-        "\(item.availabilityMessage ?? "This title can't be played right now.") Connect the drive on your Mac, then try again."
+        "\(item.availabilityMessage ?? "This title can't be played right now.") Connect the drive on your server computer, then try again."
       )
     }
     .onChange(of: headerArtwork) { _, _ in failedHeaderArtwork = nil }
@@ -149,7 +154,11 @@ struct IOSDetailView: View {
             if headerArtwork == artwork { failedHeaderArtwork = artwork }
           }
         )
-        .frame(maxWidth: .infinity).frame(height: IOSDesign.isPad ? 460 : 330)
+        .frame(maxWidth: .infinity)
+        .frame(
+          height: IOSLayoutMetrics.detailBackdropHeight(
+            isRegularWidth: sizeClass == .regular, isCompactHeight: verticalSizeClass == .compact)
+        )
         .clipped()
         .overlay {
           LinearGradient(
@@ -194,84 +203,18 @@ struct IOSDetailView: View {
         } else if !loading, plan?.target == nil {
           Text("No playable media available.").font(.footnote).foregroundStyle(.secondary)
         }
-        HStack(spacing: 10) {
-          Button {
-            playTarget()
-          } label: {
-            HStack(spacing: 8) {
-              if launching || (loading && plan == nil) {
-                ProgressView().tint(.black)
-              } else {
-                Image(systemName: "play.fill")
-              }
-              Text(playLabel)
+        if dynamicTypeSize.isAccessibilitySize {
+          VStack(spacing: 10) {
+            playButton
+            HStack(spacing: 12) {
+              secondaryHeaderActions
             }
           }
-          .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
-          .disabled(launching)
-          .accessibilityIdentifier("detail-play")
-          if item.kind == .movie || item.kind == .series {
-            Button {
-              Task { await actions.favorite(item, model: model) }
-            } label: {
-              Image(systemName: item.isFavorite ? "star.fill" : "star")
-            }
-            .buttonStyle(IOSButtonStyle(kind: .icon))
-            .accessibilityIdentifier("detail-favorite")
-            .accessibilityLabel(item.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+        } else {
+          HStack(spacing: 10) {
+            playButton
+            secondaryHeaderActions
           }
-          Menu {
-            // Movies only: a series continues with its episodes and has no Start Over.
-            if item.kind == .movie, plan?.action == .resume, plan?.target?.isPlayable == true {
-              Button("Start Over", systemImage: "arrow.counterclockwise") {
-                playTarget(startOver: true)
-              }
-              .accessibilityIdentifier("detail-start-over")
-            }
-            if IOSAdminPermissions(
-              role: model.session?.user.role, accessMode: model.session?.user.accessMode
-            ).administrator {
-              Button("Edit…", systemImage: "pencil") { editing = true }
-                .accessibilityIdentifier("detail-edit")
-            }
-            if model.supportsRemotePlayback, let target = plan?.target, target.isPlayable {
-              Button("Play On…", systemImage: "airplayvideo") {
-                playOn = target
-              }
-              .accessibilityIdentifier("detail-play-on")
-            }
-            IOSMediaContextActions(item: item, actions: actions, includeFavorite: false)
-            if item.kind == .series, let selectedSeason {
-              let name = selectedSeason == 0 ? "Specials" : "Season \(selectedSeason)"
-              if model.supportsCollections {
-                Button("Add \(name) to Collection…", systemImage: "rectangle.stack.badge.plus") {
-                  actions.requestAddToCollection(
-                    item: item, seasonNumber: selectedSeason, title: "\(item.title) · \(name)")
-                }
-              }
-              Button("Mark \(name) as Watched", systemImage: "checkmark.circle") {
-                seasonWatch(true)
-              }
-              Button("Mark \(name) as Unwatched", systemImage: "circle", role: .destructive) {
-                seasonWatch(false)
-              }
-              if let episodes = season?.episodes.map({ model.overlay($0.item) }),
-                episodes.contains(where: IOSOfflineRules.canDownload)
-              {
-                Button("Download \(name)", systemImage: "arrow.down.circle") {
-                  model.download(episodes: episodes)
-                }
-                .accessibilityIdentifier("detail-download-season")
-              }
-            }
-          } label: {
-            Image(systemName: "ellipsis").font(.body.weight(.semibold))
-              .frame(width: 48, height: 48)
-              .background(IOSDesign.raised, in: Circle())
-              .contentShape(Circle())
-          }
-          .tint(.white)
-          .accessibilityIdentifier("detail-more").accessibilityLabel("More")
         }
         // Parties others started for this title or one of its episodes.
         ForEach(joinableParties) { party in
@@ -308,11 +251,104 @@ struct IOSDetailView: View {
           .accessibilityHint("Shows the full description")
         }
       }
-      .frame(maxWidth: showsHeaderArtwork ? .infinity : 760, alignment: .leading)
-      .padding(.horizontal, IOSDesign.margin)
+      .frame(
+        maxWidth: IOSLayoutMetrics.readableContentMaxWidth,
+        alignment: showsHeaderArtwork ? .center : .leading
+      )
+      .padding(.horizontal, margin)
       .padding(.top, showsHeaderArtwork ? -44 : 16)
-      .frame(maxWidth: .infinity, alignment: .leading)
+      .frame(maxWidth: .infinity, alignment: showsHeaderArtwork ? .center : .leading)
     }
+  }
+
+  private var playButton: some View {
+    Button {
+      playTarget()
+    } label: {
+      HStack(spacing: 8) {
+        if launching || (loading && plan == nil) {
+          ProgressView().tint(.black)
+        } else {
+          Image(systemName: "play.fill")
+        }
+        Text(playLabel)
+      }
+    }
+    .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
+    .disabled(launching)
+    .accessibilityIdentifier("detail-play")
+  }
+
+  @ViewBuilder
+  private var secondaryHeaderActions: some View {
+    if item.kind == .movie || item.kind == .series {
+      Button {
+        Task { await actions.favorite(item, model: model) }
+      } label: {
+        Image(systemName: item.isFavorite ? "star.fill" : "star")
+      }
+      .buttonStyle(IOSButtonStyle(kind: .icon))
+      .accessibilityIdentifier("detail-favorite")
+      .accessibilityLabel(item.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+    }
+    Menu {
+      // Movies only: a series continues with its episodes and has no Start Over.
+      if item.kind == .movie, plan?.action == .resume, plan?.target?.isPlayable == true {
+        Button("Start Over", systemImage: "arrow.counterclockwise") {
+          playTarget(startOver: true)
+        }
+        .accessibilityIdentifier("detail-start-over")
+      }
+      if IOSAdminPermissions(
+        role: model.session?.user.role, accessMode: model.session?.user.accessMode
+      ).administrator {
+        Button("Edit…", systemImage: "pencil") { editing = true }
+          .accessibilityIdentifier("detail-edit")
+      }
+      if model.supportsRemotePlayback, let target = plan?.target, target.isPlayable {
+        Button("Play On…", systemImage: "airplayvideo") {
+          playOn = target
+        }
+        .accessibilityIdentifier("detail-play-on")
+      }
+      IOSMediaContextActions(item: item, actions: actions, includeFavorite: false)
+      if item.kind == .series, let selectedSeason {
+        let name = selectedSeason == 0 ? "Specials" : "Season \(selectedSeason)"
+        if model.supportsCollections {
+          Button("Add \(name) to Collection…", systemImage: "rectangle.stack.badge.plus") {
+            actions.requestAddToCollection(
+              item: item, seasonNumber: selectedSeason, title: "\(item.title) · \(name)")
+          }
+        }
+        Button("Mark \(name) as Watched", systemImage: "checkmark.circle") {
+          seasonWatch(true)
+        }
+        Button("Mark \(name) as Unwatched", systemImage: "circle", role: .destructive) {
+          seasonWatch(false)
+        }
+        if let episodes = season?.episodes.map({ model.overlay($0.item) }),
+          episodes.contains(where: IOSOfflineRules.canDownload)
+        {
+          Button("Download \(name)", systemImage: "arrow.down.circle") {
+            model.download(episodes: episodes)
+          }
+          .accessibilityIdentifier("detail-download-season")
+        }
+      }
+    } label: {
+      Image(systemName: "ellipsis").font(.body.weight(.semibold))
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .frame(width: 48, height: 48)
+        .background(reduceTransparency ? IOSDesign.surface : IOSDesign.raised, in: Circle())
+        .overlay {
+          if contrast == .increased || reduceTransparency {
+            Circle().strokeBorder(.white.opacity(0.35), lineWidth: 1)
+          }
+        }
+        .contentShape(Circle())
+    }
+    .tint(.white)
+    .accessibilityIdentifier("detail-more").accessibilityLabel("More")
   }
 
   /// "42 min left" for a title that has been started.
@@ -321,14 +357,17 @@ struct IOSDetailView: View {
     let minutes = Int(
       (Double(max(0, progress.durationMilliseconds - progress.positionMilliseconds)) / 60_000)
         .rounded(.up))
-    guard minutes > 0 else { return nil }
-    return minutes >= 60 ? "\(minutes / 60) h \(minutes % 60) min left" : "\(minutes) min left"
+    return IOSLayoutMetrics.remainingTimeText(minutes: minutes)
   }
 
   /// The season picker above the season's episodes as a row of wide cards, as on the Mac.
   private var episodes: some View {
     VStack(alignment: .leading, spacing: 12) {
-      HStack {
+      let headerLayout =
+        dynamicTypeSize.isAccessibilitySize
+        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+        : AnyLayout(HStackLayout(alignment: .center))
+      headerLayout {
         Menu {
           Picker(
             "Season",
@@ -341,8 +380,14 @@ struct IOSDetailView: View {
         } label: {
           HStack(spacing: 6) {
             Text(seasonName(selectedSeason ?? 1)).font(.title3.weight(.bold))
-            Image(systemName: "chevron.down").font(.footnote.weight(.bold))
-          }.foregroundStyle(.white)
+            if seasons.count >= 2 {
+              Image(systemName: "chevron.down").font(.footnote.weight(.bold))
+                .accessibilityHidden(true)
+            }
+          }
+          .foregroundStyle(.white)
+          .frame(minHeight: 44)
+          .contentShape(Rectangle())
         }
         .disabled(seasons.count < 2)
         .accessibilityIdentifier("season-picker")
@@ -355,13 +400,14 @@ struct IOSDetailView: View {
             }
           }
         }
-        Spacer()
+        if !dynamicTypeSize.isAccessibilitySize { Spacer() }
         if let count = season?.episodes.count {
-          Text(count == 1 ? "1 episode" : "\(count) episodes").font(.footnote)
+          Text(IOSLayoutMetrics.countPhrase(count, singular: "episode", plural: "episodes"))
+            .font(.footnote)
             .foregroundStyle(.secondary)
         }
       }
-      .padding(.horizontal, IOSDesign.margin)
+      .padding(.horizontal, margin)
       IOSShelf {
         ForEach(season?.episodes ?? [], id: \.item.id) { value in
           let episode = model.overlay(value.item)
@@ -414,7 +460,8 @@ struct IOSDetailView: View {
           NavigationLink {
             IOSDetailView(id: value.detailID, initial: value)
           } label: {
-            IOSPosterLabel(item: value).frame(width: IOSDesign.posterWidth)
+            IOSPosterLabel(item: value)
+              .frame(width: IOSDesign.posterWidth(for: sizeClass, typeSize: dynamicTypeSize))
           }
           .buttonStyle(IOSContentButtonStyle())
         }
@@ -448,26 +495,28 @@ struct IOSDetailView: View {
     }
   }
 
-  /// The facts of the title in two columns; the full text opens from the description above.
+  /// The facts of the title in two columns; collapses to one column at accessibility sizes.
   private func about(_ detail: IOSCatalogDetail) -> some View {
     let fields = IOSDetailPresentation.information(detail)
+    let columns =
+      dynamicTypeSize.isAccessibilitySize
+      ? [GridItem(.flexible(), alignment: .topLeading)]
+      : [
+        GridItem(.flexible(), alignment: .topLeading),
+        GridItem(.flexible(), alignment: .topLeading),
+      ]
     return VStack(alignment: .leading, spacing: 12) {
       if !fields.isEmpty { IOSSectionHeader(title: "Information") }
-      LazyVGrid(
-        columns: [
-          GridItem(.flexible(), alignment: .topLeading),
-          GridItem(.flexible(), alignment: .topLeading),
-        ],
-        alignment: .leading, spacing: 14
-      ) {
+      LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
         ForEach(fields, id: \.title) { field in
           VStack(alignment: .leading, spacing: 2) {
             Text(field.title).font(.caption).foregroundStyle(.secondary)
             Text(field.value).font(.subheadline)
           }
+          .accessibilityElement(children: .combine)
         }
       }
-      .padding(.horizontal, IOSDesign.margin)
+      .padding(.horizontal, margin)
       .accessibilityIdentifier("detail-about")
     }
   }
@@ -617,67 +666,116 @@ struct IOSDetailView: View {
 }
 
 /// A wide card with the title over its picture, as on the Mac: an episode with its number, title,
-/// description and year, or a trailer or extra with its kind.
+/// description and year, or a trailer or extra with its kind. At accessibility text sizes the text
+/// moves below the 16:9 image so nothing clips inside the fixed artwork height.
 private struct IOSWideCard: View {
+  @Environment(\.horizontalSizeClass) private var sizeClass
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let item: IOSCatalogItem
   let eyebrow: String
   let highlighted: Bool
-  private var width: CGFloat { IOSDesign.isPad ? 420 : 300 }
+  private var width: CGFloat { IOSDesign.wideCardWidth(for: sizeClass) }
 
   var body: some View {
-    ZStack(alignment: .bottomLeading) {
-      IOSArtworkView(artwork: item.backdrop ?? item.poster, width: 840, symbol: "play.rectangle")
-        .frame(width: width, height: width * 9 / 16)
-      LinearGradient(
-        colors: [.clear, .black.opacity(0.35), .black.opacity(0.85)], startPoint: .top,
-        endPoint: .bottom)
-      VStack(alignment: .leading, spacing: 3) {
-        Text(item.availabilityMessage ?? eyebrow).font(.caption2.weight(.bold)).tracking(0.6)
-          .foregroundStyle(
-            item.availabilityMessage != nil
-              ? Color.orange : highlighted ? Color.accentColor : .white.opacity(0.85)
+    Group {
+      if dynamicTypeSize.isAccessibilitySize {
+        VStack(alignment: .leading, spacing: 8) {
+          IOSArtworkView(
+            artwork: item.backdrop ?? item.poster, width: 840, symbol: "play.rectangle"
           )
-          .lineLimit(1)
-        Text(item.title).font(.subheadline.weight(.bold)).foregroundStyle(.white).lineLimit(1)
-        if let overview = item.overview, !overview.isEmpty {
-          Text(overview).font(.caption).foregroundStyle(.white.opacity(0.8)).lineLimit(2)
-            .multilineTextAlignment(.leading)
+          .frame(width: width, height: width * 9 / 16)
+          .overlay(alignment: .topTrailing) { IOSItemBadges(item: item).padding(6) }
+          .overlay(alignment: .bottom) {
+            if let fraction = item.progressFraction {
+              IOSProgressBar(fraction: fraction).padding(.horizontal, 10).padding(.bottom, 10)
+            }
+          }
+          .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
+          .opacity(item.isPlayable ? 1 : 0.6)
+          VStack(alignment: .leading, spacing: 4) {
+            Text(item.availabilityMessage ?? eyebrow).font(.caption2.weight(.bold)).tracking(0.6)
+              .foregroundStyle(
+                item.availabilityMessage != nil
+                  ? Color.orange : highlighted ? Color.accentColor : .secondary)
+            Text(item.title).font(.subheadline.weight(.bold)).foregroundStyle(.white)
+            if let overview = item.overview, !overview.isEmpty {
+              Text(overview).font(.caption).foregroundStyle(.secondary)
+                .lineLimit(3).multilineTextAlignment(.leading)
+            }
+            if let year = item.year {
+              Text(String(year)).font(.caption2).foregroundStyle(.secondary)
+            }
+          }
+          .frame(width: width, alignment: .leading)
         }
-        if let year = item.year {
-          Text(String(year)).font(.caption2).foregroundStyle(.white.opacity(0.7))
+      } else {
+        ZStack(alignment: .bottomLeading) {
+          IOSArtworkView(
+            artwork: item.backdrop ?? item.poster, width: 840, symbol: "play.rectangle"
+          )
+          .frame(width: width, height: width * 9 / 16)
+          .opacity(item.isPlayable ? 1 : 0.55)
+          LinearGradient(
+            colors: [.clear, .black.opacity(0.4), .black.opacity(0.88)], startPoint: .top,
+            endPoint: .bottom)
+          VStack(alignment: .leading, spacing: 3) {
+            Text(item.availabilityMessage ?? eyebrow).font(.caption2.weight(.bold)).tracking(0.6)
+              .foregroundStyle(
+                item.availabilityMessage != nil
+                  ? Color.orange : highlighted ? Color.accentColor : .white.opacity(0.85)
+              )
+              .lineLimit(1)
+            Text(item.title).font(.subheadline.weight(.bold)).foregroundStyle(.white).lineLimit(1)
+            if let overview = item.overview, !overview.isEmpty {
+              Text(overview).font(.caption).foregroundStyle(.white.opacity(0.85)).lineLimit(2)
+                .multilineTextAlignment(.leading)
+            }
+            if let year = item.year {
+              Text(String(year)).font(.caption2).foregroundStyle(.white.opacity(0.75))
+            }
+            if let fraction = item.progressFraction {
+              IOSProgressBar(fraction: fraction).padding(.top, 4)
+            }
+          }
+          .padding(12)
         }
-        if let fraction = item.progressFraction {
-          IOSProgressBar(fraction: fraction).padding(.top, 4)
-        }
+        .frame(width: width, height: width * 9 / 16)
+        .overlay(alignment: .topTrailing) { IOSItemBadges(item: item).padding(6) }
+        .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
       }
-      .padding(12)
     }
-    .frame(width: width, height: width * 9 / 16)
-    .overlay(alignment: .topTrailing) { IOSItemBadges(item: item).padding(6) }
-    .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
-    .opacity(item.isPlayable ? 1 : 0.55)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("\(eyebrow), \(item.title)")
+    .accessibilityValue(item.accessibilitySummary)
   }
 }
 
 /// A round portrait with the name and role below.
 private struct IOSPersonLabel: View {
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let person: IOSPersonCard
   var body: some View {
     VStack(spacing: 6) {
       IOSArtworkView(artwork: person.profile, width: 320, symbol: "person.fill")
         .frame(width: 76, height: 76).clipShape(Circle())
         .overlay(Circle().stroke(.white.opacity(0.08), lineWidth: 0.5))
-      Text(person.name).font(.caption.weight(.semibold)).lineLimit(1)
+      Text(person.name).font(.caption.weight(.semibold))
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+        .multilineTextAlignment(.center)
       if let subtitle = person.subtitle {
-        Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+        Text(subtitle).font(.caption2).foregroundStyle(.secondary)
+          .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
           .multilineTextAlignment(.center)
       }
-    }.frame(width: 88)
+    }
+    .frame(width: dynamicTypeSize.isAccessibilitySize ? 148 : 88)
+    .accessibilityElement(children: .combine)
   }
 }
 
 /// The full description and every information field.
 private struct IOSAboutSheet: View {
+  @Environment(\.horizontalSizeClass) private var sizeClass
   let detail: IOSCatalogDetail
   @Environment(\.dismiss) private var dismiss
   var body: some View {
@@ -695,9 +793,10 @@ private struct IOSAboutSheet: View {
               Text(field.title).font(.caption).foregroundStyle(.secondary)
               Text(field.value).font(.subheadline)
             }
+            .accessibilityElement(children: .combine)
           }
         }
-        .padding(IOSDesign.margin).frame(maxWidth: .infinity, alignment: .leading)
+        .padding(IOSDesign.margin(for: sizeClass)).frame(maxWidth: .infinity, alignment: .leading)
       }
       .navigationTitle(detail.metadata.title)
       .navigationBarTitleDisplayMode(.inline)
