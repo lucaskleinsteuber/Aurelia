@@ -13,15 +13,72 @@ enum IOSDesign {
   static let surface = Color(red: 38 / 255, green: 41 / 255, blue: 45 / 255)
   static let raised = Color.white.opacity(0.1)
 
-  /// The side margin of every screen, like Apple's own apps.
+  /// The side margin of every screen, adapting to compact iPad Slide Over / Split View.
   static var margin: CGFloat { isPad ? 28 : 16 }
+  static func margin(for sizeClass: UserInterfaceSizeClass?) -> CGFloat {
+    IOSLayoutMetrics.margin(isRegularWidth: sizeClass == .regular)
+  }
+
   static let cardRadius: CGFloat = 10
   static var posterWidth: CGFloat { isPad ? 150 : 112 }
+  static func posterWidth(
+    for sizeClass: UserInterfaceSizeClass?, typeSize: DynamicTypeSize
+  ) -> CGFloat {
+    IOSLayoutMetrics.posterWidth(
+      isRegularWidth: sizeClass == .regular, isAccessibilitySize: typeSize.isAccessibilitySize)
+  }
+
   static var landscapeWidth: CGFloat { isPad ? 340 : 272 }
+  static func landscapeWidth(
+    for sizeClass: UserInterfaceSizeClass?, availableWidth: CGFloat? = nil
+  ) -> CGFloat {
+    IOSLayoutMetrics.landscapeCardWidth(
+      isRegularWidth: sizeClass == .regular, availableWidth: availableWidth)
+  }
+
+  static func wideCardWidth(
+    for sizeClass: UserInterfaceSizeClass?, availableWidth: CGFloat? = nil
+  ) -> CGFloat {
+    IOSLayoutMetrics.wideCardWidth(
+      isRegularWidth: sizeClass == .regular, availableWidth: availableWidth)
+  }
+
   static var shelfSpacing: CGFloat { isPad ? 16 : 12 }
-  /// Poster grids: three columns on an iPhone in portrait, more where there is room.
+  static func shelfSpacing(for sizeClass: UserInterfaceSizeClass?) -> CGFloat {
+    sizeClass == .regular ? 16 : 12
+  }
+
+  /// Poster grids: three columns on an iPhone in portrait, more where there is room, and wider
+  /// columns at accessibility text sizes so titles do not break into narrow fragments.
   static var gridColumns: [GridItem] {
     [GridItem(.adaptive(minimum: isPad ? 140 : 100), spacing: 12, alignment: .top)]
+  }
+
+  static func gridColumns(
+    for sizeClass: UserInterfaceSizeClass?, typeSize: DynamicTypeSize
+  ) -> [GridItem] {
+    let minimum = IOSLayoutMetrics.posterGridMinimum(
+      isRegularWidth: sizeClass == .regular, isAccessibilitySize: typeSize.isAccessibilitySize)
+    return [GridItem(.adaptive(minimum: minimum), spacing: 12, alignment: .top)]
+  }
+}
+
+/// Adds a Done button above number pads, which have no Return key on iPhone.
+struct IOSNumberPadDoneToolbar: ViewModifier {
+  let action: () -> Void
+  func body(content: Content) -> some View {
+    content.toolbar {
+      ToolbarItemGroup(placement: .keyboard) {
+        Spacer()
+        Button("Done", action: action)
+      }
+    }
+  }
+}
+
+extension View {
+  func iosNumberPadDone(_ action: @escaping () -> Void) -> some View {
+    modifier(IOSNumberPadDoneToolbar(action: action))
   }
 }
 
@@ -36,30 +93,59 @@ struct IOSEyebrow: View {
 
 /// A shelf title with its quiet item count and, when the shelf continues, "See All".
 struct IOSSectionHeader<Destination: View>: View {
+  @Environment(\.horizontalSizeClass) private var sizeClass
+  @Environment(\.dynamicTypeSize) private var typeSize
   let title: String
   var count: Int?
   let destination: Destination?
 
   var body: some View {
+    let margin = IOSDesign.margin(for: sizeClass)
+    Group {
+      if typeSize.isAccessibilitySize {
+        VStack(alignment: .leading, spacing: 6) {
+          heading
+          seeAll
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      } else {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          heading
+          Spacer(minLength: 8)
+          seeAll
+        }
+      }
+    }
+    .padding(.horizontal, margin)
+    .accessibilityElement(children: .contain)
+  }
+
+  private var heading: some View {
     HStack(alignment: .firstTextBaseline, spacing: 8) {
       Text(title).font(.title3.weight(.bold)).accessibilityAddTraits(.isHeader)
       if let count {
-        Text("\(count)").font(.subheadline.weight(.semibold)).foregroundStyle(.tertiary)
-      }
-      Spacer(minLength: 8)
-      if let destination {
-        NavigationLink {
-          destination
-        } label: {
-          HStack(spacing: 3) {
-            Text("See All")
-            Image(systemName: "chevron.right").font(.caption.weight(.bold))
-          }.font(.subheadline.weight(.semibold))
-        }.tint(.white.opacity(0.7)).accessibilityLabel("See all \(title)")
+        Text("\(count)").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
       }
     }
-    .padding(.horizontal, IOSDesign.margin)
-    .accessibilityElement(children: .contain)
+  }
+
+  @ViewBuilder
+  private var seeAll: some View {
+    if let destination {
+      NavigationLink {
+        destination
+      } label: {
+        HStack(spacing: 3) {
+          Text("See All")
+          Image(systemName: "chevron.right").font(.caption.weight(.bold)).accessibilityHidden(true)
+        }
+        .font(.subheadline.weight(.semibold))
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+      }
+      .tint(.white.opacity(0.8))
+      .accessibilityLabel("See all \(title)")
+    }
   }
 }
 
@@ -84,11 +170,12 @@ struct IOSProgressBar: View {
 
 /// A horizontal shelf with the screen margin on both ends.
 struct IOSShelf<Content: View>: View {
+  @Environment(\.horizontalSizeClass) private var sizeClass
   @ViewBuilder let content: Content
   var body: some View {
     ScrollView(.horizontal) {
-      LazyHStack(alignment: .top, spacing: IOSDesign.shelfSpacing) { content }
-        .padding(.horizontal, IOSDesign.margin)
+      LazyHStack(alignment: .top, spacing: IOSDesign.shelfSpacing(for: sizeClass)) { content }
+        .padding(.horizontal, IOSDesign.margin(for: sizeClass))
     }
     .scrollIndicators(.hidden)
     .scrollClipDisabled()
@@ -107,11 +194,12 @@ extension IOSCatalogItem {
 
 /// Cards dim slightly while pressed, like iOS's own artwork buttons.
 struct IOSContentButtonStyle: ButtonStyle {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .opacity(configuration.isPressed ? 0.7 : 1)
-      .scaleEffect(configuration.isPressed ? 0.98 : 1)
-      .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
   }
 }
 
@@ -123,32 +211,49 @@ struct IOSButtonStyle: ButtonStyle {
   var fullWidth = false
   @Environment(\.isEnabled) private var enabled
   @Environment(\.dynamicTypeSize) private var typeSize
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  @Environment(\.colorSchemeContrast) private var contrast
 
   func makeBody(configuration: Configuration) -> some View {
-    // At accessibility text sizes a label wraps instead of ending in "…" ("Pair This iPh…").
-    let wraps = typeSize.isAccessibilitySize && kind != .icon
+    // Allow labels to wrap on narrow widths and larger text sizes instead of ending in "…".
+    let wraps = kind != .icon && (typeSize.isAccessibilitySize || typeSize >= .xLarge)
+    let secondaryFill = reduceTransparency ? IOSDesign.surface : IOSDesign.raised
+    let showsBorder =
+      (contrast == .increased || reduceTransparency) && (kind == .secondary || kind == .icon)
     configuration.label
       .font(kind == .row ? .body : .body.weight(.semibold))
-      .lineLimit(wraps ? 3 : 1)
+      .dynamicTypeSize(
+        kind == .icon ? (...DynamicTypeSize.xxxLarge) : (...DynamicTypeSize.accessibility5)
+      )
+      .lineLimit(kind == .icon ? 1 : (typeSize.isAccessibilitySize ? nil : (wraps ? 2 : 1)))
       .multilineTextAlignment(kind == .row ? .leading : .center)
       .padding(.horizontal, kind == .icon || kind == .row ? 0 : 20)
-      .padding(.vertical, wraps && kind != .row ? 8 : 0)
+      .padding(.vertical, wraps && kind != .row ? 10 : 0)
       .frame(maxWidth: fullWidth ? .infinity : nil)
       .frame(width: kind == .icon ? 48 : nil, height: kind == .icon ? 48 : nil)
-      .frame(minHeight: kind == .icon || kind == .row ? nil : 48)
+      .frame(minHeight: kind == .icon ? nil : (kind == .row ? 44 : 48))
       .foregroundStyle(kind == .primary ? Color.black : Color.white)
       .background {
         switch kind {
         case .primary: Capsule().fill(.white)
-        case .secondary: Capsule().fill(IOSDesign.raised)
-        case .icon: Circle().fill(IOSDesign.raised)
+        case .secondary:
+          Capsule().fill(secondaryFill)
+            .overlay {
+              if showsBorder { Capsule().strokeBorder(.white.opacity(0.35), lineWidth: 1) }
+            }
+        case .icon:
+          Circle().fill(secondaryFill)
+            .overlay {
+              if showsBorder { Circle().strokeBorder(.white.opacity(0.35), lineWidth: 1) }
+            }
         case .row: Color.clear
         }
       }
       .contentShape(kind == .icon ? AnyShape(Circle()) : AnyShape(Rectangle()))
       .opacity(enabled ? (configuration.isPressed ? 0.7 : 1) : 0.4)
-      .scaleEffect(configuration.isPressed && kind != .row ? 0.97 : 1)
-      .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+      .scaleEffect(configuration.isPressed && kind != .row && !reduceMotion ? 0.97 : 1)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
   }
 }
 
