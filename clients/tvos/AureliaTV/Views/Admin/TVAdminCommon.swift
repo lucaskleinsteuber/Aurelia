@@ -14,7 +14,13 @@ final class TVAdministrationModel: ObservableObject {
   private weak var app: TVAppModel?
   private var waiters: [CheckedContinuation<Bool, Never>] = []
 
-  func attach(_ app: TVAppModel) { self.app = app }
+  /// The pages read `permissions` while they are drawn, before `onAppear` attaches the app, so
+  /// attaching asks them to draw again; before, an owner's own rows (Power, Updates…) stayed hidden.
+  func attach(_ app: TVAppModel) {
+    guard self.app !== app else { return }
+    self.app = app
+    objectWillChange.send()
+  }
 
   var client: TVAPIClient? { app?.client }
   var permissions: TVAdminPermissions {
