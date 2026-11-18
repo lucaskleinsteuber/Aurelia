@@ -79,6 +79,10 @@ public sealed class OfflineDownloads
     private List<OfflineTitle> titles = [];
     private readonly Dictionary<Guid, double> active = [];
     private readonly Dictionary<Guid, string> activeNames = [];
+    // One download at a time, in the order they were asked for, so a whole season never takes all
+    // of a profile's streams and the TV keeps playing meanwhile.
+    private Task turn = Task.CompletedTask;
+    private readonly HashSet<Guid> waiting = [];
 
     public OfflineDownloads(string root)
     {
@@ -99,6 +103,9 @@ public sealed class OfflineDownloads
 
     /// <summary>The name of a title downloading now, for the Downloads page.</summary>
     public string? ActiveName(Guid id) { lock (gate) return activeNames.GetValueOrDefault(id); }
+
+    /// <summary>Whether a download waits for the ones before it.</summary>
+    public bool IsWaiting(Guid id) { lock (gate) return waiting.Contains(id); }
 
     public long TotalBytes => Titles.Sum(title => title.Bytes);
 
@@ -140,12 +147,21 @@ public sealed class OfflineDownloads
             }
             active[item.Id] = 0;
             activeNames[item.Id] = subtitle is null ? item.Title : $"{item.Title} · {subtitle}";
+            waiting.Add(item.Id);
             Error = null;
         }
         Changed?.Invoke();
         var folder = Folder(item.Id);
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task previous;
+        lock (gate) (previous, turn) = (turn, done.Task);
+        var hasSlot = false;
         try
         {
+            await previous.WaitAsync(cancel.Token);
+            hasSlot = true;
+            lock (gate) waiting.Remove(item.Id);
+            Changed?.Invoke();
             var ticket = await client.StartAsync(item.Id, cancel.Token, forDownload: true);
             var tickets = new List<Guid> { ticket.Id };
             try
@@ -240,10 +256,14 @@ public sealed class OfflineDownloads
         }
         finally
         {
+            // A download cancelled while it waited hands on its turn only when the one before ends.
+            if (hasSlot) done.TrySetResult();
+            else _ = previous.ContinueWith(_ => done.TrySetResult(), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
             lock (gate)
             {
                 active.Remove(item.Id);
                 activeNames.Remove(item.Id);
+                waiting.Remove(item.Id);
                 running.Remove(item.Id);
             }
             cancel.Dispose();

@@ -321,6 +321,17 @@ public sealed class DetailPage : LibraryPageBase
             menuItems.Add(MenuItem("Mark Series as Watched", () => _ = MediaMenu.MarkAsync(Context, Item.Id, WatchStateScope.Series, true)));
             menuItems.Add(MenuItem("Mark Series as Unwatched", () => _ = MediaMenu.MarkAsync(Context, Item.Id, WatchStateScope.Series, false)));
         }
+        if (Context.Navigator.Downloads is { } downloads)
+        {
+            var missing = current.Episodes.Select(episode => episode.Item)
+                .Where(episode => LibraryPresentation.IsPlayable(episode) && downloads.Find(episode.Id) is null && !downloads.Active.ContainsKey(episode.Id))
+                .ToList();
+            if (missing.Count > 0)
+            {
+                menuItems.Add(new Separator());
+                menuItems.Add(MenuItem($"Download {SeasonName(current)}", () => Context.Navigator.DownloadAll(missing)));
+            }
+        }
         menuItems.Add(new Separator());
         menuItems.Add(MediaMenu.CollectionsMenu(Context, Item, current.Number));
         var picker = new Button

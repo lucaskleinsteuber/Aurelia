@@ -592,36 +592,42 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
     public OfflineDownloads? Downloads => services.Downloads;
 
     /// <summary>Downloads a movie or episode to watch without the server.</summary>
-    public void Download(Aurelia.Contracts.CatalogItemSummary item)
+    public void Download(Aurelia.Contracts.CatalogItemSummary item) => DownloadAll([item]);
+
+    /// <summary>
+    /// Downloads titles one after another, such as a whole season: the quality is chosen once for
+    /// all, and each episode gets the nearest quality the server offers for it, or its original.
+    /// </summary>
+    public void DownloadAll(IReadOnlyList<Aurelia.Contracts.CatalogItemSummary> items)
     {
         if (services.Downloads is not { } downloads || Session.Library is not { } library) return;
-        var subtitle = item.Kind == Aurelia.Contracts.MediaKind.Episode
-            ? string.Join(" · ", new[] { item.ParentTitle, item.SeasonNumber is { } season ? $"S{season} E{item.EpisodeNumber}" : null }.Where(part => part is not null))
-            : item.Year?.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        // The series poster goes along, so an episode looks like its series on the Downloads page.
-        var series = item.ParentId is { } parent ? library.Catalog.FirstOrDefault(each => each.Id == parent) : null;
+        var wanted = items.Where(item => item.Kind is Aurelia.Contracts.MediaKind.Movie or Aurelia.Contracts.MediaKind.Episode
+            && downloads.Find(item.Id) is null && !downloads.Active.ContainsKey(item.Id)).ToList();
+        if (wanted.Count == 0) return;
         var client = new PlaybackClient(Session.Api, library.Client);
         var preference = PlaybackPreferences.Load(services.Settings).DownloadQuality;
         if (!library.Client.Supports(Aurelia.Contracts.ServerFeatures.ConvertedDownloads) || preference == ConvertedDownloads.Original)
         {
-            _ = Task.Run(() => downloads.DownloadAsync(client, item, subtitle, series));
+            Enqueue(downloads, client, library, wanted, null, null);
             return;
         }
-        _ = ChooseDownloadAsync(downloads, client, item, subtitle, series, preference);
+        _ = ChooseDownloadAsync(downloads, client, library, wanted, preference);
     }
 
     /// <summary>The original or a smaller copy the server converts: as set, or asked for now.</summary>
-    private async Task ChooseDownloadAsync(OfflineDownloads downloads, PlaybackClient client, Aurelia.Contracts.CatalogItemSummary item,
-        string? subtitle, Aurelia.Contracts.CatalogItemSummary? series, string preference)
+    private async Task ChooseDownloadAsync(OfflineDownloads downloads, PlaybackClient client, LibraryStore library,
+        List<Aurelia.Contracts.CatalogItemSummary> items, string preference)
     {
+        var first = items[0];
         Aurelia.Contracts.DownloadOptionsResponse? options = null;
-        try { options = await client.DownloadOptionsAsync(item.Id, CancellationToken.None); }
+        try { options = await client.DownloadOptionsAsync(first.Id, CancellationToken.None); }
         catch (Exception failure) when (failure is AureliaApiException or HttpRequestException) { }
         var choice = ConvertedDownloads.Resolve(preference, options);
         string? quality = choice.Quality;
         if (choice.Kind == DownloadChoiceKind.Ask && options is not null && shell?.SheetHost is { } sheets)
         {
-            var sheet = new DownloadQualitySheet(item.Title, options, sheets);
+            var title = items.Count == 1 ? first.Title : $"{first.ParentTitle ?? first.Title} · {items.Count} Episodes";
+            var sheet = new DownloadQualitySheet(title, options, sheets);
             if (!await sheets.ShowAsync(sheet)) return;
             quality = sheet.Quality;
             if (sheet.Remember)
@@ -631,9 +637,43 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         {
             quality = null;
         }
-        var expected = options?.Qualities.FirstOrDefault(each => each.Id == quality)?.EstimatedBytes;
-        _ = Task.Run(() => downloads.DownloadAsync(client, item, subtitle, series, quality, quality is null ? null : options?.AudioTrack, expected));
+        Enqueue(downloads, client, library, items, quality, options);
     }
+
+    /// <summary>
+    /// Hands the titles to the downloads in their order. Each waits for the one before it; the
+    /// Downloads page shows them as waiting until their turn.
+    /// </summary>
+    private static void Enqueue(OfflineDownloads downloads, PlaybackClient client, LibraryStore library,
+        List<Aurelia.Contracts.CatalogItemSummary> items, string? quality, Aurelia.Contracts.DownloadOptionsResponse? firstOptions) =>
+        _ = Task.Run(async () =>
+        {
+            for (var index = 0; index < items.Count; index++)
+            {
+                var item = items[index];
+                var chosen = quality;
+                var options = index == 0 ? firstOptions : null;
+                if (quality is not null && index > 0)
+                {
+                    try { options = await client.DownloadOptionsAsync(item.Id, CancellationToken.None); }
+                    catch (Exception failure) when (failure is AureliaApiException or HttpRequestException) { options = null; }
+                    var own = ConvertedDownloads.Resolve(quality, options);
+                    chosen = own.Kind == DownloadChoiceKind.Converted ? own.Quality : null;
+                }
+                var expected = options?.Qualities.FirstOrDefault(each => each.Id == chosen)?.EstimatedBytes;
+                // Not awaited: the download registers itself now and then waits for its turn.
+                _ = downloads.DownloadAsync(client, item, DownloadSubtitle(item), SeriesOf(library, item), chosen,
+                    chosen is null ? null : options?.AudioTrack, expected);
+            }
+        });
+
+    private static string? DownloadSubtitle(Aurelia.Contracts.CatalogItemSummary item) => item.Kind == Aurelia.Contracts.MediaKind.Episode
+        ? string.Join(" · ", new[] { item.ParentTitle, item.SeasonNumber is { } season ? $"S{season} E{item.EpisodeNumber}" : null }.Where(part => part is not null))
+        : item.Year?.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>The series poster goes along, so an episode looks like its series on the Downloads page.</summary>
+    private static Aurelia.Contracts.CatalogItemSummary? SeriesOf(LibraryStore library, Aurelia.Contracts.CatalogItemSummary item) =>
+        item.ParentId is { } parent ? library.Catalog.FirstOrDefault(each => each.Id == parent) : null;
 
     /// <summary>
     /// Aurelia Test's Reset App Data: stops its own test server, erases the test edition's folders and keyring

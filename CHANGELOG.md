@@ -15,6 +15,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
+- Linux: Settings › Playback › Subtitle Size and Subtitle Background, as in the browser; they apply from the next title. Download Season in a series' season menu loads its episodes one after another in one chosen quality; downloads now run one at a time, and the Downloads page shows the waiting ones.
 - Mac: Settings › Playback › Subtitle Size and Subtitle Background, as in the browser; they apply from the next title. Download Season in a series' season menu loads its episodes one after another in one chosen quality; downloads now run one at a time, and the Downloads page shows the waiting ones.
 - Browser: the PIN screen has Forgot PIN?, which says how to get a new PIN, as in the apps. Media keys, Chrome's and Edge's media controls and the lock screen on Android, iPhone and iPad show the title with its poster and play, pause, skip, seek and change episodes.
 - Server, browser, Mac, Linux and iPhone & iPad: People. A People page (in the sidebar; on iPhone and iPad from Search) lists everyone TMDB identified in the library, those in the most titles first, with a search. With TMDB turned on, a person's page shows their birthday, age, birthplace and biography, their titles in the library, and under Known For the titles they are known for that the library doesn't have, each with Wish or Me Too. The server asks TMDB when a person's page first opens and keeps the answer for 30 days.

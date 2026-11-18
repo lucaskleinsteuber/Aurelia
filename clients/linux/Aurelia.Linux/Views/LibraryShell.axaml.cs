@@ -313,6 +313,8 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
 
     public void Download(CatalogItemSummary item) => Together?.Download(item);
 
+    public void DownloadAll(IReadOnlyList<CatalogItemSummary> items) => Together?.DownloadAll(items);
+
     public void PlayOffline(Aurelia.Linux.Core.Playback.OfflineTitle title) => Together?.PlayOffline(title);
 
     public void EditCollection(CollectionSummary? collection, CatalogItemSummary? preselected) =>

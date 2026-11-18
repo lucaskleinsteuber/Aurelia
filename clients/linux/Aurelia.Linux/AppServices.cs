@@ -60,7 +60,7 @@ public sealed record AppServices(
     /// <summary>Services that touch nothing outside the process, for tests.</summary>
     public static AppServices ForTests(ISettingsStore? settings = null, WindowButtonLayout? layout = null, IServerTransport? transport = null,
         ICredentialStore? credentials = null, IVideoEngineFactory? engines = null, TimeProvider? time = null, ILocalServerHost? host = null,
-        IDesktopNotificationService? notifications = null) => new(
+        IDesktopNotificationService? notifications = null, OfflineDownloads? downloads = null) => new(
             settings ?? new MemorySettingsStore(),
             layout ?? WindowButtonLayout.Default,
             transport ?? new PinnedServerTransport(),
@@ -72,5 +72,6 @@ public sealed record AppServices(
             Engines: engines,
             CreateHost: host is null ? null : () => host,
             HostingSystem: new NoHostingSystem(),
+            Downloads: downloads,
             Notifications: notifications ?? new NoDesktopNotificationService());
 }

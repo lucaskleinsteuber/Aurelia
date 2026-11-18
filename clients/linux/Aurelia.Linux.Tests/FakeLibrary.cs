@@ -188,14 +188,15 @@ internal static class FakeLibrary
     }
 
     /// <summary>Opens the main window with the invented library and an open owner profile.</summary>
-    public static MainWindow ShowLibrary(FakeServer server, SimulatedEngines? engines = null, TimeProvider? time = null, MemoryCredentialStore? keyring = null, Aurelia.Linux.Core.Platform.IDesktopNotificationService? notifications = null)
+    public static MainWindow ShowLibrary(FakeServer server, SimulatedEngines? engines = null, TimeProvider? time = null, MemoryCredentialStore? keyring = null, Aurelia.Linux.Core.Platform.IDesktopNotificationService? notifications = null,
+        Aurelia.Linux.Core.Playback.OfflineDownloads? downloads = null)
     {
         keyring ??= new MemoryCredentialStore
         {
             Server = new StoredServer(FakeServer.ServerId, "Living Room Server", new Uri("https://192.168.1.20:43111"), FakeServer.Fingerprint,
                 "device-token-synthetic-0000000000000000000001", Guid.NewGuid(), DateTimeOffset.UtcNow.AddDays(30)),
         };
-        var window = TestWindows.Show(AppServices.ForTests(transport: server, credentials: keyring, engines: engines, time: time, notifications: notifications));
+        var window = TestWindows.Show(AppServices.ForTests(transport: server, credentials: keyring, engines: engines, time: time, notifications: notifications, downloads: downloads));
         Pump(() => window.Flow.Screen == Core.Flow.AppScreen.ProfilePicker);
         window.Session.OpenProfile(new ProfileSession(
             new UserSummary(OwnerId, "Lucas", UserRole.Owner, DateTimeOffset.UtcNow), Guid.NewGuid(), "profile-token-synthetic-0000000000000000001", DateTimeOffset.UtcNow.AddHours(12)));

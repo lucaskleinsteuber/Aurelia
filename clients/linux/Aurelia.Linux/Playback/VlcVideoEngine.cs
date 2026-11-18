@@ -23,7 +23,7 @@ public sealed partial class VlcEngineFactory : IVideoEngineFactory, IScrubPrevie
 
     private static readonly Lock Gate = new();
     private static bool initialized;
-    private readonly Dictionary<VolumeLeveling, LibVLC> audioLibraries = [];
+    private readonly Dictionary<(VolumeLeveling, SubtitleAppearance), LibVLC> libraries = [];
     private LibVLC? previews;
 
     public IScrubPreviewDecoder CreatePreviewDecoder()
@@ -41,7 +41,9 @@ public sealed partial class VlcEngineFactory : IVideoEngineFactory, IScrubPrevie
 
     public IVideoEngine Create(bool nightMode) => Create(new AudioProcessing(Leveling: nightMode ? VolumeLeveling.Standard : VolumeLeveling.Off));
 
-    public IVideoEngine Create(AudioProcessing processing)
+    public IVideoEngine Create(AudioProcessing processing) => Create(processing, new SubtitleAppearance());
+
+    public IVideoEngine Create(AudioProcessing processing, SubtitleAppearance subtitles)
     {
         lock (Gate)
         {
@@ -50,10 +52,11 @@ public sealed partial class VlcEngineFactory : IVideoEngineFactory, IScrubPrevie
                 LibVLCSharp.Shared.Core.Initialize();
                 initialized = true;
             }
-            if (!audioLibraries.TryGetValue(processing.Leveling, out var library))
+            subtitles = subtitles.Normalized();
+            if (!libraries.TryGetValue((processing.Leveling, subtitles), out var library))
             {
-                library = new LibVLC([.. BaseOptions, .. processing.Options]);
-                audioLibraries.Add(processing.Leveling, library);
+                library = new LibVLC([.. BaseOptions, .. processing.Options, .. subtitles.VlcOptions]);
+                libraries.Add((processing.Leveling, subtitles), library);
             }
             var available = library.AudioFilters.Select(filter => filter.Name).ToHashSet(StringComparer.Ordinal);
             if (processing.Filters.Any(filter => !available.Contains(filter)))

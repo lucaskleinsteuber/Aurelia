@@ -54,6 +54,9 @@ public interface ILibraryNavigator
 
     void Download(CatalogItemSummary item) { }
 
+    /// <summary>Downloads titles one after another, such as a whole season.</summary>
+    void DownloadAll(IReadOnlyList<CatalogItemSummary> items) { }
+
     void PlayOffline(Aurelia.Linux.Core.Playback.OfflineTitle title) { }
 }
 

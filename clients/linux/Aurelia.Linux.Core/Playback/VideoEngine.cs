@@ -81,4 +81,7 @@ public interface IVideoEngineFactory
     IVideoEngine Create(bool nightMode);
 
     IVideoEngine Create(AudioProcessing processing) => Create(processing.Leveling != VolumeLeveling.Off);
+
+    /// <summary>The subtitles' size and background are part of the VLC instance too.</summary>
+    IVideoEngine Create(AudioProcessing processing, SubtitleAppearance subtitles) => Create(processing);
 }

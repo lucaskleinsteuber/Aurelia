@@ -189,6 +189,35 @@ public sealed class LibraryScreenTests
     }
 
     [AvaloniaFact]
+    public void ASeasonDownloadsItsEpisodesOneAfterAnother()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "aurelia-season-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var server = FakeLibrary.Create();
+            var window = FakeLibrary.ShowLibrary(server, downloads: new Aurelia.Linux.Core.Playback.OfflineDownloads(root));
+            var series = window.Session.Library!.Catalog.Single(item => item.Kind == MediaKind.Series);
+            window.Shell!.OpenDetail(series);
+            FakeLibrary.Pump(() => (window.Shell.CurrentPage as DetailPage)?.Detail is not null);
+            var detail = Assert.IsType<DetailPage>(window.Shell.CurrentPage);
+            var picker = detail.GetVisualDescendants().OfType<Button>().Single(button => button.Classes.Contains("seasonMenu"));
+            var entries = Assert.IsType<MenuFlyout>(picker.Flyout).ItemsSource!.OfType<MenuItem>().ToList();
+            var download = entries.Single(entry => entry.Header as string == "Download Season 1");
+
+            download.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+            var one = $"POST /api/v1/media/{FakeLibrary.EpisodeOne}/playback";
+            var two = $"POST /api/v1/media/{FakeLibrary.EpisodeTwo}/playback";
+            FakeLibrary.Pump(() => server.Requests.Contains(two));
+            // The episodes ask the server in their order, the second only after the first ended.
+            Assert.True(server.Requests.IndexOf(one) < server.Requests.IndexOf(two));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [AvaloniaFact]
     public void TheCollectionEditorSavesBoxSetWithOverviewSortOrderAndMembers()
     {
         var server = FakeLibrary.Create();

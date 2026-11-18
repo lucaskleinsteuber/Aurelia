@@ -29,12 +29,16 @@ public sealed record PlaybackPreferences(
     int CinemaTrailers = 2,
     bool PlaySuggestionsAutomatically = false,
     bool ShowGoodNightOnSleepTimer = false,
-    string DownloadQuality = ConvertedDownloads.Ask)
+    string DownloadQuality = ConvertedDownloads.Ask,
+    string SubtitleSize = SubtitleAppearance.Medium,
+    string SubtitleBackground = SubtitleAppearance.Transparent)
 {
     [JsonIgnore]
     public VolumeLeveling EffectiveLeveling => VolumeLeveling ?? (NightMode ? Playback.VolumeLeveling.Standard : Playback.VolumeLeveling.Off);
     [JsonIgnore]
     public AudioProcessing AudioProcessing => new(DialogueBoost, EffectiveLeveling);
+    [JsonIgnore]
+    public SubtitleAppearance Subtitles => new SubtitleAppearance(SubtitleSize, SubtitleBackground).Normalized();
 
     public const string Key = "playback.preferences.v1";
     public static readonly int[] Countdowns = [5, 10, 15, 20, 30];
@@ -63,6 +67,8 @@ public sealed record PlaybackPreferences(
             DefaultAudioLanguage = DefaultAudioLanguage == "original" || Languages.Contains(DefaultAudioLanguage) ? DefaultAudioLanguage : "original",
             DefaultSubtitleLanguage = DefaultSubtitleLanguage == "off" || Languages.Contains(DefaultSubtitleLanguage) ? DefaultSubtitleLanguage : "off",
             DownloadQuality = ConvertedDownloads.Choices.Any(choice => choice.Value == DownloadQuality) ? DownloadQuality : ConvertedDownloads.Ask,
+            SubtitleSize = Subtitles.Size,
+            SubtitleBackground = Subtitles.Background,
         };
     }
 

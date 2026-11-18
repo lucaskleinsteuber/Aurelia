@@ -15,6 +15,7 @@ internal sealed class FakeServer : IServerTransport
 
     private readonly Dictionary<string, Queue<(HttpStatusCode Status, string Body)>> answers = [];
     private readonly Dictionary<string, byte[]> images = [];
+    private readonly Dictionary<string, Task> held = [];
 
     public List<string> Requests { get; } = [];
 
@@ -34,6 +35,13 @@ internal sealed class FakeServer : IServerTransport
     public FakeServer Image(string path, byte[] bytes)
     {
         images[path] = bytes;
+        return this;
+    }
+
+    /// <summary>Answers this request only once <paramref name="until"/> is done, or the request is cancelled.</summary>
+    public FakeServer Hold(string method, string path, Task until)
+    {
+        held[method + " " + path] = until;
         return this;
     }
 
@@ -65,6 +73,7 @@ internal sealed class FakeServer : IServerTransport
             server.Requests.Add(key);
             server.RequestUris.Add(request.Method.Method + " " + request.RequestUri.PathAndQuery);
             if (request.Content is not null) server.Bodies[key] = await request.Content.ReadAsStringAsync(cancellationToken);
+            if (server.held.TryGetValue(key, out var until)) await until.WaitAsync(cancellationToken);
             if (server.images.TryGetValue(request.RequestUri.AbsolutePath, out var image))
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(image) };
             if (!server.answers.TryGetValue(key, out var queue) || queue.Count == 0)

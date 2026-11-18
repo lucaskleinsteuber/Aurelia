@@ -140,8 +140,8 @@ public sealed class DownloadsPage : LibraryPageBase
                 Children =
                 {
                     new TextBlock { Text = downloads.ActiveName(id) ?? "Downloading", MaxWidth = 260, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center },
-                    new ProgressBar { Minimum = 0, Maximum = 1, Value = share, Width = 260, VerticalAlignment = VerticalAlignment.Center },
-                    new TextBlock { Text = $"{(int)(share * 100)} %", VerticalAlignment = VerticalAlignment.Center, Classes = { "subdued" } },
+                    new ProgressBar { Minimum = 0, Maximum = 1, Value = share, Width = 260, VerticalAlignment = VerticalAlignment.Center, IsVisible = !downloads.IsWaiting(id) },
+                    new TextBlock { Text = downloads.IsWaiting(id) ? "Waiting" : $"{(int)(share * 100)} %", VerticalAlignment = VerticalAlignment.Center, Classes = { "subdued" } },
                     cancel,
                 },
             });

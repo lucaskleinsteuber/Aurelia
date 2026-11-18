@@ -119,6 +119,59 @@ public sealed class OfflineDownloadTests : IDisposable
     }
 
     [Fact]
+    public async Task DownloadsRunOneAfterAnotherAndAWaitingOneCanBeCancelled()
+    {
+        CatalogItemSummary Movie(string name) => new OfflineTitle(Guid.NewGuid(), FakeServer.ServerId, FakeLibrary.OwnerId, name, null, MediaKind.Movie,
+            "title.mkv", "video/x-matroska", 0, DateTimeOffset.UtcNow, 0, 0, false, null, false, []).Item();
+        var (first, second, third) = (Movie("First"), Movie("Second"), Movie("Third"));
+        var release = new TaskCompletionSource();
+        var server = new FakeServer().Hold("POST", $"/api/v1/media/{first.Id}/playback", release.Task);
+        using var api = new AureliaApi(server);
+        var stored = new StoredServer(FakeServer.ServerId, "Living Room Server", new Uri("https://192.168.1.20:43111"), FakeServer.Fingerprint,
+            "device-token-synthetic-0000000000000000000001", Guid.NewGuid(), DateTimeOffset.UtcNow.AddDays(30));
+        var profile = new ProfileSession(new UserSummary(FakeLibrary.OwnerId, "Lucas", UserRole.Owner, DateTimeOffset.UtcNow), Guid.NewGuid(),
+            "profile-token-synthetic-0000000000000000001", DateTimeOffset.UtcNow.AddHours(12));
+        var client = new PlaybackClient(api, new LibraryClient(api, stored, profile, ["library-state-v1"]));
+        var downloads = new OfflineDownloads(root);
+        var token = TestContext.Current.CancellationToken;
+
+        var running = downloads.DownloadAsync(client, first, null);
+        var waiting = downloads.DownloadAsync(client, second, null);
+        var last = downloads.DownloadAsync(client, third, null);
+        await Task.Delay(100, token);
+        // Only the first asks the server; the others wait their turn and the Downloads page says so.
+        Assert.Equal([$"POST /api/v1/media/{first.Id}/playback"], server.Requests);
+        Assert.False(downloads.IsWaiting(first.Id));
+        Assert.True(downloads.IsWaiting(second.Id) && downloads.IsWaiting(third.Id));
+        Assert.Equal(3, downloads.Active.Count);
+
+        downloads.Cancel(second.Id);
+        await waiting.WaitAsync(token);
+        Assert.False(downloads.Active.ContainsKey(second.Id));
+        await Task.Delay(50, token);
+        Assert.Single(server.Requests);
+
+        release.SetResult();
+        await Task.WhenAll(running, last).WaitAsync(token);
+        Assert.Equal([$"POST /api/v1/media/{first.Id}/playback", $"POST /api/v1/media/{third.Id}/playback"], server.Requests);
+        Assert.Empty(downloads.Active);
+    }
+
+    [Fact]
+    public void SubtitlesKeepVlcsOwnLookUnlessALookIsChosen()
+    {
+        Assert.Empty(new SubtitleAppearance().VlcOptions);
+        Assert.Equal(["--sub-text-scale=140", "--freetype-background-opacity=255", "--freetype-background-color=0"],
+            new SubtitleAppearance(SubtitleAppearance.Large, SubtitleAppearance.Solid).VlcOptions);
+        Assert.Equal(["--sub-text-scale=70", "--freetype-background-opacity=0", "--freetype-background-color=0"],
+            new SubtitleAppearance(SubtitleAppearance.Small).VlcOptions);
+        var odd = new PlaybackPreferences(SubtitleSize: "huge", SubtitleBackground: "neon").Normalized();
+        Assert.Equal((SubtitleAppearance.Medium, SubtitleAppearance.Transparent), (odd.SubtitleSize, odd.SubtitleBackground));
+        var chosen = new PlaybackPreferences(SubtitleBackground: SubtitleAppearance.SemiTransparent).Normalized();
+        Assert.Equal("--freetype-background-opacity=140", chosen.Subtitles.VlcOptions[1]);
+    }
+
+    [Fact]
     public async Task ADownloadPlaysFromItsFileWithItsSubtitlesAndKeepsProgressOnThisComputer()
     {
         var title = Invented();

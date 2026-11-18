@@ -804,7 +804,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
                 quality = StreamingQualities.Effective(Preferences.StreamingQuality, client.Library.SupportsAdaptiveStreaming);
                 url = StreamingQualities.PlaybackUrl(quality, relay.Start());
             }
-            engine = engines.Create(Preferences.AudioProcessing);
+            engine = engines.Create(Preferences.AudioProcessing, Preferences.Subtitles);
             OnPropertyChanged(nameof(Engine));
             engine.Changed += OnEngineChanged;
             engine.Finished += OnEngineFinished;

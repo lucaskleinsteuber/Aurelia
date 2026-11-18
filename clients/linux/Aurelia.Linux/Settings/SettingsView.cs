@@ -610,7 +610,11 @@ public sealed class SettingsView : UserControl
             Choice("Default Audio Language", null, [("original", "Original"), .. languages], current.DefaultAudioLanguage,
                 value => Save(PlaybackPreferences.Load(Prefs.Store) with { DefaultAudioLanguage = value })),
             Choice("Default Subtitle Language", null, [("off", "File Default"), .. languages], current.DefaultSubtitleLanguage,
-                value => Save(PlaybackPreferences.Load(Prefs.Store) with { DefaultSubtitleLanguage = value }))));
+                value => Save(PlaybackPreferences.Load(Prefs.Store) with { DefaultSubtitleLanguage = value })),
+            Choice("Subtitle Size", "Applies from the next title you open.", SubtitleAppearance.Sizes, current.Subtitles.Size,
+                value => Save(PlaybackPreferences.Load(Prefs.Store) with { SubtitleSize = value })),
+            Choice("Subtitle Background", "Applies from the next title you open.", SubtitleAppearance.Backgrounds, current.Subtitles.Background,
+                value => Save(PlaybackPreferences.Load(Prefs.Store) with { SubtitleBackground = value }))));
         page.Children.Add(new StackPanel
         {
             Orientation = Orientation.Horizontal,

@@ -85,7 +85,8 @@ internal static class MediaMenu
         {
             items.Add(new Separator());
             if (downloads.Active.TryGetValue(item.Id, out var share))
-                items.Add(Item($"Cancel Download ({(int)(share * 100)} %)", "IconWindowClose", () => downloads.Cancel(item.Id)));
+                items.Add(Item(downloads.IsWaiting(item.Id) ? "Cancel Download (Waiting)" : $"Cancel Download ({(int)(share * 100)} %)",
+                    "IconWindowClose", () => downloads.Cancel(item.Id)));
             else if (downloads.Find(item.Id) is not null)
                 items.Add(Item("Remove Download", "IconDownloads", () => downloads.Remove(item.Id)));
             else if (LibraryPresentation.IsPlayable(item))
