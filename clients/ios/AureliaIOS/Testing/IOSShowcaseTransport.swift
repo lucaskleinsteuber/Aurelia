@@ -57,9 +57,12 @@
             ($0["title"] as? String ?? "").localizedCaseInsensitiveContains(term)
           }
         }
+        let offset = Int(parameter("offset") ?? "0") ?? 0
+        let limit = Int(parameter("limit") ?? "60") ?? 60
+        let page = offset < items.count ? Array(items.dropFirst(offset).prefix(limit)) : []
         body = [
-          "items": first ? items : [], "offset": Int(parameter("offset") ?? "0") ?? 0,
-          "limit": 200, "total": items.count, "revision": "showcase",
+          "items": page, "offset": offset,
+          "limit": limit, "total": items.count, "revision": "showcase",
         ]
       } else if path.hasSuffix("/summary"), components.count >= 2 {
         let id = components[components.count - 2].lowercased()
