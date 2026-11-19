@@ -30,13 +30,14 @@ struct IOSAdminProfileIdentity: View {
 
 /// Keep the name label visible after the field has a value.
 struct IOSAdminProfileNameField: View {
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Binding var name: String
 
   var body: some View {
     LabeledContent("Name") {
       TextField("Name", text: $name, prompt: Text("Required"))
         .textContentType(.name)
-        .multilineTextAlignment(.trailing)
+        .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
     }
   }
 }
@@ -94,6 +95,12 @@ struct IOSAdminPicturePicker: View {
           }
         }
         .frame(width: 30, height: 30)
+        .padding(3)
+        .overlay {
+          if selected {
+            Circle().strokeBorder(Color.white, lineWidth: 2)
+          }
+        }
         .frame(width: 44, height: 44)
         .contentShape(Rectangle())
     }
@@ -135,7 +142,15 @@ struct IOSAdminPicturePicker: View {
       .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
     .buttonStyle(.plain)
-    .accessibilityLabel(symbol?.capitalized ?? "Use Initial")
+    .accessibilityLabel(Self.symbolLabel(symbol))
     .accessibilityAddTraits(selected ? .isSelected : [])
+  }
+
+  private static func symbolLabel(_ symbol: String?) -> String {
+    guard let symbol else { return "Use Initial" }
+    switch symbol {
+    case "gamecontroller": return "Game Controller"
+    default: return symbol.capitalized
+    }
   }
 }

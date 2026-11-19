@@ -231,7 +231,7 @@ private struct IOSAdminMetadataReviewsView: View {
                   if let overview = candidate.overview {
                     Text(overview).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                   }
-                  Text("\(Int(candidate.confidence * 100)) % match").font(.caption2)
+                  Text("\(Int(candidate.confidence * 100))% match").font(.caption2)
                     .foregroundStyle(.secondary)
                 }
               }
@@ -296,7 +296,7 @@ private struct IOSAdminSubtitlesView: View {
       Section {
         if provider.hasApiKey {
           LabeledContent("API Key", value: "Saved")
-          Button("Remove API Key", role: .destructive) {
+          Button("Remove API Key…", role: .destructive) {
             confirmation = IOSAdminConfirmation(
               title: "Remove the OpenSubtitles key?", message: "Downloaded subtitles stay.",
               action: "Remove"
@@ -305,7 +305,9 @@ private struct IOSAdminSubtitlesView: View {
             }
           }
         } else {
-          SecureField("API Key", text: $apiKey).textInputAutocapitalization(.never)
+          SecureField("API Key", text: $apiKey)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
         }
         if provider.hasAccount {
           LabeledContent("Account", value: provider.accountName ?? "Saved")
@@ -330,6 +332,7 @@ private struct IOSAdminSubtitlesView: View {
       }
       Section { Text(provider.attribution).font(.caption).foregroundStyle(.secondary) }
     }
+    .scrollDismissesKeyboard(.interactively)
     .adminConfirmation($confirmation)
     .toolbar {
       ToolbarItem(placement: .confirmationAction) {

@@ -6,6 +6,8 @@ import SwiftUI
 struct IOSSettingsTab: View {
   @EnvironmentObject private var model: IOSAppModel
   @Environment(\.horizontalSizeClass) private var sizeClass
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @StateObject private var admin = IOSAdministrationModel()
   @State private var selection: IOSSettingsPage?
   @State private var phonePath: [IOSSettingsPage] = []
@@ -59,6 +61,19 @@ struct IOSSettingsTab: View {
         selection = admin.permissions.storage ? .library : .playback
       }
     }
+    .onChange(of: sizeClass) { _, updated in
+      if updated == .regular {
+        if let active = phonePath.last {
+          selection = active
+        } else if selection == nil {
+          selection = admin.permissions.storage ? .library : .playback
+        }
+      } else if updated == .compact {
+        if let active = selection, phonePath.last != active {
+          phonePath = [active]
+        }
+      }
+    }
     .onChange(of: model.session?.sessionId) { _, _ in
       admin.attach(model)
       phonePath = []
@@ -82,13 +97,17 @@ struct IOSSettingsTab: View {
           Text(activity).font(.subheadline.weight(.semibold))
         }
         .padding(.horizontal, 18).padding(.vertical, 12)
-        .background(.ultraThinMaterial, in: Capsule())
+        .background(
+          reduceTransparency ? AnyShapeStyle(IOSDesign.raised) : AnyShapeStyle(.ultraThinMaterial),
+          in: Capsule()
+        )
+        .padding(.horizontal, 16)
         .padding(.bottom, 12)
-        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
         .accessibilityElement(children: .combine)
       }
     }
-    .animation(.easeOut(duration: 0.2), value: admin.activity)
+    .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: admin.activity)
   }
 }
 
@@ -97,6 +116,7 @@ struct IOSSettingsTab: View {
 struct IOSSettingsRoot: View {
   @EnvironmentObject private var model: IOSAppModel
   @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.colorSchemeContrast) private var contrast
   /// Bound on iPad, where rows choose the page beside the list.
   var selection: Binding<IOSSettingsPage?>?
 
@@ -147,7 +167,7 @@ struct IOSSettingsRoot: View {
           Text(
             admin.isUnlocked
               ? "Server management is unlocked on this \(IOSDesign.deviceName) for a few minutes."
-              : "Changes ask once for the Server Password (or Face ID), which unlocks management for ten minutes."
+              : "Changes ask once for the Server Password (or \(IOSSecureEnclaveSigner.biometryName)), which unlocks management for ten minutes."
           )
         }
       }
@@ -187,7 +207,12 @@ struct IOSSettingsRoot: View {
     // On iPad the chosen page stays marked in the sidebar, as on the Mac.
     .listRowBackground(
       selection?.wrappedValue == page
-        ? RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white.opacity(0.14))
+        ? RoundedRectangle(cornerRadius: 10, style: .continuous)
+          .fill(Color.white.opacity(contrast == .increased ? 0.24 : 0.14))
+          .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+              .stroke(Color.white.opacity(contrast == .increased ? 0.5 : 0), lineWidth: 1)
+          )
           .padding(.horizontal, 8)
         : nil
     )
@@ -207,6 +232,7 @@ struct IOSSettingsRoot: View {
 
 /// A row with a colored icon, the page's name and one line about what it does.
 struct IOSSettingsRowLabel: View {
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let page: IOSSettingsPage
 
   var body: some View {
@@ -221,7 +247,8 @@ struct IOSSettingsRowLabel: View {
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
         Text(page.title)
-        Text(page.subtitle).font(.caption).foregroundStyle(Color.secondary).lineLimit(2)
+        Text(page.subtitle).font(.caption).foregroundStyle(Color.secondary)
+          .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
       }
     }
     .padding(.vertical, 2)

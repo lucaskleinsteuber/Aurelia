@@ -35,6 +35,7 @@ struct IOSAdminSecurityView: View {
 private struct IOSAdminSecurityContent: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let overview: IOSAdminSecurityView.Overview
   let owner: Bool
   let reload: @MainActor @Sendable () async -> Void
@@ -44,6 +45,7 @@ private struct IOSAdminSecurityContent: View {
 
   private var thisDeviceKey: IOSStoredPasskey? { admin.storedPasskey }
   private var biometry: String { IOSSecureEnclaveSigner.biometryName }
+  private var biometrySymbol: String { IOSSecureEnclaveSigner.biometrySymbol }
 
   var body: some View {
     Form {
@@ -74,7 +76,7 @@ private struct IOSAdminSecurityContent: View {
           Button {
             Task { await setUp() }
           } label: {
-            Label("Set Up \(biometry)", systemImage: "faceid")
+            Label("Set Up \(biometry)", systemImage: biometrySymbol)
           }
           .disabled(settingUp)
         }
@@ -88,23 +90,33 @@ private struct IOSAdminSecurityContent: View {
       if !overview.passkeys.isEmpty {
         Section("Keys") {
           ForEach(overview.passkeys) { passkey in
-            HStack {
-              VStack(alignment: .leading, spacing: 2) {
-                Text(passkey.name + (passkey.isThisDevice ? " (This \(IOSDesign.deviceName))" : ""))
-                Text(
-                  "\(passkey.userName) · added \(IOSAdminFormat.relative(passkey.createdAt))\(passkey.lastUsedAt.map { " · used \(IOSAdminFormat.relative($0))" } ?? "")"
-                )
-                .font(.caption).foregroundStyle(.secondary)
+            let info = VStack(alignment: .leading, spacing: 2) {
+              Text(passkey.name + (passkey.isThisDevice ? " (This \(IOSDesign.deviceName))" : ""))
+              Text(
+                "\(passkey.userName) · added \(IOSAdminFormat.relative(passkey.createdAt))\(passkey.lastUsedAt.map { " · used \(IOSAdminFormat.relative($0))" } ?? "")"
+              )
+              .font(.caption).foregroundStyle(.secondary)
+            }
+            let removeButton = Button("Remove", role: .destructive) {
+              confirmation = IOSAdminConfirmation(
+                title: "Remove “\(passkey.name)”?",
+                message: "That device asks for the Server Password again.",
+                action: "Remove"
+              ) { remove(passkey.id) }
+            }
+            .buttonStyle(.borderless)
+            .frame(minHeight: 44)
+            if dynamicTypeSize.isAccessibilitySize {
+              VStack(alignment: .leading, spacing: 6) {
+                info
+                removeButton
               }
-              Spacer()
-              Button("Remove", role: .destructive) {
-                confirmation = IOSAdminConfirmation(
-                  title: "Remove “\(passkey.name)”?",
-                  message: "That device asks for the Server Password again.",
-                  action: "Remove"
-                ) { remove(passkey.id) }
+            } else {
+              HStack {
+                info
+                Spacer()
+                removeButton
               }
-              .buttonStyle(.borderless)
             }
           }
         }
@@ -121,7 +133,11 @@ private struct IOSAdminSecurityContent: View {
             in: 30...365,
             step: 30
           ) {
-            LabeledContent("Keep the Log", value: "\(logDays ?? settings.securityLogDays) days")
+            VStack(alignment: .leading, spacing: 2) {
+              Text("Keep the Log")
+              Text("\(logDays ?? settings.securityLogDays) days")
+                .font(.subheadline).foregroundStyle(.secondary)
+            }
           }
           if let days = logDays, days != settings.securityLogDays {
             Button("Save") {
@@ -139,25 +155,35 @@ private struct IOSAdminSecurityContent: View {
         if !overview.blocked.isEmpty {
           Section {
             ForEach(overview.blocked) { blocked in
-              HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                  Text(blocked.deviceName)
-                  Text(
-                    [
-                      IOSSecurityText.deviceLine(
-                        platform: blocked.platform, ipAddress: blocked.ipAddress),
-                      "blocked \(IOSAdminFormat.relative(blocked.blockedAt))",
-                    ]
-                    .filter { !$0.isEmpty }.joined(separator: " · ")
-                  )
-                  .font(.caption).foregroundStyle(.secondary)
+              let info = VStack(alignment: .leading, spacing: 2) {
+                Text(blocked.deviceName)
+                Text(
+                  [
+                    IOSSecurityText.deviceLine(
+                      platform: blocked.platform, ipAddress: blocked.ipAddress),
+                    "blocked \(IOSAdminFormat.relative(blocked.blockedAt))",
+                  ]
+                  .filter { !$0.isEmpty }.joined(separator: " · ")
+                )
+                .font(.caption).foregroundStyle(.secondary)
+              }
+              let unblockButton = Button("Unblock") {
+                let id = blocked.id
+                Task { await admin.perform("Unblocking…") { try await $0.unblockDevice(id: id) } }
+              }
+              .buttonStyle(.borderless)
+              .frame(minHeight: 44)
+              if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 6) {
+                  info
+                  unblockButton
                 }
-                Spacer()
-                Button("Unblock") {
-                  let id = blocked.id
-                  Task { await admin.perform("Unblocking…") { try await $0.unblockDevice(id: id) } }
+              } else {
+                HStack {
+                  info
+                  Spacer()
+                  unblockButton
                 }
-                .buttonStyle(.borderless)
               }
             }
           } header: {
@@ -254,28 +280,47 @@ private struct IOSAdminSecurityContent: View {
 
 /// A device with its kind, address and when it was last seen, and Block unless it is this one.
 struct IOSSecurityDeviceRow: View {
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let device: IOSSecurityDevice
   let onBlock: () -> Void
 
-  var body: some View {
-    HStack(alignment: .top) {
-      VStack(alignment: .leading, spacing: 3) {
-        HStack(spacing: 6) {
-          Text(device.deviceName + (device.isCurrent ? " (This \(IOSDesign.deviceName))" : ""))
-          if device.isNew {
-            Text("New").font(.caption2.weight(.bold)).padding(.horizontal, 6).padding(.vertical, 2)
-              .background(Capsule().fill(Color.orange.opacity(0.85)))
-          }
+  private var info: some View {
+    VStack(alignment: .leading, spacing: 3) {
+      HStack(spacing: 6) {
+        Text(device.deviceName + (device.isCurrent ? " (This \(IOSDesign.deviceName))" : ""))
+        if device.isNew {
+          Text("New").font(.caption2.weight(.bold)).foregroundStyle(.black)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Capsule().fill(Color.orange))
         }
-        let line = IOSSecurityText.deviceLine(
-          platform: device.platform, ipAddress: device.ipAddress)
-        if !line.isEmpty { Text(line).font(.caption).foregroundStyle(.secondary) }
-        Text("\(device.userName) · last used \(IOSAdminFormat.relative(device.lastSeenAt))")
-          .font(.caption2).foregroundStyle(.secondary)
       }
-      Spacer()
-      if device.canBlock {
-        Button("Block", role: .destructive, action: onBlock).buttonStyle(.borderless)
+      let line = IOSSecurityText.deviceLine(
+        platform: device.platform, ipAddress: device.ipAddress)
+      if !line.isEmpty { Text(line).font(.caption).foregroundStyle(.secondary) }
+      Text("\(device.userName) · last used \(IOSAdminFormat.relative(device.lastSeenAt))")
+        .font(.caption2).foregroundStyle(.secondary)
+    }
+  }
+
+  var body: some View {
+    if dynamicTypeSize.isAccessibilitySize {
+      VStack(alignment: .leading, spacing: 6) {
+        info
+        if device.canBlock {
+          Button("Block", role: .destructive, action: onBlock)
+            .buttonStyle(.borderless)
+            .frame(minHeight: 44)
+        }
+      }
+    } else {
+      HStack(alignment: .top) {
+        info
+        Spacer()
+        if device.canBlock {
+          Button("Block", role: .destructive, action: onBlock)
+            .buttonStyle(.borderless)
+            .frame(minHeight: 44)
+        }
       }
     }
   }
@@ -284,6 +329,7 @@ struct IOSSecurityDeviceRow: View {
 /// The security log, newest first, with a filter and Load More.
 private struct IOSAdminSecurityLogView: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var filter = "all"
   @State private var events: [IOSSecurityEvent] = []
   @State private var before: String?
@@ -294,13 +340,17 @@ private struct IOSAdminSecurityLogView: View {
   var body: some View {
     List {
       Section {
-        Picker("Show", selection: $filter) {
+        let filterPicker = Picker("Show", selection: $filter) {
           Text("All").tag("all")
           Text("Sign-Ins").tag("succeeded")
           Text("Failed").tag("failed")
           Text("Changes").tag("changed")
         }
-        .pickerStyle(.segmented)
+        if dynamicTypeSize >= .xxLarge {
+          filterPicker.pickerStyle(.menu)
+        } else {
+          filterPicker.pickerStyle(.segmented)
+        }
       }
       Section {
         if let error {
@@ -312,7 +362,9 @@ private struct IOSAdminSecurityLogView: View {
           HStack(alignment: .top, spacing: 12) {
             Image(systemName: IOSSecurityText.symbol(event.outcome))
               .foregroundStyle(event.outcome == "failed" ? Color.orange : .secondary)
-              .frame(width: 22)
+              .frame(minWidth: 22)
+              .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+              .accessibilityLabel(event.outcome == "failed" ? "Failed" : "Recorded")
             VStack(alignment: .leading, spacing: 2) {
               Text(IOSSecurityText.kind(event.kind) + (event.detail.map { " · \($0)" } ?? ""))
               Text(
@@ -466,18 +518,29 @@ struct IOSSecurityAlertBanner: View {
   @EnvironmentObject private var model: IOSAppModel
   @ObservedObject var center: IOSSecurityAlertCenter
   @Environment(\.dynamicTypeSize) private var typeSize
+  @Environment(\.verticalSizeClass) private var verticalSizeClass
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var contentHeight: CGFloat = 0
+  @State private var containerWidth: CGFloat = 390
 
-  // Its whole height up to about half a phone screen, then it scrolls: above the tabs it would
-  // otherwise be squeezed and cut its text and buttons short at large text sizes.
+  // Its whole height up to about half the available screen, then it scrolls: above the tabs it
+  // would otherwise be squeezed and cut its text and buttons short at large text sizes or landscape.
   var body: some View {
+    let maxHeight = IOSLayoutMetrics.securityBannerMaxHeight(
+      availableHeight: verticalSizeClass == .compact ? 360 : 840)
     ScrollView { banners.padding(.bottom, showsAnything ? 12 : 0) }
       .onScrollGeometryChange(for: CGFloat.self) {
         $0.contentSize.height
       } action: { _, height in
         contentHeight = height
       }
-      .frame(height: min(contentHeight, 420))
+      .onGeometryChange(for: CGFloat.self) {
+        $0.size.width
+      } action: { width in
+        if width > 0 { containerWidth = width }
+      }
+      .frame(height: min(contentHeight, maxHeight))
       .scrollBounceBehavior(.basedOnSize)
   }
 
@@ -526,12 +589,12 @@ struct IOSSecurityAlertBanner: View {
       }
     }
     .padding(.horizontal, IOSDesign.margin)
-    .animation(.easeOut(duration: 0.2), value: center.newDevices)
-    .animation(.easeOut(duration: 0.2), value: center.unlockRequests)
+    .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: center.newDevices)
+    .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: center.unlockRequests)
   }
 
-  /// Side by side, or one above the other at accessibility text sizes ("Bloc/k" otherwise).
-  private var stacked: Bool { typeSize.isAccessibilitySize }
+  /// Side by side, or one above the other on narrow screens / accessibility text sizes.
+  private var stacked: Bool { typeSize.isAccessibilitySize || containerWidth < 380 }
 
   private func actions<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
     let layout = stacked ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout())
@@ -543,7 +606,11 @@ struct IOSSecurityAlertBanner: View {
       .font(.subheadline)
       .padding(14)
       .frame(maxWidth: 560, alignment: .leading)
-      .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+      .background(
+        reduceTransparency
+          ? AnyShapeStyle(IOSDesign.raised) : AnyShapeStyle(.ultraThickMaterial),
+        in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+      )
       .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
       .accessibilityElement(children: .contain)
   }

@@ -222,7 +222,9 @@ struct IOSManagementUnlockSheet: View {
             Button {
               Task { await admin.unlockWithPasskey() }
             } label: {
-              Label("Unlock with \(IOSSecureEnclaveSigner.biometryName)", systemImage: "faceid")
+              Label(
+                "Unlock with \(IOSSecureEnclaveSigner.biometryName)",
+                systemImage: IOSSecureEnclaveSigner.biometrySymbol)
             }
             .disabled(admin.unlocking)
             .accessibilityIdentifier("admin-unlock-passkey")
@@ -246,6 +248,7 @@ struct IOSManagementUnlockSheet: View {
           }
         }
       }
+      .scrollDismissesKeyboard(.interactively)
       .scrollContentBackground(.hidden)
       .background(IOSDesign.canvas.ignoresSafeArea())
       .navigationTitle("Server Password")
@@ -256,7 +259,7 @@ struct IOSManagementUnlockSheet: View {
         }
         ToolbarItem(placement: .confirmationAction) {
           if admin.unlocking {
-            ProgressView()
+            ProgressView().accessibilityLabel("Unlocking")
           } else {
             Button("Unlock", action: submit).disabled(password.isEmpty)
               .accessibilityIdentifier("admin-unlock")
@@ -272,7 +275,7 @@ struct IOSManagementUnlockSheet: View {
       }
       .onDisappear { password = "" }
     }
-    .presentationDetents([.medium])
+    .presentationDetents([.medium, .large])
     .interactiveDismissDisabled(admin.unlocking)
   }
 
@@ -290,6 +293,7 @@ struct IOSManagementUnlockSheet: View {
 /// way everywhere. Pull to refresh reloads it; a finished change elsewhere reloads it too.
 struct IOSAdminLoader<Value: Sendable, Content: View>: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   let load: @Sendable (IOSAPIClient) async throws -> Value
   @ViewBuilder let content:
     (Value, _ reload: @escaping @MainActor @Sendable () async -> Void) -> Content
@@ -306,7 +310,9 @@ struct IOSAdminLoader<Value: Sendable, Content: View>: View {
             IOSAdminSectionProblem(message: error, retry: reload)
               .padding()
               .frame(maxWidth: .infinity, alignment: .leading)
-              .background(.regularMaterial)
+              .background(
+                reduceTransparency
+                  ? AnyShapeStyle(IOSDesign.raised) : AnyShapeStyle(.regularMaterial))
           }
           content(value, reload)
         }
@@ -318,6 +324,8 @@ struct IOSAdminLoader<Value: Sendable, Content: View>: View {
         } actions: {
           Button("Unlock…") { Task { await reload() } }.buttonStyle(.borderedProminent)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(IOSDesign.canvas.ignoresSafeArea())
       } else if let error {
         ContentUnavailableView {
           Label("Couldn’t Load", systemImage: "exclamationmark.triangle")
@@ -326,8 +334,12 @@ struct IOSAdminLoader<Value: Sendable, Content: View>: View {
         } actions: {
           Button("Try Again") { Task { await reload() } }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(IOSDesign.canvas.ignoresSafeArea())
       } else {
-        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        ProgressView()
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .background(IOSDesign.canvas.ignoresSafeArea())
       }
     }
     .task(id: admin.revision) { await reload() }
@@ -395,12 +407,13 @@ struct IOSAdminForm<Content: View>: View {
   }
 }
 
-/// A confirmation with a destructive button, described in one sentence.
+/// A confirmation alert, described in one sentence.
 struct IOSAdminConfirmation: Identifiable {
   let id = UUID()
   let title: String
   let message: String
   let action: String
+  var isDestructive: Bool = true
   let perform: () -> Void
 }
 
@@ -412,7 +425,9 @@ extension View {
         get: { item.wrappedValue != nil }, set: { if !$0 { item.wrappedValue = nil } }),
       presenting: item.wrappedValue
     ) { confirmation in
-      Button(confirmation.action, role: .destructive) { confirmation.perform() }
+      Button(confirmation.action, role: confirmation.isDestructive ? .destructive : nil) {
+        confirmation.perform()
+      }
       Button("Cancel", role: .cancel) {}
     } message: { confirmation in
       Text(confirmation.message)
@@ -434,6 +449,7 @@ enum IOSAdminFormat {
 /// The first lines of a settings page: its icon, its name and one sentence about what it does,
 /// as on the Mac. Placed as the form's first section.
 struct IOSAdminPageHeader: View {
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let systemImage: String
   let title: String
   let text: String
@@ -452,19 +468,36 @@ struct IOSAdminPageHeader: View {
       tint: IOSSettingsRowLabel.tint(page.group))
   }
 
+  private var iconBadge: some View {
+    Image(systemName: systemImage)
+      .font(.system(size: 22, weight: .semibold))
+      .foregroundStyle(.white)
+      .frame(width: 44, height: 44)
+      .background(tint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+      .accessibilityHidden(true)
+  }
+
+  private var textBlock: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Text(title).font(.headline)
+      Text(text).font(.subheadline).foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+
   var body: some View {
     Section {
-      HStack(alignment: .top, spacing: 14) {
-        Image(systemName: systemImage)
-          .font(.system(size: 22, weight: .semibold))
-          .foregroundStyle(.white)
-          .frame(width: 44, height: 44)
-          .background(tint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-          .accessibilityHidden(true)
-        VStack(alignment: .leading, spacing: 4) {
-          Text(title).font(.headline)
-          Text(text).font(.subheadline).foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+      Group {
+        if dynamicTypeSize.isAccessibilitySize {
+          VStack(alignment: .leading, spacing: 10) {
+            iconBadge
+            textBlock
+          }
+        } else {
+          HStack(alignment: .top, spacing: 14) {
+            iconBadge
+            textBlock
+          }
         }
       }
       .padding(.vertical, 4)
@@ -497,6 +530,8 @@ struct IOSAdminToggleLabel: View {
 /// in its row, so you see what happened where you tapped.
 struct IOSAdminActionButton: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   let title: String
   let systemImage: String
   var detail: String?
@@ -522,36 +557,53 @@ struct IOSAdminActionButton: View {
     self.work = work
   }
 
+  @ViewBuilder
+  private var statusIndicator: some View {
+    switch state {
+    case .running:
+      ProgressView().accessibilityLabel("Working")
+    case .done:
+      Label(doneText, systemImage: "checkmark.circle.fill").labelStyle(.titleAndIcon)
+        .font(.caption.weight(.semibold)).foregroundStyle(.green)
+    default: EmptyView()
+    }
+  }
+
+  private var labelBlock: some View {
+    Label {
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title)
+        if case .failed(let message) = state {
+          Text(message).font(.caption).foregroundStyle(.orange)
+        } else if let detail {
+          Text(detail).font(.caption).foregroundStyle(Color.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+    } icon: {
+      Image(systemName: systemImage)
+    }
+  }
+
   var body: some View {
     Button(role: role) {
       Task { await run() }
     } label: {
-      HStack(alignment: .center, spacing: 10) {
-        Label {
-          VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-            if case .failed(let message) = state {
-              Text(message).font(.caption).foregroundStyle(.orange)
-            } else if let detail {
-              Text(detail).font(.caption).foregroundStyle(Color.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-          }
-        } icon: {
-          Image(systemName: systemImage)
+      if dynamicTypeSize.isAccessibilitySize {
+        VStack(alignment: .leading, spacing: 8) {
+          labelBlock
+          statusIndicator
         }
-        Spacer(minLength: 8)
-        switch state {
-        case .running: ProgressView()
-        case .done:
-          Label(doneText, systemImage: "checkmark.circle.fill").labelStyle(.titleAndIcon)
-            .font(.caption.weight(.semibold)).foregroundStyle(.green)
-        default: EmptyView()
+      } else {
+        HStack(alignment: .center, spacing: 10) {
+          labelBlock
+          Spacer(minLength: 8)
+          statusIndicator
         }
       }
     }
     .disabled(state == .running)
-    .animation(.easeOut(duration: 0.2), value: state)
+    .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: state)
   }
 
   private func run() async {
@@ -580,7 +632,9 @@ struct IOSAdminSectionProblem: View {
       Label("Couldn’t load this part", systemImage: "exclamationmark.triangle")
         .foregroundStyle(.orange)
       Text(message).font(.caption).foregroundStyle(.secondary)
-      Button("Try Again") { Task { await retry() } }.buttonStyle(.borderless)
+      Button("Try Again") { Task { await retry() } }
+        .buttonStyle(.borderless)
+        .frame(minHeight: 44)
     }
   }
 }

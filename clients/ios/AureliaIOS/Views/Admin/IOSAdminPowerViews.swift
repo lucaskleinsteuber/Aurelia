@@ -330,7 +330,8 @@ private struct IOSAdminUpdatesForm: View {
               confirmation = IOSAdminConfirmation(
                 title: "Install the update?",
                 message: "The server restarts once it is installed. Playback stops for a moment.",
-                action: "Install"
+                action: "Install",
+                isDestructive: false
               ) {
                 Task {
                   await admin.perform("Starting the update…") {
@@ -381,6 +382,9 @@ private struct IOSAdminResetForm: View {
   var body: some View {
     Form {
       Section {
+        if libraries.isEmpty {
+          Text("No storage locations to reset.").foregroundStyle(.secondary)
+        }
         ForEach(libraries) { library in
           Toggle(
             isOn: Binding(
@@ -393,7 +397,8 @@ private struct IOSAdminResetForm: View {
           ) {
             VStack(alignment: .leading, spacing: 2) {
               Text(library.name)
-              Text(library.path).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+              Text(library.path).font(.caption).foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.middle)
             }
           }
         }
@@ -429,6 +434,7 @@ private struct IOSAdminResetForm: View {
       }
       if let result { Section { Text(result) } }
     }
+    .scrollDismissesKeyboard(.interactively)
     .scrollContentBackground(.hidden)
     .background(IOSDesign.canvas.ignoresSafeArea())
     .onDisappear { resetTask?.cancel() }
@@ -445,7 +451,8 @@ private struct IOSAdminResetForm: View {
       else { return }
       do {
         while mutation.state == "queued" || mutation.state == "running" {
-          result = "Removing… \(mutation.removedItems) titles so far."
+          result =
+            "Removing… \(IOSLayoutMetrics.countPhrase(mutation.removedItems, singular: "title", plural: "titles")) so far."
           try await Task.sleep(for: .seconds(2))
           let id = mutation.id
           mutation = try await admin.run { try await $0.background.libraryMutation(id: id) }
@@ -453,7 +460,7 @@ private struct IOSAdminResetForm: View {
         try Task.checkCancellation()
         result =
           mutation.error.map { "The reset stopped: \($0)" }
-          ?? "Removed \(mutation.removedItems) titles. The video files are unchanged."
+          ?? "Removed \(IOSLayoutMetrics.countPhrase(mutation.removedItems, singular: "title", plural: "titles")). The video files are unchanged."
         preview = nil
         typed = ""
         selected = []

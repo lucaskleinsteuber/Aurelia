@@ -21,6 +21,13 @@ struct IOSSecureEnclaveSigner: IOSPasskeySigner {
     return context.biometryType == .touchID ? "Touch ID" : "Face ID"
   }
 
+  /// The matching SF Symbol for this device's biometrics.
+  static var biometrySymbol: String {
+    let context = LAContext()
+    _ = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
+    return context.biometryType == .touchID ? "touchid" : "faceid"
+  }
+
   static func create() throws -> IOSSecureEnclaveSigner {
     var error: Unmanaged<CFError>?
     guard

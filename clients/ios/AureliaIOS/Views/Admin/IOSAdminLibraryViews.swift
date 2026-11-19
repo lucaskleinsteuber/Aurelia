@@ -255,6 +255,7 @@ private struct IOSAdminLibraryContent: View {
 
 /// A storage location in the list: name, folder and what it is doing now.
 private struct IOSLibraryRow: View {
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let library: IOSLibrarySummary
   let scan: IOSLibraryScan?
 
@@ -266,7 +267,9 @@ private struct IOSLibraryRow: View {
       )
       .font(.title3)
       .foregroundStyle(library.isAvailable ? Color.secondary : Color.orange)
-      .frame(width: 28)
+      .frame(minWidth: 28)
+      .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+      .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 3) {
         HStack(spacing: 6) {
           Text(library.name).font(.body.weight(.medium))
@@ -275,7 +278,8 @@ private struct IOSLibraryRow: View {
               .accessibilityLabel("Watching for changes")
           }
         }
-        Text(library.path).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        Text(library.path).font(.caption).foregroundStyle(.secondary)
+          .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
           .truncationMode(.middle)
         let waiting = IOSLibraryAdminText.isWaitingForReview(library)
         Text(IOSLibraryAdminText.status(library, scanning: scan != nil))
@@ -293,27 +297,36 @@ private struct IOSLibraryRow: View {
 
 private struct IOSScanRow: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let scan: IOSLibraryScan
   let name: String
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
-      HStack {
-        VStack(alignment: .leading, spacing: 2) {
-          Text(name)
-          Text(
-            [scan.stateTitle, IOSLibraryAdminText.trigger(scan.trigger)].compactMap { $0 }
-              .joined(separator: " · ")
-          )
-          .font(.caption).foregroundStyle(.secondary)
+      let info = VStack(alignment: .leading, spacing: 2) {
+        Text(name)
+        Text(
+          [scan.stateTitle, IOSLibraryAdminText.trigger(scan.trigger)].compactMap { $0 }
+            .joined(separator: " · ")
+        )
+        .font(.caption).foregroundStyle(.secondary)
+      }
+      let stopButton = Button("Stop", role: .destructive) {
+        let id = scan.id
+        Task { await admin.perform { try await $0.cancelScan(id: id) } }
+      }
+      .buttonStyle(.borderless)
+      .frame(minHeight: 44)
+      if dynamicTypeSize.isAccessibilitySize {
+        VStack(alignment: .leading, spacing: 6) {
+          info
+          if scan.isActive { stopButton }
         }
-        Spacer()
-        if scan.isActive {
-          Button("Stop", role: .destructive) {
-            let id = scan.id
-            Task { await admin.perform { try await $0.cancelScan(id: id) } }
-          }
-          .buttonStyle(.borderless)
+      } else {
+        HStack {
+          info
+          Spacer()
+          if scan.isActive { stopButton }
         }
       }
       if let progress = scan.progress, scan.isActive { ProgressView(value: progress).tint(.indigo) }
@@ -325,7 +338,8 @@ private struct IOSScanRow: View {
             VStack(alignment: .leading, spacing: 2) {
               Text(issue.message).font(.caption)
               if let path = issue.path {
-                Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                Text(path).font(.caption2).foregroundStyle(.secondary)
+                  .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
               }
             }
           }
@@ -356,6 +370,7 @@ private struct IOSAdminStorageLocationView: View {
 private struct IOSAdminStorageLocationForm: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let loaded: IOSAdminStorageLocationView.Loaded
   let reload: @MainActor @Sendable () async -> Void
   @State private var confirmation: IOSAdminConfirmation?
@@ -460,10 +475,16 @@ private struct IOSAdminStorageLocationForm: View {
           ForEach(pending) { review in
             VStack(alignment: .leading, spacing: 6) {
               Text(review.detectedTitle)
-              Text(review.relativePath).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+              Text(review.relativePath).font(.caption).foregroundStyle(.secondary)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
               Text(review.reason).font(.caption2).foregroundStyle(.secondary)
-              HStack(spacing: 16) {
+              let actionsLayout =
+                dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                : AnyLayout(HStackLayout(spacing: 16))
+              actionsLayout {
                 Button("Assign to Movie…") { assigning = review }
+                  .frame(minHeight: 44)
                 Button("Leave Out") {
                   let (id, review) = (library.id, review.id)
                   Task {
@@ -472,6 +493,7 @@ private struct IOSAdminStorageLocationForm: View {
                     }
                   }
                 }
+                .frame(minHeight: 44)
               }
               .buttonStyle(.borderless)
               .font(.callout)
@@ -488,17 +510,29 @@ private struct IOSAdminStorageLocationForm: View {
       if !loaded.exclusions.isEmpty {
         Section {
           ForEach(loaded.exclusions) { excluded in
-            HStack {
-              Label(excluded.relativePath, systemImage: excluded.isDirectory ? "folder" : "film")
-                .lineLimit(2)
-              Spacer()
-              Button("Include") {
-                let (library, id) = (library.id, excluded.id)
-                Task {
-                  await admin.perform { try await $0.restoreExclusion(library: library, id: id) }
-                }
+            let rowLabel = Label(
+              excluded.relativePath, systemImage: excluded.isDirectory ? "folder" : "film"
+            )
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+            let includeButton = Button("Include") {
+              let (library, id) = (library.id, excluded.id)
+              Task {
+                await admin.perform { try await $0.restoreExclusion(library: library, id: id) }
               }
-              .buttonStyle(.borderless)
+            }
+            .buttonStyle(.borderless)
+            .frame(minHeight: 44)
+            if dynamicTypeSize.isAccessibilitySize {
+              VStack(alignment: .leading, spacing: 6) {
+                rowLabel
+                includeButton
+              }
+            } else {
+              HStack {
+                rowLabel
+                Spacer()
+                includeButton
+              }
             }
           }
         } header: {
@@ -965,7 +999,12 @@ private struct IOSAdminImportPreviewView: View {
           let counts = summary.counts
           Text(IOSLibraryAdminText.importSummary(counts))
           if counts.pending > 0 || counts.errors > 0 {
-            Text("\(counts.pending) need review · \(counts.errors) errors").foregroundStyle(.orange)
+            let pendingText =
+              counts.pending == 1 ? "1 needs review" : "\(counts.pending) need review"
+            Text(
+              "\(pendingText) · \(IOSLayoutMetrics.countPhrase(counts.errors, singular: "error", plural: "errors"))"
+            )
+            .foregroundStyle(.orange)
           }
           if counts.errors > 0 {
             Text("Fix the errors first: they would import wrongly.").font(.caption).foregroundStyle(
@@ -1335,6 +1374,7 @@ private struct IOSImportAssignmentEditor: View {
 private struct IOSAdminLibraryHealthView: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var problems: Result<[IOSFileProblem], Error>?
   @State private var drives: Result<IOSDriveHealthResponse, Error>?
   @State private var duplicates: Result<[IOSDuplicateGroup], Error>?
@@ -1424,14 +1464,29 @@ private struct IOSAdminLibraryHealthView: View {
   }
 
   private func offlineRow(_ title: IOSHealthOfflineTitle) -> some View {
-    HStack {
-      VStack(alignment: .leading, spacing: 2) {
-        Text(title.title)
-        Text("\(title.libraryName) · away for \(title.daysOffline) days").font(.caption)
-          .foregroundStyle(.secondary)
+    let info = VStack(alignment: .leading, spacing: 2) {
+      Text(title.title)
+      Text(
+        "\(title.libraryName) · away for \(IOSLayoutMetrics.countPhrase(title.daysOffline, singular: "day", plural: "days"))"
+      )
+      .font(.caption).foregroundStyle(.secondary)
+    }
+    let removeButton = Button("Remove", role: .destructive) { confirmRemove(title) }
+      .buttonStyle(.borderless)
+      .frame(minHeight: 44)
+    return Group {
+      if dynamicTypeSize.isAccessibilitySize {
+        VStack(alignment: .leading, spacing: 6) {
+          info
+          removeButton
+        }
+      } else {
+        HStack {
+          info
+          Spacer()
+          removeButton
+        }
       }
-      Spacer()
-      Button("Remove", role: .destructive) { confirmRemove(title) }.buttonStyle(.borderless)
     }
   }
 
@@ -1463,13 +1518,25 @@ private struct IOSAdminLibraryHealthView: View {
             .secondary)
         }
         ForEach(titles) { title in
-          HStack {
-            VStack(alignment: .leading, spacing: 2) {
-              Text(title.title)
-              Text(title.fileName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+          let info = VStack(alignment: .leading, spacing: 2) {
+            Text(title.title)
+            Text(title.fileName).font(.caption).foregroundStyle(.secondary)
+              .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+          }
+          let matchButton = Button("Match…") { matching = title }
+            .buttonStyle(.borderless)
+            .frame(minHeight: 44)
+          if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 6) {
+              info
+              matchButton
             }
-            Spacer()
-            Button("Match…") { matching = title }.buttonStyle(.borderless)
+          } else {
+            HStack {
+              info
+              Spacer()
+              matchButton
+            }
           }
         }
       }
@@ -1484,45 +1551,57 @@ private struct IOSAdminLibraryHealthView: View {
 
   @ViewBuilder
   private func duplicateGroup(_ group: IOSDuplicateGroup) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
+    VStack(alignment: .leading, spacing: 8) {
       Text([group.title, group.year.map(String.init)].compactMap { $0 }.joined(separator: " · "))
         .font(.headline)
       ForEach(group.items) { item in
-        HStack {
-          VStack(alignment: .leading, spacing: 2) {
-            Text(item.fileName).font(.caption).lineLimit(2)
-            Text(
-              item.availability == "available" ? IOSAdminText.bytes(item.fileSize) : "Drive away"
-            )
-            .font(.caption2).foregroundStyle(.secondary)
-          }
-          Spacer()
-          if group.items.count > 1 {
-            Button("Keep") {
-              let target = item.id
-              let sources = group.items.map(\.id).filter { $0 != target }
-              confirmation = IOSAdminConfirmation(
-                title: "Keep this one?",
-                message:
-                  "The others are combined into it, with their watch history and favorites. No file is deleted.",
-                action: "Combine"
-              ) {
-                Task {
-                  if await admin.perform(
-                    "Combining…",
-                    { client in
-                      for source in sources {
-                        try await client.mergeDuplicates(source: source, target: target)
-                      }
-                    })
-                  {
-                    await loadDuplicates()
+        let info = VStack(alignment: .leading, spacing: 2) {
+          Text(item.fileName).font(.caption)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+          Text(
+            item.availability == "available" ? IOSAdminText.bytes(item.fileSize) : "Drive away"
+          )
+          .font(.caption2).foregroundStyle(.secondary)
+        }
+        let keepButton = Button("Keep") {
+          let target = item.id
+          let sources = group.items.map(\.id).filter { $0 != target }
+          confirmation = IOSAdminConfirmation(
+            title: "Keep this one?",
+            message:
+              "The others are combined into it, with their watch history and favorites. No file is deleted.",
+            action: "Combine",
+            isDestructive: false
+          ) {
+            Task {
+              if await admin.perform(
+                "Combining…",
+                { client in
+                  for source in sources {
+                    try await client.mergeDuplicates(source: source, target: target)
                   }
-                }
+                })
+              {
+                await loadDuplicates()
               }
             }
-            .buttonStyle(.borderless)
           }
+        }
+        .buttonStyle(.borderless)
+        .frame(minHeight: 44)
+        if dynamicTypeSize.isAccessibilitySize {
+          VStack(alignment: .leading, spacing: 6) {
+            info
+            if group.items.count > 1 { keepButton }
+          }
+          .padding(.vertical, 2)
+        } else {
+          HStack {
+            info
+            Spacer()
+            if group.items.count > 1 { keepButton }
+          }
+          .padding(.vertical, 2)
         }
       }
     }
@@ -1573,33 +1652,47 @@ private struct IOSAdminLibraryHealthView: View {
         systemImage: IOSFileWatchText.problemSymbol(problem.state)
       )
       .font(.headline)
-      Text(problem.fileName).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+      Text(problem.fileName).font(.caption).foregroundStyle(.secondary)
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
       if let detail = problem.detail { Text(detail).font(.caption) }
       let facts = IOSFileWatchText.facts(problem)
       if !facts.isEmpty { Text(facts).font(.caption2).foregroundStyle(.secondary) }
-      HStack {
-        Button("Examine Again") {
-          let id = problem.mediaId
-          Task {
-            if await admin.perform(nil, { try await $0.recheckFile(mediaId: id) }) {
-              await loadFileWatch()
-            }
-          }
-        }
-        Spacer()
-        Button("Set Aside") {
-          let id = problem.mediaId
-          Task {
-            if await admin.perform(
-              nil, { try await $0.setFileProblemIgnored(mediaId: id, ignored: true) })
-            {
-              await loadFileWatch()
-            }
+      let examineButton = Button("Examine Again") {
+        let id = problem.mediaId
+        Task {
+          if await admin.perform(nil, { try await $0.recheckFile(mediaId: id) }) {
+            await loadFileWatch()
           }
         }
       }
-      .buttonStyle(.borderless)
-      .font(.callout)
+      .frame(minHeight: 44)
+      let setAsideButton = Button("Set Aside") {
+        let id = problem.mediaId
+        Task {
+          if await admin.perform(
+            nil, { try await $0.setFileProblemIgnored(mediaId: id, ignored: true) })
+          {
+            await loadFileWatch()
+          }
+        }
+      }
+      .frame(minHeight: 44)
+      if dynamicTypeSize.isAccessibilitySize {
+        VStack(alignment: .leading, spacing: 6) {
+          examineButton
+          setAsideButton
+        }
+        .buttonStyle(.borderless)
+        .font(.callout)
+      } else {
+        HStack {
+          examineButton
+          Spacer()
+          setAsideButton
+        }
+        .buttonStyle(.borderless)
+        .font(.callout)
+      }
     }
   }
 
@@ -1612,6 +1705,9 @@ private struct IOSAdminLibraryHealthView: View {
           await loadFileWatch()
         }
       case .success(let answer):
+        if answer.drives.isEmpty {
+          Label("No drives reported", systemImage: "externaldrive").foregroundStyle(.secondary)
+        }
         ForEach(answer.drives) { drive in
           VStack(alignment: .leading, spacing: 2) {
             Label(
@@ -1838,12 +1934,16 @@ private struct IOSAdminRelocateView: View {
         .accessibilityIdentifier("relocate-confirm")
       } footer: {
         if let done {
-          Text("\(done.titles) titles now point at the new folder. A scan checks them.")
+          Text(
+            done.titles == 1
+              ? "1 title now points at the new folder. A scan checks it."
+              : "\(done.titles) titles now point at the new folder. A scan checks them.")
         } else if let error {
           Text(error).foregroundStyle(.orange)
         }
       }
     }
+    .scrollDismissesKeyboard(.interactively)
     .scrollContentBackground(.hidden)
     .background(IOSDesign.canvas.ignoresSafeArea())
     .navigationTitle("\(name) Moved")

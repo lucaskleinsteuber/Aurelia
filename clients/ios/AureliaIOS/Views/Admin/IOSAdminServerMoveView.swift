@@ -5,6 +5,8 @@ import SwiftUI
 /// device's sign-in come along; media files are not copied (docs/SERVER_MOVE.md).
 struct IOSAdminServerMoveView: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.horizontalSizeClass) private var sizeClass
   @State private var status: IOSServerMoveStatus?
   @State private var started: IOSServerMoveStarted?
   @State private var withFile = false
@@ -32,6 +34,7 @@ struct IOSAdminServerMoveView: View {
         Section {
           Text(code).font(.system(.largeTitle, design: .monospaced, weight: .semibold))
             .frame(maxWidth: .infinity).textSelection(.enabled)
+            .accessibilityLabel(code.map(String.init).joined(separator: " "))
             .accessibilityIdentifier("move-code")
           if let expires = started.expiresAt.flatMap(IOSServerDate.parse) {
             Text("Valid until \(expires.formatted(date: .omitted, time: .shortened)).")
@@ -69,6 +72,7 @@ struct IOSAdminServerMoveView: View {
         }
       }
     }
+    .scrollDismissesKeyboard(.interactively)
     .scrollContentBackground(.hidden)
     .background(IOSDesign.canvas.ignoresSafeArea())
     .navigationTitle("Move to a New Server")
@@ -89,11 +93,15 @@ struct IOSAdminServerMoveView: View {
 
   @ViewBuilder private var startForm: some View {
     Section {
-      Picker("How", selection: $withFile) {
+      let methodPicker = Picker("How", selection: $withFile) {
         Text("Over the Network").tag(false)
         Text("With a Moving File").tag(true)
       }
-      .pickerStyle(.segmented)
+      if dynamicTypeSize >= .xLarge || sizeClass == .compact {
+        methodPicker.pickerStyle(.menu)
+      } else {
+        methodPicker.pickerStyle(.segmented)
+      }
       if withFile {
         SecureField("Passphrase", text: $passphrase).textContentType(.newPassword)
         SecureField("Repeat Passphrase", text: $again).textContentType(.newPassword)

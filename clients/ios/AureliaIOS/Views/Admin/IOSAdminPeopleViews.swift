@@ -142,19 +142,37 @@ private struct IOSAdminPeopleContent: View {
 
 /// A device in a list, with Sign Out unless it is this one.
 private struct IOSDeviceRow: View {
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let device: IOSDeviceSession
   let signOut: () -> Void
 
+  private var info: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(device.deviceName + (device.isCurrent ? " (This \(IOSDesign.deviceName))" : ""))
+      Text("Last used \(IOSAdminFormat.relative(device.lastSeenAt))")
+        .font(.caption).foregroundStyle(.secondary)
+    }
+  }
+
   var body: some View {
-    HStack {
-      VStack(alignment: .leading, spacing: 2) {
-        Text(device.deviceName + (device.isCurrent ? " (This \(IOSDesign.deviceName))" : ""))
-        Text("Last used \(IOSAdminFormat.relative(device.lastSeenAt))")
-          .font(.caption).foregroundStyle(.secondary)
+    if dynamicTypeSize.isAccessibilitySize {
+      VStack(alignment: .leading, spacing: 6) {
+        info
+        if !device.isCurrent {
+          Button("Sign Out", role: .destructive, action: signOut)
+            .buttonStyle(.borderless)
+            .frame(minHeight: 44)
+        }
       }
-      Spacer()
-      if !device.isCurrent {
-        Button("Sign Out", role: .destructive, action: signOut).buttonStyle(.borderless)
+    } else {
+      HStack {
+        info
+        Spacer()
+        if !device.isCurrent {
+          Button("Sign Out", role: .destructive, action: signOut)
+            .buttonStyle(.borderless)
+            .frame(minHeight: 44)
+        }
       }
     }
   }
@@ -191,6 +209,7 @@ private struct IOSDeviceApprovalSheet: View {
   @Environment(\.dismiss) private var dismiss
   @StateObject private var approval = IOSDeviceApprovalModel()
   @State private var requestTask: Task<Void, Never>?
+  @FocusState private var codeFocused: Bool
 
   var body: some View {
     NavigationStack {
@@ -206,6 +225,7 @@ private struct IOSDeviceApprovalSheet: View {
               })
           )
           .keyboardType(.numberPad)
+          .focused($codeFocused)
           .font(.title2.monospacedDigit())
           .disabled(approval.phase == .deciding)
           Button(action: lookUp) {
@@ -241,6 +261,8 @@ private struct IOSDeviceApprovalSheet: View {
         }
         if let done = approval.done { Section { Text(done) } }
       }
+      .scrollDismissesKeyboard(.interactively)
+      .iosNumberPadDone { codeFocused = false }
       .scrollContentBackground(.hidden)
       .background(IOSDesign.canvas.ignoresSafeArea())
       .navigationTitle("Enter Code")
@@ -257,6 +279,7 @@ private struct IOSDeviceApprovalSheet: View {
 
   private func lookUp() {
     guard approval.canLookUp else { return }
+    codeFocused = false
     requestTask?.cancel()
     requestTask = Task {
       await approval.lookUp { typed in
@@ -289,6 +312,7 @@ private struct IOSAdminCreateProfileView: View {
   @State private var ageLimit: Int?
   @State private var picture: String?
   @State private var saving = false
+  @FocusState private var pinFocused: Bool
 
   private var canSave: Bool {
     IOSProfileRules.isValidName(name)
@@ -317,7 +341,9 @@ private struct IOSAdminCreateProfileView: View {
       Section {
         Toggle("Protect with a PIN", isOn: $protection).disabled(role == "admin")
         if protection {
-          SecureField("PIN (4 to 8 digits)", text: $pin).keyboardType(.numberPad)
+          SecureField("PIN (4 to 8 digits)", text: $pin)
+            .keyboardType(.numberPad)
+            .focused($pinFocused)
           if let problem = IOSProfilePIN.problem(pin) {
             Text(problem).font(.caption).foregroundStyle(.orange)
           }
@@ -337,6 +363,8 @@ private struct IOSAdminCreateProfileView: View {
         }
       }
     }
+    .scrollDismissesKeyboard(.interactively)
+    .iosNumberPadDone { pinFocused = false }
     .toolbar {
       ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
       ToolbarItem(placement: .confirmationAction) {
@@ -405,6 +433,7 @@ private struct IOSAdminProfileForm: View {
   @State private var ageLimit: Int?
   @State private var confirmation: IOSAdminConfirmation?
   @State private var saving = false
+  @FocusState private var pinFocused: Bool
 
   init(
     loaded: IOSAdminProfileEditor.Loaded, reload: @escaping @MainActor @Sendable () async -> Void
@@ -488,6 +517,7 @@ private struct IOSAdminProfileForm: View {
             text: $pin
           )
           .keyboardType(.numberPad)
+          .focused($pinFocused)
           if let problem = IOSProfilePIN.problem(pin) {
             Text(problem).font(.caption).foregroundStyle(.orange)
           }
@@ -538,9 +568,10 @@ private struct IOSAdminProfileForm: View {
           Text("Content Access")
         }
       }
-      if !loaded.devices.isEmpty {
+      let activeDevices = loaded.devices.filter { $0.isActive() }
+      if !activeDevices.isEmpty {
         Section {
-          ForEach(loaded.devices.filter { $0.isActive() }) { device in
+          ForEach(activeDevices) { device in
             IOSDeviceRow(device: device) {
               let id = device.id
               Task { await admin.perform { try await $0.revokeDevice(id: id) } }
@@ -579,6 +610,8 @@ private struct IOSAdminProfileForm: View {
         }
       }
     }
+    .scrollDismissesKeyboard(.interactively)
+    .iosNumberPadDone { pinFocused = false }
     .scrollContentBackground(.hidden)
     .background(IOSDesign.canvas.ignoresSafeArea())
     .adminConfirmation($confirmation)
@@ -647,6 +680,7 @@ private struct IOSAdminTitleChooser: View {
             search.isEmpty ? "Add movies or shows to the library first." : "Try another title."))
       }
       ForEach(shown) { item in
+        let isSelected = selection.contains(item.id)
         Button {
           if let index = selection.firstIndex(of: item.id) {
             selection.remove(at: index)
@@ -665,13 +699,14 @@ private struct IOSAdminTitleChooser: View {
               .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if selection.contains(item.id) {
-              Image(systemName: "checkmark").foregroundStyle(.tint)
+            if isSelected {
+              Image(systemName: "checkmark").foregroundStyle(.tint).accessibilityHidden(true)
             }
           }
           .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
       }
     }
     .searchable(text: $search)
@@ -759,7 +794,11 @@ private struct IOSAdminScreenTimeForm: View {
           }
           if rules.ending == "finishTitle" {
             Stepper(value: $rules.maxOvertimeMinutes, in: 0...180, step: 15) {
-              LabeledContent("At Most", value: "\(rules.maxOvertimeMinutes) minutes longer")
+              VStack(alignment: .leading, spacing: 2) {
+                Text("At Most")
+                Text("\(rules.maxOvertimeMinutes) minutes longer")
+                  .font(.subheadline).foregroundStyle(.secondary)
+              }
             }
           }
           Picker("Then Close", selection: $rules.lockScope) {
@@ -807,7 +846,7 @@ private struct IOSAdminScreenTimeForm: View {
           set: { rule.wrappedValue.bedtime = $0 ? "19:30" : nil }))
       if let bedtime = rule.wrappedValue.bedtime {
         DatePicker(
-          "Bedtime",
+          "Starts At",
           selection: Binding(
             get: { Self.date(bedtime) }, set: { rule.wrappedValue.bedtime = Self.time($0) }),
           displayedComponents: .hourAndMinute)
@@ -828,9 +867,11 @@ private struct IOSAdminScreenTimeForm: View {
           value: Binding(get: { limit }, set: { rule.wrappedValue.dailyLimitMinutes = $0 }),
           in: 15...600, step: 15
         ) {
-          LabeledContent(
-            "Up To",
-            value: limit % 60 == 0 ? "\(limit / 60) h" : "\(limit / 60) h \(limit % 60) min")
+          VStack(alignment: .leading, spacing: 2) {
+            Text("Up To")
+            Text(IOSLayoutMetrics.durationLimitText(minutes: limit))
+              .font(.subheadline).foregroundStyle(.secondary)
+          }
         }
       }
     }
@@ -881,6 +922,7 @@ struct IOSAdminDevicesView: View {
 
 private struct IOSAdminDevicesForm: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let loaded: IOSAdminDevicesView.Loaded
   let reload: @MainActor @Sendable () async -> Void
   @State private var confirmation: IOSAdminConfirmation?
@@ -911,25 +953,13 @@ private struct IOSAdminDevicesForm: View {
       case .own(let devices):
         Section {
           ForEach(devices.filter { $0.isActive() }) { device in
-            HStack {
-              VStack(alignment: .leading, spacing: 2) {
-                Text(
-                  device.deviceName + (device.isCurrent ? " (This \(IOSDesign.deviceName))" : ""))
-                Text("Last used \(IOSAdminFormat.relative(device.lastSeenAt))")
-                  .font(.caption).foregroundStyle(.secondary)
-              }
-              Spacer()
-              if !device.isCurrent {
-                Button("Sign Out", role: .destructive) {
-                  confirmation = IOSAdminConfirmation(
-                    title: "Sign out “\(device.deviceName)”?",
-                    message: "It needs a new code to connect again.", action: "Sign Out"
-                  ) {
-                    let id = device.id
-                    Task { await admin.perform { try await $0.revokeOwnDevice(id: id) } }
-                  }
-                }
-                .buttonStyle(.borderless)
+            IOSDeviceRow(device: device) {
+              confirmation = IOSAdminConfirmation(
+                title: "Sign out “\(device.deviceName)”?",
+                message: "It needs a new code to connect again.", action: "Sign Out"
+              ) {
+                let id = device.id
+                Task { await admin.perform { try await $0.revokeOwnDevice(id: id) } }
               }
             }
           }
@@ -948,12 +978,17 @@ private struct IOSAdminDevicesForm: View {
     VStack(alignment: .leading, spacing: 8) {
       IOSSecurityDeviceRow(device: device, onBlock: { confirmBlock(device) })
       if !device.isCurrent {
-        HStack(spacing: 18) {
+        let layout =
+          dynamicTypeSize.isAccessibilitySize
+          ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+          : AnyLayout(HStackLayout(spacing: 18))
+        layout {
           if device.isNew {
             Button("That Was Me") {
               let id = device.id
               Task { await admin.perform { try await $0.acknowledgeDevice(id: id) } }
             }
+            .frame(minHeight: 44)
           }
           Button("Sign Out", role: .destructive) {
             confirmation = IOSAdminConfirmation(
@@ -964,6 +999,7 @@ private struct IOSAdminDevicesForm: View {
               Task { await admin.perform { try await $0.revokeDevice(id: id) } }
             }
           }
+          .frame(minHeight: 44)
         }
         .buttonStyle(.borderless)
         .font(.callout)

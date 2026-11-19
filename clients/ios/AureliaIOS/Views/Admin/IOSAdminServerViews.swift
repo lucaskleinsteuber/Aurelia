@@ -387,12 +387,13 @@ struct IOSAdminPolicyView: View {
                 value: Binding(get: { value }, set: { numbers[field.key] = $0 }),
                 in: field.range, step: field.step
               ) {
-                LabeledContent(field.label) {
+                VStack(alignment: .leading, spacing: 2) {
+                  Text(field.label)
                   Text(
                     field.unit == ":00"
                       ? String(format: "%02d:00", value) : "\(value) \(field.unit)"
                   )
-                  .monospacedDigit()
+                  .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
                 }
               }
             }
@@ -478,7 +479,11 @@ private struct IOSAdminScrubPreviewsForm: View {
             }
           }
           Stepper(value: binding(\.storageCapMegabytes), in: 100...100_000, step: 100) {
-            LabeledContent("Space at Most", value: "\(current.storageCapMegabytes) MB")
+            VStack(alignment: .leading, spacing: 2) {
+              Text("Space at Most")
+              Text("\(current.storageCapMegabytes) MB")
+                .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+            }
           }
         } footer: {
           Text(
@@ -567,6 +572,7 @@ private struct IOSAdminSegmentsView: View {
 
 private struct IOSAdminSegmentsForm: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let overview: IOSAdminSegmentsView.Overview
   let reload: @MainActor @Sendable () async -> Void
 
@@ -607,7 +613,7 @@ private struct IOSAdminSegmentsForm: View {
           }
         } footer: {
           Text(
-            "The server compares the sound of a season’s episodes, and small grey pictures of the last minutes for credits, in the background while nobody watches. Only the times are stored."
+            "The server compares the sound of a season’s episodes, and small gray pictures of the last minutes for credits, in the background while nobody watches. Only the times are stored."
           )
         }
         Section("Progress") {
@@ -644,24 +650,35 @@ private struct IOSAdminSegmentsForm: View {
         if !overview.series.isEmpty {
           Section("Series") {
             ForEach(overview.series) { series in
-              HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                  Text(series.title)
-                  Text(
-                    "\(series.withIntro) intros · \(series.withCredits) credits of \(series.episodeCount)\(series.pendingCount > 0 ? " · \(series.pendingCount) waiting" : "")"
-                  )
-                  .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Again") {
-                  let id = series.seriesId
-                  Task {
-                    await admin.perform("Starting…") {
-                      _ = try await $0.reanalyzeSegments(seriesId: id)
-                    }
+              let info = VStack(alignment: .leading, spacing: 2) {
+                Text(series.title)
+                Text(
+                  "\(IOSLayoutMetrics.countPhrase(series.withIntro, singular: "intro", plural: "intros")) · \(series.withCredits) credits of \(series.episodeCount)\(series.pendingCount > 0 ? " · \(series.pendingCount) waiting" : "")"
+                )
+                .font(.caption).foregroundStyle(.secondary)
+              }
+              let againButton = Button("Again") {
+                let id = series.seriesId
+                Task {
+                  await admin.perform("Starting…") {
+                    _ = try await $0.reanalyzeSegments(seriesId: id)
                   }
                 }
-                .buttonStyle(.borderless)
+              }
+              .buttonStyle(.borderless)
+              .frame(minHeight: 44)
+              .accessibilityLabel("Examine \(series.title) again")
+              if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 6) {
+                  info
+                  againButton
+                }
+              } else {
+                HStack {
+                  info
+                  Spacer()
+                  againButton
+                }
               }
             }
           }
@@ -820,6 +837,7 @@ private struct IOSAdminTranscodingView: View {
 /// Recent scans and metadata jobs, with Retry for a failed one.
 private struct IOSAdminJobsView: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
   var body: some View {
     IOSAdminLoader {
@@ -843,19 +861,28 @@ private struct IOSAdminJobsView: View {
         Section("Movie and TV Information") {
           if jobs.metadata.isEmpty { Text("No jobs yet").foregroundStyle(.secondary) }
           ForEach(jobs.metadata) { job in
-            HStack {
-              VStack(alignment: .leading, spacing: 2) {
-                Text(job.summary)
-                Text(IOSAdminFormat.relative(job.completedAt ?? job.createdAt)).font(.caption)
-                  .foregroundStyle(.secondary)
+            let info = VStack(alignment: .leading, spacing: 2) {
+              Text(job.summary)
+              Text(IOSAdminFormat.relative(job.completedAt ?? job.createdAt)).font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            let canRetry = job.state == "failed" || job.state == "interrupted"
+            let retryButton = Button("Retry") {
+              let id = job.id
+              Task { await admin.perform { try await $0.retryMetadataJob(id: id) } }
+            }
+            .buttonStyle(.borderless)
+            .frame(minHeight: 44)
+            if dynamicTypeSize.isAccessibilitySize {
+              VStack(alignment: .leading, spacing: 6) {
+                info
+                if canRetry { retryButton }
               }
-              Spacer()
-              if job.state == "failed" || job.state == "interrupted" {
-                Button("Retry") {
-                  let id = job.id
-                  Task { await admin.perform { try await $0.retryMetadataJob(id: id) } }
-                }
-                .buttonStyle(.borderless)
+            } else {
+              HStack {
+                info
+                Spacer()
+                if canRetry { retryButton }
               }
             }
           }
@@ -892,6 +919,7 @@ private struct IOSAdminBackupsView: View {
 private struct IOSAdminBackupsForm: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let backups: [IOSServerBackup]
   let configuration: IOSServerConfiguration?
   let canRestore: Bool
@@ -912,25 +940,35 @@ private struct IOSAdminBackupsForm: View {
       Section("On the Server") {
         if backups.isEmpty { Text("No backups yet").foregroundStyle(.secondary) }
         ForEach(backups) { backup in
-          HStack {
-            VStack(alignment: .leading, spacing: 2) {
-              Text(backup.kind.capitalized)
-              Text("\(IOSAdminFormat.date(backup.createdAt)) · \(IOSAdminText.bytes(backup.bytes))")
-                .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("Check") {
-              let name = backup.name
-              Task {
-                if let valid = await admin.value(
-                  "Checking the backup…", { try await $0.verifyBackup(name: name) })
-                {
-                  message =
-                    valid ? "The backup is complete and readable." : "The backup is damaged."
-                }
+          let info = VStack(alignment: .leading, spacing: 2) {
+            Text(backup.kind.capitalized)
+            Text("\(IOSAdminFormat.date(backup.createdAt)) · \(IOSAdminText.bytes(backup.bytes))")
+              .font(.caption).foregroundStyle(.secondary)
+          }
+          let checkButton = Button("Check") {
+            let name = backup.name
+            Task {
+              if let valid = await admin.value(
+                "Checking the backup…", { try await $0.verifyBackup(name: name) })
+              {
+                message =
+                  valid ? "The backup is complete and readable." : "The backup is damaged."
               }
             }
-            .buttonStyle(.borderless)
+          }
+          .buttonStyle(.borderless)
+          .frame(minHeight: 44)
+          if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 6) {
+              info
+              checkButton
+            }
+          } else {
+            HStack {
+              info
+              Spacer()
+              checkButton
+            }
           }
         }
         Button("Back Up Now") {
@@ -1016,6 +1054,7 @@ private struct IOSAdminBackupsForm: View {
       }
       if let message { Section { Text(message) } }
     }
+    .scrollDismissesKeyboard(.interactively)
     .scrollContentBackground(.hidden)
     .background(IOSDesign.canvas.ignoresSafeArea())
     .refreshable { await reload() }
@@ -1116,6 +1155,7 @@ private struct IOSAdminDiagnosticsView: View {
 /// Performance: response times per endpoint and slow database queries, measured by the server.
 private struct IOSAdminPerformanceView: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var confirmation: IOSAdminConfirmation?
 
   var body: some View {
@@ -1126,7 +1166,7 @@ private struct IOSAdminPerformanceView: View {
         Section {
           LabeledContent("Requests", value: performance.requests.formatted())
           LabeledContent(
-            "95 % Answered Within", value: IOSPerformanceText.duration(performance.p95Milliseconds))
+            "95% Answered Within", value: IOSPerformanceText.duration(performance.p95Milliseconds))
           LabeledContent(
             "Slow Queries", value: "\(performance.slowQueries.filter { !$0.warmUp }.count)")
         } footer: {
@@ -1141,9 +1181,10 @@ private struct IOSAdminPerformanceView: View {
           ForEach(performance.endpoints.prefix(15)) { endpoint in
             VStack(alignment: .leading, spacing: 3) {
               Text("\(endpoint.method) \(IOSPerformanceText.route(endpoint.route))")
-                .font(.subheadline.monospaced()).lineLimit(2)
+                .font(.subheadline.monospaced())
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
               Text(
-                "median \(IOSPerformanceText.duration(endpoint.medianMilliseconds)) · 95 % \(IOSPerformanceText.duration(endpoint.p95Milliseconds)) · \(endpoint.count) requests · \(String(format: "%.1f", endpoint.queriesPerRequest)) queries"
+                "median \(IOSPerformanceText.duration(endpoint.medianMilliseconds)) · 95% \(IOSPerformanceText.duration(endpoint.p95Milliseconds)) · \(IOSLayoutMetrics.countPhrase(Int(endpoint.count), singular: "request", plural: "requests")) · \(String(format: "%.1f", endpoint.queriesPerRequest)) queries"
               )
               .font(.caption)
               .foregroundStyle(
