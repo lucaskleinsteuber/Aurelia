@@ -476,6 +476,9 @@ struct IOSPairingView: View {
       .frame(maxWidth: .infinity)
     }
     .scrollDismissesKeyboard(.interactively)
+    .safeAreaInset(edge: .top, spacing: 0) {
+      IOSDesign.canvas.frame(height: 1)
+    }
     .iosNumberPadDone { focused = false }
     .onAppear {
       if !IOSDesign.isPad { focused = true }
