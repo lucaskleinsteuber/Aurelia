@@ -15,6 +15,8 @@ private enum MovieNightPalette {
 struct IOSMovieNightView: View {
   @EnvironmentObject private var model: IOSAppModel
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.horizontalSizeClass) private var sizeClass
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   @StateObject private var session: IOSMovieNightSession
   let joining: IOSMovieNightSummary?
   let onPlay: (UUID) -> Void
@@ -42,6 +44,8 @@ struct IOSMovieNightView: View {
                 session.errorText = nil
               } label: {
                 Image(systemName: "xmark")
+                  .frame(width: 44, height: 44)
+                  .contentShape(Rectangle())
               }
               .accessibilityLabel("Dismiss")
             }
@@ -51,7 +55,7 @@ struct IOSMovieNightView: View {
           }
           content
         }
-        .padding(.horizontal, IOSDesign.margin)
+        .padding(.horizontal, IOSDesign.margin(for: sizeClass))
         .padding(.top, 56)
         .padding(.bottom, 32)
         .frame(maxWidth: 560)
@@ -66,11 +70,18 @@ struct IOSMovieNightView: View {
           }
         } label: {
           Image(systemName: "xmark").font(.headline)
+            .foregroundStyle(.white)
+            .frame(width: 48, height: 48)
+            .background(
+              IOSDesign.canvas.opacity(reduceTransparency ? 1 : 0.78), in: Circle()
+            )
+            .overlay(Circle().strokeBorder(.white.opacity(0.24), lineWidth: 1))
+            .contentShape(Circle())
         }
-        .buttonStyle(IOSButtonStyle(kind: .icon))
+        .buttonStyle(IOSContentButtonStyle())
         .accessibilityLabel("Leave Movie Night")
       }
-      .padding(.horizontal, IOSDesign.margin)
+      .padding(.horizontal, IOSDesign.margin(for: sizeClass))
       .padding(.top, 4)
     }
     .preferredColorScheme(.dark)
@@ -116,8 +127,10 @@ struct IOSMovieNightView: View {
         HStack(spacing: 12) {
           Text(String(member.name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased())
             .font(.headline)
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .frame(width: 36, height: 36)
             .background(IOSDesign.raised, in: Circle())
+            .accessibilityHidden(true)
           VStack(alignment: .leading, spacing: 2) {
             Text(member.isYou ? "\(member.name) (you)" : member.name).font(.body.weight(.semibold))
             Text(
@@ -148,7 +161,7 @@ struct IOSMovieNightView: View {
       heading(
         "Movie Night",
         voters == 0
-          ? "Nobody is swiping yet. Open Aurelia on another phone and join this night."
+          ? "Nobody is swiping yet. Open Aurelia on another device and join this night."
           : "\(voters == 1 ? "1 person is" : "\(voters) people are") ready to swipe. Anyone else at home can join from Aurelia."
       )
       IOSMovieNightProgramCard(state: state, voters: voters) { program in
@@ -221,13 +234,14 @@ struct IOSMovieNightView: View {
 private struct IOSMovieNightStack: View {
   @ObservedObject var session: IOSMovieNightSession
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.verticalSizeClass) private var verticalSizeClass
   @State private var offset: CGSize = .zero
   @State private var flying = false
 
   var body: some View {
     let cards = Array(session.remaining.prefix(3))
     let total = session.deck.count
-    VStack(spacing: 26) {
+    VStack(spacing: verticalSizeClass == .compact ? 16 : 26) {
       GeometryReader { geometry in
         ZStack {
           ForEach(Array(cards.enumerated().reversed()), id: \.element.id) { index, card in
@@ -238,7 +252,9 @@ private struct IOSMovieNightStack: View {
             .offset(y: index == 0 ? 0 : CGFloat(index) * 24)
             .brightness(index == 0 ? 0 : -0.25 * Double(index))
             .offset(index == 0 ? offset : .zero)
-            .rotationEffect(.degrees(index == 0 ? Double(offset.width / 16) : 0))
+            .rotationEffect(
+              .degrees(index == 0 && !reduceMotion ? Double(offset.width / 16) : 0)
+            )
             .simultaneousGesture(
               drag(width: geometry.size.width, card: card), including: index == 0 ? .all : .none
             )
@@ -248,9 +264,9 @@ private struct IOSMovieNightStack: View {
         }
       }
       .aspectRatio(2 / 3, contentMode: .fit)
-      .frame(maxWidth: 380)
+      .frame(maxWidth: verticalSizeClass == .compact ? 220 : 380)
       .frame(maxWidth: .infinity)
-      HStack(spacing: 28) {
+      HStack(spacing: 16) {
         button(.nope, card: cards.first)
         VStack(spacing: 2) {
           Text("\(total - session.remaining.count + 1) of \(total)").font(
@@ -261,7 +277,7 @@ private struct IOSMovieNightStack: View {
               .font(.caption).foregroundStyle(.secondary).lineLimit(1)
           }
         }
-        .frame(minWidth: 90)
+        .frame(minWidth: 72)
         button(.like, card: cards.first)
       }
       Text("Swipe right if you'd watch it tonight, left if not.")
@@ -294,7 +310,9 @@ private struct IOSMovieNightStack: View {
         {
           fly(choice, card: card)
         } else {
-          withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) { offset = .zero }
+          withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.7)) {
+            offset = .zero
+          }
         }
       }
   }
@@ -383,6 +401,8 @@ private struct IOSMovieNightCardView: View {
 
 /// The match as a cinema ticket: poster and lines on paper, and a stub that admits the voters.
 private struct IOSMovieNightTicket: View {
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @ScaledMetric(relativeTo: .largeTitle) private var headlineSize: CGFloat = 32
   let outcome: IOSMovieNightResult
   let voters: [String]
 
@@ -394,18 +414,22 @@ private struct IOSMovieNightTicket: View {
             .frame(width: 128, height: 192)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        Text(outcome.headline).font(.system(size: 32, weight: .black))
+        Text(outcome.headline).font(.system(size: min(headlineSize, 46), weight: .black))
         if let card = outcome.card {
           VStack(alignment: .leading, spacing: 2) {
             Text(card.title).font(.title3.weight(.bold))
-            if !card.meta.isEmpty { Text(card.meta).font(.subheadline).opacity(0.62) }
+            if !card.meta.isEmpty { Text(card.meta).font(.subheadline).opacity(0.76) }
           }
         }
         Text(outcome.line).font(.body)
       }
       .padding(20)
       if outcome.card != nil {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        let stubLayout =
+          dynamicTypeSize.isAccessibilitySize
+          ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+          : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
+        stubLayout {
           Text(
             outcome.isUnanimous
               ? "Admit \(voters.count)" : "\(outcome.likes) of \(outcome.voters) said yes"
@@ -529,7 +553,8 @@ private struct IOSMovieNightProgramCard: View {
           ForEach(options, id: \.0) { option in
             Button(option.1) { choose(option.0) }
               .font(.subheadline.weight(.semibold))
-              .padding(.horizontal, 12).padding(.vertical, 7)
+              .padding(.horizontal, 12)
+              .frame(minHeight: 44)
               .background(
                 option.0 == selected ? Color.white : Color.white.opacity(0.1), in: Capsule()
               )

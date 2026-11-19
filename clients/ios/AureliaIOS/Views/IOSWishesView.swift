@@ -47,6 +47,8 @@ struct IOSWishesView: View {
 
   @EnvironmentObject private var model: IOSAppModel
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.horizontalSizeClass) private var sizeClass
+  @FocusState private var manualYearFocused: Bool
 
   @State private var wishes: [IOSWishSummary] = []
   @State private var filter: Filter = .open
@@ -91,9 +93,13 @@ struct IOSWishesView: View {
         filterBar
         wishesSection
       }
-      .padding(.horizontal, IOSDesign.margin)
+      .frame(maxWidth: IOSLayoutMetrics.readableContentMaxWidth, alignment: .leading)
+      .padding(.horizontal, IOSDesign.margin(for: sizeClass))
       .padding(.vertical, 16)
+      .frame(maxWidth: .infinity)
     }
+    .scrollDismissesKeyboard(.interactively)
+    .iosNumberPadDone { manualYearFocused = false }
     .background(IOSDesign.canvas.ignoresSafeArea())
     .navigationTitle("Family Wishes")
     .navigationDestination(item: $openedLibraryItem) { target in
@@ -170,12 +176,13 @@ struct IOSWishesView: View {
           }
           .font(.subheadline.weight(.semibold))
           .padding(.horizontal, 14)
-          .padding(.vertical, 8)
+          .frame(minHeight: 44)
           .foregroundStyle(filter == item ? Color.black : Color.white)
           .background(
             filter == item ? Color.white : IOSDesign.surface,
             in: Capsule()
           )
+          .accessibilityAddTraits(filter == item ? .isSelected : [])
         }
       }
     }
@@ -201,16 +208,27 @@ struct IOSWishesView: View {
             alreadyInLibraryConflict = nil
           } label: {
             Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+              .frame(width: 44, height: 44)
+              .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
+          .accessibilityLabel("Clear search")
         }
       }
 
-      HStack(spacing: 8) {
-        kindChip(title: "All", selection: nil)
-        kindChip(title: "Movie", selection: .movie)
-        kindChip(title: "TV Series", selection: .series)
-        Spacer(minLength: 4)
+      let kindControlsLayout =
+        dynamicTypeSize.isAccessibilitySize
+        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+        : AnyLayout(HStackLayout(spacing: 8))
+      kindControlsLayout {
+        ScrollView(.horizontal, showsIndicators: false) {
+          HStack(spacing: 8) {
+            kindChip(title: "All", selection: nil)
+            kindChip(title: "Movie", selection: .movie)
+            kindChip(title: "TV Series", selection: .series)
+          }
+        }
+        if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 4) }
         if providerEnabled {
           Button("Search") {
             Task { await performSearch() }
@@ -218,6 +236,7 @@ struct IOSWishesView: View {
           .buttonStyle(.borderedProminent)
           .tint(.white)
           .foregroundStyle(.black)
+          .frame(minHeight: 44)
           .disabled(
             isSearching || searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
           )
@@ -260,7 +279,9 @@ struct IOSWishesView: View {
           showManualForm = true
         }
         .font(.footnote.weight(.semibold))
-        .foregroundStyle(.white.opacity(0.8))
+        .foregroundStyle(.white.opacity(0.85))
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
       }
     }
     .padding(16)
@@ -274,34 +295,43 @@ struct IOSWishesView: View {
     }
     .font(.caption.weight(.semibold))
     .padding(.horizontal, 12)
-    .padding(.vertical, 6)
+    .frame(minHeight: 44)
     .foregroundStyle(selected ? Color.black : Color.white)
     .background(selected ? Color.white : IOSDesign.raised, in: Capsule())
+    .accessibilityAddTraits(selected ? .isSelected : [])
   }
 
   private func searchHitRow(_ hit: IOSWishSearchHit) -> some View {
-    HStack(alignment: .top, spacing: 12) {
-      IOSWishPosterView(posterPath: hit.posterPath, kind: hit.kind, width: 48, height: 72)
-
-      VStack(alignment: .leading, spacing: 4) {
-        Text(hit.year.map { "\(hit.title) (\($0))" } ?? hit.title)
-          .font(.subheadline.weight(.semibold))
-        Text(IOSWishPresentation.kindLabel(hit.kind))
-          .font(.caption)
-          .foregroundStyle(.secondary)
-        if let overview = hit.overview, !overview.isEmpty {
-          Text(overview).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+    let layout =
+      dynamicTypeSize.isAccessibilitySize
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+      : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+    return layout {
+      HStack(alignment: .top, spacing: 12) {
+        if !dynamicTypeSize.isAccessibilitySize {
+          IOSWishPosterView(posterPath: hit.posterPath, kind: hit.kind, width: 48, height: 72)
+        }
+        VStack(alignment: .leading, spacing: 4) {
+          Text(hit.year.map { "\(hit.title) (\($0))" } ?? hit.title)
+            .font(.subheadline.weight(.semibold))
+          Text(IOSWishPresentation.kindLabel(hit.kind))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          if let overview = hit.overview, !overview.isEmpty {
+            Text(overview).font(.caption).foregroundStyle(.secondary)
+              .lineLimit(dynamicTypeSize.isAccessibilitySize ? 4 : 2)
+          }
         }
       }
 
-      Spacer(minLength: 6)
+      if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 6) }
 
       if hit.alreadyInLibrary, let mediaId = hit.existingMediaId {
         Button("In Library") {
           Task { await openLibraryTitle(mediaId) }
         }
         .buttonStyle(.bordered)
-        .controlSize(.small)
+        .frame(minHeight: 44)
       } else if hit.alreadyWished, let wishId = hit.existingWishId {
         if hit.supportedByCaller {
           Text("Wished")
@@ -312,7 +342,7 @@ struct IOSWishesView: View {
             Task { await toggleSupport(wishID: wishId, supported: true) }
           }
           .buttonStyle(.bordered)
-          .controlSize(.small)
+          .frame(minHeight: 44)
         }
       } else {
         Button("Wish") {
@@ -321,7 +351,7 @@ struct IOSWishesView: View {
         .buttonStyle(.borderedProminent)
         .tint(.white)
         .foregroundStyle(.black)
-        .controlSize(.small)
+        .frame(minHeight: 44)
         .disabled(submittingKey == hit.id)
       }
     }
@@ -331,7 +361,11 @@ struct IOSWishesView: View {
   }
 
   private var manualComposerCard: some View {
-    VStack(alignment: .leading, spacing: 10) {
+    let actionLayout =
+      dynamicTypeSize.isAccessibilitySize
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+      : AnyLayout(HStackLayout(spacing: 10))
+    return VStack(alignment: .leading, spacing: 10) {
       Text(
         providerEnabled ? "Write a Wish Manually" : "TMDB search is off — enter details manually"
       )
@@ -351,6 +385,7 @@ struct IOSWishesView: View {
 
       TextField("Year (optional)", text: $manualYear)
         .keyboardType(.numberPad)
+        .focused($manualYearFocused)
         .textFieldStyle(.plain)
         .padding(10)
         .background(IOSDesign.canvas, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -361,13 +396,15 @@ struct IOSWishesView: View {
         .padding(10)
         .background(IOSDesign.canvas, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-      HStack(spacing: 10) {
+      actionLayout {
         Button("Send Wish") {
+          manualYearFocused = false
           Task { await submitManualWish() }
         }
         .buttonStyle(.borderedProminent)
         .tint(.white)
         .foregroundStyle(.black)
+        .frame(minHeight: 44)
         .disabled(
           submittingKey == "manual"
             || manualTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -375,8 +412,12 @@ struct IOSWishesView: View {
         .accessibilityIdentifier("wishes-manual-submit")
 
         if providerEnabled {
-          Button("Cancel") { showManualForm = false }
-            .buttonStyle(.bordered)
+          Button("Cancel") {
+            manualYearFocused = false
+            showManualForm = false
+          }
+          .buttonStyle(.bordered)
+          .frame(minHeight: 44)
         }
       }
     }
@@ -386,18 +427,25 @@ struct IOSWishesView: View {
 
   @ViewBuilder
   private func conflictBanner(_ problem: IOSWishAlreadyInLibraryProblem) -> some View {
-    HStack(spacing: 12) {
-      Image(systemName: "checkmark.circle.fill").foregroundStyle(.white)
-      VStack(alignment: .leading, spacing: 2) {
-        Text("Already in the library").font(.subheadline.weight(.semibold))
-        Text(problem.message).font(.caption).foregroundStyle(.secondary)
+    let layout =
+      dynamicTypeSize.isAccessibilitySize
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+      : AnyLayout(HStackLayout(spacing: 12))
+    layout {
+      HStack(spacing: 12) {
+        Image(systemName: "checkmark.circle.fill").foregroundStyle(.white)
+          .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Already in the library").font(.subheadline.weight(.semibold))
+          Text(problem.message).font(.caption).foregroundStyle(.secondary)
+        }
       }
-      Spacer(minLength: 6)
+      if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 6) }
       Button("Open") {
         Task { await openLibraryTitle(problem.mediaId) }
       }
       .buttonStyle(.bordered)
-      .controlSize(.small)
+      .frame(minHeight: 44)
     }
     .padding(12)
     .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

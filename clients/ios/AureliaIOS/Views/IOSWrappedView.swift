@@ -17,6 +17,8 @@ struct IOSWrappedView: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.horizontalSizeClass) private var sizeClass
+  @Environment(\.colorSchemeContrast) private var contrast
   @Environment(\.scenePhase) private var scenePhase
   @ScaledMetric(relativeTo: .largeTitle) private var headlineSize: CGFloat = 38
   @ScaledMetric(relativeTo: .largeTitle) private var numberSize: CGFloat = 150
@@ -53,7 +55,7 @@ struct IOSWrappedView: View {
               .padding(.vertical, 24)
               .frame(maxWidth: 600, alignment: .leading)
               .frame(maxWidth: .infinity)
-              .padding(.horizontal, IOSDesign.margin)
+              .padding(.horizontal, IOSDesign.margin(for: sizeClass))
           }
           .scrollBounceBehavior(.basedOnSize)
           .onScrollPhaseChange { _, phase in scrolling = phase != .idle }
@@ -207,7 +209,15 @@ struct IOSWrappedView: View {
         } label: {
           Image(systemName: "xmark").font(.system(size: 17, weight: .semibold))
             .frame(width: 44, height: 44)
-            .background(Color(wrappedHex: accent.ink).opacity(0.1), in: Circle())
+            .background(
+              Color(wrappedHex: accent.ink).opacity(contrast == .increased ? 0.22 : 0.1),
+              in: Circle()
+            )
+            .overlay {
+              if contrast == .increased {
+                Circle().strokeBorder(Color(wrappedHex: accent.ink).opacity(0.6), lineWidth: 1)
+              }
+            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Close Wrapped")
@@ -216,14 +226,15 @@ struct IOSWrappedView: View {
     }
     .padding(.top, 8).padding(.bottom, 4)
     .frame(maxWidth: 600)
-    .padding(.horizontal, IOSDesign.margin)
+    .padding(.horizontal, IOSDesign.margin(for: sizeClass))
     .frame(maxWidth: .infinity)
     .background(Color(wrappedHex: accent.field).opacity(0.94))
   }
 
   private func footer(count: Int, accent: IOSWrapped.Accent) -> some View {
+    let stack = dynamicTypeSize.isAccessibilitySize || dynamicTypeSize >= .xxLarge
     let layout =
-      dynamicTypeSize.isAccessibilitySize
+      stack
       ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 12))
     return layout {
       Button {
@@ -262,7 +273,7 @@ struct IOSWrappedView: View {
     .tint(Color(wrappedHex: accent.ink))
     .padding(.vertical, 12)
     .frame(maxWidth: 600)
-    .padding(.horizontal, IOSDesign.margin)
+    .padding(.horizontal, IOSDesign.margin(for: sizeClass))
     .frame(maxWidth: .infinity)
     .background(Color(wrappedHex: accent.field).opacity(0.94))
   }

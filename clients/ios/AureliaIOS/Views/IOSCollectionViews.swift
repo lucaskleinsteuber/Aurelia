@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct IOSCollectionCard: View {
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   let collection: IOSCollection
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -38,9 +40,11 @@ struct IOSCollectionCard: View {
         .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
       }
       VStack(alignment: .leading, spacing: 1) {
-        Text(collection.name).font(.footnote.weight(.semibold)).lineLimit(1)
+        Text(collection.name).font(.footnote.weight(.semibold))
+          .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
         Text(IOSCollectionRules.cardSubtitle(collection))
-          .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+          .font(.caption).foregroundStyle(.secondary)
+          .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
       }
     }
   }
@@ -48,13 +52,22 @@ struct IOSCollectionCard: View {
   private func badge(_ text: String) -> some View {
     Text(text).font(.caption2.weight(.bold))
       .padding(.horizontal, 6).padding(.vertical, 3)
-      .background(.ultraThinMaterial, in: Capsule())
+      .background {
+        if reduceTransparency {
+          Capsule().fill(IOSDesign.canvas.opacity(0.9))
+        } else {
+          Capsule().fill(.ultraThinMaterial)
+          Capsule().fill(.black.opacity(0.35))
+        }
+      }
       .padding(6)
   }
 }
 
 struct IOSCollectionsView: View {
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.horizontalSizeClass) private var sizeClass
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var collections: [IOSCollection] = []
   @State private var loading = false
   @State private var complete = false
@@ -66,7 +79,9 @@ struct IOSCollectionsView: View {
   var body: some View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 20) {
-        LazyVGrid(columns: IOSDesign.gridColumns, spacing: 20) {
+        LazyVGrid(
+          columns: IOSDesign.gridColumns(for: sizeClass, typeSize: dynamicTypeSize), spacing: 20
+        ) {
           ForEach(collections) { collection in
             NavigationLink {
               IOSCollectionView(collection: collection)
@@ -77,15 +92,19 @@ struct IOSCollectionsView: View {
             }
           }
         }
-        if loading { ProgressView() }
+        if loading { ProgressView().frame(maxWidth: .infinity) }
         if let error {
-          IOSErrorText(message: error)
-          Button("Try Again") { Task { await next(replacing: true) } }.buttonStyle(IOSButtonStyle())
+          VStack(spacing: 12) {
+            IOSErrorText(message: error)
+            Button("Try Again") { Task { await next(replacing: true) } }
+              .buttonStyle(IOSButtonStyle())
+          }
+          .frame(maxWidth: .infinity)
         }
         if complete && collections.isEmpty {
           ContentUnavailableView("No Collections", systemImage: "rectangle.stack")
         }
-      }.padding(.horizontal, IOSDesign.margin).padding(.vertical, 12)
+      }.padding(.horizontal, IOSDesign.margin(for: sizeClass)).padding(.vertical, 12)
     }
     .background(IOSDesign.canvas.ignoresSafeArea())
     .navigationTitle("Collections")
@@ -164,6 +183,9 @@ struct IOSCollectionView: View {
   @State private var fullOverview = false
   @State private var loadedRevision: UUID?
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.horizontalSizeClass) private var sizeClass
+  @Environment(\.verticalSizeClass) private var verticalSizeClass
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
   private struct CollectionPlaybackRequest: Identifiable {
     let item: IOSCatalogItem
@@ -207,22 +229,27 @@ struct IOSCollectionView: View {
           membersSection(detail)
         }
         if loading && detail == nil {
-          ProgressView().frame(maxWidth: .infinity).accessibilityIdentifier("collection-loading")
+          ProgressView().frame(maxWidth: .infinity).padding(.top, 120)
+            .accessibilityIdentifier("collection-loading")
         }
         if unavailable {
           ContentUnavailableView("Collection Unavailable", systemImage: "rectangle.stack")
+            .padding(.top, 60)
             .accessibilityIdentifier("collection-unavailable")
         }
         if let error {
-          VStack(alignment: .leading, spacing: 10) {
+          VStack(spacing: 10) {
             IOSErrorText(message: error)
             Button("Try Again") { Task { await reload() } }.buttonStyle(IOSButtonStyle())
-          }.padding(.horizontal, IOSDesign.margin)
+          }
+          .frame(maxWidth: .infinity)
+          .padding(.horizontal, IOSDesign.margin(for: sizeClass))
+          .padding(.top, detail == nil ? 80 : 0)
         }
       }
       .padding(.bottom, 32)
     }
-    .ignoresSafeArea(edges: .top)
+    .ignoresSafeArea(edges: detail != nil ? .top : [])
     .background(IOSDesign.canvas.ignoresSafeArea())
     .navigationBarTitleDisplayMode(.inline)
     .toolbarBackground(.hidden, for: .navigationBar)
@@ -301,9 +328,14 @@ struct IOSCollectionView: View {
   }
 
   private func heroSection(_ detail: IOSCollectionDetail) -> some View {
-    VStack(spacing: 0) {
+    let margin = IOSDesign.margin(for: sizeClass)
+    return VStack(spacing: 0) {
       IOSArtworkView(artwork: heroArtwork, width: 1280, symbol: nil)
-        .frame(maxWidth: .infinity).frame(height: IOSDesign.isPad ? 420 : 300)
+        .frame(maxWidth: .infinity)
+        .frame(
+          height: IOSLayoutMetrics.detailBackdropHeight(
+            isRegularWidth: sizeClass == .regular, isCompactHeight: verticalSizeClass == .compact)
+        )
         .clipped()
         .overlay {
           LinearGradient(
@@ -316,7 +348,11 @@ struct IOSCollectionView: View {
         }
 
       VStack(alignment: .leading, spacing: 14) {
-        HStack(alignment: .bottom, spacing: 14) {
+        let headerLayout =
+          dynamicTypeSize.isAccessibilitySize
+          ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+          : AnyLayout(HStackLayout(alignment: .bottom, spacing: 14))
+        headerLayout {
           IOSArtworkView(artwork: boxCoverArtwork, width: 320, symbol: "rectangle.stack")
             .frame(width: 84, height: 126)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -332,7 +368,8 @@ struct IOSCollectionView: View {
             } else {
               IOSEyebrow(text: "Collection")
             }
-            Text(detail.name).font(.title2.weight(.bold)).lineLimit(2)
+            Text(detail.name).font(.title2.weight(.bold))
+              .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
             Text(IOSCollectionRules.statsLine(detail))
               .font(.caption).foregroundStyle(.secondary)
             if !detail.genres.isEmpty {
@@ -340,7 +377,7 @@ struct IOSCollectionView: View {
                 .font(.caption2).foregroundStyle(.secondary)
             }
           }
-          Spacer(minLength: 0)
+          if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
         }
 
         if detail.itemCount > 0 {
@@ -362,7 +399,11 @@ struct IOSCollectionView: View {
 
         let playable = IOSCollectionRules.playableItems(from: detail)
         if !playable.isEmpty {
-          HStack(spacing: 10) {
+          let ctaLayout =
+            dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 10))
+          ctaLayout {
             Button {
               Task { await playCollection(detail) }
             } label: {
@@ -383,7 +424,9 @@ struct IOSCollectionView: View {
                   Label("Save", systemImage: "square.and.arrow.down")
                 }
               }
-              .buttonStyle(IOSButtonStyle(kind: .secondary))
+              .buttonStyle(
+                IOSButtonStyle(kind: .secondary, fullWidth: dynamicTypeSize.isAccessibilitySize)
+              )
               .disabled(savingCopy)
             }
           }
@@ -397,28 +440,34 @@ struct IOSCollectionView: View {
           .disabled(savingCopy)
         }
       }
-      .padding(.horizontal, IOSDesign.margin)
+      .frame(maxWidth: IOSLayoutMetrics.readableContentMaxWidth, alignment: .leading)
+      .padding(.horizontal, margin)
       .padding(.top, -56)
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
 
   @ViewBuilder
   private func membersSection(_ detail: IOSCollectionDetail) -> some View {
+    let margin = IOSDesign.margin(for: sizeClass)
     if detail.members.isEmpty {
       ContentUnavailableView("No Titles Available", systemImage: "rectangle.stack")
-        .padding(.horizontal, IOSDesign.margin)
+        .padding(.horizontal, margin)
     } else {
       VStack(alignment: .leading, spacing: 12) {
         Text("In This Collection")
           .font(.title3.weight(.bold))
-          .padding(.horizontal, IOSDesign.margin)
+          .accessibilityAddTraits(.isHeader)
+          .padding(.horizontal, margin)
 
         LazyVStack(spacing: 10) {
           ForEach(Array(detail.members.enumerated()), id: \.element.id) { index, member in
             memberCard(detail: detail, index: index, member: member)
           }
         }
-        .padding(.horizontal, IOSDesign.margin)
+        .frame(maxWidth: IOSLayoutMetrics.readableContentMaxWidth, alignment: .leading)
+        .padding(.horizontal, margin)
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
   }
@@ -481,10 +530,11 @@ struct IOSCollectionView: View {
             VStack(alignment: .leading, spacing: 4) {
               Text("\(index + 1). \(member.displayTitle)")
                 .font(.subheadline.weight(.semibold))
-                .lineLimit(2)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
               if !subtitleParts.isEmpty {
                 Text(subtitleParts.joined(separator: " · "))
-                  .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                  .font(.caption).foregroundStyle(.secondary)
+                  .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
               }
               if let fraction = linkedItem?.progressFraction {
                 IOSProgressBar(fraction: fraction).frame(maxWidth: 140)
@@ -506,7 +556,8 @@ struct IOSCollectionView: View {
           } label: {
             Image(systemName: expanded ? "chevron.up" : "chevron.down")
               .font(.caption.weight(.bold))
-              .padding(8)
+              .frame(width: 44, height: 44)
+              .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
           .accessibilityLabel(expanded ? "Hide Episodes" : "Show Episodes")
@@ -520,8 +571,11 @@ struct IOSCollectionView: View {
             startPlayback(detail: detail, target: playTarget, startOver: false)
           } label: {
             Image(systemName: "play.circle.fill").font(.title3)
+              .frame(width: 44, height: 44)
+              .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
+          .accessibilityLabel("Play \(member.displayTitle)")
         }
       }
       .contextMenu {
@@ -554,15 +608,19 @@ struct IOSCollectionView: View {
           } label: {
             HStack(spacing: 10) {
               Image(systemName: "play.fill").font(.caption2).foregroundStyle(.secondary)
+                .accessibilityHidden(true)
               Text(ep.episodeLabel.map { "\($0) · \(ep.title)" } ?? ep.title)
-                .font(.caption).lineLimit(1)
+                .font(.caption)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
               Spacer()
               if ep.watchState == "completed" {
                 Image(systemName: "checkmark").font(.caption2).foregroundStyle(.secondary)
+                  .accessibilityLabel("Watched")
               }
             }
-            .padding(.vertical, 4)
+            .frame(minHeight: 44)
             .padding(.leading, 8)
+            .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
           .disabled(!ep.isPlayable)

@@ -4,6 +4,8 @@ import SwiftUI
 struct IOSCollectionEditorView: View {
   @EnvironmentObject private var model: IOSAppModel
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @FocusState private var yearFieldFocused: Bool
 
   let existing: IOSCollectionDetail?
   var preselectedMember: IOSLibraryActions.AddCollectionTarget? = nil
@@ -110,6 +112,8 @@ struct IOSCollectionEditorView: View {
           }
         }
       }
+      .scrollDismissesKeyboard(.interactively)
+      .iosNumberPadDone { yearFieldFocused = false }
       .disabled(saving || uploadingArtwork)
       .navigationTitle(
         existing == nil && savedCollection == nil ? "New Collection" : "Edit Collection"
@@ -182,7 +186,9 @@ struct IOSCollectionEditorView: View {
           PhotosPicker(selection: $coverPickerItem, matching: .images) {
             Text(hasCover ? "Replace" : "Choose")
               .font(.footnote.weight(.semibold))
+              .frame(minHeight: 44)
           }
+          .buttonStyle(.borderless)
           .disabled(uploadingArtwork)
           if hasCover {
             Button("Remove", role: .destructive) {
@@ -190,7 +196,9 @@ struct IOSCollectionEditorView: View {
               stagedCover = nil
               removeCover = true
             }
+            .buttonStyle(.borderless)
             .font(.footnote)
+            .frame(minHeight: 44)
           }
         }
       }
@@ -222,7 +230,9 @@ struct IOSCollectionEditorView: View {
           PhotosPicker(selection: $backdropPickerItem, matching: .images) {
             Text(hasBackdrop ? "Replace" : "Choose")
               .font(.footnote.weight(.semibold))
+              .frame(minHeight: 44)
           }
+          .buttonStyle(.borderless)
           .disabled(uploadingArtwork)
           if hasBackdrop {
             Button("Remove", role: .destructive) {
@@ -230,7 +240,9 @@ struct IOSCollectionEditorView: View {
               stagedBackdrop = nil
               removeBackdrop = true
             }
+            .buttonStyle(.borderless)
             .font(.footnote)
+            .frame(minHeight: 44)
           }
         }
       }
@@ -258,7 +270,8 @@ struct IOSCollectionEditorView: View {
             )
             .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {
-              Text(member.title).font(.body).lineLimit(1)
+              Text(member.title).font(.body)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
               if let subtitle = member.subtitle {
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
               }
@@ -289,11 +302,19 @@ struct IOSCollectionEditorView: View {
         Text("Movies").tag(Optional("movie"))
         Text("Shows").tag(Optional("series"))
       }
-      Picker("Match", selection: $rules.combination) {
-        Text("All Rules").tag("and")
-        Text("Any Rule").tag("or")
+      if dynamicTypeSize.isAccessibilitySize {
+        Picker("Match", selection: $rules.combination) {
+          Text("All Rules").tag("and")
+          Text("Any Rule").tag("or")
+        }
+        .pickerStyle(.menu)
+      } else {
+        Picker("Match", selection: $rules.combination) {
+          Text("All Rules").tag("and")
+          Text("Any Rule").tag("or")
+        }
+        .pickerStyle(.segmented)
       }
-      .pickerStyle(.segmented)
     } header: {
       Text("Rules")
     } footer: {
@@ -306,6 +327,8 @@ struct IOSCollectionEditorView: View {
         TextField("Add Genre, such as Comedy", text: $genreEntry)
           .onSubmit(addGenre)
         Button("Add", action: addGenre)
+          .buttonStyle(.borderless)
+          .frame(minHeight: 44)
           .disabled(genreEntry.trimmingCharacters(in: .whitespaces).isEmpty)
       }
     }
@@ -314,9 +337,18 @@ struct IOSCollectionEditorView: View {
         Text("Any").tag(Int?.none)
         ForEach(IOSSmartRules.decades, id: \.self) { Text("\($0)s").tag(Optional($0)) }
       }
-      HStack {
+      if dynamicTypeSize.isAccessibilitySize {
         TextField("From Year", text: yearBinding(\.yearMin)).keyboardType(.numberPad)
+          .focused($yearFieldFocused)
         TextField("Until Year", text: yearBinding(\.yearMax)).keyboardType(.numberPad)
+          .focused($yearFieldFocused)
+      } else {
+        HStack {
+          TextField("From Year", text: yearBinding(\.yearMin)).keyboardType(.numberPad)
+            .focused($yearFieldFocused)
+          TextField("Until Year", text: yearBinding(\.yearMax)).keyboardType(.numberPad)
+            .focused($yearFieldFocused)
+        }
       }
       Picker("Rated at Least", selection: $rules.ratingMin) {
         Text("Any").tag(Double?.none)
@@ -609,7 +641,8 @@ private struct IOSCollectionMemberPickerSheet: View {
           memberRow(
             mediaId: show.id, seasonNumber: season.number,
             title: "\(show.title) · \(label)", kind: .series,
-            subtitle: "\(season.episodes.count) episodes")
+            subtitle: IOSLayoutMetrics.countPhrase(
+              season.episodes.count, singular: "episode", plural: "episodes"))
           ForEach(season.episodes, id: \.item.id) { ep in
             memberRow(
               mediaId: ep.item.id, seasonNumber: nil,
@@ -655,8 +688,10 @@ private struct IOSCollectionMemberPickerSheet: View {
         Spacer()
         Image(systemName: selected ? "checkmark.circle.fill" : "circle")
           .foregroundStyle(selected ? Color.accentColor : .secondary)
+          .accessibilityHidden(true)
       }
     }
+    .accessibilityAddTraits(selected ? .isSelected : [])
   }
 
   private func loadCatalog() async {

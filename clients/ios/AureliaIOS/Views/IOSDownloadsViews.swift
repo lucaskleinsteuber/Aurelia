@@ -83,6 +83,9 @@ struct IOSDownloadsView: View {
 /// The offline mode: Aurelia without the server, showing only the downloads on this device.
 struct IOSOfflineModeView: View {
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.horizontalSizeClass) private var sizeClass
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   @ObservedObject private var store: IOSOfflineStore
   @State private var asking: IOSOfflineProfileCard?
   @State private var pin = ""
@@ -120,11 +123,16 @@ struct IOSOfflineModeView: View {
         }
       }
       .background(IOSDesign.canvas.ignoresSafeArea())
-      .safeAreaInset(edge: .bottom) {
-        Button("Connect to the Server") { model.leaveOfflineMode() }
-          .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
-          .padding(.horizontal, IOSDesign.margin).padding(.bottom, 8)
-          .accessibilityIdentifier("offline-leave")
+      .safeAreaInset(edge: .bottom, spacing: 0) {
+        VStack(spacing: 0) {
+          Divider().opacity(0.2)
+          Button("Connect to the Server") { model.leaveOfflineMode() }
+            .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
+            .padding(.horizontal, IOSDesign.margin(for: sizeClass))
+            .padding(.top, 10).padding(.bottom, 8)
+            .accessibilityIdentifier("offline-leave")
+        }
+        .background(IOSDesign.canvas.opacity(reduceTransparency ? 1 : 0.94))
       }
     }
     .accessibilityIdentifier("offline-mode")
@@ -136,6 +144,7 @@ struct IOSOfflineModeView: View {
       VStack(spacing: 24) {
         Image(systemName: "arrow.down.circle").font(.system(size: 44, weight: .medium))
           .foregroundStyle(.secondary)
+          .accessibilityHidden(true)
         VStack(spacing: 8) {
           Text("Watch Downloads").font(.title.bold())
           Text(
@@ -148,11 +157,11 @@ struct IOSOfflineModeView: View {
           Text(
             "Open your profile once while the server answers, then its downloads open here too."
           )
-          .font(.footnote).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+          .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
           .frame(maxWidth: 420)
         }
         // Centered rows like "Who's watching?" (a lone profile sat at the left edge).
-        IOSProfileRows {
+        IOSProfileRows(minimumColumnWidth: dynamicTypeSize.isAccessibilitySize ? 260 : 140) {
           ForEach(cards) { card in
             Button {
               if card.pinProtected {
@@ -171,11 +180,13 @@ struct IOSOfflineModeView: View {
                 )
                 .shadow(color: .black.opacity(0.3), radius: 12, y: 6)
                 HStack(spacing: 4) {
-                  Text(card.name).font(.subheadline.weight(.semibold)).lineLimit(2)
+                  Text(card.name).font(.subheadline.weight(.semibold))
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                     .multilineTextAlignment(.center)
                   if card.pinProtected {
                     Image(systemName: "lock.fill").font(.caption2.weight(.semibold))
                       .foregroundStyle(.secondary)
+                      .accessibilityHidden(true)
                   }
                 }
               }
@@ -188,7 +199,7 @@ struct IOSOfflineModeView: View {
           }
         }
       }
-      .padding(IOSDesign.margin).padding(.vertical, 32)
+      .padding(IOSDesign.margin(for: sizeClass)).padding(.vertical, 32)
       .frame(maxWidth: .infinity)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -212,6 +223,7 @@ struct IOSOfflineModeView: View {
 
 /// A profile's downloads: Continue Watching, movies and series with their episodes.
 private struct IOSOfflineSections: View {
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let titles: [IOSOfflineTitle]
   @ObservedObject var store: IOSOfflineStore
   let play: (IOSOfflineTitle) -> Void
@@ -242,19 +254,24 @@ private struct IOSOfflineSections: View {
       play(title)
     } label: {
       HStack(spacing: 12) {
-        IOSOfflinePicture(
-          url: store.pictureURL(title, series: series && title.isEpisode)
-            ?? store.pictureURL(title))
+        if !dynamicTypeSize.isAccessibilitySize {
+          IOSOfflinePicture(
+            url: store.pictureURL(title, series: series && title.isEpisode)
+              ?? store.pictureURL(title))
+        }
         VStack(alignment: .leading, spacing: 4) {
           Text(series && title.isEpisode ? title.playerTitle : episodeName(title))
-            .font(.body.weight(.semibold)).foregroundStyle(.white).lineLimit(2)
-          Text(details(title)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            .font(.body.weight(.semibold)).foregroundStyle(.white)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+          Text(details(title)).font(.caption).foregroundStyle(.secondary)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
           if title.isInProgress {
             IOSProgressBar(fraction: title.watchedShare).frame(width: 80)
           }
         }
         Spacer(minLength: 0)
         Image(systemName: "play.circle.fill").font(.title2).foregroundStyle(.white.opacity(0.85))
+          .accessibilityHidden(true)
       }
       .contentShape(Rectangle())
     }
@@ -285,17 +302,25 @@ private struct IOSOfflineSections: View {
 
 private struct IOSPendingDownloadRow: View {
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let entry: IOSOfflinePending
   @ObservedObject var store: IOSOfflineStore
 
   var body: some View {
+    let title = entry.title.subtitle.map { "\(entry.title.title) · \($0)" } ?? entry.title.title
     VStack(alignment: .leading, spacing: 6) {
-      HStack {
-        Text(entry.title.subtitle.map { "\(entry.title.title) · \($0)" } ?? entry.title.title)
-          .font(.body.weight(.semibold)).lineLimit(1)
-        Spacer()
+      if dynamicTypeSize.isAccessibilitySize {
+        Text(title).font(.body.weight(.semibold))
         if entry.state == .downloading {
-          Text("\(Int(entry.share * 100)) %").monospacedDigit().foregroundStyle(.secondary)
+          Text("\(Int(entry.share * 100))%").monospacedDigit().foregroundStyle(.secondary)
+        }
+      } else {
+        HStack {
+          Text(title).font(.body.weight(.semibold)).lineLimit(1)
+          Spacer()
+          if entry.state == .downloading {
+            Text("\(Int(entry.share * 100))%").monospacedDigit().foregroundStyle(.secondary)
+          }
         }
       }
       if entry.state == .downloading {
@@ -313,12 +338,16 @@ private struct IOSPendingDownloadRow: View {
       } else {
         Label(entry.message ?? "The download stopped.", systemImage: "exclamationmark.circle")
           .font(.caption).foregroundStyle(.orange)
-        Button("Try Again") { model.retryDownload(entry.id) }.font(.subheadline.weight(.semibold))
+        Button("Try Again") { model.retryDownload(entry.id) }
+          .font(.subheadline.weight(.semibold))
+          .frame(minHeight: 44)
+          .contentShape(Rectangle())
       }
     }
     .padding(.vertical, 2)
     .swipeActions {
       Button("Cancel", role: .destructive) { store.cancel(entry.id) }
+        .tint(.red)
     }
   }
 }
@@ -365,7 +394,7 @@ struct IOSDownloadMenuItems: View {
         }
         Button(
           entry.state == .downloading
-            ? "Cancel Download (\(Int(entry.share * 100)) %)"
+            ? "Cancel Download (\(Int(entry.share * 100))%)"
             : entry.state == .waiting ? "Cancel Waiting Download" : "Cancel Download",
           systemImage: "xmark.circle"
         ) { store.cancel(item.id) }

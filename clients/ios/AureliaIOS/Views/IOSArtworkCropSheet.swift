@@ -17,7 +17,7 @@ struct IOSArtworkCropSheet: View {
     NavigationStack {
       GeometryReader { geometry in
         let maxW = max(120, geometry.size.width - 40)
-        let maxH = max(120, geometry.size.height - 40)
+        let maxH = max(80, geometry.size.height - 40)
         let frameW = min(maxW, maxH * aspectRatio)
         let frameSize = CGSize(width: frameW, height: frameW / aspectRatio)
         let liveZoom = min(max(zoom * pinching, 1), IOSRectCrop.maximumZoom)
@@ -35,8 +35,9 @@ struct IOSArtworkCropSheet: View {
             .frame(width: imageSize.width * scale, height: imageSize.height * scale)
             .offset(live)
           Rectangle().fill(.black.opacity(0.55))
+            .ignoresSafeArea()
             .mask {
-              Rectangle().overlay {
+              Rectangle().ignoresSafeArea().overlay {
                 RoundedRectangle(cornerRadius: 10)
                   .frame(width: frameSize.width, height: frameSize.height)
                   .blendMode(.destinationOut)
@@ -49,8 +50,19 @@ struct IOSArtworkCropSheet: View {
             .allowsHitTesting(false)
         }
         .frame(width: geometry.size.width, height: geometry.size.height)
+        .onChange(of: geometry.size) { _, newSize in
+          let newMaxW = max(120, newSize.width - 40)
+          let newMaxH = max(80, newSize.height - 40)
+          let newFrameW = min(newMaxW, newMaxH * aspectRatio)
+          let newFrameSize = CGSize(width: newFrameW, height: newFrameW / aspectRatio)
+          offset = IOSRectCrop.clamped(
+            offset: offset, imageSize: imageSize, frameSize: newFrameSize, zoom: zoom)
+        }
         .clipped()
         .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title) crop area")
+        .accessibilityHint("Drag to move the artwork, pinch to zoom.")
         .gesture(
           DragGesture()
             .updating($dragging) { value, state, _ in state = value.translation }
