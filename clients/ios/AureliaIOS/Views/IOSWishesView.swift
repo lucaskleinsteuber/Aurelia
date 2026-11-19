@@ -131,6 +131,8 @@ struct IOSWishesView: View {
         headerDescription
         Spacer(minLength: 8)
         composerToggle(expanded: false)
+          .fixedSize(horizontal: true, vertical: false)
+          .layoutPriority(1)
       }
     }
   }
@@ -154,7 +156,7 @@ struct IOSWishesView: View {
       Label {
         Text(composerExpanded ? "Close" : "Make a Wish")
           .lineLimit(expanded ? nil : 1)
-          .fixedSize(horizontal: false, vertical: true)
+          .fixedSize(horizontal: !expanded, vertical: true)
       } icon: {
         Image(systemName: composerExpanded ? "xmark" : "plus")
       }
@@ -233,10 +235,7 @@ struct IOSWishesView: View {
           Button("Search") {
             Task { await performSearch() }
           }
-          .buttonStyle(.borderedProminent)
-          .tint(.white)
-          .foregroundStyle(.black)
-          .frame(minHeight: 44)
+          .buttonStyle(IOSButtonStyle(kind: .primary))
           .disabled(
             isSearching || searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
           )
@@ -330,8 +329,7 @@ struct IOSWishesView: View {
         Button("In Library") {
           Task { await openLibraryTitle(mediaId) }
         }
-        .buttonStyle(.bordered)
-        .frame(minHeight: 44)
+        .buttonStyle(IOSButtonStyle(kind: .secondary))
       } else if hit.alreadyWished, let wishId = hit.existingWishId {
         if hit.supportedByCaller {
           Text("Wished")
@@ -341,17 +339,13 @@ struct IOSWishesView: View {
           Button("+ Me Too") {
             Task { await toggleSupport(wishID: wishId, supported: true) }
           }
-          .buttonStyle(.bordered)
-          .frame(minHeight: 44)
+          .buttonStyle(IOSButtonStyle(kind: .secondary))
         }
       } else {
         Button("Wish") {
           Task { await submitSearchHit(hit) }
         }
-        .buttonStyle(.borderedProminent)
-        .tint(.white)
-        .foregroundStyle(.black)
-        .frame(minHeight: 44)
+        .buttonStyle(IOSButtonStyle(kind: .primary))
         .disabled(submittingKey == hit.id)
       }
     }
@@ -401,10 +395,7 @@ struct IOSWishesView: View {
           manualYearFocused = false
           Task { await submitManualWish() }
         }
-        .buttonStyle(.borderedProminent)
-        .tint(.white)
-        .foregroundStyle(.black)
-        .frame(minHeight: 44)
+        .buttonStyle(IOSButtonStyle(kind: .primary))
         .disabled(
           submittingKey == "manual"
             || manualTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -416,8 +407,7 @@ struct IOSWishesView: View {
             manualYearFocused = false
             showManualForm = false
           }
-          .buttonStyle(.bordered)
-          .frame(minHeight: 44)
+          .buttonStyle(IOSButtonStyle(kind: .secondary))
         }
       }
     }
@@ -444,8 +434,7 @@ struct IOSWishesView: View {
       Button("Open") {
         Task { await openLibraryTitle(problem.mediaId) }
       }
-      .buttonStyle(.bordered)
-      .frame(minHeight: 44)
+      .buttonStyle(IOSButtonStyle(kind: .secondary))
     }
     .padding(12)
     .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -655,75 +644,46 @@ struct IOSWishesView: View {
     _ wish: IOSWishSummary, isBusy: Bool, isOwnWish: Bool, expanded: Bool
   ) -> some View {
     if wish.state == .open && wish.canSupport {
-      Button {
+      Button(wish.supportedByCaller ? "Remove Vote" : "+ Me Too") {
         Task { await toggleSupport(wishID: wish.id, supported: !wish.supportedByCaller) }
-      } label: {
-        wishActionLabel(wish.supportedByCaller ? "Remove Vote" : "+ Me Too", expanded: expanded)
       }
-      .buttonStyle(.bordered)
-      .controlSize(.small)
+      .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: expanded))
       .disabled(isBusy)
     }
 
     if wish.state == .fulfilled, let mediaId = wish.fulfilledMediaItemId {
-      Button {
+      Button("Open in Library") {
         Task { await openLibraryTitle(mediaId) }
-      } label: {
-        wishActionLabel("Open in Library", expanded: expanded)
       }
-      .buttonStyle(.borderedProminent)
-      .tint(.white)
-      .foregroundStyle(.black)
-      .controlSize(.small)
+      .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: expanded))
     }
 
     if model.isWishAdmin && wish.state == .open {
-      Button {
+      Button("In Library") {
         Task {
           await resolveWish(
             wish, state: .fulfilled, note: nil,
             mediaID: wish.suggestions.first?.mediaId)
         }
-      } label: {
-        wishActionLabel("In Library", expanded: expanded)
       }
-      .buttonStyle(.borderedProminent)
-      .tint(.white)
-      .foregroundStyle(.black)
-      .controlSize(.small)
+      .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: expanded))
       .disabled(isBusy)
 
-      Button {
+      Button("Decline") {
         declineNote = ""
         decliningWish = wish
-      } label: {
-        wishActionLabel("Decline", expanded: expanded)
       }
-      .buttonStyle(.bordered)
-      .controlSize(.small)
+      .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: expanded))
       .disabled(isBusy)
     }
-
-    if !expanded { Spacer(minLength: 4) }
 
     if (isOwnWish && wish.state == .open) || model.isWishAdmin {
-      Button(role: .destructive) {
+      Button(isOwnWish && !model.isWishAdmin ? "Withdraw" : "Remove", role: .destructive) {
         Task { await deleteWish(wish) }
-      } label: {
-        wishActionLabel(isOwnWish && !model.isWishAdmin ? "Withdraw" : "Remove", expanded: expanded)
       }
-      .buttonStyle(.bordered)
-      .controlSize(.small)
+      .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: expanded))
       .disabled(isBusy)
     }
-  }
-
-  private func wishActionLabel(_ title: String, expanded: Bool) -> some View {
-    Text(title)
-      .lineLimit(expanded ? nil : 1)
-      .fixedSize(horizontal: !expanded, vertical: expanded)
-      .frame(minWidth: 44, maxWidth: expanded ? .infinity : nil, minHeight: 44)
-      .contentShape(Rectangle())
   }
 
   private func badgePill(_ text: String, wrapping: Bool) -> some View {
