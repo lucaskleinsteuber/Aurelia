@@ -14,18 +14,20 @@ struct IOSSecureEnclaveSigner: IOSPasskeySigner {
 
   static var isAvailable: Bool { SecureEnclave.isAvailable }
 
-  /// "Face ID" or "Touch ID", for the words on screen.
-  static var biometryName: String {
+  private static let cachedBiometryType: LABiometryType = {
     let context = LAContext()
     _ = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
-    return context.biometryType == .touchID ? "Touch ID" : "Face ID"
+    return context.biometryType
+  }()
+
+  /// "Face ID" or "Touch ID", for the words on screen.
+  static var biometryName: String {
+    cachedBiometryType == .touchID ? "Touch ID" : "Face ID"
   }
 
   /// The matching SF Symbol for this device's biometrics.
   static var biometrySymbol: String {
-    let context = LAContext()
-    _ = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
-    return context.biometryType == .touchID ? "touchid" : "faceid"
+    cachedBiometryType == .touchID ? "touchid" : "faceid"
   }
 
   static func create() throws -> IOSSecureEnclaveSigner {

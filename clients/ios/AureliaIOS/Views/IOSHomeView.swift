@@ -592,6 +592,7 @@ private struct IOSHomeHero: View {
 
 /// Wide artwork that fills the top of a page and fades into the canvas below.
 struct IOSHeroBackdrop: View {
+  @Environment(\.verticalSizeClass) private var verticalSizeClass
   let artwork: IOSArtwork?
   var strengthenScrim = false
   var onUnavailable: (() -> Void)?
@@ -616,6 +617,20 @@ struct IOSHeroBackdrop: View {
                 .init(color: IOSDesign.canvas, location: 1),
               ],
             startPoint: .top, endPoint: .bottom)
+        }
+        .mask {
+          if verticalSizeClass == .compact {
+            LinearGradient(
+              stops: [
+                .init(color: .clear, location: 0),
+                .init(color: .white, location: 0.08),
+                .init(color: .white, location: 0.92),
+                .init(color: .clear, location: 1),
+              ],
+              startPoint: .leading, endPoint: .trailing)
+          } else {
+            Color.white
+          }
         }
     }
     .accessibilityHidden(true)

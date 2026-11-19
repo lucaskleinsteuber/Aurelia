@@ -214,6 +214,9 @@ struct IOSDetailView: View {
           HStack(spacing: 10) {
             playButton
             secondaryHeaderActions
+            if sizeClass == .regular && !showsHeaderArtwork {
+              Spacer(minLength: 0)
+            }
           }
         }
         // Parties others started for this title or one of its episodes.
@@ -262,7 +265,8 @@ struct IOSDetailView: View {
   }
 
   private var playButton: some View {
-    Button {
+    let stretch = sizeClass != .regular || dynamicTypeSize.isAccessibilitySize
+    return Button {
       playTarget()
     } label: {
       HStack(spacing: 8) {
@@ -273,8 +277,9 @@ struct IOSDetailView: View {
         }
         Text(playLabel)
       }
+      .frame(minWidth: stretch ? nil : 200)
     }
-    .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
+    .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: stretch))
     .disabled(launching)
     .accessibilityIdentifier("detail-play")
   }

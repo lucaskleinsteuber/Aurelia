@@ -216,10 +216,13 @@ struct IOSConnectionView: View {
           Text("On This Network")
         }
         Section {
-          TextField("https://192.168.1.20:8443", text: $address)
-            .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never)
-            .autocorrectionDisabled().submitLabel(.go)
-            .onSubmit { model.inspect(address: address) }
+          TextField(
+            "Server Address", text: $address,
+            prompt: Text(verbatim: "https://192.168.1.20:8443").foregroundStyle(.secondary)
+          )
+          .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never)
+          .autocorrectionDisabled().submitLabel(.go)
+          .onSubmit { model.inspect(address: address) }
           Button("Connect") { model.inspect(address: address) }
             .disabled(model.isBusy || address.trimmingCharacters(in: .whitespaces).isEmpty)
         } header: {
@@ -404,14 +407,14 @@ struct IOSServerTrustView: View {
 
 struct IOSPairingView: View {
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.horizontalSizeClass) private var sizeClass
   @State private var code = ""
   @FocusState private var focused: Bool
   @ScaledMetric(relativeTo: .largeTitle) private var codeFontSize: CGFloat = 34
 
   var body: some View {
-    IOSSetupScrollView {
-      VStack(spacing: 22) {
-        Spacer()
+    ScrollView {
+      VStack(spacing: 20) {
         Image(systemName: IOSDesign.isPad ? "ipad.badge.checkmark" : "iphone.badge.checkmark")
           .font(.system(size: 44)).foregroundStyle(.secondary)
           .accessibilityHidden(true)
@@ -448,7 +451,6 @@ struct IOSPairingView: View {
           .accessibilityLabel("Pairing code")
           .accessibilityIdentifier("pairing-code")
         if let error = model.error { IOSErrorText(message: error) }
-        Spacer()
         VStack(spacing: 10) {
           Button {
             focused = false
@@ -465,10 +467,19 @@ struct IOSPairingView: View {
           Button("Cancel") { model.cancelPairing() }
             .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
         }
+        .padding(.top, 4)
       }
+      .padding(.horizontal, IOSDesign.margin(for: sizeClass))
+      .padding(.top, 24)
+      .padding(.bottom, 24)
+      .frame(maxWidth: 420)
+      .frame(maxWidth: .infinity)
     }
+    .scrollDismissesKeyboard(.interactively)
     .iosNumberPadDone { focused = false }
-    .onAppear { focused = true }
+    .onAppear {
+      if !IOSDesign.isPad { focused = true }
+    }
     .iosBackCommand { model.cancelPairing() }
   }
 }

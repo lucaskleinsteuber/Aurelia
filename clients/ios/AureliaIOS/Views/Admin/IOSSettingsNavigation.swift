@@ -117,6 +117,7 @@ struct IOSSettingsRoot: View {
   @EnvironmentObject private var model: IOSAppModel
   @EnvironmentObject private var admin: IOSAdministrationModel
   @Environment(\.colorSchemeContrast) private var contrast
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   /// Bound on iPad, where rows choose the page beside the list.
   var selection: Binding<IOSSettingsPage?>?
 
@@ -131,7 +132,11 @@ struct IOSSettingsRoot: View {
     let visibility = visibility
     list {
       Section {
-        HStack(spacing: 14) {
+        let profileLayout =
+          dynamicTypeSize.isAccessibilitySize
+          ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+          : AnyLayout(HStackLayout(spacing: 14))
+        profileLayout {
           IOSProfilePicture(
             id: model.session?.user.id, name: model.session?.user.shownName ?? "Profile",
             size: 52, pictureKey: model.session?.user.pictureKey,
@@ -235,8 +240,19 @@ struct IOSSettingsRowLabel: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let page: IOSSettingsPage
 
+  private var subtitleText: String {
+    if page == .security {
+      return "Sign-in log, \(IOSSecureEnclaveSigner.biometryName) and blocked devices"
+    }
+    return page.subtitle
+  }
+
   var body: some View {
-    HStack(spacing: 12) {
+    let layout =
+      dynamicTypeSize.isAccessibilitySize
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+      : AnyLayout(HStackLayout(spacing: 12))
+    layout {
       Image(systemName: page.systemImage)
         .font(.system(size: 15, weight: .semibold))
         .foregroundStyle(.white)
@@ -247,7 +263,7 @@ struct IOSSettingsRowLabel: View {
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
         Text(page.title)
-        Text(page.subtitle).font(.caption).foregroundStyle(Color.secondary)
+        Text(subtitleText).font(.caption).foregroundStyle(Color.secondary)
           .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
       }
     }

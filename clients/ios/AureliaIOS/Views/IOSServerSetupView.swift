@@ -72,7 +72,7 @@ private struct IOSNewServerForm: View {
 
   var body: some View {
     Section {
-      TextField("Setup Code, such as ABCDE-FGHJK", text: $code)
+      TextField("Setup Code", text: $code, prompt: Text("ABCDE-FGHJK"))
         .textInputAutocapitalization(.characters).autocorrectionDisabled()
         .font(.body.monospaced())
         .accessibilityIdentifier("setup-code")
