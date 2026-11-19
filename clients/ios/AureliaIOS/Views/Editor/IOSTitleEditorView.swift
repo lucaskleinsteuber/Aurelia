@@ -8,7 +8,9 @@ import UIKit
 struct IOSTitleEditorView: View {
   @EnvironmentObject private var model: IOSAppModel
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @StateObject private var admin = IOSAdministrationModel()
+  @FocusState private var numberFieldFocused: Bool
   let mediaID: UUID
   let title: String
 
@@ -54,6 +56,8 @@ struct IOSTitleEditorView: View {
           ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         }
       }
+      .scrollDismissesKeyboard(.interactively)
+      .iosNumberPadDone { numberFieldFocused = false }
       .scrollContentBackground(.hidden)
       .background(IOSDesign.canvas.ignoresSafeArea())
       .navigationTitle("Edit")
@@ -76,6 +80,7 @@ struct IOSTitleEditorView: View {
         }
       }
     }
+    .tint(.blue)
     .interactiveDismissDisabled(draft.isDirty || saving)
     .task {
       admin.attach(model)
@@ -144,12 +149,14 @@ struct IOSTitleEditorView: View {
         .accessibilityIdentifier("editor-title")
         TextField("Year", text: Binding(get: { draft.year }, set: { draft.setYear($0) }))
           .keyboardType(.numberPad)
+          .focused($numberFieldFocused)
         if kind == .movie {
           TextField(
             "Runtime in Minutes",
             text: Binding(get: { draft.runtime }, set: { draft.setRuntime($0) })
           )
           .keyboardType(.numberPad)
+          .focused($numberFieldFocused)
         }
         Picker(
           "FSK",
@@ -244,6 +251,8 @@ struct IOSTitleEditorView: View {
           draft.add(entry.wrappedValue, to: key, field: field)
           entry.wrappedValue = ""
         }
+        .buttonStyle(.borderless)
+        .frame(minHeight: 44)
         .disabled(entry.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty)
       }
     } header: {
@@ -322,30 +331,50 @@ struct IOSTitleEditorView: View {
   private func artworkRow(_ label: String, field: String, selection: Binding<PhotosPickerItem?>)
     -> some View
   {
-    HStack(spacing: 14) {
-      Group {
-        if let image = previews[field] {
-          Image(uiImage: image).resizable().scaledToFill()
-        } else {
-          Rectangle().fill(IOSDesign.raised)
-            .overlay(Image(systemName: "photo").foregroundStyle(.secondary))
+    let preview = Group {
+      if let image = previews[field] {
+        Image(uiImage: image).resizable().scaledToFill()
+      } else {
+        Rectangle().fill(IOSDesign.raised)
+          .overlay(Image(systemName: "photo").foregroundStyle(.secondary))
+      }
+    }
+    .frame(width: field == "poster" ? 48 : 96, height: field == "poster" ? 72 : 54)
+    .clipShape(RoundedRectangle(cornerRadius: 6))
+
+    return Group {
+      if dynamicTypeSize.isAccessibilitySize {
+        VStack(alignment: .leading, spacing: 10) {
+          preview
+          VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+            Text(draft.isManual(field) ? "Chosen here" : "Found by the server")
+              .font(.footnote).foregroundStyle(.secondary)
+          }
+          PhotosPicker(selection: selection, matching: .images) {
+            Text("Choose…").frame(minHeight: 44)
+          }
+          .disabled(uploading)
+          .accessibilityIdentifier("editor-\(field)")
+        }
+        .padding(.vertical, 4)
+      } else {
+        HStack(spacing: 14) {
+          // Both pictures sit in a column as wide as the backdrop, so the two labels line up.
+          preview.frame(width: 96, alignment: .leading)
+          VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+            Text(draft.isManual(field) ? "Chosen here" : "Found by the server")
+              .font(.footnote).foregroundStyle(.secondary)
+          }
+          Spacer()
+          PhotosPicker(selection: selection, matching: .images) {
+            Text("Choose…").frame(minHeight: 44)
+          }
+          .disabled(uploading)
+          .accessibilityIdentifier("editor-\(field)")
         }
       }
-      .frame(width: field == "poster" ? 48 : 96, height: field == "poster" ? 72 : 54)
-      .clipShape(RoundedRectangle(cornerRadius: 6))
-      // Both pictures sit in a column as wide as the backdrop, so the two labels line up.
-      .frame(width: 96, alignment: .leading)
-      VStack(alignment: .leading, spacing: 2) {
-        Text(label)
-        Text(draft.isManual(field) ? "Chosen here" : "Found by the server")
-          .font(.footnote).foregroundStyle(.secondary)
-      }
-      Spacer()
-      PhotosPicker(selection: selection, matching: .images) {
-        Text("Choose…")
-      }
-      .disabled(uploading)
-      .accessibilityIdentifier("editor-\(field)")
     }
     .task(id: artworkKey(field)) { await loadPreview(field) }
   }
@@ -385,6 +414,8 @@ struct IOSTitleEditorView: View {
         for field in manual { draft.useAutomatic(field) }
       }
       .font(.footnote)
+      .frame(minHeight: 44)
+      .contentShape(Rectangle())
     }
   }
 
@@ -531,6 +562,9 @@ private struct IOSCreditEditor: View {
             text: Binding(get: { credit.job ?? "" }, set: { credit.job = $0.isEmpty ? nil : $0 }))
         }
       }
+      .scrollDismissesKeyboard(.interactively)
+      .scrollContentBackground(.hidden)
+      .background(IOSDesign.canvas.ignoresSafeArea())
       .navigationTitle(credit.name.isEmpty ? "Add Person" : credit.name)
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -544,7 +578,8 @@ private struct IOSCreditEditor: View {
         }
       }
     }
-    .presentationDetents([.medium])
+    .tint(.blue)
+    .presentationDetents([.medium, .large])
   }
 }
 
@@ -562,10 +597,12 @@ private struct IOSServerVideoPicker: View {
           ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
         }
     }
+    .tint(.blue)
   }
 }
 
 private struct IOSServerVideoFolder: View {
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let mediaID: UUID
   let path: String
   let admin: IOSAdministrationModel
@@ -590,9 +627,13 @@ private struct IOSServerVideoFolder: View {
             Button {
               chosen(entry.relativePath)
             } label: {
-              HStack {
+              let layout =
+                dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                : AnyLayout(HStackLayout(spacing: 8))
+              layout {
                 Label(entry.name, systemImage: "film")
-                Spacer()
+                if !dynamicTypeSize.isAccessibilitySize { Spacer() }
                 if let bytes = entry.bytes {
                   Text(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))
                     .font(.footnote).foregroundStyle(.secondary)
@@ -605,6 +646,8 @@ private struct IOSServerVideoFolder: View {
         ProgressView()
       }
     }
+    .scrollContentBackground(.hidden)
+    .background(IOSDesign.canvas.ignoresSafeArea())
     .navigationTitle(path.isEmpty ? "Storage Location" : (path as NSString).lastPathComponent)
     .navigationBarTitleDisplayMode(.inline)
     .task {

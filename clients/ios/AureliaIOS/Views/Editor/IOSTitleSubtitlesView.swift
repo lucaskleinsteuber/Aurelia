@@ -4,6 +4,7 @@ import SwiftUI
 /// and subtitles the server writes from speech or syncs to it (server-speech-v1).
 struct IOSTitleSubtitlesView: View {
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let mediaID: UUID
   @ObservedObject var admin: IOSAdministrationModel
 
@@ -34,10 +35,12 @@ struct IOSTitleSubtitlesView: View {
               [subtitle.release, subtitle.automatic ? "Automatic" : nil].compactMap { $0 }
                 .joined(separator: " · ")
             )
-            .font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+            .font(.footnote).foregroundStyle(.secondary)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
           }
           .swipeActions {
             Button("Remove", role: .destructive) { Task { await remove(subtitle) } }
+              .tint(.red)
           }
         }
       } header: {
@@ -78,7 +81,8 @@ struct IOSTitleSubtitlesView: View {
               } label: {
                 VStack(alignment: .leading, spacing: 2) {
                   Text(candidate.release ?? IOSSubtitleLanguages.name(candidate.language))
-                    .foregroundStyle(.primary).lineLimit(2)
+                    .foregroundStyle(.primary)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                   Text(candidate.details).font(.footnote).foregroundStyle(.secondary)
                 }
               }
@@ -113,6 +117,8 @@ struct IOSTitleSubtitlesView: View {
     .scrollContentBackground(.hidden)
     .background(IOSDesign.canvas.ignoresSafeArea())
     .navigationTitle("Subtitles")
+    .navigationBarTitleDisplayMode(.inline)
+    .tint(.blue)
     .task { await load() }
     .task(id: speech?.job?.isRunning == true) { await followSpeech() }
   }

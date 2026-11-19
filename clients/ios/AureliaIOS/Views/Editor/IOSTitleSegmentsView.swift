@@ -5,6 +5,7 @@ import UIKit
 /// trim editor over pictures of the title to correct them, and Look Again.
 struct IOSTitleSegmentsView: View {
   @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let mediaID: UUID
   @ObservedObject var admin: IOSAdministrationModel
 
@@ -72,6 +73,8 @@ struct IOSTitleSegmentsView: View {
     .scrollContentBackground(.hidden)
     .background(IOSDesign.canvas.ignoresSafeArea())
     .navigationTitle("Intro and Credits")
+    .navigationBarTitleDisplayMode(.inline)
+    .tint(.blue)
     .disabled(working)
     .task { await load() }
     .sheet(item: $editing) { part in
@@ -98,7 +101,7 @@ struct IOSTitleSegmentsView: View {
 
   private func row(_ label: String, value: String?, source: String, examined: Bool) -> some View {
     LabeledContent {
-      VStack(alignment: .trailing, spacing: 2) {
+      VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 2) {
         Text(value ?? "None").monospacedDigit()
         Text(IOSMediaSegmentsDetail.sourceText(source, examined: examined)).font(.footnote)
           .foregroundStyle(.secondary)
@@ -156,6 +159,8 @@ struct IOSTitleSegmentsView: View {
 private struct IOSSegmentTrimSheet: View {
   @EnvironmentObject private var model: IOSAppModel
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.colorSchemeContrast) private var contrast
   let mediaID: UUID
   let part: IOSSegmentPart
   let duration: Int64
@@ -164,6 +169,7 @@ private struct IOSSegmentTrimSheet: View {
   @State private var start: Int64
   @State private var end: Int64
   @State private var frames: [Int: UIImage] = [:]
+  @State private var activeDragIsStart: Bool?
   private let span: ClosedRange<Int64>
   private static let frameCount = 10
 
@@ -186,21 +192,25 @@ private struct IOSSegmentTrimSheet: View {
 
   var body: some View {
     NavigationStack {
-      VStack(alignment: .leading, spacing: 22) {
-        strip
-        handle(part == .intro ? "Intro Starts" : "Credits Start", value: $start, isStart: true)
-        if part == .intro {
-          handle("Intro Ends", value: $end, isStart: false)
+      ScrollView {
+        VStack(alignment: .leading, spacing: 22) {
+          strip
+          handle(part == .intro ? "Intro Starts" : "Credits Start", value: $start, isStart: true)
+          if part == .intro {
+            handle("Intro Ends", value: $end, isStart: false)
+          }
+          Text(
+            part == .intro
+              ? "Skip Intro jumps from the start to the end."
+              : "Up Next appears when the credits start."
+          )
+          .font(.footnote).foregroundStyle(.secondary)
         }
-        Text(
-          part == .intro
-            ? "Skip Intro jumps from the start to the end."
-            : "Up Next appears when the credits start."
-        )
-        .font(.footnote).foregroundStyle(.secondary)
-        Spacer()
+        .padding(20)
+        .frame(maxWidth: 640, alignment: .leading)
+        .frame(maxWidth: .infinity)
       }
-      .padding(20)
+      .scrollBounceBehavior(.basedOnSize)
       .background(IOSDesign.canvas.ignoresSafeArea())
       .navigationTitle("Adjust \(part.title)")
       .navigationBarTitleDisplayMode(.inline)
@@ -216,12 +226,13 @@ private struct IOSSegmentTrimSheet: View {
       }
       .task { await loadFrames() }
     }
+    .tint(.blue)
   }
 
   private var strip: some View {
     GeometryReader { geometry in
-      let width = geometry.size.width
-      let length = Double(span.upperBound - span.lowerBound)
+      let width = max(1, geometry.size.width)
+      let length = max(1, Double(span.upperBound - span.lowerBound))
       let x = { (value: Int64) in CGFloat(Double(value - span.lowerBound) / length) * width }
       ZStack(alignment: .leading) {
         HStack(spacing: 1) {
@@ -237,52 +248,101 @@ private struct IOSSegmentTrimSheet: View {
             .clipped()
           }
         }
-        Rectangle().fill(Color.accentColor.opacity(0.35))
+        Rectangle().fill(Color.accentColor.opacity(contrast == .increased ? 0.5 : 0.35))
           .frame(width: max(2, x(part == .intro ? end : span.upperBound) - x(start)))
           .offset(x: x(start))
-        Rectangle().fill(.white).frame(width: 3).offset(x: x(start) - 1.5)
+        trimHandleMark.offset(x: x(start) - 4)
         if part == .intro {
-          Rectangle().fill(.white).frame(width: 3).offset(x: x(end) - 1.5)
+          trimHandleMark.offset(x: x(end) - 4)
         }
       }
       .contentShape(Rectangle())
       .gesture(
-        DragGesture(minimumDistance: 0).onChanged { drag in
-          let value =
-            span.lowerBound + Int64(Double(min(max(drag.location.x, 0), width) / width) * length)
-          // The nearer handle follows the finger.
-          if part == .intro, abs(value - end) < abs(value - start) {
-            end = IOSSegmentTrim.clamp(start: start, end: value, span: span).end
-          } else {
-            start = IOSSegmentTrim.clamp(start: value, end: end, span: span).start
+        DragGesture(minimumDistance: 0)
+          .onChanged { drag in
+            let value =
+              span.lowerBound + Int64(Double(min(max(drag.location.x, 0), width) / width) * length)
+            let dragStart: Bool
+            if let locked = activeDragIsStart {
+              dragStart = locked
+            } else {
+              let startValue =
+                span.lowerBound
+                + Int64(Double(min(max(drag.startLocation.x, 0), width) / width) * length)
+              dragStart = part != .intro || abs(startValue - start) <= abs(startValue - end)
+              activeDragIsStart = dragStart
+            }
+            if dragStart {
+              start = IOSSegmentTrim.clamp(start: value, end: end, span: span).start
+            } else {
+              end = IOSSegmentTrim.clamp(start: start, end: value, span: span).end
+            }
           }
-        }
+          .onEnded { _ in activeDragIsStart = nil }
       )
     }
     .frame(height: 64)
     .clipShape(RoundedRectangle(cornerRadius: 8))
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(part == .intro ? "Intro range" : "Credits start position")
+    .accessibilityValue(
+      part == .intro
+        ? "\(IOSSegmentTrim.label(start)) to \(IOSSegmentTrim.label(end))"
+        : IOSSegmentTrim.label(start)
+    )
+    .accessibilityAdjustableAction { direction in
+      let step: Int64 = direction == .increment ? 5_000 : -5_000
+      nudge($start, by: step, isStart: true)
+    }
+  }
+
+  private var trimHandleMark: some View {
+    ZStack {
+      Capsule().fill(.black.opacity(0.65)).frame(width: 8, height: 64)
+      Capsule().fill(.white).frame(width: 4, height: 58)
+    }
     .accessibilityHidden(true)
   }
 
   private func handle(_ label: String, value: Binding<Int64>, isStart: Bool) -> some View {
-    HStack {
-      Text(label)
-      Spacer()
+    let controls = HStack(spacing: 12) {
       Button {
         nudge(value, by: -1_000, isStart: isStart)
       } label: {
-        Image(systemName: "minus").frame(width: 36, height: 36)
+        Image(systemName: "minus")
       }
       .buttonStyle(IOSButtonStyle(kind: .icon))
       .accessibilityLabel("\(label) one second earlier")
-      Text(IOSSegmentTrim.label(value.wrappedValue)).monospacedDigit().frame(minWidth: 72)
+      Text(IOSSegmentTrim.label(value.wrappedValue))
+        .monospacedDigit()
+        .frame(minWidth: 72)
       Button {
         nudge(value, by: 1_000, isStart: isStart)
       } label: {
-        Image(systemName: "plus").frame(width: 36, height: 36)
+        Image(systemName: "plus")
       }
       .buttonStyle(IOSButtonStyle(kind: .icon))
       .accessibilityLabel("\(label) one second later")
+    }
+    return Group {
+      if dynamicTypeSize.isAccessibilitySize {
+        VStack(alignment: .leading, spacing: 8) {
+          Text(label).font(.headline)
+          controls
+        }
+      } else {
+        ViewThatFits(in: .horizontal) {
+          HStack {
+            Text(label)
+            Spacer(minLength: 12)
+            controls
+          }
+          VStack(alignment: .leading, spacing: 8) {
+            Text(label)
+            controls
+          }
+        }
+      }
     }
   }
 
