@@ -415,9 +415,11 @@ struct IOSPairingView: View {
   var body: some View {
     ScrollView {
       VStack(spacing: 20) {
-        Image(systemName: IOSDesign.isPad ? "ipad.badge.checkmark" : "iphone.badge.checkmark")
-          .font(.system(size: 44)).foregroundStyle(.secondary)
-          .accessibilityHidden(true)
+        if !focused {
+          Image(systemName: IOSDesign.isPad ? "ipad.badge.checkmark" : "iphone.badge.checkmark")
+            .font(.system(size: 44)).foregroundStyle(.secondary)
+            .accessibilityHidden(true)
+        }
         VStack(spacing: 6) {
           Text("Enter the Code").font(.title.bold())
             .multilineTextAlignment(.center)
@@ -470,15 +472,13 @@ struct IOSPairingView: View {
         .padding(.top, 4)
       }
       .padding(.horizontal, IOSDesign.margin(for: sizeClass))
-      .padding(.top, 24)
+      .padding(.top, focused ? 12 : 24)
       .padding(.bottom, 24)
       .frame(maxWidth: 420)
       .frame(maxWidth: .infinity)
     }
+    .clipped()
     .scrollDismissesKeyboard(.interactively)
-    .safeAreaInset(edge: .top, spacing: 0) {
-      IOSDesign.canvas.frame(height: 1)
-    }
     .iosNumberPadDone { focused = false }
     .onAppear {
       if !IOSDesign.isPad { focused = true }
