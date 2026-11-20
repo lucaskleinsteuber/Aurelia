@@ -16,8 +16,9 @@ let package = Package(name: "AureliaUpdaterTests", platforms: [.macOS("26.0")], 
   .target(name: "Aurelia"), .testTarget(name: "AureliaTests", dependencies: ["Aurelia"]),
 ])
 SWIFT
-for name in AppUpdateLogic AppUpdateDownload; do
+for name in AppUpdateLogic AppUpdateDownload AppUpdateSignature; do
   cp "$repository_root/clients/macos/Aurelia/Updates/$name.swift" "$runtime_root/Sources/Aurelia/"
 done
-cp "$repository_root/clients/macos/AureliaTests/AppUpdateLogicTests.swift" "$runtime_root/Tests/AureliaTests/"
+cp "$repository_root/clients/macos/UpdateHandoff/AppEdition.swift" "$runtime_root/Sources/Aurelia/"
+cp "$repository_root/clients/macos/AureliaTests/AppUpdateLogicTests.swift" "$repository_root/clients/macos/AureliaTests/UpdateSigningFixture.swift" "$runtime_root/Tests/AureliaTests/"
 DEVELOPER_DIR="$developer_dir" swift test --package-path "$runtime_root" -Xswiftc -warnings-as-errors 2>&1 | tee "$log"

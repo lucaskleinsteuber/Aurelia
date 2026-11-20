@@ -16,7 +16,7 @@ let package = Package(name: "AureliaAudioSettingsTests", platforms: [.macOS("26.
   .target(name: "Aurelia"), .testTarget(name: "AureliaTests", dependencies: ["Aurelia"]),
 ])
 SWIFT
-for name in AudioProcessing PlaybackPreferences; do
+for name in AudioProcessing PlaybackPreferences SubtitleAppearance; do
   cp "$repository_root/clients/macos/Aurelia/Playback/$name.swift" "$runtime_root/Sources/Aurelia/"
 done
 cp "$repository_root/clients/macos/AureliaTests/AudioProcessingTests.swift" "$runtime_root/Tests/AureliaTests/"
