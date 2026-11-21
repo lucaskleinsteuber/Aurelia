@@ -318,6 +318,14 @@
           {"formatVersion":1,"minimumClientVersion":"1.0.0","managementSetupRequired":false,
           "profiles":[\(profiles.joined(separator: ","))]}
           """.utf8)
+      case "/api/v1/devices/players": return Data("[]".utf8)
+      case "/api/v1/server/info":
+        return try encoder.encode(
+          ServerInfoResponse(
+            serverId: serverId, name: profile().name, version: "2.27.0", isSetup: true,
+            lanAccessEnabled: true, lanHttpsPort: 43_111,
+            publicKeyFingerprint: String(repeating: "A", count: 64),
+            displayFingerprint: "AAAA-AAAA-AAAA-AAAA-AAAA-AAAA"))
       case "/api/v1/home": return try encoder.encode(home)
       case "/api/v1/catalog/collections": return try encoder.encode(collections)
       case "/api/v1/catalog/person":
@@ -365,6 +373,14 @@
       default:
         if route.hasPrefix("/api/v1/statistics/year/"), route.hasSuffix("/wrapped") {
           return try encoder.encode(wrapped)
+        }
+        if route.hasPrefix("/api/v1/statistics/year/") {
+          return try encoder.encode(
+            YearInReview(
+              year: 2025, totalHoursWatched: emptyData ? 0 : 612.5, titlesWatched: 140,
+              moviesWatched: 52, episodesWatched: 88, topGenre: "Drama",
+              topTitle: emptyData ? nil : longTitle, busiestDay: "2025-12-24",
+              busiestDayHours: 9.5))
         }
         let parts = route.split(separator: "/").map(String.init)
         if parts.count >= 5, parts[2] == "catalog", parts[3] == "items",

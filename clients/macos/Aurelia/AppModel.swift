@@ -4922,7 +4922,6 @@ final class AppModel: ObservableObject {
       model.isStarting = false
       model.libraryLoaded = true
       model.operatingMode = .client
-      model.libraryCapabilities = AuditRenderFixture.capabilities
       model.profile = AuditRenderFixture.profile()
       model.deviceConnection = AuditRenderFixture.profile(viewing: false)
       model.catalogItems = AuditRenderFixture.catalog
@@ -5015,6 +5014,8 @@ final class AppModel: ObservableObject {
           mediaId: item.id, title: item.title, subtitle: "2021 · Adventure",
           startIntent: .resume, artwork: item.backdrop)
       }
+      // After the profile: a new connection clears the server's features.
+      model.libraryCapabilities = AuditRenderFixture.capabilities
       return model
     }
   }
