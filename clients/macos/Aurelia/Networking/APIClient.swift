@@ -1918,8 +1918,13 @@ struct APIClient: Sendable {
         {
           return fixture
         }
-        guard method == "GET" else { throw APIClientError.invalidResponse }
-        return try Self.serverSettingsFixture(path: path)
+        do {
+          guard method == "GET" else { throw APIClientError.invalidResponse }
+          return try Self.serverSettingsFixture(path: path)
+        } catch {
+          await AuditRenderFixture.noteUnanswered("\(method) \(path)")
+          throw error
+        }
       }
       if await ProfileEditorUITestFixture.enabled,
         let fixture = try await ProfileEditorUITestFixture.response(

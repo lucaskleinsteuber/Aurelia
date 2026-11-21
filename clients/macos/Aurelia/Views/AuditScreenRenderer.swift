@@ -38,6 +38,9 @@
       var sheet = false
       /// Also drawn 1280 points wide and 3000 tall (dark only), for pages that scroll.
       var tall = false
+      /// Built again for every picture, for screens that change by themselves (player controls
+      /// hide after a few seconds).
+      var rebuildsForEachPicture = false
       var empty = false
       var failing = false
       var content: @MainActor (AppModel) -> AnyView = {
@@ -121,31 +124,51 @@
       exit(0)
     }
 
-    private static func render(
-      _ screen: Screen, sizes: [(String, NSSize)], variants: [Variant], scale: Double
-    ) async {
+    private struct Stage {
+      let model: AppModel
+      let environment: AuditRenderEnvironment
+      let host: NSView
+      let window: NSWindow
+    }
+
+    private static func stage(_ screen: Screen, size: NSSize, variant: Variant?) async -> Stage {
       AuditRenderFixture.emptyData = screen.empty
       AuditRenderFixture.failing = false
       let model = AppModel.auditRenderModel(screen.scenario)
       AuditRenderFixture.failing = screen.failing
       let environment = AuditRenderEnvironment()
+      environment.contrast = variant?.contrast ?? false
+      environment.reduceTransparency = variant?.reduceTransparency ?? false
       let host = NSHostingView(
         rootView: AuditRenderHost(environment: environment, content: screen.content(model)))
-      let first = sizes.first?.1 ?? NSSize(width: 1280, height: 800)
       let window = NSWindow(
-        contentRect: NSRect(origin: NSPoint(x: -30_000, y: -30_000), size: first),
+        contentRect: NSRect(origin: NSPoint(x: -30_000, y: -30_000), size: size),
         styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
         backing: .buffered, defer: false)
       window.isReleasedWhenClosed = false
       window.titlebarAppearsTransparent = true
       window.titleVisibility = .hidden
-      window.appearance = NSAppearance(named: variants.first?.appearance ?? .darkAqua)
+      window.appearance = NSAppearance(named: variant?.appearance ?? .darkAqua)
       window.contentView = host
-      host.frame = NSRect(origin: .zero, size: first)
-      try? await Task.sleep(for: .milliseconds(1200))
+      host.frame = NSRect(origin: .zero, size: size)
+      try? await Task.sleep(for: .milliseconds(screen.rebuildsForEachPicture ? 300 : 1200))
       await screen.prepare(model)
-      try? await Task.sleep(for: .milliseconds(1300))
+      try? await Task.sleep(for: .milliseconds(screen.rebuildsForEachPicture ? 500 : 1300))
+      return Stage(model: model, environment: environment, host: host, window: window)
+    }
 
+    private static func dismantle(_ stage: Stage, _ screen: Screen) {
+      stage.window.contentView = nil
+      stage.window.close()
+      AuditRenderFixture.failing = false
+      AuditRenderFixture.emptyData = false
+      if case .setupFinish = screen.scenario { stage.model.setupGuide.skip() }
+    }
+
+    private static func render(
+      _ screen: Screen, sizes: [(String, NSSize)], variants: [Variant], scale: Double
+    ) async {
+      let first = sizes.first?.1 ?? NSSize(width: 1280, height: 800)
       var jobs: [(String, NSSize?, Variant)] = []
       if screen.sheet {
         jobs = variants.map { ("sheet", nil, $0) }
@@ -155,10 +178,21 @@
           jobs.append(("1280x3000-tall", NSSize(width: 1280, height: 3000), dark))
         }
       }
+      var shared: Stage?
       for (label, fixedSize, variant) in jobs {
-        window.appearance = NSAppearance(named: variant.appearance)
-        environment.contrast = variant.contrast
-        environment.reduceTransparency = variant.reduceTransparency
+        let current: Stage
+        if screen.rebuildsForEachPicture {
+          current = await stage(screen, size: fixedSize ?? first, variant: variant)
+        } else if let shared {
+          current = shared
+        } else {
+          current = await stage(screen, size: first, variant: variant)
+          shared = current
+        }
+        let host = current.host
+        current.window.appearance = NSAppearance(named: variant.appearance)
+        current.environment.contrast = variant.contrast
+        current.environment.reduceTransparency = variant.reduceTransparency
         var size = fixedSize ?? first
         if fixedSize == nil {
           host.frame = NSRect(origin: .zero, size: NSSize(width: 1200, height: 900))
@@ -167,7 +201,7 @@
           size = NSSize(
             width: min(max(fitting.width, 320), 1920), height: min(max(fitting.height, 200), 1400))
         }
-        window.setContentSize(size)
+        current.window.setContentSize(size)
         host.frame = NSRect(origin: .zero, size: size)
         host.layoutSubtreeIfNeeded()
         try? await Task.sleep(for: .milliseconds(450))
@@ -183,12 +217,12 @@
         } else {
           manifest.append(["file": "", "screen": screen.name, "error": "snapshot failed: \(name)"])
         }
+        if screen.rebuildsForEachPicture { dismantle(current, screen) }
       }
-      window.contentView = nil
-      window.close()
-      AuditRenderFixture.failing = false
-      AuditRenderFixture.emptyData = false
-      if case .setupFinish = screen.scenario { model.setupGuide.skip() }
+      if let shared { dismantle(shared, screen) }
+      for request in AuditRenderFixture.takeUnanswered() {
+        manifest.append(["file": "", "screen": screen.name, "unanswered": request])
+      }
     }
 
     private static func snapshot(_ view: NSView, scale: Double) -> (data: Data, uniform: Bool)? {
@@ -257,10 +291,13 @@
     private static func sheet(
       _ name: String, _ make: @escaping @MainActor (AppModel) -> AnyView
     ) -> Screen {
+      // Sheets open from the root view, which asks for dark, so they are drawn in dark too.
       Screen(
         name: name, scenario: .library, sheet: true,
         content: { model in
-          AnyView(make(model).environmentObject(model).background(AureliaDesign.canvas))
+          AnyView(
+            make(model).environmentObject(model).background(AureliaDesign.canvas)
+              .environment(\.colorScheme, .dark))
         })
     }
 
@@ -322,7 +359,7 @@
         Screen(
           name: "wrapped", scenario: .library,
           prepare: { $0.wrappedLaunch = WrappedLaunch(year: 2025) }),
-        Screen(name: "player-controls", scenario: .player),
+        Screen(name: "player-controls", scenario: .player, rebuildsForEachPicture: true),
         // Empty and error states.
         library("home-empty", .home, empty: true),
         library("movies-empty", .movies, empty: true),
@@ -368,7 +405,7 @@
             content: { model in
               AnyView(
                 SetupIntroductionView(guide: model.setupGuide, startPage: page)
-                  .environmentObject(model))
+                  .environmentObject(model).preferredColorScheme(.dark))
             }))
       }
       list += SettingsCategory.allCases.map { settings($0) }

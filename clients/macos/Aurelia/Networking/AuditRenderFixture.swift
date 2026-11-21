@@ -13,6 +13,17 @@
     /// Set per screen: empty lists, or every answer failing like an unreachable server.
     static var emptyData = false
     static var failing = false
+    private static var unanswered: [String] = []
+
+    /// A request no fixture answers: the page shows an error that only the fixture causes.
+    static func noteUnanswered(_ request: String) {
+      if !unanswered.contains(request) { unanswered.append(request) }
+    }
+
+    static func takeUnanswered() -> [String] {
+      defer { unanswered = [] }
+      return unanswered
+    }
 
     // MARK: Identities
 

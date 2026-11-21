@@ -129,11 +129,18 @@ final class AureliaAppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-    WindowClosePreference.quits()
+    #if DEBUG
+      // The renderer hides every window it does not draw into; it ends the process itself.
+      if AuditRenderFixture.enabled { return false }
+    #endif
+    return WindowClosePreference.quits()
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    termination.request(
+    #if DEBUG
+      if AuditRenderFixture.enabled { return .terminateCancel }
+    #endif
+    return termination.request(
       shutdown: { await AppModel.active?.shutdown() },
       terminate: { sender.terminate(nil) })
   }
