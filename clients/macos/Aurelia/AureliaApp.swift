@@ -100,6 +100,14 @@ final class AureliaAppDelegate: NSObject, NSApplicationDelegate {
   private let termination = ApplicationTerminationCoordinator()
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    #if DEBUG
+      // Offscreen screen renders stay in the background: no activation, window or update check.
+      if AuditRenderFixture.enabled {
+        NSApplication.shared.setActivationPolicy(.accessory)
+        Task { await AppModel.active?.start() }
+        return
+      }
+    #endif
     WishNotificationCenter.shared.installDelegateIfNeeded {
       AppModel.active?.openWishes()
     }

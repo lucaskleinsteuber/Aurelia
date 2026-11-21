@@ -56,6 +56,10 @@ final class BonjourBrowser: ObservableObject {
 
   func start() {
     guard browsers.isEmpty else { return }
+    #if DEBUG
+      // Offscreen screen renders never browse the local network.
+      if AuditRenderFixture.enabled { return }
+    #endif
     errorMessage = nil
     for type in ["_aurelia._tcp", "_aurelia-home._tcp"] { startBrowser(type: type, attempt: 0) }
   }

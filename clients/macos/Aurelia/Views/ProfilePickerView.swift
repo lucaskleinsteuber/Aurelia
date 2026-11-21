@@ -55,6 +55,9 @@ struct ProfilePickerView: View {
       reduceMotion ? .easeOut(duration: 0.12) : .smooth(duration: 0.32), value: choice?.id
     )
     .accessibilityIdentifier("profile-picker")
+    #if DEBUG
+      .onReceive(AuditRenderSignals.chooseProfile) { choice = $0 }
+    #endif
     .task { await reloadProfilesIfSafe() }
     .onChange(of: scenePhase) { _, phase in
       if phase == .active { Task { await reloadProfilesIfSafe() } }

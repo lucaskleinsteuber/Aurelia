@@ -185,6 +185,9 @@ struct LibraryShellView: View {
       open(.media(id))
       model.requestedMediaDetail = nil
     }
+    #if DEBUG
+      .onReceive(AuditRenderSignals.openCollection) { open(.collection($0)) }
+    #endif
     .onChange(of: model.requestedPersonDetail) { _, person in
       guard let person else { return }
       open(.person(person))
@@ -922,6 +925,9 @@ private struct LibraryPage: View {
       .frame(maxWidth: .infinity, alignment: .leading)
     }
     .accessibilityIdentifier("browse-\(section.rawValue)")
+    #if DEBUG
+      .onReceive(AuditRenderSignals.search) { search = $0 }
+    #endif
     .task(id: requestKey) {
       if loadedContext != context {
         browser.invalidate()

@@ -1911,6 +1911,16 @@ struct APIClient: Sendable {
     timeout: TimeInterval = 15
   ) async throws -> Data {
     #if DEBUG
+      // Offscreen screen renders (scripts/audit-render-screens.sh) never send a request.
+      if AuditRenderFixture.enabled {
+        if let fixture = try await AuditRenderFixture.response(
+          path: path, method: method, body: body)
+        {
+          return fixture
+        }
+        guard method == "GET" else { throw APIClientError.invalidResponse }
+        return try Self.serverSettingsFixture(path: path)
+      }
       if await ProfileEditorUITestFixture.enabled,
         let fixture = try await ProfileEditorUITestFixture.response(
           path: path, method: method, body: body)

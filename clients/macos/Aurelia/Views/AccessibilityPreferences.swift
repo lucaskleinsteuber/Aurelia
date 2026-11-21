@@ -15,7 +15,10 @@ extension EnvironmentValues {
   }
 
   var aureliaReduceTransparency: Bool {
-    accessibilityReduceTransparency || cinemaAccessibilityFixture
+    #if DEBUG
+      if auditRenderReduceTransparency { return true }
+    #endif
+    return accessibilityReduceTransparency || cinemaAccessibilityFixture
   }
 
   /// The system setting, or Settings › General › Reduce Motion in Aurelia.
@@ -25,6 +28,31 @@ extension EnvironmentValues {
   }
 
   var aureliaContrast: ColorSchemeContrast {
-    cinemaAccessibilityFixture ? .increased : colorSchemeContrast
+    #if DEBUG
+      if auditRenderIncreasedContrast { return .increased }
+    #endif
+    return cinemaAccessibilityFixture ? .increased : colorSchemeContrast
   }
 }
+
+#if DEBUG
+  // scripts/audit-render-screens.sh draws screens offscreen with these set on the hosting view's
+  // environment only; the Mac's own accessibility settings are never changed.
+  private struct AuditRenderReduceTransparencyKey: EnvironmentKey {
+    static let defaultValue = false
+  }
+  private struct AuditRenderIncreasedContrastKey: EnvironmentKey {
+    static let defaultValue = false
+  }
+
+  extension EnvironmentValues {
+    var auditRenderReduceTransparency: Bool {
+      get { self[AuditRenderReduceTransparencyKey.self] }
+      set { self[AuditRenderReduceTransparencyKey.self] = newValue }
+    }
+    var auditRenderIncreasedContrast: Bool {
+      get { self[AuditRenderIncreasedContrastKey.self] }
+      set { self[AuditRenderIncreasedContrastKey.self] = newValue }
+    }
+  }
+#endif
