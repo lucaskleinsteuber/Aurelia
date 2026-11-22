@@ -353,7 +353,7 @@ builder.Services.AddRateLimiter(options =>
         await context.HttpContext.Response.WriteAsJsonAsync(new ApiProblem("rate_limited", "Too many requests. Try again shortly."), token);
     };
     options.AddPolicy("authentication", context => RateLimitPartition.GetFixedWindowLimiter(
-        context.Connection.RemoteIpAddress?.ToString() ?? "local",
+        ServerRequestGuard.AuthenticationPartitionKey(context),
         _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = 10,
@@ -363,7 +363,7 @@ builder.Services.AddRateLimiter(options =>
         }));
     // Between two servers during a move: a handful of calls per move; the code's own five tries count separately.
     options.AddPolicy("move", context => RateLimitPartition.GetFixedWindowLimiter(
-        context.Connection.RemoteIpAddress?.ToString() ?? "local",
+        ServerRequestGuard.AddressKey(context.Connection.RemoteIpAddress),
         _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = 20,
@@ -401,7 +401,10 @@ HostReadinessSignal.Register(
     Environment.GetEnvironmentVariable(HostReadinessSignal.EnvironmentVariableName));
 app.Use(async (context, next) =>
 {
-    if (!context.RequestServices.GetRequiredService<ServerRequestGuard>().Admit(context.Connection.RemoteIpAddress, ServerRequestGuard.IsPreviewStream(context.Request)))
+    if (!context.RequestServices.GetRequiredService<ServerRequestGuard>().Admit(
+        context.Connection.RemoteIpAddress,
+        ServerRequestGuard.IsPreviewStream(context.Request),
+        ServerRequestGuard.IsUserStateWrite(context.Request)))
     {
         context.Response.StatusCode = 429;
         context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("request_rate_limited", "warning", status: 429);

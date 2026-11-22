@@ -406,6 +406,8 @@ public sealed class AccountService(
         if (actor.Role != UserRole.Owner) throw Forbidden();
         var target = await database.Users.Include(user => user.LibraryGrants).SingleOrDefaultAsync(user => user.Id == targetId, cancellationToken)
             ?? throw NotFound("user_not_found", "The user was not found.");
+        if (target.AgeLimit is not null)
+            throw new AccountException("age_limit_active", "Remove the profile's age limit before switching to legacy library grants.", 409);
         if (target.Role == UserRole.Owner && target.IsEnabled && !request.IsEnabled
             && await database.Users.CountAsync(user => user.Role == UserRole.Owner && user.IsEnabled, cancellationToken) <= 1)
             throw new AccountException("last_owner_required", "The final active owner cannot be disabled.", 409);

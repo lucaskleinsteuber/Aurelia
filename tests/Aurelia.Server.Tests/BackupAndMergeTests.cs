@@ -96,14 +96,12 @@ public sealed class BackupAndMergeTests
             }
 
             // Restore into a second initialized server's data directory.
-            using (var targetFactory = new AureliaServerFactory())
+            using (var targetFactory = new AureliaServerFactory(restoreDir))
             {
                 using var targetClient = targetFactory.CreateClient();
                 await ApiTestClient.SetupOwnerAsync(targetClient);
-                var targetDir = targetFactory.DataDirectory;
-                // Copy initialized state to restoreDir so targetFactory can be disposed cleanly before activation.
-                CopyDirectory(targetDir, restoreDir);
             }
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             var targetRuntime = ServerRuntimeOptions.Resolve(new ConfigurationBuilder().Build(), ["--data-dir", restoreDir]);
             var targetDbBackups = new DatabaseBackupService(targetRuntime);
             var targetConfig = new ServerConfigurationStore(targetRuntime);
@@ -279,15 +277,6 @@ public sealed class BackupAndMergeTests
         {
             Directory.Delete(Path.GetDirectoryName(mediaRoot)!, recursive: true);
         }
-    }
-
-    private static void CopyDirectory(string source, string destination)
-    {
-        Directory.CreateDirectory(destination);
-        foreach (var file in Directory.EnumerateFiles(source))
-            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), overwrite: true);
-        foreach (var dir in Directory.EnumerateDirectories(source))
-            CopyDirectory(dir, Path.Combine(destination, Path.GetFileName(dir)));
     }
 
     private static MemoryStream CreatePngStream(int width, int height)

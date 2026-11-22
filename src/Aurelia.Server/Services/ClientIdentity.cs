@@ -22,7 +22,7 @@ public sealed record ClientIdentity(string? InstallationId, string? Platform, st
     /// </summary>
     public static void EnsureBrowserInstallation(HttpContext context)
     {
-        if (Installation(context.Request.Cookies[InstallationCookie]) is not null) return;
+        if (Installation(Authentication.WebCookies.Read(context.Request, InstallationCookie)) is not null) return;
         var created = Guid.NewGuid().ToString("N");
         context.Items[InstallationItem] = created;
         Authentication.WebCookies.Set(context, InstallationCookie, created, DateTimeOffset.UtcNow.AddYears(10));
@@ -33,7 +33,7 @@ public sealed record ClientIdentity(string? InstallationId, string? Platform, st
         if (context is null) return new(null, null, null, null);
         var installation = Installation(context.Request.Headers[InstallationHeader].ToString())
             ?? Installation(context.Items[InstallationItem] as string)
-            ?? Installation(context.Request.Cookies[InstallationCookie]);
+            ?? Installation(Authentication.WebCookies.Read(context.Request, InstallationCookie));
         var (platform, version) = Client(context.Request.Headers[ClientHeader].ToString());
         platform ??= BrowserPlatform(context.Request.Headers.UserAgent.ToString());
         return new(installation, platform, version, Address(context.Connection.RemoteIpAddress));

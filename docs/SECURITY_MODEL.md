@@ -19,9 +19,12 @@ endpoint or a client can be checked against it.
   own token, which the owner can revoke under *Settings › Profiles and Devices*.
 - **Profiles.** On a paired device, each person chooses their profile. Owner and administrator
   profiles always need their PIN; other profiles can have one.
-- **Browsers** keep their credentials in `HttpOnly`, `SameSite=Strict` cookies that scripts
-  cannot read, and every change must carry the `X-Aurelia-Web` header, which another web page
-  cannot add. The page's content policy loads nothing from the internet.
+- **Browsers** keep their credentials in `HttpOnly`, `SameSite=Strict` cookies (using the
+  `__Host-` prefix over HTTPS so another service on the same host cannot overwrite them) that
+  scripts cannot read, and every change must carry the `X-Aurelia-Web` header, which another web
+  page cannot add. The page's content policy loads nothing from the internet. Because browser
+  cookies are not port-scoped (RFC 6265), avoid running untrusted HTTPS services on the same IP
+  address or hostname as Aurelia Server.
 - **Rate limits** slow down guessing of passwords, PINs and pairing codes and cap requests
   per address. Waiting pairing codes also end after 100 wrong guesses in total, from any
   address.

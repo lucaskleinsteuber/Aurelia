@@ -410,24 +410,32 @@ public sealed class MediaEditingTests
     public async Task SeriesRemovalIncludesDescendantsAndExplicitDirectoryReimportClearsAllExclusions()
     {
         using var fixture = await Fixture.CreateAsync();
-        var path = Path.Combine(fixture.Factory.DataDirectory, "Synthetic Shows");
-        var names = new[] { "Example Show/Season 1/Example Show S01E01 Pilot.mkv", "Example Show/Season 1/Example Show S01E02 Second.mkv",
-            "Example Show/Season 1/Extras/Behind the Scenes.mkv", "Example Show/Extras/Retrospective.mkv", "Example Show/Trailers/Trailer.mkv" };
-        foreach (var name in names) { var source = Path.Combine(path, name); Directory.CreateDirectory(Path.GetDirectoryName(source)!); await File.WriteAllBytesAsync(source, [1, 2, 3]); }
-        var library = await fixture.RequestAsync<LibrarySummary>(HttpMethod.Post, "/api/v1/libraries", new CreateLibraryRequest(null, path, LibraryKind.TvShows));
-        await fixture.ScanAsync(library.Id);
-        var show = Assert.Single((await fixture.GetAsync<PagedResponse<SeriesSummary>>("/api/v1/catalog/series")).Items);
-        var removed = await fixture.RequestAsync<LibraryMutationResult>(HttpMethod.Delete, $"/api/v1/media/{show.Id}");
-        Assert.Equal(6, removed.RemovedItems); Assert.Equal("completed", removed.State);
-        await fixture.ScanAsync(library.Id);
-        Assert.Empty((await fixture.GetAsync<PagedResponse<SeriesSummary>>("/api/v1/catalog/series")).Items);
-        var exclusions = await fixture.GetAsync<ExcludedMediaSummary[]>($"/api/v1/libraries/{library.Id}/exclusions");
-        Assert.Equal(6, exclusions.Length); var directory = Assert.Single(exclusions, value => value.IsDirectory);
-        var scan = await fixture.RequestAsync<LibraryScanSummary>(HttpMethod.Delete, $"/api/v1/libraries/{library.Id}/exclusions/{directory.Id}");
-        await fixture.WaitScanAsync(scan.Id);
-        Assert.Empty(await fixture.GetAsync<ExcludedMediaSummary[]>($"/api/v1/libraries/{library.Id}/exclusions"));
-        Assert.Single((await fixture.GetAsync<PagedResponse<SeriesSummary>>("/api/v1/catalog/series")).Items);
-        foreach (var name in names) Assert.Equal(new byte[] { 1, 2, 3 }, await File.ReadAllBytesAsync(Path.Combine(path, name)));
+        var mediaParent = TestPaths.CreateDataDirectory();
+        var path = Path.Combine(mediaParent, "Synthetic Shows");
+        try
+        {
+            var names = new[] { "Example Show/Season 1/Example Show S01E01 Pilot.mkv", "Example Show/Season 1/Example Show S01E02 Second.mkv",
+                "Example Show/Season 1/Extras/Behind the Scenes.mkv", "Example Show/Extras/Retrospective.mkv", "Example Show/Trailers/Trailer.mkv" };
+            foreach (var name in names) { var source = Path.Combine(path, name); Directory.CreateDirectory(Path.GetDirectoryName(source)!); await File.WriteAllBytesAsync(source, [1, 2, 3]); }
+            var library = await fixture.RequestAsync<LibrarySummary>(HttpMethod.Post, "/api/v1/libraries", new CreateLibraryRequest(null, path, LibraryKind.TvShows));
+            await fixture.ScanAsync(library.Id);
+            var show = Assert.Single((await fixture.GetAsync<PagedResponse<SeriesSummary>>("/api/v1/catalog/series")).Items);
+            var removed = await fixture.RequestAsync<LibraryMutationResult>(HttpMethod.Delete, $"/api/v1/media/{show.Id}");
+            Assert.Equal(6, removed.RemovedItems); Assert.Equal("completed", removed.State);
+            await fixture.ScanAsync(library.Id);
+            Assert.Empty((await fixture.GetAsync<PagedResponse<SeriesSummary>>("/api/v1/catalog/series")).Items);
+            var exclusions = await fixture.GetAsync<ExcludedMediaSummary[]>($"/api/v1/libraries/{library.Id}/exclusions");
+            Assert.Equal(6, exclusions.Length); var directory = Assert.Single(exclusions, value => value.IsDirectory);
+            var scan = await fixture.RequestAsync<LibraryScanSummary>(HttpMethod.Delete, $"/api/v1/libraries/{library.Id}/exclusions/{directory.Id}");
+            await fixture.WaitScanAsync(scan.Id);
+            Assert.Empty(await fixture.GetAsync<ExcludedMediaSummary[]>($"/api/v1/libraries/{library.Id}/exclusions"));
+            Assert.Single((await fixture.GetAsync<PagedResponse<SeriesSummary>>("/api/v1/catalog/series")).Items);
+            foreach (var name in names) Assert.Equal(new byte[] { 1, 2, 3 }, await File.ReadAllBytesAsync(Path.Combine(path, name)));
+        }
+        finally
+        {
+            if (Directory.Exists(mediaParent)) Directory.Delete(mediaParent, recursive: true);
+        }
     }
 
     internal static byte[] Png(int width, int height)

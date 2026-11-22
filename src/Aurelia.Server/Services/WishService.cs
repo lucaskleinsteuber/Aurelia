@@ -58,8 +58,6 @@ public sealed class WishService(
         if (hits.Count == 0)
             return new WishSearchResponse([], true);
 
-        posterCache.AllowRecent(hits.Select(hit => hit.PosterPath));
-
         var providerIds = hits.Select(hit => hit.ProviderMediaId).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToList();
         var existingLibrary = await (
             from meta in database.MediaMetadata.AsNoTracking()
@@ -90,7 +88,54 @@ public sealed class WishService(
             .GroupBy(wish => wish.ProviderMediaId!, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
 
-        var mapped = hits.Select(hit =>
+        var keptHits = hits;
+        if (IsChildAgeLimited(caller))
+        {
+            var limit = caller.AgeLimit!.Value;
+            var mediaType = kind == MediaKind.Series ? "tv" : "movie";
+            var filtered = new List<MetadataCandidateSummary>();
+            var tmdbChecks = 0;
+            foreach (var hit in hits)
+            {
+                if (libraryByProviderId.ContainsKey(hit.ProviderMediaId))
+                {
+                    filtered.Add(hit);
+                    continue;
+                }
+                if (visibleWishByProviderId.TryGetValue(hit.ProviderMediaId, out var wish)
+                    && AgeRatings.MinimumAge(wish.AgeRating) is int wishMinAge
+                    && wishMinAge <= limit)
+                {
+                    filtered.Add(hit);
+                    continue;
+                }
+                if (tmdbChecks >= 8) continue;
+                tmdbChecks++;
+                try
+                {
+                    using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    deadline.CancelAfter(TimeSpan.FromSeconds(3));
+                    var detail = await tmdb.GetAsync(configuration.Token, configuration.Language, mediaType, hit.ProviderMediaId, deadline.Token);
+                    if (AgeRatings.MinimumAge(detail.ContentRating) is int detailMinAge && detailMinAge <= limit)
+                    {
+                        filtered.Add(hit);
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception error) when (error is HttpRequestException or MetadataException or OperationCanceledException or InvalidDataException)
+                {
+                    // Unrated or unreachable TMDB details stay hidden from child profiles.
+                }
+            }
+            keptHits = filtered;
+        }
+
+        posterCache.AllowRecent(keptHits.Select(hit => hit.PosterPath));
+
+        var mapped = keptHits.Select(hit =>
         {
             libraryByProviderId.TryGetValue(hit.ProviderMediaId, out var mediaId);
             visibleWishByProviderId.TryGetValue(hit.ProviderMediaId, out var existingWish);
@@ -319,6 +364,13 @@ public sealed class WishService(
                     // Fall back to the submitted search summary; ageRating remains null (hidden from other child profiles).
                 }
             }
+        }
+
+        if (IsChildAgeLimited(caller)
+            && AgeRatings.MinimumAge(ageRating) is int createdMinAge
+            && createdMinAge > caller.AgeLimit!.Value)
+        {
+            throw new AccountException("wish_age_restricted", "This title exceeds your profile's age limit.", StatusCodes.Status403Forbidden);
         }
 
         if (posterPath is not null)

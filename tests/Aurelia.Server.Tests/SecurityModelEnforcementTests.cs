@@ -80,12 +80,20 @@ public sealed class SecurityModelEnforcementTests
         tmdbResp.EnsureSuccessStatusCode();
 
         // 3. Admin action: Add storage location (NO unlock, NO approval)
-        var storageDir = Path.Combine(factory.DataDirectory, "admin-added-storage");
-        Directory.CreateDirectory(storageDir);
-        using var addStorageReq = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/libraries", adminToken,
-            new CreateLibraryRequest("Admin Added Storage", storageDir, LibraryKind.Movies));
-        using var addStorageResp = await client.SendAsync(addStorageReq);
-        addStorageResp.EnsureSuccessStatusCode();
+        var storageParent = TestPaths.CreateDataDirectory();
+        var storageDir = Path.Combine(storageParent, "admin-added-storage");
+        try
+        {
+            Directory.CreateDirectory(storageDir);
+            using var addStorageReq = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/libraries", adminToken,
+                new CreateLibraryRequest("Admin Added Storage", storageDir, LibraryKind.Movies));
+            using var addStorageResp = await client.SendAsync(addStorageReq);
+            addStorageResp.EnsureSuccessStatusCode();
+        }
+        finally
+        {
+            if (Directory.Exists(storageParent)) Directory.Delete(storageParent, recursive: true);
+        }
     }
 
     [Fact]

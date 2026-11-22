@@ -17,6 +17,16 @@ public sealed class ServerRequestGuard
     /// </summary>
     public const int RequestsPerMinute = 3_000;
     /// <summary>
+    /// Loopback serves the local desktop app, local browser tabs, and CLI simultaneously, so
+    /// it gets a higher budget than remote addresses.
+    /// </summary>
+    public const int LoopbackRequestsPerMinute = 12_000;
+    /// <summary>
+    /// Playback progress and user-state mutations count in their own bucket so artwork/catalog
+    /// bursts cannot starve progress saves with 429.
+    /// </summary>
+    public const int WriteRequestsPerMinute = 6_000;
+    /// <summary>
     /// Timeline preview reads come in short bursts of a few thousand range requests while a
     /// device prepares a title's frames on several cores. They count in their own, larger
     /// bucket so a burst never locks the device out of browsing or playback; the stream
@@ -66,10 +76,18 @@ public sealed class ServerRequestGuard
         return new IPAddress(bytes).ToString() + "/64";
     }
 
-    public bool Admit(IPAddress? address, bool preview = false)
+    public bool Admit(IPAddress? address, bool preview = false, bool userStateWrite = false)
     {
-        var key = (preview ? "preview:" : "") + AddressKey(address);
-        var limit = preview ? PreviewRequestsPerMinute : RequestsPerMinute;
+        var isLoopback = address is null || IPAddress.IsLoopback(address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address);
+        var bucket = preview ? "preview:" : userStateWrite ? "write:" : "";
+        var key = bucket + AddressKey(address);
+        var limit = preview
+            ? PreviewRequestsPerMinute
+            : isLoopback
+                ? LoopbackRequestsPerMinute
+                : userStateWrite
+                    ? WriteRequestsPerMinute
+                    : RequestsPerMinute;
         var now = DateTimeOffset.UtcNow;
         lock (gate)
         {
@@ -91,6 +109,40 @@ public sealed class ServerRequestGuard
             }
             return true;
         }
+    }
+
+    /// <summary>
+    /// Partition key for the "authentication" rate limiter: IPv6 counts by /64 so privacy-address
+    /// rotation cannot bypass limits, while authenticated sessions partition per device session and
+    /// route so one device's failed PIN guesses cannot lock out other devices or profiles sharing
+    /// loopback or a NAT IP.
+    /// </summary>
+    internal static string AuthenticationPartitionKey(HttpContext context)
+    {
+        var address = AddressKey(context.Connection.RemoteIpAddress);
+        if (context.User.Identity?.IsAuthenticated == true)
+        {
+            var sessionId = context.User.FindFirst(DeviceTokenAuthenticationHandler.SessionIdClaim)?.Value;
+            if (!string.IsNullOrEmpty(sessionId))
+            {
+                var path = (context.Request.Path.Value ?? string.Empty).TrimEnd('/').ToLowerInvariant();
+                return $"{address}:session:{sessionId}:{path}";
+            }
+        }
+        return address;
+    }
+
+    /// <summary>Small user-state write endpoints (progress, favorites, watchlist, notes) kept separate from catalog/artwork floods.</summary>
+    public static bool IsUserStateWrite(HttpRequest request)
+    {
+        if (HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method)) return false;
+        var path = request.Path.Value ?? string.Empty;
+        return path.EndsWith("/progress", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith("/favorite", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith("/watched", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/watchlist", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/notes", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/continue-watching", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>A stream read or scrub-preview read that a client marked as a timeline preview.</summary>

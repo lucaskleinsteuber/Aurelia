@@ -52,7 +52,7 @@ public static class DeviceAuthorizationEndpoints
         });
     }
 
-    private static string Address(HttpContext context) => context.Connection.RemoteIpAddress?.ToString() ?? "local";
+    private static string Address(HttpContext context) => ServerRequestGuard.AddressKey(context.Connection.RemoteIpAddress);
 
     private static async Task<T> ExecuteAsync<T>(Func<Task<T>> action)
     {

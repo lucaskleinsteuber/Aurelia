@@ -50,18 +50,29 @@ public sealed class DeviceAuthorizationService(
             codeHash = tokens.HashCode(code);
         } while (await database.DeviceAuthorizationRequests.AnyAsync(request => request.CodeHash == codeHash, token));
         var secret = tokens.CreateDeviceToken();
+        var requestId = Guid.NewGuid();
+        var expiresAt = now.AddMinutes(5);
+        guard.ReservePending(address, requestId, expiresAt);
         var request = new DeviceAuthorizationRequest
         {
-            Id = Guid.NewGuid(),
+            Id = requestId,
             DeviceName = name,
             CodeHash = codeHash,
             SecretHash = tokens.Hash(secret),
             State = DeviceAuthorizationState.Pending,
             CreatedAt = now,
-            ExpiresAt = now.AddMinutes(5),
+            ExpiresAt = expiresAt,
         };
-        database.DeviceAuthorizationRequests.Add(request);
-        await database.SaveChangesAsync(token);
+        try
+        {
+            database.DeviceAuthorizationRequests.Add(request);
+            await database.SaveChangesAsync(token);
+        }
+        catch
+        {
+            guard.ReleasePending(requestId);
+            throw;
+        }
         return new(request.Id, code, secret, request.ExpiresAt, PollIntervalSeconds);
     }
 
@@ -127,6 +138,7 @@ public sealed class DeviceAuthorizationService(
             await database.SaveChangesAsync(token);
         }
         await transaction.CommitAsync(token);
+        guard.ReleasePending(request.Id);
         // Only an approval that was saved is a sign-in (audit S-X5).
         if (created is not null)
         {
@@ -233,6 +245,7 @@ public sealed class DeviceAuthorizationService(
         request.ProtectedAuthentication = null;
         if (request.DeviceSession is { } session) session.RevokedAt ??= clock.GetUtcNow();
         await database.SaveChangesAsync(token);
+        guard.ReleasePending(request.Id);
     }
 
     private async Task<ServerUser> RequireOwnerAsync(Guid ownerId, Guid deviceId, Guid profileId, CancellationToken token)

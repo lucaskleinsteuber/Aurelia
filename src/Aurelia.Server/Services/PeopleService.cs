@@ -90,6 +90,15 @@ public sealed partial class PeopleService(
         CancellationToken cancellationToken)
     {
         if (ProviderPersonId(personKey) is not { } personId) return new PersonProfileResponse(null, []);
+        var inVisibleLibrary = await database.MediaCredits.AsNoTracking()
+            .Where(credit => credit.ProviderPersonId == personId)
+            .Join(
+                database.MediaItems.AsNoTracking().Where(item => item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series),
+                credit => credit.MediaItemId,
+                item => item.Id,
+                (credit, _) => credit.Id)
+            .AnyAsync(cancellationToken);
+        if (!inVisibleLibrary) return new PersonProfileResponse(null, []);
         var configuration = metadataSettings.Load();
         var stored = await database.PersonProfiles.SingleOrDefaultAsync(
             profile => profile.Provider == "tmdb" && profile.ProviderPersonId == personId, cancellationToken);
@@ -112,6 +121,12 @@ public sealed partial class PeopleService(
         }
         if (stored is null) return new PersonProfileResponse(null, []);
         var about = new PersonAbout(stored.Biography, stored.Birthday, stored.Deathday, stored.PlaceOfBirth, stored.KnownForDepartment, "tmdb", personId);
+        var caller = await database.Users.AsNoTracking().SingleOrDefaultAsync(user => user.Id == callerId, cancellationToken);
+        if (caller is not null && caller.Role == UserRole.User && caller.AccessMode == ProfileAccessMode.EntireLibrary && caller.AgeLimit is not null)
+        {
+            // External TMDB "Known for" credits carry no age rating; child profiles only see their library titles.
+            return new PersonProfileResponse(about, []);
+        }
         List<TmdbPersonCredit> credits;
         try { credits = JsonSerializer.Deserialize<List<TmdbPersonCredit>>(stored.CreditsJson, JsonOptions) ?? []; }
         catch (JsonException) { credits = []; }
