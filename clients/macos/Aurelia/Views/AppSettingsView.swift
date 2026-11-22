@@ -75,6 +75,7 @@ struct AppSettingsView: View {
   @State private var libraryToRemove: LibrarySummary?
   @State private var libraryToRelocate: LibrarySummary?
   @State private var showingSwitchConfirmation = false
+  @State private var showingDisconnectConfirmation = false
   @State private var pendingLocations: [StorageLocationDraft] = []
   @State private var showingCombineConfirmation = false
   @State private var isLoadingAdministration = false
@@ -179,6 +180,19 @@ struct AppSettingsView: View {
       }
     } message: {
       Text("Server data and media files remain untouched.")
+    }
+    .confirmationDialog(
+      "Disconnect This Mac?",
+      isPresented: $showingDisconnectConfirmation,
+      titleVisibility: .visible
+    ) {
+      Button("Disconnect This Mac", role: .destructive) {
+        Task { await model.disconnect() }
+      }
+    } message: {
+      Text(
+        "To connect to this server again, you will need a new pairing code. Offline downloads stored on this Mac can no longer be opened without the server."
+      )
     }
     .confirmationDialog(
       "Combine Existing Libraries?",
@@ -1467,8 +1481,8 @@ struct AppSettingsView: View {
                 .accessibilityIdentifier("restore-local-host")
               }
             }
-            Button("Disconnect This Mac", role: .destructive) {
-              Task { await model.disconnect() }
+            Button("Disconnect This Mac…", role: .destructive) {
+              showingDisconnectConfirmation = true
             }
             .accessibilityIdentifier("disconnect-server")
           }

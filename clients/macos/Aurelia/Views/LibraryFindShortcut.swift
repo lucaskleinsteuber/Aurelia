@@ -1,31 +1,41 @@
 import AppKit
 import SwiftUI
 
-/// The shortcut belongs to the visible library window, including its detail pages.
+/// The shortcuts belong to the visible library window, including its detail pages.
 struct LibraryFindShortcut: NSViewRepresentable {
   let isBlocked: () -> Bool
+  var canGoBack: () -> Bool = { false }
+  var back: (() -> Void)?
   let find: () -> Void
 
   func makeNSView(context: Context) -> ShortcutView {
     let view = ShortcutView()
     view.isBlocked = isBlocked
+    view.canGoBack = canGoBack
+    view.back = back
     view.find = find
     return view
   }
 
   func updateNSView(_ view: ShortcutView, context: Context) {
     view.isBlocked = isBlocked
+    view.canGoBack = canGoBack
+    view.back = back
     view.find = find
   }
 
   static func dismantleNSView(_ view: ShortcutView, coordinator: Void) {
     view.removeMonitor()
     view.isBlocked = nil
+    view.canGoBack = nil
+    view.back = nil
     view.find = nil
   }
 
   @MainActor final class ShortcutView: NSView {
     var isBlocked: (() -> Bool)?
+    var canGoBack: (() -> Bool)?
+    var back: (() -> Void)?
     var find: (() -> Void)?
     private var monitor: Any?
 
@@ -42,15 +52,29 @@ struct LibraryFindShortcut: NSViewRepresentable {
         let eventWindowNumber = event.windowNumber
         let consumed = MainActor.assumeIsolated {
           guard let self, let window = self.window else { return false }
-          let consumes = LibraryFindShortcutPolicy.consumes(
-            characters: characters, modifiers: NSEvent.ModifierFlags(rawValue: modifiers),
-            isRepeat: isRepeat,
-            activeShellWindow: NSApp.isActive && NSApp.keyWindow === window
-              && eventWindowNumber == window.windowNumber,
-            blocked: window.attachedSheet != nil || NSApp.modalWindow != nil
-              || RunLoop.current.currentMode == .eventTracking || self.isBlocked?() == true)
-          if consumes { self.find?() }
-          return consumes
+          let activeShellWindow =
+            NSApp.isActive && NSApp.keyWindow === window
+            && eventWindowNumber == window.windowNumber
+          let blocked =
+            window.attachedSheet != nil || NSApp.modalWindow != nil
+            || RunLoop.current.currentMode == .eventTracking || self.isBlocked?() == true
+          let modifierFlags = NSEvent.ModifierFlags(rawValue: modifiers)
+          if LibraryFindShortcutPolicy.consumes(
+            characters: characters, modifiers: modifierFlags,
+            isRepeat: isRepeat, activeShellWindow: activeShellWindow, blocked: blocked)
+          {
+            self.find?()
+            return true
+          }
+          if LibraryFindShortcutPolicy.consumesBack(
+            characters: characters, modifiers: modifierFlags,
+            isRepeat: isRepeat, activeShellWindow: activeShellWindow, blocked: blocked,
+            canGoBack: self.canGoBack?() == true)
+          {
+            self.back?()
+            return true
+          }
+          return false
         }
         return consumed ? nil : event
       }

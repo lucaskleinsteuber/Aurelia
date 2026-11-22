@@ -1,14 +1,45 @@
 import SwiftUI
 import UserNotifications
 
+/// Pure display state for the Touch ID row so a failed or in-flight passkey lookup never offers
+/// "Set Up Touch ID" over an existing local key.
+enum ServerSecurityTouchIDState: Equatable {
+  case hardwareUnavailable
+  case failed(String)
+  case loading
+  case configured(UUID)
+  case canSetUp
+
+  static func resolve(
+    hardwareAvailable: Bool,
+    loaded: Bool,
+    error: String?,
+    storedPasskeyID: UUID?,
+    serverPasskeyIDs: Set<UUID>
+  ) -> Self {
+    guard hardwareAvailable else { return .hardwareUnavailable }
+    if let error { return .failed(error) }
+    guard loaded else { return .loading }
+    if let storedPasskeyID, serverPasskeyIDs.contains(storedPasskeyID) {
+      return .configured(storedPasskeyID)
+    }
+    return .canSetUp
+  }
+}
+
 /// Settings › Profiles and Devices › Security: Touch ID on this Mac, signed-in devices with Block,
 /// the block list, the owner's security settings and the security log ("security-v1").
 struct ServerSecuritySection: View {
   @EnvironmentObject private var model: AppModel
   @State private var passkeys: [ServerPasskey] = []
+  @State private var passkeysLoaded = false
+  @State private var passkeysError: String?
   @State private var settings: ServerSecuritySettings?
+  @State private var settingsError: String?
   @State private var devices: [ServerSecurityDevice] = []
+  @State private var devicesError: String?
   @State private var blocked: [ServerBlockedDevice] = []
+  @State private var blockedError: String?
   @State private var logDays: Int?
   @State private var message: String?
   @State private var working = false
@@ -28,9 +59,16 @@ struct ServerSecuritySection: View {
       ) {
         VStack(alignment: .leading, spacing: 16) {
           touchID
-          if owner, let settings { settingsRows(settings) }
+          if owner {
+            if let settings {
+              settingsRows(settings)
+            } else if let settingsError {
+              Divider()
+              ErrorBanner(message: settingsError, retry: { Task { await reload() } }, inline: true)
+            }
+          }
           if owner { devicesRows }
-          if owner && !blocked.isEmpty { blockedRows }
+          if owner && (!blocked.isEmpty || blockedError != nil) { blockedRows }
           if owner {
             Button("Show Security Log…") { showsLog = true }
           }
@@ -50,15 +88,26 @@ struct ServerSecuritySection: View {
 
   @ViewBuilder private var touchID: some View {
     Text("Touch ID").font(.headline)
-    if !SecureEnclavePasskeySigner.isAvailable {
+    switch ServerSecurityTouchIDState.resolve(
+      hardwareAvailable: SecureEnclavePasskeySigner.isAvailable,
+      loaded: passkeysLoaded,
+      error: passkeysError,
+      storedPasskeyID: model.storedPasskey?.passkeyId,
+      serverPasskeyIDs: Set(passkeys.map(\.id)))
+    {
+    case .hardwareUnavailable:
       Text("This Mac can't keep a Touch ID key.").font(.callout).foregroundStyle(.secondary)
-    } else if let key = model.storedPasskey, passkeys.contains(where: { $0.id == key.passkeyId }) {
+    case .failed(let error):
+      ErrorBanner(message: error, retry: { Task { await reload() } }, inline: true)
+    case .loading:
+      AureliaDelayedProgress(controlSize: .small)
+    case .configured(let keyID):
       HStack {
         Label("Touch ID is set up on this Mac", systemImage: "checkmark.shield")
         Spacer()
-        Button("Remove", role: .destructive) { Task { await remove(key.passkeyId) } }
+        Button("Remove", role: .destructive) { Task { await remove(keyID) } }
       }
-    } else {
+    case .canSetUp:
       HStack {
         Text(
           "Confirm changes with Touch ID instead of the Server Password. Setting it up asks once for the password."
@@ -68,7 +117,7 @@ struct ServerSecuritySection: View {
         Button("Set Up Touch ID") { Task { await setUp() } }
       }
     }
-    if passkeys.contains(where: { !$0.isThisDevice }) {
+    if passkeysError == nil, passkeys.contains(where: { !$0.isThisDevice }) {
       ForEach(passkeys.filter { !$0.isThisDevice }) { passkey in
         HStack {
           VStack(alignment: .leading) {
@@ -120,6 +169,9 @@ struct ServerSecuritySection: View {
       "Sign Out ends a device's access; it can connect again with a new code. Block also keeps it from signing in or pairing again until you unblock it."
     )
     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+    if let devicesError {
+      ErrorBanner(message: devicesError, retry: { Task { await reload() } }, inline: true)
+    }
     ForEach(sessions) { session in
       deviceRow(
         id: session.id, name: session.deviceName, isCurrent: session.isCurrent,
@@ -176,6 +228,9 @@ struct ServerSecuritySection: View {
   @ViewBuilder private var blockedRows: some View {
     Divider()
     Text("Blocked Devices").font(.headline)
+    if let blockedError {
+      ErrorBanner(message: blockedError, retry: { Task { await reload() } }, inline: true)
+    }
     ForEach(blocked) { device in
       HStack {
         VStack(alignment: .leading) {
@@ -197,11 +252,40 @@ struct ServerSecuritySection: View {
 
   private func reload() async {
     guard let client else { return }
-    passkeys = (try? await client.passkeys()) ?? []
+    do {
+      passkeys = try await client.passkeys()
+      passkeysLoaded = true
+      passkeysError = nil
+    } catch is CancellationError {
+      return
+    } catch {
+      passkeysError = error.localizedDescription
+    }
     guard owner else { return }
-    settings = try? await client.securitySettings()
-    devices = (try? await client.securityDevices()) ?? []
-    blocked = (try? await client.blockedDevices()) ?? []
+    do {
+      settings = try await client.securitySettings()
+      settingsError = nil
+    } catch is CancellationError {
+      return
+    } catch {
+      settingsError = error.localizedDescription
+    }
+    do {
+      devices = try await client.securityDevices()
+      devicesError = nil
+    } catch is CancellationError {
+      return
+    } catch {
+      devicesError = error.localizedDescription
+    }
+    do {
+      blocked = try await client.blockedDevices()
+      blockedError = nil
+    } catch is CancellationError {
+      return
+    } catch {
+      blockedError = error.localizedDescription
+    }
   }
 
   /// Runs a change; a locked server asks for Touch ID or the Server Password once.

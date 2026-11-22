@@ -121,9 +121,13 @@ struct LibraryShellView: View {
     }
     .background(AureliaDesign.canvas)
     .background {
-      LibraryFindShortcut(isBlocked: {
-        model.playback != nil || model.movieNightLaunch != nil || model.wrappedLaunch != nil
-      }) {
+      LibraryFindShortcut(
+        isBlocked: {
+          model.playback != nil || model.movieNightLaunch != nil || model.wrappedLaunch != nil
+        },
+        canGoBack: { selection != nil },
+        back: { goBack() }
+      ) {
         // Wishes and People have their own search; every page without a library search switches
         // to Library.
         let searchesHere: Set<LibraryDestination> = [
@@ -419,18 +423,10 @@ struct LibraryShellView: View {
           .equatable()
           .id(page)
           .opacity(isTop ? 1 : 0)
-          .allowsHitTesting(isTop)
+          .allowsHitTesting(selection != nil && isTop)
           .accessibilityHidden(!isTop)
           .transition(.opacity)
           .zIndex(Double(index + 1))
-      }
-      if selection != nil {
-        // ⌘[ goes back from a title, collection or person, as in Safari and Finder.
-        Button("Back") { goBack() }
-          .keyboardShortcut("[", modifiers: .command)
-          .opacity(0)
-          .frame(width: 0, height: 0)
-          .accessibilityHidden(true)
       }
     }
     .onExitCommand { if selection != nil { goBack() } }

@@ -179,7 +179,7 @@ final class AureliaUITests: XCTestCase {
     restore.click()
     XCTAssertTrue(restore.waitForNonExistence(timeout: 5))
     XCTAssertTrue(app.staticTexts["owner · Owner"].exists)
-    XCTAssertFalse(app.buttons["Disconnect This Mac"].exists)
+    XCTAssertFalse(app.buttons["disconnect-server"].exists)
     // The restored server is managed under Settings › Server again.
     app.buttons["Server"].click()
     XCTAssertTrue(app.buttons["Restart Server…"].waitForExistence(timeout: 8))

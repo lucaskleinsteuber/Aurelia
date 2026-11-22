@@ -1082,6 +1082,7 @@ struct ErrorBanner: View {
     let banner = HStack(spacing: 12) {
       Image(systemName: "exclamationmark.triangle.fill")
         .foregroundStyle(.orange)
+        .accessibilityHidden(true)
       Text(message)
         .font(.callout)
         .textSelection(.enabled)
@@ -1098,7 +1099,7 @@ struct ErrorBanner: View {
       RoundedRectangle(cornerRadius: AureliaDesign.compactRadius)
         .stroke(AureliaDesign.hairline, lineWidth: 1)
     }
-    .accessibilityElement(children: .combine)
+    .accessibilityElement(children: .contain)
     if inline {
       banner.frame(maxWidth: .infinity, alignment: .leading)
     } else {
