@@ -124,4 +124,58 @@ public sealed class ApiErrorHandlingTests
         Assert.False(ServerStorageErrors.IsStorageFull(unrelatedSqlite));
         Assert.False(ServerStorageErrors.IsStorageFull(unrelatedIo));
     }
+
+    [Fact]
+    public async Task LibraryPathOverlappingServerDataDirectoryIsRejected()
+    {
+        var outer = TestPaths.CreateDataDirectory();
+        var dataDir = Path.Combine(outer, ".srv-data");
+        var insideData = Path.Combine(dataDir, "media");
+        Directory.CreateDirectory(insideData);
+        try
+        {
+            using var factory = new AureliaServerFactory(dataDir);
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+
+            foreach (var badPath in new[] { outer, dataDir, insideData })
+            {
+                using var request = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/libraries", owner.Token,
+                    new CreateLibraryRequest("Bad", badPath, LibraryKind.Movies));
+                using var response = await client.SendAsync(request);
+                Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+                var problem = await ApiTestClient.ReadAsync<ApiProblem>(response);
+                Assert.Equal("library_overlaps_server_data", problem.Code);
+            }
+        }
+        finally { Directory.Delete(outer, recursive: true); }
+    }
+
+    [Fact]
+    public async Task LibraryPathWithNulCharacterReturns400InsteadOf500()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+
+        using var request = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/libraries", owner.Token,
+            new CreateLibraryRequest("Bad", "/tmp/bad\0path", LibraryKind.Movies));
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await ApiTestClient.ReadAsync<ApiProblem>(response);
+        Assert.Equal("invalid_library_path", problem.Code);
+    }
+
+    [Fact]
+    public void LibraryWatcherIgnoresServerDataDirectoryAndHiddenFolders()
+    {
+        var root = "/media/home";
+        var dataDir = "/media/home/aurelia-data";
+        Assert.False(LibraryMonitoringService.IsRelevant(root, "/media/home/aurelia-data/work", dataDir));
+        Assert.False(LibraryMonitoringService.IsRelevant(root, "/media/home/aurelia-data/last-use", dataDir));
+        Assert.False(LibraryMonitoringService.IsRelevant(root, "/media/home/.srv-data/work", "/other/data"));
+        Assert.False(LibraryMonitoringService.IsRelevant(root, "/media/home/.git/HEAD", "/other/data"));
+        Assert.True(LibraryMonitoringService.IsRelevant(root, "/media/home/Movies/Film.mkv", dataDir));
+        Assert.True(LibraryMonitoringService.IsRelevant(root, "/media/home/Movies/New Season", dataDir));
+    }
 }

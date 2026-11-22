@@ -7,7 +7,8 @@ namespace Aurelia.Server.Services;
 
 public sealed class LibraryService(
     AureliaDbContext database,
-    LibraryScanScheduler scanQueue)
+    LibraryScanScheduler scanQueue,
+    ServerRuntimeOptions? runtime = null)
 {
     public async Task<IReadOnlyList<LibrarySummary>> ListAsync(CancellationToken cancellationToken)
     {
@@ -32,6 +33,12 @@ public sealed class LibraryService(
         var derivedName = new DirectoryInfo(path).Name;
         var name = ValidateName(string.IsNullOrWhiteSpace(request.Name) ? derivedName : request.Name);
         var normalizedPath = MediaPath.Normalize(path);
+        if (runtime is not null && MediaPath.Overlaps(MediaPath.Normalize(runtime.DataDirectory), normalizedPath))
+        {
+            throw BadRequest(
+                "library_overlaps_server_data",
+                "A storage location cannot contain or be inside Aurelia Server's data folder.");
+        }
         var existingLibraries = await database.LibraryRoots
             .ToListAsync(cancellationToken);
         var overlaps = existingLibraries
@@ -742,14 +749,23 @@ public sealed class LibraryService(
 
     private static string ValidateDirectory(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value) || !Path.IsPathFullyQualified(value))
+        if (string.IsNullOrWhiteSpace(value)
+            || value.Contains('\0', StringComparison.Ordinal)
+            || !Path.IsPathFullyQualified(value))
         {
             throw BadRequest(
                 "invalid_library_path",
                 "The library path must be an absolute directory path.");
         }
 
-        var path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(value));
+        string path;
+        try { path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(value)); }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw BadRequest(
+                "invalid_library_path",
+                "The library path must be an absolute directory path.");
+        }
         var directory = new DirectoryInfo(path);
         if (!directory.Exists || directory.LinkTarget is not null)
         {

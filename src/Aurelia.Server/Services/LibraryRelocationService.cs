@@ -32,6 +32,8 @@ public sealed class LibraryRelocationService(AureliaDbContext database, ServerRu
     public async Task<LibraryRelocateResult> RelocateAsync(Guid libraryId, LibraryRelocateRequest request, CancellationToken token)
     {
         var folder = Folder(request.Path);
+        if (MediaPath.Overlaps(MediaPath.Normalize(runtime.DataDirectory), MediaPath.Normalize(folder)))
+            throw new AccountException("library_overlaps_server_data", "A storage location cannot contain or be inside Aurelia Server's data folder.", 400);
         var location = await LocationAsync(libraryId, token);
         var matched = ServerMoveLocations.CountMatches(folder, location.Samples);
         if (location.Samples.Count > 0 && matched == 0 && !request.Force)

@@ -8,7 +8,8 @@ namespace Aurelia.Server.Services;
 public sealed partial class LibraryMonitoringService(
     IServiceScopeFactory scopeFactory,
     ILogger<LibraryMonitoringService> logger,
-    ServerConfigurationStore configuration) : BackgroundService
+    ServerConfigurationStore configuration,
+    ServerRuntimeOptions? runtime = null) : BackgroundService
 {
     private static readonly TimeSpan Debounce = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan StabilityDelay = TimeSpan.FromSeconds(5);
@@ -208,7 +209,7 @@ public sealed partial class LibraryMonitoringService(
 
     private void Record(LibraryRoot library, string path, bool forceFull)
     {
-        if (!forceFull && !IsRelevant(path))
+        if (!forceFull && !IsRelevant(library.Path, path, runtime?.DataDirectory))
         {
             return;
         }
@@ -293,8 +294,23 @@ public sealed partial class LibraryMonitoringService(
         }
     }
 
-    private static bool IsRelevant(string path)
+    internal static bool IsRelevant(string libraryRoot, string path, string? dataDirectory = null)
     {
+        if (!string.IsNullOrWhiteSpace(dataDirectory)
+            && MediaPath.IsSameOrDescendant(MediaPath.Normalize(path), MediaPath.Normalize(dataDirectory)))
+        {
+            return false;
+        }
+
+        var relative = Path.GetRelativePath(libraryRoot, path);
+        foreach (var segment in relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (segment != "." && segment != ".." && segment.StartsWith('.'))
+            {
+                return false;
+            }
+        }
+
         var name = Path.GetFileName(path);
         if (name.StartsWith('.') || name.EndsWith('~') || name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
         {
