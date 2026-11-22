@@ -21,6 +21,9 @@ public sealed partial class LibraryMonitoringService(
     // File events wake the loop; without pending changes it sleeps until the next library refresh.
     private readonly DatabaseChangeSignal recorded = new();
 
+    private static readonly Action<ILogger, Exception?> MonitoringLoopFailed = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(4417, nameof(MonitoringLoopFailed)), "Library monitoring paused after an unexpected failure.");
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
@@ -28,23 +31,32 @@ public sealed partial class LibraryMonitoringService(
             var recovery = new StorageRecovery(logger, "library monitoring");
             while (!stoppingToken.IsCancellationRequested)
             {
-                var arrival = recorded.Snapshot();
-                var now = DateTimeOffset.UtcNow;
-                if (now >= nextLibraryRefresh)
+                try
                 {
-                    await recovery.RunAsync(() => RefreshLibrariesAsync(now, stoppingToken), stoppingToken);
-                    nextLibraryRefresh = now.Add(LibraryRefreshInterval);
-                }
+                    var arrival = recorded.Snapshot();
+                    var now = DateTimeOffset.UtcNow;
+                    if (now >= nextLibraryRefresh)
+                    {
+                        await recovery.RunAsync(() => RefreshLibrariesAsync(now, stoppingToken), stoppingToken);
+                        nextLibraryRefresh = now.Add(LibraryRefreshInterval);
+                    }
 
-                await recovery.RunAsync(() => FlushPendingAsync(now, stoppingToken), stoppingToken);
-                if (!pending.IsEmpty)
-                {
-                    // Debounce and stability checks need a short cadence while changes wait.
-                    await Task.Delay(configuration.IsMaintenanceWindow(now) ? TimeSpan.FromSeconds(1) : TimeSpan.FromMinutes(1), stoppingToken);
-                    continue;
+                    await recovery.RunAsync(() => FlushPendingAsync(now, stoppingToken), stoppingToken);
+                    if (!pending.IsEmpty)
+                    {
+                        // Debounce and stability checks need a short cadence while changes wait.
+                        await Task.Delay(configuration.IsMaintenanceWindow(now) ? TimeSpan.FromSeconds(1) : TimeSpan.FromMinutes(1), stoppingToken);
+                        continue;
+                    }
+                    var untilRefresh = nextLibraryRefresh - DateTimeOffset.UtcNow;
+                    await DatabaseChangeSignal.WaitAsync(arrival, untilRefresh > TimeSpan.FromSeconds(1) ? untilRefresh : TimeSpan.FromSeconds(1), stoppingToken);
                 }
-                var untilRefresh = nextLibraryRefresh - DateTimeOffset.UtcNow;
-                await DatabaseChangeSignal.WaitAsync(arrival, untilRefresh > TimeSpan.FromSeconds(1) ? untilRefresh : TimeSpan.FromSeconds(1), stoppingToken);
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    MonitoringLoopFailed(logger, exception);
+                    await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+                }
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

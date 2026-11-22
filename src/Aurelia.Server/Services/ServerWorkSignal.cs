@@ -41,12 +41,22 @@ public sealed partial class ServerWorkSignal(ServerRuntimeOptions runtime, TimeP
 
     private string WorkPath => Path.Combine(runtime.DataDirectory, FileName);
 
+    private static readonly Action<ILogger, Exception?> WorkLoopFailed = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(4423, nameof(WorkLoopFailed)), "Server work signal paused after an unexpected failure.");
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30), clock);
         try
         {
-            do Write();
+            do
+            {
+                try { Write(); }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    WorkLoopFailed(logger, exception);
+                }
+            }
             while (await timer.WaitForNextTickAsync(stoppingToken));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }

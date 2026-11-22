@@ -123,11 +123,17 @@ public sealed partial class SpeechJobService : BackgroundService
             : FormattableString.Invariant($"{series} · S{media.SeasonNumber ?? 0:00}E{media.EpisodeNumber ?? 0:00}");
     }
 
+    private static readonly TimeSpan UnexpectedFailurePause = TimeSpan.FromSeconds(30);
+    private static readonly Action<ILogger, Exception?> LoopFailed = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(4401, nameof(LoopFailed)), "Speech subtitles paused after an unexpected failure.");
+    private static readonly Action<ILogger, Guid, Exception?> JobFailedUnexpectedly = LoggerMessage.Define<Guid>(
+        LogLevel.Warning, new EventId(4402, nameof(JobFailedUnexpectedly)), "Speech subtitles for title {MediaId} failed unexpectedly.");
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        try
+        while (!stoppingToken.IsCancellationRequested)
         {
-            while (!stoppingToken.IsCancellationRequested)
+            try
             {
                 await signal.WaitAsync(stoppingToken);
                 while (queue.TryDequeue(out var mediaId))
@@ -136,8 +142,17 @@ public sealed partial class SpeechJobService : BackgroundService
                     using (ServerWorkSignal.Begin(scopes, keepAwake: false)) await RunAsync(job, stoppingToken);
                 }
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                LoopFailed(logger, exception);
+                try { await Task.Delay(UnexpectedFailurePause, stoppingToken); }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            }
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
     }
 
     /// <summary>Runs one job to its end; tests call it directly.</summary>
@@ -225,6 +240,12 @@ public sealed partial class SpeechJobService : BackgroundService
             job.State = SpeechJobState.Failed;
             job.Message = failure is MetadataException or PlaybackException ? failure.Message : "The server couldn't listen to this title.";
             LogFailed(logger, job.MediaId, failure.GetType().Name);
+        }
+        catch (Exception failure) when (failure is not OperationCanceledException)
+        {
+            job.State = SpeechJobState.Failed;
+            job.Message = "The server couldn't listen to this title.";
+            JobFailedUnexpectedly(logger, job.MediaId, failure);
         }
         finally
         {

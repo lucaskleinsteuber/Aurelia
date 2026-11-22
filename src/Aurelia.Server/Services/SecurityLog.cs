@@ -15,8 +15,11 @@ namespace Aurelia.Server.Services;
 public sealed class SecurityLog(
     IServiceScopeFactory scopes,
     SecuritySettingsStore settings,
-    TimeProvider? timeProvider = null) : BackgroundService
+    TimeProvider? timeProvider = null,
+    ILogger<SecurityLog>? logger = null) : BackgroundService
 {
+    private static readonly Action<ILogger, Exception?> FlushFailed = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(4419, nameof(FlushFailed)), "Security log flush paused after an unexpected failure.");
     public const string Succeeded = "succeeded";
     public const string Failed = "failed";
     public const string Changed = "changed";
@@ -84,11 +87,24 @@ public sealed class SecurityLog(
                 }
                 catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested) { }
                 finally { await idle.CancelAsync(); }
-                await FlushAsync(stoppingToken);
+                try { await FlushAsync(stoppingToken); }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    if (logger is not null) FlushFailed(logger, exception);
+                    await Task.Delay(TimeSpan.FromSeconds(30), clock, stoppingToken);
+                }
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
-        finally { await FlushAsync(CancellationToken.None); }
+        finally
+        {
+            try { await FlushAsync(CancellationToken.None); }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                if (logger is not null) FlushFailed(logger, exception);
+            }
+        }
     }
 
     /// <summary>Writes what is waiting and removes entries older than the owner's setting.</summary>

@@ -40,13 +40,16 @@ public sealed partial class AppHostedIdleStop(
         return start < end ? time >= start && time < end : time >= start || time < end;
     }
 
+    private static readonly Action<ILogger, Exception?> LoopFailed = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(4415, nameof(LoopFailed)), "Idle stop check paused after an unexpected failure.");
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (!ServerHosting.ByApp(ServerHosting.Kind(runtime))) return;
         var started = clock.GetUtcNow();
-        try
+        while (!stoppingToken.IsCancellationRequested)
         {
-            while (!stoppingToken.IsCancellationRequested)
+            try
             {
                 await Task.Delay(Check, clock, stoppingToken);
                 var now = clock.GetUtcNow();
@@ -58,8 +61,14 @@ public sealed partial class AppHostedIdleStop(
                 lifetime.StopApplication();
                 return;
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                LoopFailed(logger, exception);
+                try { await Task.Delay(Check, clock, stoppingToken); }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            }
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
     }
 
     private DateTimeOffset? SleepTimerEnded()

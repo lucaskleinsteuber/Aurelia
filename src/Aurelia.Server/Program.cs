@@ -182,6 +182,9 @@ builder.Services.AddSingleton<Aurelia.Server.Services.Hls.HlsSessionManager>();
 builder.Services.AddHostedService<Aurelia.Server.Services.Hls.HlsSessionSweeper>();
 builder.Services.AddSingleton<ScrubPreviewService>();
 if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<ScrubPreviewService>());
+// An unexpected failure in an optional background service must never take down the whole server (audit SRV-BG-004).
+builder.Services.Configure<HostOptions>(options =>
+    options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore);
 builder.Services.AddSingleton<SegmentAudioReader>();
 builder.Services.AddSingleton<Aurelia.Server.Services.Speech.SpeechModelStore>();
 builder.Services.AddSingleton<Aurelia.Server.Services.Speech.ISpeechRecognizer, Aurelia.Server.Services.Speech.WhisperRecognizer>();

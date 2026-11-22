@@ -22,6 +22,9 @@ public sealed partial class CreditRefresh(
 
     private string MarkerPath => Path.Combine(runtime.DataDirectory, MarkerName);
 
+    private static readonly Action<ILogger, Exception?> UnexpectedFailure = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(4411, nameof(UnexpectedFailure)), "Cast and crew refresh stopped after an unexpected failure.");
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
@@ -31,6 +34,10 @@ public sealed partial class CreditRefresh(
             await RunAsync(Pause, stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            UnexpectedFailure(logger, exception);
+        }
     }
 
     /// <summary>Refreshes the credits. True when every title was handled and the marker was written.</summary>
@@ -72,6 +79,11 @@ public sealed partial class CreditRefresh(
             catch (Exception exception) when (exception is MetadataException or HttpRequestException or TaskCanceledException && !token.IsCancellationRequested)
             {
                 Postponed(logger, exception.GetType().Name);
+                return false;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                UnexpectedFailure(logger, exception);
                 return false;
             }
             if (pause > TimeSpan.Zero) await Task.Delay(pause, token);

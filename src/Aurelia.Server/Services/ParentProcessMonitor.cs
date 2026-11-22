@@ -13,6 +13,12 @@ public sealed class ParentProcessMonitor(
             new EventId(5001, nameof(NativeHostExited)),
             "The native host exited; stopping Aurelia Server.");
 
+    private static readonly Action<ILogger, Exception?> MonitorFailed =
+        LoggerMessage.Define(
+            LogLevel.Warning,
+            new EventId(5002, nameof(MonitorFailed)),
+            "Parent process check failed unexpectedly.");
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (runtime.HostParentProcessId is null)
@@ -50,8 +56,13 @@ public sealed class ParentProcessMonitor(
                 lifetime.StopApplication();
                 return;
             }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                MonitorFailed(logger, exception);
+            }
 
-            await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+            try { await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken); }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
         }
     }
 

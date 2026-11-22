@@ -212,14 +212,24 @@ public sealed partial class HlsSessionManager(
 }
 
 /// <summary>Ends idle HLS sessions every few seconds.</summary>
-public sealed class HlsSessionSweeper(HlsSessionManager sessions, TimeProvider clock) : BackgroundService
+public sealed class HlsSessionSweeper(HlsSessionManager sessions, TimeProvider clock, ILogger<HlsSessionSweeper>? logger = null) : BackgroundService
 {
+    private static readonly Action<ILogger, Exception?> SweepFailed = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(4416, nameof(SweepFailed)), "HLS session sweep paused after an unexpected failure.");
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5), clock);
         try
         {
-            while (await timer.WaitForNextTickAsync(stoppingToken)) await sessions.SweepAsync();
+            while (await timer.WaitForNextTickAsync(stoppingToken))
+            {
+                try { await sessions.SweepAsync(); }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    if (logger is not null) SweepFailed(logger, exception);
+                }
+            }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
         finally { await sessions.DisposeAsync(); }

@@ -65,6 +65,9 @@ public sealed partial class ServerMoveArrivalReporter(ServerRuntimeOptions runti
     internal static readonly TimeSpan[] Delays =
         [TimeSpan.Zero, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(20), TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(3)];
 
+    private static readonly Action<ILogger, Exception?> ArrivalReportFailed = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(4420, nameof(ArrivalReportFailed)), "Reporting server move arrival stopped after an unexpected failure.");
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var record = ServerMoveArrival.Read(runtime.DataDirectory);
@@ -102,6 +105,10 @@ public sealed partial class ServerMoveArrivalReporter(ServerRuntimeOptions runti
             ServerMoveArrival.Delete(runtime.DataDirectory);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            ArrivalReportFailed(logger, exception);
+        }
     }
 
     /// <summary>True when the old server took the report, false when it refused it for good, null to try again.</summary>

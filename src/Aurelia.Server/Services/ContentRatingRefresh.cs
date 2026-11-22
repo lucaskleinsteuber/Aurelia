@@ -21,6 +21,9 @@ public sealed partial class ContentRatingRefresh(
 
     private string MarkerPath => Path.Combine(runtime.DataDirectory, MarkerName);
 
+    private static readonly Action<ILogger, Exception?> UnexpectedFailure = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(4412, nameof(UnexpectedFailure)), "Age rating refresh stopped after an unexpected failure.");
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
@@ -30,6 +33,10 @@ public sealed partial class ContentRatingRefresh(
             await RunAsync(Pause, stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            UnexpectedFailure(logger, exception);
+        }
     }
 
     /// <summary>Refreshes the ratings. True when every title was handled and the marker was written.</summary>
@@ -55,6 +62,10 @@ public sealed partial class ContentRatingRefresh(
             try
             {
                 rating = (await tmdb.GetAsync(settings.Token, settings.Language, mediaType, title.ProviderMediaId!, token)).ContentRating;
+                changed += await database.MediaMetadata
+                    .Where(metadata => metadata.MediaItemId == title.MediaItemId && metadata.ProviderMediaId == title.ProviderMediaId
+                        && metadata.ProviderContentRating != rating)
+                    .ExecuteUpdateAsync(update => update.SetProperty(metadata => metadata.ProviderContentRating, rating), token);
             }
             catch (MetadataException exception) when (exception.StatusCode is StatusCodes.Status404NotFound or StatusCodes.Status400BadRequest)
             {
@@ -65,10 +76,11 @@ public sealed partial class ContentRatingRefresh(
                 Postponed(logger, exception.GetType().Name);
                 return false;
             }
-            changed += await database.MediaMetadata
-                .Where(metadata => metadata.MediaItemId == title.MediaItemId && metadata.ProviderMediaId == title.ProviderMediaId
-                    && metadata.ProviderContentRating != rating)
-                .ExecuteUpdateAsync(update => update.SetProperty(metadata => metadata.ProviderContentRating, rating), token);
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                UnexpectedFailure(logger, exception);
+                return false;
+            }
             if (pause > TimeSpan.Zero) await Task.Delay(pause, token);
         }
 
