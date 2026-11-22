@@ -73,11 +73,15 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
     public Task<CatalogItemSummary> SummaryAsync(Guid mediaId, CancellationToken cancellation) =>
         Get<CatalogItemSummary>($"/api/v1/catalog/items/{mediaId}/summary", cancellation);
 
-    public Task<PersonDetailResponse> PersonAsync(string name, string? personKey, CancellationToken cancellation)
-    {
-        var query = "name=" + Uri.EscapeDataString(name) + (personKey is { Length: > 0 } key ? "&personKey=" + Uri.EscapeDataString(key) : "");
-        return Get<PersonDetailResponse>("/api/v1/catalog/person?" + query, cancellation);
-    }
+    public Task<PersonDetailResponse> PersonAsync(string name, string? personKey, CancellationToken cancellation) =>
+        Get<PersonDetailResponse>("/api/v1/catalog/person?" + PersonQuery(name, personKey), cancellation);
+
+    /// <summary>Builds the query string for GET /api/v1/catalog/person using the server's key parameter (audit SRV-API-002).</summary>
+    public static string PersonQuery(string name, string? personKey) =>
+        "name=" + Uri.EscapeDataString(name)
+        + (personKey is { Length: > 0 } key && !key.StartsWith("unidentified:", StringComparison.Ordinal)
+            ? "&key=" + Uri.EscapeDataString(key)
+            : "");
 
     /// <summary>People in the library's credits, those in the most titles first ("people-v1").</summary>
     public Task<PeoplePageResponse> PeopleAsync(string? query, int offset, int limit, CancellationToken cancellation)

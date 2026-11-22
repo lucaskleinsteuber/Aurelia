@@ -31,6 +31,11 @@ public sealed class PeopleTests
         Assert.Equal("Director · 1 title", PeoplePresentation.Role(new PersonSummary("Theo Brandt", "tmdb:person:18", null, 1, "Director")));
         Assert.True(PeoplePresentation.HasProfile("tmdb:person:17"));
         Assert.False(PeoplePresentation.HasProfile("ada"));
+
+        // Catalog person lookup must pass `key` (not `personKey`) and omit `unidentified:` keys (audit SRV-API-002).
+        Assert.Equal("name=Ada%20Lovelace&key=tmdb%3Aperson%3A17", LibraryClient.PersonQuery("Ada Lovelace", "tmdb:person:17"));
+        Assert.Equal("name=Ada%20Lovelace", LibraryClient.PersonQuery("Ada Lovelace", "unidentified:ada"));
+        Assert.Equal("name=Ada%20Lovelace", LibraryClient.PersonQuery("Ada Lovelace", null));
     }
 
     [Fact]

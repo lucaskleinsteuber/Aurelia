@@ -21,18 +21,20 @@ public sealed class RealServer : WebApplicationFactory<Program>
     /// <summary>The server's address as the client sees it: on this computer, so no network access is needed.</summary>
     public static readonly Uri Address = new("https://127.0.0.1:43111");
 
-    private readonly string dataDirectory = Path.Combine(Path.GetTempPath(), "aurelia-linux-integration-" + Guid.NewGuid().ToString("N"));
+    private readonly string rootDirectory = Path.Combine(Path.GetTempPath(), "aurelia-linux-integration-" + Guid.NewGuid().ToString("N"));
+    private readonly string dataDirectory;
 
     public RealServer()
     {
+        dataDirectory = Path.Combine(rootDirectory, "data");
         Directory.CreateDirectory(dataDirectory);
         Transport = new InProcessTransport(this);
     }
 
     public IServerTransport Transport { get; }
 
-    /// <summary>Where the synthetic media of <see cref="SeedLibraryAsync"/> lives; tests may add folders beside it.</summary>
-    public string MediaDirectory => Path.Combine(dataDirectory, "media");
+    /// <summary>Where the synthetic media of <see cref="SeedLibraryAsync"/> lives; sibling to <see cref="dataDirectory"/>.</summary>
+    public string MediaDirectory => Path.Combine(rootDirectory, "media");
 
     /// <summary>Creates the owner account, sets up profiles and returns a fresh eight-digit pairing code.</summary>
     public async Task<string> CreatePairingCodeAsync()
@@ -58,8 +60,8 @@ public sealed class RealServer : WebApplicationFactory<Program>
         await SendAsync(client, HttpMethod.Post, "/api/v1/profiles/initialize", owner.Token, new InitializeProfilesRequest(OwnerPassword, OwnerPin));
         var profile = await SendAsync<ProfileSessionResponse>(client, HttpMethod.Post, $"/api/v1/profiles/{owner.User.Id}/unlock", owner.Token,
             new UnlockProfileRequest(OwnerPin));
-        var movies = Path.Combine(dataDirectory, "media", "Movies");
-        var shows = Path.Combine(dataDirectory, "media", "Shows", "Cobalt Station", "Season 01");
+        var movies = Path.Combine(MediaDirectory, "Movies");
+        var shows = Path.Combine(MediaDirectory, "Shows", "Cobalt Station", "Season 01");
         Directory.CreateDirectory(movies);
         Directory.CreateDirectory(shows);
         await File.WriteAllBytesAsync(Path.Combine(movies, "Alpha Voyage (2020).mkv"), [1]);
@@ -68,7 +70,7 @@ public sealed class RealServer : WebApplicationFactory<Program>
         await File.WriteAllTextAsync(Path.Combine(movies, "Beta Harbor (2021).eng.srt"), "1\n00:00:00,000 --> 00:00:01,000\nSynthetic subtitle.\n");
         await File.WriteAllBytesAsync(Path.Combine(shows, "Cobalt Station - S01E01.mkv"), [3]);
         await File.WriteAllBytesAsync(Path.Combine(shows, "Cobalt Station - S01E02.mkv"), [4]);
-        foreach (var (name, path, kind) in new[] { ("Movies", movies, LibraryKind.Movies), ("TV Shows", Path.Combine(dataDirectory, "media", "Shows"), LibraryKind.TvShows) })
+        foreach (var (name, path, kind) in new[] { ("Movies", movies, LibraryKind.Movies), ("TV Shows", Path.Combine(MediaDirectory, "Shows"), LibraryKind.TvShows) })
         {
             var library = await SendAsync<LibrarySummary>(client, HttpMethod.Post, "/api/v1/libraries", profile.Token, new CreateLibraryRequest(name, path, kind));
             var scan = await SendAsync<LibraryScanSummary>(client, HttpMethod.Post, $"/api/v1/libraries/{library.Id}/scans", profile.Token, null);
@@ -115,7 +117,7 @@ public sealed class RealServer : WebApplicationFactory<Program>
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
-        if (disposing && Directory.Exists(dataDirectory)) Directory.Delete(dataDirectory, recursive: true);
+        if (disposing && Directory.Exists(rootDirectory)) Directory.Delete(rootDirectory, recursive: true);
     }
 
     private HttpClient Client() => new(Server.CreateHandler()) { BaseAddress = Address };
