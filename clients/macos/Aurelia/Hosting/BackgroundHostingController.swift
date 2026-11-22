@@ -63,12 +63,15 @@ enum BackgroundHostingController {
     try? disabled.save()
   }
   static func openPermissions() { SMAppService.openSystemSettingsLoginItems() }
-  static func startRegisteredService() async throws {
+  static func startRegisteredService(forceRestart: Bool = false) async throws {
     guard permitted else { throw NativeServerHostError.rejected }
     let settings = try HostServiceSettings.load()
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-    process.arguments = ["kickstart", "-k", "gui/\(getuid())/\(settings.agentName)"]
+    process.arguments =
+      forceRestart
+      ? ["kickstart", "-k", "gui/\(getuid())/\(settings.agentName)"]
+      : ["kickstart", "gui/\(getuid())/\(settings.agentName)"]
     process.standardOutput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in

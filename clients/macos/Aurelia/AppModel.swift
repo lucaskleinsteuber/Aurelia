@@ -1679,8 +1679,9 @@ final class AppModel: ObservableObject {
     try await serverHost.hostingSettingsApplied(
       operationID: operation.id, permitted: !settings.backgroundEnabled || permitted)
     if settings.backgroundEnabled && permitted {
-      if !serverHost.isBackgroundService { try await serverHost.handoffToBackground() }
-      await startNativeHost()
+      let handedOff = !serverHost.isBackgroundService
+      if handedOff { try await serverHost.handoffToBackground() }
+      await startNativeHost(skipKickstart: handedOff)
     } else if !settings.backgroundEnabled {
       await serverHost.stop()
       await startNativeHost()
@@ -3876,7 +3877,7 @@ final class AppModel: ObservableObject {
   }
 
   @discardableResult
-  private func startNativeHost() async -> Bool {
+  private func startNativeHost(skipKickstart: Bool = false) async -> Bool {
     guard !isRecoveringLocalHost else { return false }
     isRecoveringLocalHost = true
     defer { isRecoveringLocalHost = false }
@@ -3889,12 +3890,21 @@ final class AppModel: ObservableObject {
       serverInfo: nil)
     do {
       hostSnapshot = try await serverHost.start(
-        serverName: "Aurelia on \(Host.current().localizedName ?? "This Mac")")
+        serverName: "Aurelia on \(Host.current().localizedName ?? "This Mac")",
+        skipKickstart: skipKickstart)
       beginTerminationProtection()
-      // A live helper may still be starting Kestrel. Do not treat its first
-      // rendezvous response as proof that the saved account can load its library.
-      for _ in 0..<120 {
-        guard OperatingModePolicy.isAwaitingReadiness(hostSnapshot.state) else { break }
+      // A live helper may still be starting Kestrel or running a database migration after an
+      // update. Give normal startups 30 s and active database updates up to 10 minutes.
+      var idlePolls = 0
+      var totalPolls = 0
+      while OperatingModePolicy.isAwaitingReadiness(hostSnapshot.state) && totalPolls < 2_400 {
+        let isUpdatingDatabase =
+          hostSnapshot.message?.localizedCaseInsensitiveContains("Updating the database") == true
+        if !isUpdatingDatabase {
+          idlePolls += 1
+          if idlePolls >= 120 { break }
+        }
+        totalPolls += 1
         try await Task.sleep(for: .milliseconds(250))
         hostSnapshot = try await serverHost.status()
       }

@@ -42,6 +42,7 @@ struct NativeHostSettings: Codable, Equatable, Sendable {
 enum NativeServerHostError: LocalizedError, Equatable {
   case helperMissing
   case couldNotLaunch
+  case startupFailed(String)
   case rendezvousTimedOut
   case invalidResponse
   case rejected
@@ -52,6 +53,7 @@ enum NativeServerHostError: LocalizedError, Equatable {
     switch self {
     case .helperMissing: "The bundled Aurelia Server Host is missing."
     case .couldNotLaunch: "Aurelia Server Host could not be launched."
+    case .startupFailed(let message): message
     case .rendezvousTimedOut: "Aurelia Server Host did not become ready."
     case .invalidResponse: "Aurelia Server Host returned an invalid response."
     case .rejected: "Aurelia Server Host rejected the request."
@@ -64,12 +66,19 @@ enum NativeServerHostError: LocalizedError, Equatable {
 
 @MainActor
 final class NativeServerHost {
-  private var controlURL: URL?
+  private struct ControlEndpoint {
+    let port: Int
+    let secret: String
+  }
+
+  private var controlEndpoint: ControlEndpoint?
   private var runningApplication: NSRunningApplication?
   private var rendezvousURL: URL?
   private var isStarting = false
 
-  func start(serverName: String, lanPort: Int = 43_111) async throws -> NativeHostSnapshot {
+  func start(serverName: String, lanPort: Int = 43_111, skipKickstart: Bool = false) async throws
+    -> NativeHostSnapshot
+  {
     guard !NativePreflightIsolation.isRequested || NativePreflightIsolation.isActive else {
       throw NativeServerHostError.rejected
     }
@@ -77,30 +86,40 @@ final class NativeServerHost {
       let settings = try? HostServiceSettings.load(),
       let directory = try? HostBootstrapLocation.directory()
     {
+      HostStartupErrorRecord.clear(in: directory)
       let rendezvous = directory.appendingPathComponent(
         HostServiceSettings.backgroundRendezvousName)
-      for attempt in 0..<80 {
+      for attempt in 0..<120 {
         if (try? HostLaunchSecurity.validateConfigurationFile(
           at: rendezvous.path, bootstrapDirectory: directory)) != nil,
           let data = try? Data(contentsOf: rendezvous),
           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let port = object["port"] as? Int, (1...65535).contains(port),
-          let url = URL(string: "http://127.0.0.1:\(port)/\(settings.controlSecret)"),
-          let snapshot = try? await status(at: url),
+          let snapshot = try? await status(port: port, secret: settings.controlSecret),
           snapshot.state != .stopped
         {
-          controlURL = url
+          controlEndpoint = ControlEndpoint(port: port, secret: settings.controlSecret)
           runningApplication = nil
           return snapshot
         }
-        if attempt == 0 { try await BackgroundHostingController.startRegisteredService() }
+        if attempt >= 15, let startupError = HostStartupErrorRecord.readRecent(from: directory) {
+          throw NativeServerHostError.startupFailed(startupError.message)
+        }
+        if !skipKickstart && attempt == 15 {
+          try? await BackgroundHostingController.startRegisteredService(forceRestart: false)
+        } else if !skipKickstart && attempt == 60 {
+          try? await BackgroundHostingController.startRegisteredService(forceRestart: true)
+        }
         try await Task.sleep(for: .milliseconds(100))
+      }
+      if let startupError = HostStartupErrorRecord.readRecent(from: directory) {
+        throw NativeServerHostError.startupFailed(startupError.message)
       }
       throw NativeServerHostError.couldNotLaunch
     }
-    if let controlURL {
+    if let controlEndpoint {
       do {
-        let snapshot = try await status(at: controlURL)
+        let snapshot = try await status(port: controlEndpoint.port, secret: controlEndpoint.secret)
         // A live host may have deliberately exhausted its recovery budget.
         // Reattaching must preserve that failure until the user chooses Restart.
         if snapshot.state != .stopped { return snapshot }
@@ -118,6 +137,7 @@ final class NativeServerHost {
     do { cache = try HostBootstrapLocation.directory() } catch {
       throw NativeServerHostError.couldNotLaunch
     }
+    HostStartupErrorRecord.clear(in: cache)
     let rendezvous = cache.appendingPathComponent("\(UUID().uuidString.lowercased()).json")
     let helperURL = try helperApplicationURL()
     let launchHandoff = try HostLaunchHandoff(
@@ -147,22 +167,31 @@ final class NativeServerHost {
     do {
       for _ in 0..<100 {
         try Task.checkCancellation()
-        guard !application.isTerminated else { throw NativeServerHostError.couldNotLaunch }
+        if application.isTerminated {
+          if let startupError = HostStartupErrorRecord.readRecent(from: cache) {
+            throw NativeServerHostError.startupFailed(startupError.message)
+          }
+          throw NativeServerHostError.couldNotLaunch
+        }
         if (try? HostLaunchSecurity.validateConfigurationFile(
           at: rendezvous.path,
           bootstrapDirectory: cache)) != nil,
           let data = try? Data(contentsOf: rendezvous),
           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let port = object["port"] as? Int,
-          port > 0, port <= 65_535,
-          let url = URL(string: "http://127.0.0.1:\(port)/\(secret)")
+          port > 0, port <= 65_535
         {
           try? FileManager.default.removeItem(at: rendezvous)
-          controlURL = url
+          controlEndpoint = ControlEndpoint(port: port, secret: secret)
           for _ in 0..<60 {
             try Task.checkCancellation()
-            guard !application.isTerminated else { throw NativeServerHostError.couldNotLaunch }
-            if let snapshot = try? await status(at: url) { return snapshot }
+            if application.isTerminated {
+              if let startupError = HostStartupErrorRecord.readRecent(from: cache) {
+                throw NativeServerHostError.startupFailed(startupError.message)
+              }
+              throw NativeServerHostError.couldNotLaunch
+            }
+            if let snapshot = try? await status(port: port, secret: secret) { return snapshot }
             try await Task.sleep(for: .milliseconds(100))
           }
           throw NativeServerHostError.rendezvousTimedOut
@@ -186,10 +215,10 @@ final class NativeServerHost {
     if runningApplication?.isTerminated == true {
       throw NativeServerHostError.couldNotLaunch
     }
-    guard let controlURL else {
+    guard let controlEndpoint else {
       return .stopped
     }
-    return try await status(at: controlURL)
+    return try await status(port: controlEndpoint.port, secret: controlEndpoint.secret)
   }
 
   func configure(name: String, lanPort: Int) async throws {
@@ -218,7 +247,7 @@ final class NativeServerHost {
       ]))
   }
   var isBackgroundService: Bool {
-    controlURL != nil && runningApplication == nil && BackgroundHostingController.permitted
+    controlEndpoint != nil && runningApplication == nil && BackgroundHostingController.permitted
   }
   func handoffToBackground() async throws {
     _ = try await request(action: "handoff-background", method: "POST")
@@ -231,7 +260,7 @@ final class NativeServerHost {
   }
 
   func stop() async {
-    if controlURL == nil {
+    if controlEndpoint == nil {
       runningApplication?.forceTerminate()
       clearLaunchState()
       return
@@ -240,7 +269,9 @@ final class NativeServerHost {
     for _ in 0..<100 {
       if let application = runningApplication {
         if application.isTerminated { break }
-      } else if let controlURL, (try? await status(at: controlURL)) == nil {
+      } else if let controlEndpoint,
+        (try? await status(port: controlEndpoint.port, secret: controlEndpoint.secret)) == nil
+      {
         break
       }
       try? await Task.sleep(for: .milliseconds(100))
@@ -251,37 +282,57 @@ final class NativeServerHost {
     if let cleanup { try? FileManager.default.removeItem(at: cleanup) }
   }
 
-  private func status(at url: URL) async throws -> NativeHostSnapshot {
-    let data = try await request(baseURL: url, action: "status", method: "GET")
+  private func status(port: Int, secret: String) async throws -> NativeHostSnapshot {
+    let data = try await request(port: port, secret: secret, action: "status", method: "GET")
     do { return try JSONDecoder().decode(NativeHostSnapshot.self, from: data) } catch {
       throw NativeServerHostError.invalidResponse
     }
   }
 
   private func request(action: String, method: String, body: Data? = nil) async throws -> Data {
-    guard let controlURL else {
+    guard let controlEndpoint else {
       throw NativeServerHostError.invalidResponse
     }
-    return try await request(baseURL: controlURL, action: action, method: method, body: body)
+    return try await request(
+      port: controlEndpoint.port, secret: controlEndpoint.secret, action: action, method: method,
+      body: body)
   }
 
-  private func request(baseURL: URL, action: String, method: String, body: Data? = nil) async throws
-    -> Data
-  {
-    let url = baseURL.appendingPathComponent(action)
+  private func request(
+    port: Int, secret: String, action: String, method: String, body: Data? = nil
+  ) async throws -> Data {
+    guard let url = URL(string: "http://127.0.0.1:\(port)/auth/\(action)") else {
+      throw NativeServerHostError.invalidResponse
+    }
+    let payload = body ?? Data()
+    let nonce = try HostControlAuth.makeNonce()
+    let timestamp = Int64(Date().timeIntervalSince1970)
+    let signature = HostControlAuth.requestSignature(
+      secret: secret, method: method, action: action, nonce: nonce, timestamp: timestamp,
+      body: payload)
     var request = URLRequest(url: url)
     request.httpMethod = method
     request.cachePolicy = .reloadIgnoringLocalCacheData
     request.timeoutInterval = 3
     request.httpBody = body
     if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+    request.setValue(nonce, forHTTPHeaderField: HostControlAuth.nonceHeader)
+    request.setValue(String(timestamp), forHTTPHeaderField: HostControlAuth.timestampHeader)
+    request.setValue(signature, forHTTPHeaderField: HostControlAuth.signatureHeader)
     let configuration = URLSessionConfiguration.ephemeral
     configuration.urlCache = nil
     let session = URLSession(configuration: configuration)
     defer { session.invalidateAndCancel() }
     let (data, response) = try await session.data(for: request)
-    guard let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status)
-    else { throw NativeServerHostError.rejected }
+    guard let http = response as? HTTPURLResponse else {
+      throw NativeServerHostError.invalidResponse
+    }
+    let expectedProof = HostControlAuth.responseProof(
+      secret: secret, nonce: nonce, status: http.statusCode, body: data)
+    guard let proof = http.value(forHTTPHeaderField: HostControlAuth.proofHeader),
+      HostControlAuth.constantTimeEquals(proof, expectedProof)
+    else { throw NativeServerHostError.invalidResponse }
+    guard (200..<300).contains(http.statusCode) else { throw NativeServerHostError.rejected }
     return data
   }
 
@@ -298,7 +349,7 @@ final class NativeServerHost {
   }
 
   private func clearLaunchState() {
-    controlURL = nil
+    controlEndpoint = nil
     runningApplication = nil
     rendezvousURL = nil
   }

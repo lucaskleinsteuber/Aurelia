@@ -6,6 +6,7 @@ enum ServerDataMigrationError: Error, Equatable {
   case sqliteUnavailable
   case integrityCheckFailed
   case activationFailed
+  case destinationUnavailable
 }
 
 enum ServerDataMigrator {
@@ -20,6 +21,22 @@ enum ServerDataMigrator {
   static func migrateIfNeeded(from source: URL, to destination: URL) throws {
     let fileManager = FileManager.default
     let canonicalDestination = destination.standardizedFileURL
+
+    var destinationLinkMetadata = stat()
+    if lstat(canonicalDestination.path, &destinationLinkMetadata) == 0,
+      destinationLinkMetadata.st_mode & S_IFMT == S_IFLNK
+    {
+      var targetIsDirectory: ObjCBool = false
+      if fileManager.fileExists(atPath: canonicalDestination.path, isDirectory: &targetIsDirectory),
+        targetIsDirectory.boolValue
+      {
+        // The user relocated the server data folder via a symbolic link to an available directory
+        // (for example on an external drive). Leave it untouched instead of attempting Build 11
+        // migration or failing startup.
+        return
+      }
+      throw ServerDataMigrationError.destinationUnavailable
+    }
 
     if fileManager.fileExists(atPath: canonicalDestination.path) {
       guard isOwnedDirectory(canonicalDestination) else {

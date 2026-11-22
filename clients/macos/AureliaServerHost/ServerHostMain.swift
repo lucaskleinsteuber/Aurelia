@@ -76,7 +76,14 @@ final class ServerHostApplication: NSObject, NSApplicationDelegate {
         },
       ]
     } catch {
-      let category = (error as? HostError)?.diagnosticCategory ?? "runtime-initialization"
+      let hostError = error as? HostError
+      let category = hostError?.diagnosticCategory ?? "runtime-initialization"
+      let message = hostError?.userMessage ?? "Aurelia Server Host could not start."
+      if let bootstrapDir = ServerHostRuntime.bestEffortBootstrapDirectory(
+        environment: ProcessInfo.processInfo.environment)
+      {
+        HostStartupErrorRecord.write(category: category, message: message, in: bootstrapDir)
+      }
       Self.logger.error("Server host startup failed: \(category, privacy: .public)")
       FileHandle.standardError.write(
         Data("Aurelia Server Host could not start (\(category)).\n".utf8))
@@ -170,6 +177,10 @@ private enum ChildServerReadiness: Equatable {
 }
 
 private final class ServerHostRuntime: @unchecked Sendable {
+  private static let localPort = 43_110
+  private static let minimumFreeDiskBytes: Int64 = 16 * 1024 * 1024
+  private static let maxActiveConnections = 16
+  private static let connectionTimeoutSeconds: TimeInterval = 5
   private let queue = DispatchQueue(label: "com.lucas.aurelia.media.server-host")
   private let secret: String
   private let parentProcessID: Int32
@@ -179,15 +190,21 @@ private final class ServerHostRuntime: @unchecked Sendable {
   private let terminationHandler: @MainActor @Sendable () -> Void
   private let isolatedBackground: Bool
   private var listener: NWListener?
+  private var activeConnections:
+    [ObjectIdentifier: (connection: NWConnection, timer: DispatchSourceTimer)] = [:]
+  private var replayGuard = HostControlNonceReplayGuard()
   private var process: Process?
   private var serverLifeline: Pipe?
   private var logSink: BoundedLogSink?
   private var parentTimer: DispatchSourceTimer?
   private var status = HostStatus(
     state: .starting, message: nil, bootstrapToken: nil, serverInfo: nil)
+  private var currentLaunchLAN = false
+  private var currentBootstrapToken: String?
   private var pendingRestartLAN: Bool?
   private var pendingRestoreID: UUID?
   private var restoreProcess: Process?
+  private var restoreLifeline: Pipe?
   private var pendingBackgroundHandoff = false
   private var sleepAssertion: IOPMAssertionID = 0
   private var shuttingDown = false
@@ -198,6 +215,9 @@ private final class ServerHostRuntime: @unchecked Sendable {
   private var readinessGeneration: UInt64 = 0
   private var serverReadyGeneration: UInt64?
   private var serverStoppingGeneration: UInt64?
+  private var serverMigratingGeneration: UInt64?
+  private var serverPortInUseGeneration: UInt64?
+  private var serverPortInUseNumber: Int?
 
   init(
     environment: [String: String],
@@ -206,6 +226,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
     let launch = try Self.resolveLaunch(environment: environment)
     do {
       try ServerDataMigrator.migrateBuild11IfNeeded(to: launch.dataDirectory)
+    } catch ServerDataMigrationError.destinationUnavailable {
+      throw HostError.dataDirectoryUnavailable
     } catch {
       throw HostError.dataMigration
     }
@@ -231,7 +253,13 @@ private final class ServerHostRuntime: @unchecked Sendable {
     }
   }
 
+  static func bestEffortBootstrapDirectory(environment: [String: String]) -> URL? {
+    try? bootstrapDirectory(environment: environment)
+  }
+
   func start() throws {
+    try? FileManager.default.removeItem(at: rendezvousURL)
+    HostStartupErrorRecord.clear(in: rendezvousURL.deletingLastPathComponent())
     let parameters = NWParameters.tcp
     parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
     let listener: NWListener
@@ -410,23 +438,81 @@ private final class ServerHostRuntime: @unchecked Sendable {
     }
   }
 
+  private static func hasInsufficientDiskSpace(for directory: URL) -> Bool {
+    var probe = directory
+    while !FileManager.default.fileExists(atPath: probe.path) {
+      let parent = probe.deletingLastPathComponent()
+      if parent.path == probe.path { break }
+      probe = parent
+    }
+    guard
+      let values = try? probe.resourceValues(forKeys: [
+        .volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey,
+      ])
+    else { return false }
+    if let important = values.volumeAvailableCapacityForImportantUsage {
+      return important < minimumFreeDiskBytes
+    }
+    if let available = values.volumeAvailableCapacity {
+      return Int64(available) < minimumFreeDiskBytes
+    }
+    return false
+  }
+
   private func startServer(lan: Bool) {
     guard !shuttingDown else { return }
     stopWatchdog()
     readinessGeneration &+= 1
     let generation = readinessGeneration
+    currentLaunchLAN = lan
+    currentBootstrapToken = nil
     serverReadyGeneration = nil
     serverStoppingGeneration = nil
+    serverMigratingGeneration = nil
+    serverPortInUseGeneration = nil
+    serverPortInUseNumber = nil
+    if Self.hasInsufficientDiskSpace(for: dataDirectory) {
+      updateStatus(
+        .failed,
+        message:
+          "Not enough free space on this Mac’s startup disk to start Aurelia Server. Free some disk space, then choose Restart."
+      )
+      updateSleepAssertion()
+      return
+    }
     do {
       let executable = try serverExecutableURL()
       let settings = try loadSettings()
       let bootstrapToken = lan ? nil : try Self.randomSecret()
+      currentBootstrapToken = bootstrapToken
       let readinessNonce = try Self.randomSecret()
       updateStatus(lan ? .restarting : .starting, bootstrapToken: bootstrapToken)
 
-      let logSink = try BoundedLogSink(
+      let logSink = BoundedLogSink(
         directory: logDirectory,
         readinessNonce: readinessNonce,
+        onServerMigrating: { [weak self] in
+          guard let runtime = self else { return }
+          runtime.queue.async {
+            guard runtime.readinessGeneration == generation,
+              runtime.serverReadyGeneration != generation,
+              runtime.process?.isRunning == true
+            else { return }
+            runtime.serverMigratingGeneration = generation
+            runtime.updateStatus(
+              lan ? .restarting : .starting,
+              message: "Updating the database…",
+              bootstrapToken: bootstrapToken)
+          }
+        },
+        onServerPortInUse: { [weak self] port in
+          guard let runtime = self else { return }
+          runtime.queue.async {
+            guard runtime.readinessGeneration == generation else { return }
+            runtime.serverPortInUseGeneration = generation
+            runtime.serverPortInUseNumber = port
+          }
+        },
         onServerStopping: { [weak self] in
           guard let runtime = self else { return }
           runtime.queue.async {
@@ -443,6 +529,11 @@ private final class ServerHostRuntime: @unchecked Sendable {
               runtime.process?.isRunning == true
             else { return }
             runtime.serverReadyGeneration = generation
+            runtime.serverMigratingGeneration = nil
+            if runtime.status.state == .failed {
+              runtime.completeReadiness(
+                lan: lan, bootstrapToken: bootstrapToken, generation: generation)
+            }
           }
         }
       )
@@ -451,6 +542,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
       child.executableURL = executable
       var arguments = [
         "run", "--data-dir", dataDirectory.path,
+        "--urls", "http://127.0.0.1:\(Self.localPort)",
         "--host-parent-pid", String(ProcessInfo.processInfo.processIdentifier),
       ]
       if lan {
@@ -489,12 +581,71 @@ private final class ServerHostRuntime: @unchecked Sendable {
     }
   }
 
+  private func completeReadiness(lan: Bool, bootstrapToken: String?, generation: UInt64) {
+    Task { [weak self] in
+      for _ in 0..<25 {
+        guard let self else { return }
+        guard await self.serverReadinessState(generation: generation) == .ready else { return }
+        if let info = try? await Self.readServerInfo() {
+          self.applyServerInfo(
+            info, lan: lan, bootstrapToken: bootstrapToken, generation: generation)
+          return
+        }
+        try? await Task.sleep(for: .milliseconds(200))
+      }
+    }
+  }
+
+  private func applyServerInfo(
+    _ info: HostServerInfo, lan: Bool, bootstrapToken: String?, generation: UInt64
+  ) {
+    queue.async {
+      guard self.readinessGeneration == generation,
+        self.serverReadyGeneration == generation,
+        self.serverStoppingGeneration != generation,
+        self.process?.isRunning == true
+      else { return }
+      if !lan && info.isSetup && (try? self.loadSettings().lanAccessEnabled) == true {
+        self.restart(lan: true)
+      } else {
+        self.status = HostStatus(
+          state: info.isSetup ? .running : .setupRequired,
+          message: nil,
+          bootstrapToken: info.isSetup ? nil : bootstrapToken,
+          serverInfo: info)
+        if var operation = try? self.readOperation(),
+          operation["state"] as? String == "restarting"
+        {
+          operation["state"] = "completed"
+          try? self.writeOperation(operation)
+        }
+        self.startWatchdog(generation: generation)
+      }
+    }
+  }
+
   private func waitForServer(lan: Bool, bootstrapToken: String?, generation: UInt64) {
     Task { [weak self] in
-      for _ in 0..<150 {
+      var quietTicks = 0
+      for _ in 0..<3_000 {
         guard let self else { return }
         switch await self.serverReadinessState(generation: generation) {
         case .waiting:
+          let active = await self.isStartupActivelyProgressing(generation: generation)
+          if active {
+            quietTicks = 0
+          } else {
+            quietTicks += 1
+            if quietTicks >= 150 {
+              self.queue.async {
+                guard self.readinessGeneration == generation,
+                  self.serverReadyGeneration != generation
+                else { return }
+                self.updateStatus(.failed, message: "Aurelia Server did not become ready.")
+              }
+              return
+            }
+          }
           try? await Task.sleep(for: .milliseconds(200))
           continue
         case .stopping:
@@ -504,37 +655,42 @@ private final class ServerHostRuntime: @unchecked Sendable {
         }
         if let info = try? await Self.readServerInfo() {
           guard await self.serverReadinessState(generation: generation) == .ready else { return }
-          self.queue.async {
-            guard self.readinessGeneration == generation,
-              self.serverReadyGeneration == generation,
-              self.serverStoppingGeneration != generation,
-              self.process?.isRunning == true
-            else { return }
-            if !lan && info.isSetup && (try? self.loadSettings().lanAccessEnabled) == true {
-              self.restart(lan: true)
-            } else {
-              self.status = HostStatus(
-                state: info.isSetup ? .running : .setupRequired,
-                message: nil,
-                bootstrapToken: info.isSetup ? nil : bootstrapToken,
-                serverInfo: info)
-              if var operation = try? self.readOperation(),
-                operation["state"] as? String == "restarting"
-              {
-                operation["state"] = "completed"
-                try? self.writeOperation(operation)
-              }
-              self.startWatchdog(generation: generation)
-            }
-          }
+          self.applyServerInfo(
+            info, lan: lan, bootstrapToken: bootstrapToken, generation: generation)
           return
         }
+        quietTicks += 1
+        if quietTicks >= 150 { break }
         try? await Task.sleep(for: .milliseconds(200))
       }
       guard let runtime = self else { return }
       runtime.queue.async {
-        guard runtime.readinessGeneration == generation else { return }
+        guard runtime.readinessGeneration == generation,
+          runtime.serverReadyGeneration != generation
+        else { return }
         runtime.updateStatus(.failed, message: "Aurelia Server did not become ready.")
+      }
+    }
+  }
+
+  private func isStartupActivelyProgressing(generation: UInt64) async -> Bool {
+    await withCheckedContinuation { continuation in
+      queue.async {
+        guard self.readinessGeneration == generation, self.process?.isRunning == true else {
+          continuation.resume(returning: false)
+          return
+        }
+        if self.serverMigratingGeneration == generation {
+          continuation.resume(returning: true)
+          return
+        }
+        if let sink = self.logSink,
+          sink.secondsSinceLastOutput(now: ProcessInfo.processInfo.systemUptime) < 20
+        {
+          continuation.resume(returning: true)
+          return
+        }
+        continuation.resume(returning: false)
       }
     }
   }
@@ -625,7 +781,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
   }
 
   private static func serverAnsweredLivenessProbe() async -> Bool {
-    var request = URLRequest(url: URL(string: "http://127.0.0.1:43110/api/v1/health/live")!)
+    var request = URLRequest(
+      url: URL(string: "http://127.0.0.1:\(localPort)/api/v1/health/live")!)
     // HEAD completes after headers, even if a faulty service stalls its body.
     // Every valid HTTP status (including 429/503) confirms transport liveness.
     request.httpMethod = "HEAD"
@@ -714,13 +871,23 @@ private final class ServerHostRuntime: @unchecked Sendable {
 
   /// The status Aurelia Server ends with when its power settings stopped it for being unused.
   private static let idleExitCode: Int32 = 76
+  /// The status Aurelia Server ends with when its local or LAN port is already bound.
+  private static let portInUseExitCode: Int32 = 77
 
   private func serverTerminated(status terminationStatus: Int32) {
     stopWatchdog()
     process = nil
     closeServerLifeline()
+    let portConflict =
+      terminationStatus == Self.portInUseExitCode
+      || serverPortInUseGeneration == readinessGeneration
+    let conflictPort = serverPortInUseNumber
+    let wasLAN = currentLaunchLAN
     serverReadyGeneration = nil
     serverStoppingGeneration = nil
+    serverMigratingGeneration = nil
+    serverPortInUseGeneration = nil
+    serverPortInUseNumber = nil
     logSink?.close()
     logSink = nil
     if shuttingDown {
@@ -740,7 +907,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
         guard settings.backgroundEnabled else { throw HostError.invalidSettings }
         let launcher = Process()
         launcher.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        launcher.arguments = ["kickstart", "-k", "gui/\(getuid())/\(settings.agentName)"]
+        launcher.arguments = ["kickstart", "gui/\(getuid())/\(settings.agentName)"]
         launcher.standardOutput = FileHandle.nullDevice
         launcher.standardError = FileHandle.nullDevice
         launcher.terminationHandler = { [weak self] command in
@@ -783,13 +950,29 @@ private final class ServerHostRuntime: @unchecked Sendable {
       )
       return
     }
+    if portConflict {
+      let portMessage: String
+      if wasLAN {
+        let lanPort = conflictPort ?? (try? loadSettings().lanHttpsPort) ?? 43_111
+        portMessage =
+          "LAN port \(lanPort) is already used by another program. Choose another port or quit the other program, then choose Restart."
+      } else {
+        portMessage =
+          "Port \(Self.localPort) is already used by another program. Quit the other program using port \(Self.localPort), then choose Restart."
+      }
+      updateStatus(.failed, message: portMessage)
+      updateSleepAssertion()
+      return
+    }
 
     guard watchdog.requestAutomaticRecovery(at: ProcessInfo.processInfo.systemUptime) == .restart
     else {
       recordRecovery("host_restart_limit")
       updateStatus(
         .failed,
-        message: "Aurelia Server stopped repeatedly. Check Server Settings, then choose Restart.")
+        message:
+          "Aurelia Server stopped repeatedly. Check available disk space and ~/Library/Logs/Aurelia Server/server.log, then choose Restart."
+      )
       return
     }
     recordRecovery("host_process_restart")
@@ -819,6 +1002,11 @@ private final class ServerHostRuntime: @unchecked Sendable {
     }
     listener?.cancel()
     listener = nil
+    for entry in activeConnections.values {
+      entry.timer.cancel()
+      entry.connection.cancel()
+    }
+    activeConnections.removeAll()
     try? FileManager.default.removeItem(at: rendezvousURL)
     if restoreProcess?.isRunning == true { return }
     guard let process, process.isRunning else {
@@ -851,14 +1039,35 @@ private final class ServerHostRuntime: @unchecked Sendable {
   }
 
   private func accept(_ connection: NWConnection) {
+    guard activeConnections.count < Self.maxActiveConnections else {
+      connection.cancel()
+      return
+    }
+    let identifier = ObjectIdentifier(connection)
+    let timer = DispatchSource.makeTimerSource(queue: queue)
+    timer.schedule(deadline: .now() + Self.connectionTimeoutSeconds)
+    timer.setEventHandler { [weak self, weak connection] in
+      guard let self, let connection else { return }
+      self.releaseConnection(connection)
+      connection.cancel()
+    }
+    activeConnections[identifier] = (connection, timer)
+    timer.resume()
     connection.start(queue: queue)
     receive(connection, accumulated: Data())
+  }
+
+  private func releaseConnection(_ connection: NWConnection) {
+    if let entry = activeConnections.removeValue(forKey: ObjectIdentifier(connection)) {
+      entry.timer.cancel()
+    }
   }
 
   private func receive(_ connection: NWConnection, accumulated: Data) {
     connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) {
       [weak self] data, _, complete, error in
       guard let self else { return }
+      guard self.activeConnections[ObjectIdentifier(connection)] != nil else { return }
       var received = accumulated
       if let data { received.append(data) }
       if error != nil || received.count > 65_536 {
@@ -876,24 +1085,53 @@ private final class ServerHostRuntime: @unchecked Sendable {
   }
 
   private func handle(_ request: HostRequest, on connection: NWConnection) {
-    guard request.secret == secret else {
-      respond(connection, status: 404, body: Data())
-      return
+    let responseNonce: String?
+    if request.secret == "auth" {
+      guard
+        let nonce = request.headers[HostControlAuth.nonceHeader.lowercased()],
+        let timestampRaw = request.headers[HostControlAuth.timestampHeader.lowercased()],
+        let timestamp = Int64(timestampRaw),
+        let signature = request.headers[HostControlAuth.signatureHeader.lowercased()],
+        replayGuard.accept(
+          nonce: nonce, timestamp: timestamp, now: Int64(Date().timeIntervalSince1970))
+      else {
+        respond(connection, status: 404, body: Data())
+        return
+      }
+      let expected = HostControlAuth.requestSignature(
+        secret: secret,
+        method: request.method,
+        action: request.action,
+        nonce: nonce,
+        timestamp: timestamp,
+        body: request.body)
+      guard HostControlAuth.constantTimeEquals(signature, expected) else {
+        respond(connection, status: 404, body: Data())
+        return
+      }
+      responseNonce = nonce
+    } else {
+      guard HostControlAuth.constantTimeEquals(request.secret, secret) else {
+        respond(connection, status: 404, body: Data())
+        return
+      }
+      responseNonce = nil
     }
     if isolatedBackground,
       !((request.method == "GET" && request.action == "status")
         || (request.method == "POST" && ["restart", "shutdown"].contains(request.action)))
     {
-      respond(connection, status: 404, body: Data())
+      respond(connection, status: 404, body: Data(), proofNonce: responseNonce)
       return
     }
     switch (request.method, request.action) {
     case ("POST", "owner-pin-recovery"):
       guard status.state == .running, request.body.count <= 4096 else {
-        respond(connection, status: 409, body: Data())
+        respond(connection, status: 409, body: Data(), proofNonce: responseNonce)
         return
       }
-      var forwarded = URLRequest(url: URL(string: "http://127.0.0.1:43110/api/v1/local/owner-pin")!)
+      var forwarded = URLRequest(
+        url: URL(string: "http://127.0.0.1:\(Self.localPort)/api/v1/local/owner-pin")!)
       forwarded.httpMethod = "POST"
       forwarded.httpBody = request.body
       forwarded.timeoutInterval = 10
@@ -908,7 +1146,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
           guard let self else { return }
           let status = (response as? HTTPURLResponse)?.statusCode ?? 503
           self.respond(
-            connection, status: status, body: data.map { Data($0.prefix(4096)) } ?? Data())
+            connection, status: status, body: data.map { Data($0.prefix(4096)) } ?? Data(),
+            proofNonce: responseNonce)
         }
       }.resume()
     case ("POST", "hosting-authorized"):
@@ -920,8 +1159,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
           operation["kind"] as? String == "hosting"
         else { throw HostError.invalidSettings }
         try settings.save()
-        respond(connection, status: 204, body: Data())
-      } catch { respond(connection, status: 400, body: Data()) }
+        respond(connection, status: 204, body: Data(), proofNonce: responseNonce)
+      } catch { respond(connection, status: 400, body: Data(), proofNonce: responseNonce) }
     case ("POST", "hosting-applied"):
       guard let body = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
         let state = body["state"] as? String, ["completed", "awaitingPermission"].contains(state),
@@ -931,7 +1170,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
         let pending = try? HostServiceRequest.load(),
         pending.id.uuidString.lowercased() == id.lowercased()
       else {
-        respond(connection, status: 409, body: Data())
+        respond(connection, status: 409, body: Data(), proofNonce: responseNonce)
         return
       }
       do {
@@ -940,8 +1179,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
         if state == "completed" {
           try? FileManager.default.removeItem(at: HostServiceRequest.location())
         }
-        respond(connection, status: 204, body: Data())
-      } catch { respond(connection, status: 500, body: Data()) }
+        respond(connection, status: 204, body: Data(), proofNonce: responseNonce)
+      } catch { respond(connection, status: 500, body: Data(), proofNonce: responseNonce) }
     case ("GET", "hosting-status"):
       let settings = (try? HostServiceSettings.load()) ?? HostServiceSettings()
       let operation = try? readOperation()
@@ -953,14 +1192,21 @@ private final class ServerHostRuntime: @unchecked Sendable {
         "backgroundRequested": settings.backgroundEnabled, "startAtLogin": settings.startAtLogin,
         "preventIdleSleep": settings.preventIdleSleep, "state": state,
       ])
-      respond(connection, status: 200, body: body ?? Data())
+      respond(connection, status: 200, body: body ?? Data(), proofNonce: responseNonce)
     case ("GET", "status"):
       let body = (try? JSONEncoder().encode(status)) ?? Data()
-      respond(connection, status: 200, body: body)
+      respond(connection, status: 200, body: body, proofNonce: responseNonce)
     case ("POST", "restart"):
+      if serverMigratingGeneration == readinessGeneration,
+        serverReadyGeneration != readinessGeneration,
+        process?.isRunning == true
+      {
+        respond(connection, status: 409, body: Data(), proofNonce: responseNonce)
+        return
+      }
       watchdog.manualRetry()
       recordRecovery("host_manual_retry")
-      respond(connection, status: 202, body: Data())
+      respond(connection, status: 202, body: Data(), proofNonce: responseNonce)
       queue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
         guard let self else { return }
         self.restart(lan: (try? self.loadSettings().lanAccessEnabled) ?? false)
@@ -971,10 +1217,10 @@ private final class ServerHostRuntime: @unchecked Sendable {
         (operation["id"] as? String)?.lowercased() == id.lowercased(),
         operation["state"] as? String == "awaitingConfirmation"
       else {
-        respond(connection, status: 409, body: Data())
+        respond(connection, status: 409, body: Data(), proofNonce: responseNonce)
         return
       }
-      respond(connection, status: 202, body: Data())
+      respond(connection, status: 202, body: Data(), proofNonce: responseNonce)
       queue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
         guard let self else { return }
         self.restart(lan: (try? self.loadSettings().lanAccessEnabled) ?? false)
@@ -987,7 +1233,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
         let deadline = operation["confirmBefore"] as? String,
         Self.operationDate(deadline).map({ $0 > Date() }) == true
       else {
-        respond(connection, status: 409, body: Data())
+        respond(connection, status: 409, body: Data(), proofNonce: responseNonce)
         return
       }
       do {
@@ -995,8 +1241,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
         operation["confirmBefore"] = NSNull()
         operation["previousSettings"] = NSNull()
         try writeOperation(operation)
-        respond(connection, status: 204, body: Data())
-      } catch { respond(connection, status: 500, body: Data()) }
+        respond(connection, status: 204, body: Data(), proofNonce: responseNonce)
+      } catch { respond(connection, status: 500, body: Data(), proofNonce: responseNonce) }
     case ("POST", "restore-prepared"):
       guard restoreProcess == nil, pendingRestoreID == nil,
         let body = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
@@ -1004,10 +1250,10 @@ private final class ServerHostRuntime: @unchecked Sendable {
         let operation = try? readOperation(), operation["kind"] as? String == "restore",
         (operation["id"] as? String)?.lowercased() == idString.lowercased()
       else {
-        respond(connection, status: 409, body: Data())
+        respond(connection, status: 409, body: Data(), proofNonce: responseNonce)
         return
       }
-      respond(connection, status: 202, body: Data())
+      respond(connection, status: 202, body: Data(), proofNonce: responseNonce)
       queue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
         guard let self else { return }
         self.stopWatchdog()
@@ -1025,10 +1271,10 @@ private final class ServerHostRuntime: @unchecked Sendable {
       guard parentProcessID > 1, (try? HostServiceSettings.load().backgroundEnabled) == true,
         restoreProcess == nil, pendingRestoreID == nil
       else {
-        respond(connection, status: 409, body: Data())
+        respond(connection, status: 409, body: Data(), proofNonce: responseNonce)
         return
       }
-      respond(connection, status: 202, body: Data())
+      respond(connection, status: 202, body: Data(), proofNonce: responseNonce)
       queue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
         guard let self else { return }
         self.stopWatchdog()
@@ -1043,33 +1289,47 @@ private final class ServerHostRuntime: @unchecked Sendable {
       // Only initial owner setup may use the legacy bootstrap command. After setup,
       // versioned settings belong to the authenticated .NET management API.
       guard status.serverInfo?.isSetup == false else {
-        respond(connection, status: 409, body: Data())
+        respond(connection, status: 409, body: Data(), proofNonce: responseNonce)
         return
       }
       do {
         let settings = try JSONDecoder().decode(HostSettings.self, from: request.body)
         try saveSettings(settings)
-        respond(connection, status: 204, body: Data())
+        respond(connection, status: 204, body: Data(), proofNonce: responseNonce)
       } catch {
-        respond(connection, status: 400, body: Data())
+        respond(connection, status: 400, body: Data(), proofNonce: responseNonce)
       }
     case ("POST", "shutdown"):
-      respond(connection, status: 202, body: Data())
+      respond(connection, status: 202, body: Data(), proofNonce: responseNonce)
       queue.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.beginShutdown() }
     default:
-      respond(connection, status: 404, body: Data())
+      respond(connection, status: 404, body: Data(), proofNonce: responseNonce)
     }
   }
 
-  private func respond(_ connection: NWConnection, status: Int, body: Data) {
+  private func respond(
+    _ connection: NWConnection, status: Int, body: Data, proofNonce: String? = nil
+  ) {
+    releaseConnection(connection)
     let reason =
       status == 200
       ? "OK"
       : status == 204
-        ? "No Content" : status == 202 ? "Accepted" : status == 404 ? "Not Found" : "Bad Request"
-    var response = Data(
-      "HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
-        .utf8)
+        ? "No Content"
+        : status == 202
+          ? "Accepted"
+          : status == 404
+            ? "Not Found"
+            : status == 409 ? "Conflict" : status >= 500 ? "Server Error" : "Bad Request"
+    var headers =
+      "HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nCache-Control: no-store\r\n"
+    if let proofNonce {
+      let proof = HostControlAuth.responseProof(
+        secret: secret, nonce: proofNonce, status: status, body: body)
+      headers += "\(HostControlAuth.proofHeader): \(proof)\r\n"
+    }
+    headers += "Connection: close\r\n\r\n"
+    var response = Data(headers.utf8)
     response.append(body)
     connection.send(
       content: response,
@@ -1130,6 +1390,9 @@ private final class ServerHostRuntime: @unchecked Sendable {
       child.arguments = [
         "database", "restore-prepared", "--id", id.uuidString, "--data-dir", dataDirectory.path,
       ]
+      let lifeline = Pipe()
+      restoreLifeline = lifeline
+      child.standardInput = lifeline
       child.standardOutput = FileHandle.nullDevice
       child.standardError = FileHandle.nullDevice
       child.terminationHandler = { [weak self] completed in
@@ -1137,6 +1400,9 @@ private final class ServerHostRuntime: @unchecked Sendable {
         let succeeded = completed.terminationStatus == 0
         runtime.queue.async {
           runtime.restoreProcess = nil
+          try? runtime.restoreLifeline?.fileHandleForWriting.close()
+          try? runtime.restoreLifeline?.fileHandleForReading.close()
+          runtime.restoreLifeline = nil
           if var operation = try? runtime.readOperation() {
             operation["state"] = succeeded ? "completed" : "failed"
             try? runtime.writeOperation(operation)
@@ -1152,6 +1418,9 @@ private final class ServerHostRuntime: @unchecked Sendable {
       try child.run()
     } catch {
       restoreProcess = nil
+      try? restoreLifeline?.fileHandleForWriting.close()
+      try? restoreLifeline?.fileHandleForReading.close()
+      restoreLifeline = nil
       updateStatus(
         .failed,
         message:
@@ -1223,7 +1492,10 @@ private final class ServerHostRuntime: @unchecked Sendable {
   }
 
   private func writeRendezvous(port: UInt16) throws {
-    let data = try JSONSerialization.data(withJSONObject: ["port": Int(port)])
+    let data = try JSONSerialization.data(withJSONObject: [
+      "port": Int(port),
+      "pid": Int(ProcessInfo.processInfo.processIdentifier),
+    ])
     try data.write(to: rendezvousURL, options: [.atomic])
     try FileManager.default.setAttributes(
       [.posixPermissions: 0o600], ofItemAtPath: rendezvousURL.path)
@@ -1252,7 +1524,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
   }
 
   private static func readServerInfo() async throws -> HostServerInfo {
-    var request = URLRequest(url: URL(string: "http://127.0.0.1:43110/api/v1/server/info")!)
+    var request = URLRequest(
+      url: URL(string: "http://127.0.0.1:\(localPort)/api/v1/server/info")!)
     request.cachePolicy = .reloadIgnoringLocalCacheData
     request.timeoutInterval = 1
     let configuration = URLSessionConfiguration.ephemeral
@@ -1285,6 +1558,11 @@ private final class BoundedLogSink: @unchecked Sendable {
   private let previousURL: URL
   private let readinessMarker: Data
   private let stoppingMarker: Data
+  private let migratingMarker: Data
+  private let portInUseMarker: Data
+  private let portInUsePrefixWithColon: Data
+  private let onServerMigrating: @Sendable () -> Void
+  private let onServerPortInUse: @Sendable (Int?) -> Void
   private let onServerStopping: @Sendable () -> Void
   private let onServerReady: @Sendable () -> Void
   private var handle: FileHandle?
@@ -1293,23 +1571,36 @@ private final class BoundedLogSink: @unchecked Sendable {
   private var pendingOutput = Data()
   private var didSignalReadiness = false
   private var didSignalStopping = false
+  private var didSignalMigrating = false
+  private var didSignalPortInUse = false
+  private var lastOutputUptime: TimeInterval
 
   init(
     directory: URL,
     readinessNonce: String,
+    onServerMigrating: @escaping @Sendable () -> Void,
+    onServerPortInUse: @escaping @Sendable (Int?) -> Void,
     onServerStopping: @escaping @Sendable () -> Void,
     onServerReady: @escaping @Sendable () -> Void
-  ) throws {
+  ) {
     readinessMarker = Data("AURELIA_SERVER_READY:\(readinessNonce)".utf8)
     stoppingMarker = Data("AURELIA_SERVER_STOPPING:\(readinessNonce)".utf8)
+    migratingMarker = Data("AURELIA_SERVER_MIGRATING:\(readinessNonce)".utf8)
+    portInUseMarker = Data("AURELIA_SERVER_PORT_IN_USE:\(readinessNonce)".utf8)
+    portInUsePrefixWithColon = Data("AURELIA_SERVER_PORT_IN_USE:\(readinessNonce):".utf8)
+    self.onServerMigrating = onServerMigrating
+    self.onServerPortInUse = onServerPortInUse
     self.onServerStopping = onServerStopping
     self.onServerReady = onServerReady
-    try FileManager.default.createDirectory(
+    self.lastOutputUptime = ProcessInfo.processInfo.systemUptime
+    currentURL = directory.appendingPathComponent("server.log")
+    previousURL = directory.appendingPathComponent("server.previous.log")
+    // Diagnostic logs must never prevent Aurelia Server from starting (for example if the log
+    // folder is read-only or the disk is full). Still drain the pipe so readiness markers arrive.
+    try? FileManager.default.createDirectory(
       at: directory,
       withIntermediateDirectories: true,
       attributes: [.posixPermissions: 0o700])
-    currentURL = directory.appendingPathComponent("server.log")
-    previousURL = directory.appendingPathComponent("server.previous.log")
     if (try? currentURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
       >= Self.maximumFileSize
     {
@@ -1317,13 +1608,13 @@ private final class BoundedLogSink: @unchecked Sendable {
       try? FileManager.default.moveItem(at: currentURL, to: previousURL)
     }
     if !FileManager.default.fileExists(atPath: currentURL.path) {
-      FileManager.default.createFile(
+      _ = FileManager.default.createFile(
         atPath: currentURL.path,
         contents: nil,
         attributes: [.posixPermissions: 0o600])
     }
-    handle = try FileHandle(forWritingTo: currentURL)
-    if let end = try handle?.seekToEnd(), let size = Int(exactly: end) {
+    handle = try? FileHandle(forWritingTo: currentURL)
+    if let end = try? handle?.seekToEnd(), let size = Int(exactly: end) {
       currentSize = size
     }
     pipe.fileHandleForReading.readabilityHandler = { [weak self] source in
@@ -1331,6 +1622,10 @@ private final class BoundedLogSink: @unchecked Sendable {
       guard !data.isEmpty, let sink = self else { return }
       sink.queue.async { sink.append(data) }
     }
+  }
+
+  func secondsSinceLastOutput(now: TimeInterval) -> TimeInterval {
+    queue.sync { max(0, now - lastOutputUptime) }
   }
 
   func close() {
@@ -1352,6 +1647,7 @@ private final class BoundedLogSink: @unchecked Sendable {
 
   private func append(_ data: Data) {
     guard !isClosed else { return }
+    lastOutputUptime = ProcessInfo.processInfo.systemUptime
     pendingOutput.append(data)
     while let newline = pendingOutput.firstIndex(of: 0x0A) {
       let line = Data(pendingOutput[..<newline])
@@ -1371,6 +1667,24 @@ private final class BoundedLogSink: @unchecked Sendable {
           didSignalStopping = true
           onServerStopping()
         }
+      } else if comparableLine == migratingMarker {
+        if !didSignalMigrating {
+          didSignalMigrating = true
+          onServerMigrating()
+        }
+      } else if comparableLine == portInUseMarker
+        || comparableLine.starts(with: portInUsePrefixWithColon)
+      {
+        if !didSignalPortInUse {
+          didSignalPortInUse = true
+          let port: Int? =
+            comparableLine.starts(with: portInUsePrefixWithColon)
+            ? Int(
+              String(
+                decoding: comparableLine.dropFirst(portInUsePrefixWithColon.count), as: UTF8.self))
+            : nil
+          onServerPortInUse(port)
+        }
       } else {
         var logLine = line
         logLine.append(0x0A)
@@ -1378,7 +1692,7 @@ private final class BoundedLogSink: @unchecked Sendable {
       }
     }
 
-    let preservedTailCount = readinessMarker.count + 2
+    let preservedTailCount = max(readinessMarker.count, portInUsePrefixWithColon.count + 8) + 2
     if pendingOutput.count > 16_384 {
       let flushCount = pendingOutput.count - preservedTailCount
       if flushCount > 0 {
@@ -1389,11 +1703,12 @@ private final class BoundedLogSink: @unchecked Sendable {
   }
 
   private func appendToLog(_ data: Data) {
-    guard !isClosed else { return }
+    guard !isClosed, handle != nil else { return }
     var offset = 0
     while offset < data.count {
       if currentSize >= Self.maximumFileSize {
         rotate()
+        guard handle != nil else { return }
       }
       let count = min(Self.maximumFileSize - currentSize, data.count - offset)
       guard count > 0 else { return }
@@ -1408,7 +1723,7 @@ private final class BoundedLogSink: @unchecked Sendable {
     handle = nil
     try? FileManager.default.removeItem(at: previousURL)
     try? FileManager.default.moveItem(at: currentURL, to: previousURL)
-    FileManager.default.createFile(
+    _ = FileManager.default.createFile(
       atPath: currentURL.path,
       contents: nil,
       attributes: [.posixPermissions: 0o600])
@@ -1421,6 +1736,7 @@ private struct HostRequest {
   let method: String
   let secret: String
   let action: String
+  let headers: [String: String]
   let body: Data
   let isComplete: Bool
 
@@ -1435,12 +1751,13 @@ private struct HostRequest {
     guard parts.count == 3, parts[2] == "HTTP/1.1" else { return nil }
     let pathParts = parts[1].split(separator: "/")
     guard pathParts.count == 2 else { return nil }
-    let contentLength =
-      lines.dropFirst().compactMap { line -> Int? in
-        let pieces = line.split(separator: ":", maxSplits: 1)
-        guard pieces.count == 2, pieces[0].lowercased() == "content-length" else { return nil }
-        return Int(pieces[1].trimmingCharacters(in: .whitespaces))
-      }.first ?? 0
+    var headers: [String: String] = [:]
+    for line in lines.dropFirst() {
+      let pieces = line.split(separator: ":", maxSplits: 1)
+      guard pieces.count == 2 else { continue }
+      headers[pieces[0].lowercased()] = pieces[1].trimmingCharacters(in: .whitespaces)
+    }
+    let contentLength = headers["content-length"].flatMap(Int.init) ?? 0
     guard contentLength >= 0, contentLength <= 32_768 else { return nil }
     let bodyStart = headerRange.upperBound
     let available = data.count - bodyStart
@@ -1452,6 +1769,7 @@ private struct HostRequest {
       method: String(parts[0]),
       secret: String(pathParts[0]),
       action: String(pathParts[1]),
+      headers: headers,
       body: body,
       isComplete: available >= contentLength)
   }
@@ -1471,6 +1789,7 @@ private enum HostError: Error {
   case notReady
   case randomFailure
   case dataMigration
+  case dataDirectoryUnavailable
 
   var diagnosticCategory: String {
     switch self {
@@ -1487,6 +1806,22 @@ private enum HostError: Error {
     case .notReady: "server-not-ready"
     case .randomFailure: "random-source"
     case .dataMigration: "data-migration"
+    case .dataDirectoryUnavailable: "data-directory-unavailable"
+    }
+  }
+
+  var userMessage: String {
+    switch self {
+    case .dataDirectoryUnavailable:
+      "The Aurelia Server data folder (~/Library/Application Support/Aurelia Server) points to a drive or location that is currently unavailable. Reconnect the drive and try again."
+    case .settingsStorage:
+      "Aurelia Server could not write its settings folder. Check that the drive is connected, writable, and has free space."
+    case .dataMigration:
+      "Aurelia Server could not prepare its data folder (~/Library/Application Support/Aurelia Server)."
+    case .missingServer:
+      "The bundled Aurelia Server executable is missing. Reinstall Aurelia."
+    default:
+      "Aurelia Server Host could not be launched."
     }
   }
 }

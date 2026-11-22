@@ -159,4 +159,57 @@ struct HostWatchdogPolicyTests {
     #expect(disabledBackgroundHosting == 1)
     #expect(model.operatingMode == .client)
   }
+
+  @Test func hostControlAuthSignsRequestsVerifiesProofsAndBlocksReplays() throws {
+    let secret = String(repeating: "a1", count: 32)
+    let nonce = try HostControlAuth.makeNonce()
+    let body = Data("{\"ok\":true}".utf8)
+    let signature = HostControlAuth.requestSignature(
+      secret: secret, method: "POST", action: "restart", nonce: nonce, timestamp: 1_700_000_000,
+      body: body)
+    let same = HostControlAuth.requestSignature(
+      secret: secret, method: "POST", action: "restart", nonce: nonce, timestamp: 1_700_000_000,
+      body: body)
+    let tampered = HostControlAuth.requestSignature(
+      secret: secret, method: "POST", action: "shutdown", nonce: nonce, timestamp: 1_700_000_000,
+      body: body)
+    #expect(HostControlAuth.constantTimeEquals(signature, same))
+    #expect(!HostControlAuth.constantTimeEquals(signature, tampered))
+    #expect(!HostControlAuth.constantTimeEquals("abc", "abcd"))
+
+    let proof = HostControlAuth.responseProof(secret: secret, nonce: nonce, status: 200, body: body)
+    let wrongProof = HostControlAuth.responseProof(
+      secret: "other-secret", nonce: nonce, status: 200, body: body)
+    #expect(!HostControlAuth.constantTimeEquals(proof, wrongProof))
+
+    var guardState = HostControlNonceReplayGuard()
+    let firstAccepted = guardState.accept(
+      nonce: nonce, timestamp: 1_700_000_000, now: 1_700_000_010)
+    let replayAccepted = guardState.accept(
+      nonce: nonce, timestamp: 1_700_000_000, now: 1_700_000_011)
+    let staleAccepted = guardState.accept(
+      nonce: "0123456789abcdef", timestamp: 1_700_000_000, now: 1_700_000_120)
+    #expect(firstAccepted)
+    #expect(!replayAccepted)
+    #expect(!staleAccepted)
+  }
+
+  @Test func hostStartupErrorRecordRoundTripsAndClears() throws {
+    let dir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("AureliaStartupErrorTests-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    HostStartupErrorRecord.write(
+      category: "data-directory-unavailable",
+      message: "External drive unavailable.",
+      in: dir)
+    let record = HostStartupErrorRecord.readRecent(from: dir)
+    #expect(record?.category == "data-directory-unavailable")
+    #expect(record?.message == "External drive unavailable.")
+
+    HostStartupErrorRecord.clear(in: dir)
+    #expect(HostStartupErrorRecord.readRecent(from: dir) == nil)
+  }
 }

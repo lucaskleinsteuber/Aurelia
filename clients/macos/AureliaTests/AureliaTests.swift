@@ -659,6 +659,29 @@ struct AureliaTests {
   }
 
   @Test
+  func build11ServerDataMigrationAllowsRelocatedSymlinkAndReportsUnavailableTarget() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent(
+        "AureliaMigrationRelocatedTests-\(UUID().uuidString)", isDirectory: true)
+    let legacy = root.appendingPathComponent("Aurelia Home Server", isDirectory: true)
+    let relocatedTarget = root.appendingPathComponent(
+      "ExternalDrive/Aurelia Server", isDirectory: true)
+    let destination = root.appendingPathComponent("Aurelia Server", isDirectory: true)
+    try FileManager.default.createDirectory(at: relocatedTarget, withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(at: destination, withDestinationURL: relocatedTarget)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    // Available relocated symlink passes without failing startup.
+    try ServerDataMigrator.migrateIfNeeded(from: legacy, to: destination)
+
+    // Unmounted / dangling symlink reports destinationUnavailable.
+    try FileManager.default.removeItem(at: relocatedTarget)
+    #expect(throws: ServerDataMigrationError.destinationUnavailable) {
+      try ServerDataMigrator.migrateIfNeeded(from: legacy, to: destination)
+    }
+  }
+
+  @Test
   func serverProfileRoundTripsThroughInMemoryStore() throws {
     let store = InMemoryServerProfileStore()
     let profile = StoredServerProfile(

@@ -214,6 +214,12 @@ replaces only the app and starts it again; the library, profiles and settings st
 
 ## Removing Aurelia
 
-Quit Aurelia and move it from Applications to the Trash. Your media is never touched. The library
-database and settings stay in the app's container in your Library folder, so a reinstall picks up
-where you left off.
+If this Mac hosts your library, first open *Settings › Power* in Aurelia and switch background
+hosting to **Only while Aurelia is running** so the background server stops and its login item is
+removed. Then quit Aurelia and move it from Applications to the Trash. Your media is never touched.
+
+The server database and settings stay in `~/Library/Application Support/Aurelia Server`, server
+logs in `~/Library/Logs/Aurelia Server`, and app preferences in your Library container folders
+(`~/Library/Containers/com.lucas.aurelia.media` and the host App Group folder under
+`~/Library/Group Containers/`), so a reinstall picks up where you left off. Delete those folders as
+well if you want a completely clean removal.

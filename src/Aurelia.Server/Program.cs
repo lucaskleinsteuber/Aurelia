@@ -619,6 +619,11 @@ app.MapSecurityEndpoints();
 
 try
 {
+    var hostReadinessNonce = Environment.GetEnvironmentVariable(HostReadinessSignal.EnvironmentVariableName);
+    if (commandLine.Command == "run")
+    {
+        HostReadinessSignal.SignalMigrating(Console.Out, hostReadinessNonce);
+    }
     await DatabaseInitializer.InitializeAsync(app.Services, CancellationToken.None);
 
     if (runtime.LanAccessEnabled && commandLine.Command == "run")
@@ -726,7 +731,20 @@ try
         Console.WriteLine($"Verification fingerprint: {tlsIdentity.DisplayFingerprint}");
     }
 
-    await app.RunAsync();
+    try
+    {
+        await app.RunAsync();
+    }
+    catch (Exception exception) when (HostReadinessSignal.IsAddressInUse(exception))
+    {
+        HostReadinessSignal.SignalPortInUse(
+            Console.Out,
+            hostReadinessNonce,
+            runtime.LanAccessEnabled ? runtime.LanHttpsPort : null);
+        Console.Error.WriteLine($"Aurelia Server could not bind its port because another program is already using it: {exception.Message}");
+        Environment.ExitCode = HostReadinessSignal.PortInUseExitCode;
+        return;
+    }
 }
 finally
 {
