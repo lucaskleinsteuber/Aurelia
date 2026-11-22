@@ -351,6 +351,8 @@ public sealed class DatabaseBackupService(
             {
                 File.Delete(temporaryPath);
             }
+            DeleteDatabaseSidecar(temporaryPath + "-wal");
+            DeleteDatabaseSidecar(temporaryPath + "-shm");
         }
     }
 
@@ -486,6 +488,9 @@ public sealed class DatabaseBackupService(
             await destination.OpenAsync(cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             source.BackupDatabase(destination);
+            await using var journalCommand = destination.CreateCommand();
+            journalCommand.CommandText = "PRAGMA journal_mode = DELETE;";
+            await journalCommand.ExecuteNonQueryAsync(cancellationToken);
         }
     }
 

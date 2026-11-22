@@ -101,7 +101,7 @@ public static partial class SidecarSubtitles
         var video = new FileInfo(videoPath);
         if (!video.Exists || video.Directory is not { Exists: true, LinkTarget: null } directory) return [];
 
-        var baseName = Path.GetFileNameWithoutExtension(video.Name);
+        var baseName = Path.GetFileNameWithoutExtension(video.Name).Normalize(NormalizationForm.FormC);
         var candidates = new List<FileInfo>();
         try
         {
@@ -111,7 +111,7 @@ public static partial class SidecarSubtitles
             {
                 candidates.AddRange(folder.EnumerateFiles().Where(file => alone || BelongsTo(file.Name, baseName)));
                 if (folder.EnumerateDirectories().FirstOrDefault(child => child.LinkTarget is null
-                        && string.Equals(child.Name, baseName, StringComparison.OrdinalIgnoreCase)) is { } named)
+                        && string.Equals(child.Name.Normalize(NormalizationForm.FormC), baseName, StringComparison.OrdinalIgnoreCase)) is { } named)
                     candidates.AddRange(named.EnumerateFiles());
             }
         }
@@ -138,11 +138,12 @@ public static partial class SidecarSubtitles
     /// <summary>"Movie.srt" and "Movie.en.srt" belong to "Movie.mkv"; "Movie 2.srt" does not.</summary>
     private static bool BelongsTo(string fileName, string baseName)
     {
-        var name = Path.GetFileNameWithoutExtension(fileName);
-        return name.Length == baseName.Length
-            ? string.Equals(name, baseName, StringComparison.OrdinalIgnoreCase)
-            : name.Length > baseName.Length && name[baseName.Length] == '.'
-                && name.StartsWith(baseName, StringComparison.OrdinalIgnoreCase);
+        var name = Path.GetFileNameWithoutExtension(fileName).Normalize(NormalizationForm.FormC);
+        var normalizedBase = baseName.Normalize(NormalizationForm.FormC);
+        return name.Length == normalizedBase.Length
+            ? string.Equals(name, normalizedBase, StringComparison.OrdinalIgnoreCase)
+            : name.Length > normalizedBase.Length && name[normalizedBase.Length] == '.'
+                && name.StartsWith(normalizedBase, StringComparison.OrdinalIgnoreCase);
     }
 
     private static DiscoveredSidecarSubtitle Describe(FileInfo file, string baseName)
@@ -161,14 +162,16 @@ public static partial class SidecarSubtitles
 
     public static (string? Language, bool IsForced, bool IsSdh, bool IsDefault, string? Title) ParseTags(string videoBaseName, string subtitleBaseName)
     {
+        var normalizedVideo = videoBaseName.Normalize(NormalizationForm.FormC);
+        var normalizedSubtitle = subtitleBaseName.Normalize(NormalizationForm.FormC);
         string tagPart;
-        if (subtitleBaseName.StartsWith(videoBaseName, StringComparison.OrdinalIgnoreCase))
+        if (normalizedSubtitle.StartsWith(normalizedVideo, StringComparison.OrdinalIgnoreCase))
         {
-            tagPart = subtitleBaseName[videoBaseName.Length..].TrimStart('.', '_', '-', ' ');
+            tagPart = normalizedSubtitle[normalizedVideo.Length..].TrimStart('.', '_', '-', ' ');
         }
         else
         {
-            tagPart = subtitleBaseName;
+            tagPart = normalizedSubtitle;
         }
 
         var tokens = tagPart.Split(['.', '_', '-', ' '], StringSplitOptions.RemoveEmptyEntries);

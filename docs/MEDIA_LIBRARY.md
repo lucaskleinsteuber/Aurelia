@@ -150,3 +150,5 @@ Selecting a person shows every movie and series in your library they are part of
 - When a drive is unplugged, its titles stay with their details, favorites and progress and show as
   offline until the drive returns. Removing a title from the library never deletes its file.
 - **Library Health** lists duplicates, missing files, unmatched titles and excluded files.
+- **Symbolic links** (both library folders and links inside them) are not followed and are skipped during scans with a summary note (`symbolic_link_skipped`).
+- **Multi-episode files** such as `S01E01-E02` are imported under the starting episode number with the range suffix stripped from the title. Multiple video files for different resolutions of the same movie in one folder are currently imported as separate items.

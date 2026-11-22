@@ -12,13 +12,27 @@ public sealed class ArtworkStore(
 {
     private readonly string artworkDirectory = Path.Combine(runtime.DataDirectory, "Artwork");
 
+    /// <summary>Downloads provider image bytes ahead of entering the catalog mutation gate.</summary>
+    public async Task<byte[]?> PrefetchAsync(
+        ArtworkKind kind,
+        string? providerPath,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(providerPath)) return null;
+        var configuration = settings.Load();
+        if (!configuration.Enabled || configuration.Token is null) return null;
+        var size = SizeFor(kind);
+        return await tmdb.DownloadImageAsync(configuration.Token, providerPath, size, cancellationToken);
+    }
+
     public async Task<ArtworkAsset?> StoreAsync(
         AureliaDbContext database,
         Guid mediaId,
         ArtworkKind kind,
         string? providerPath,
         CancellationToken cancellationToken,
-        Func<CancellationToken, Task<bool>>? canApply = null)
+        Func<CancellationToken, Task<bool>>? canApply = null,
+        IReadOnlyDictionary<(ArtworkKind Kind, string Path), byte[]>? prefetched = null)
     {
         if (string.IsNullOrWhiteSpace(providerPath)) return null;
         if (canApply is not null && !await canApply(cancellationToken)) return null;
@@ -36,13 +50,15 @@ public sealed class ArtworkStore(
         }
 
         var currentBytes = await database.ArtworkAssets.SumAsync(asset => (long?)asset.ContentLength, cancellationToken) ?? 0;
-        var size = kind switch
+        byte[] bytes;
+        if (prefetched is not null && prefetched.TryGetValue((kind, providerPath), out var cachedBytes))
         {
-            ArtworkKind.Profile => "w342",
-            ArtworkKind.Poster => "w780",
-            _ => "w1280",
-        };
-        var bytes = await tmdb.DownloadImageAsync(configuration.Token, providerPath, size, cancellationToken);
+            bytes = cachedBytes;
+        }
+        else
+        {
+            bytes = await tmdb.DownloadImageAsync(configuration.Token, providerPath, SizeFor(kind), cancellationToken);
+        }
         if (canApply is not null && !await canApply(cancellationToken)) return null;
         if (currentBytes + bytes.LongLength > configuration.ArtworkLimitBytes)
         {
@@ -85,6 +101,16 @@ public sealed class ArtworkStore(
         existing.CreatedAt = DateTimeOffset.UtcNow;
         return existing;
     }
+
+    private static string SizeFor(ArtworkKind kind) => kind switch
+    {
+        ArtworkKind.Profile => "w342",
+        ArtworkKind.Poster => "w780",
+        _ => "w1280",
+    };
+
+    public bool HasStoredFile(string relativeFilePath) =>
+        File.Exists(Path.Combine(artworkDirectory, relativeFilePath));
 
     public async Task<ArtworkFileResult?> OpenAsync(Guid id, AureliaDbContext database, CancellationToken cancellationToken) =>
         await DescribeAsync(id, database, cancellationToken) is { } source ? Open(source) : null;

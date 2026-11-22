@@ -723,10 +723,12 @@ public sealed partial class LibraryScanWorker(
         var stored = await database.LibraryImportReviews
             .Where(review => review.LibraryRootId == library.Id)
             .ToListAsync(cancellationToken);
-        var byPath = stored.ToDictionary(review => review.NormalizedRelativePath, StringComparer.Ordinal);
-        var unresolved = (discovery.ImportReviews ?? []).ToDictionary(
-            review => NormalizeRelativePath(Path.GetRelativePath(library.Path, review.SourcePath)),
-            StringComparer.Ordinal);
+        var byPath = stored
+            .GroupBy(review => review.NormalizedRelativePath, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var unresolved = (discovery.ImportReviews ?? [])
+            .GroupBy(review => NormalizeRelativePath(Path.GetRelativePath(library.Path, review.SourcePath)), StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
         foreach (var pending in discovery.ImportReviews ?? [])
         {
             var path = Path.GetRelativePath(library.Path, pending.SourcePath);
@@ -935,13 +937,8 @@ public sealed partial class LibraryScanWorker(
     private static string AssignmentKey(string normalizedRelativePath) =>
         Path.DirectorySeparatorChar == '/' ? normalizedRelativePath : normalizedRelativePath.Replace(Path.DirectorySeparatorChar, '/');
 
-    private static string NormalizeRelativePath(string path)
-    {
-        return path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
-            .Trim(Path.DirectorySeparatorChar)
-            .Normalize(System.Text.NormalizationForm.FormKC)
-            .ToUpperInvariant();
-    }
+    private static string NormalizeRelativePath(string path) =>
+        MediaPath.NormalizeRelative(path);
 
     private static MediaItem Upsert(
         AureliaDbContext database,
@@ -1120,7 +1117,15 @@ public sealed partial class LibraryScanWorker(
     private static void EnsureReadableRoot(string path)
     {
         var directory = new DirectoryInfo(path);
-        if (!directory.Exists || directory.LinkTarget is not null || StorageMounts.IsDetached(path))
+        if (directory.Exists && directory.LinkTarget is not null)
+        {
+            throw new LibraryException(
+                "library_symbolic_link",
+                "The library directory is a symbolic link, which Aurelia does not follow.",
+                StatusCodes.Status409Conflict);
+        }
+
+        if (!directory.Exists || StorageMounts.IsDetached(path))
         {
             throw new LibraryException(
                 "library_unavailable",

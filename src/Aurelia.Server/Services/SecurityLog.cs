@@ -107,6 +107,9 @@ public sealed class SecurityLog(
         }
     }
 
+    private readonly Queue<SecurityEvent> retryBuffer = new();
+    private const int MaximumRetryBuffer = 2000;
+
     /// <summary>Writes what is waiting and removes entries older than the owner's setting.</summary>
     public async Task FlushAsync(CancellationToken token)
     {
@@ -114,6 +117,7 @@ public sealed class SecurityLog(
         try
         {
             var batch = new List<SecurityEvent>();
+            while (batch.Count < 1000 && retryBuffer.TryDequeue(out var retried)) batch.Add(retried);
             while (batch.Count < 1000 && pending.Reader.TryRead(out var entry)) batch.Add(entry);
             while (batch.Count < 1000 && failures.Reader.TryRead(out var failure)) batch.Add(failure);
             var now = clock.GetUtcNow();
@@ -122,24 +126,35 @@ public sealed class SecurityLog(
             var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
             if (batch.Count > 0)
             {
-                var users = batch.Where(entry => entry.UserId is not null).Select(entry => entry.UserId!.Value).Distinct().ToArray();
-                var names = await database.Users.AsNoTracking().Where(user => users.Contains(user.Id))
-                    .Select(user => new { user.Id, Name = user.DisplayName ?? user.Username }).ToDictionaryAsync(user => user.Id, user => user.Name, token);
-                var devices = batch.Where(entry => entry.DeviceSessionId is not null).Select(entry => entry.DeviceSessionId!.Value).Distinct().ToArray();
-                var sessions = await database.DeviceSessions.AsNoTracking().Where(session => devices.Contains(session.Id))
-                    .Select(session => new { session.Id, session.DeviceName, session.Platform }).ToDictionaryAsync(session => session.Id, token);
-                foreach (var entry in batch)
+                try
                 {
-                    if (entry.UserId is { } user && names.TryGetValue(user, out var name)) entry.UserName = Short(name, 128);
-                    if (entry.DeviceSessionId is { } device && sessions.TryGetValue(device, out var session))
+                    var users = batch.Where(entry => entry.UserId is not null).Select(entry => entry.UserId!.Value).Distinct().ToArray();
+                    var names = await database.Users.AsNoTracking().Where(user => users.Contains(user.Id))
+                        .Select(user => new { user.Id, Name = user.DisplayName ?? user.Username }).ToDictionaryAsync(user => user.Id, user => user.Name, token);
+                    var devices = batch.Where(entry => entry.DeviceSessionId is not null).Select(entry => entry.DeviceSessionId!.Value).Distinct().ToArray();
+                    var sessions = await database.DeviceSessions.AsNoTracking().Where(session => devices.Contains(session.Id))
+                        .Select(session => new { session.Id, session.DeviceName, session.Platform }).ToDictionaryAsync(session => session.Id, token);
+                    foreach (var entry in batch)
                     {
-                        entry.DeviceName ??= session.DeviceName;
-                        entry.Platform ??= session.Platform;
+                        if (entry.UserId is { } user && names.TryGetValue(user, out var name)) entry.UserName = Short(name, 128);
+                        if (entry.DeviceSessionId is { } device && sessions.TryGetValue(device, out var session))
+                        {
+                            entry.DeviceName ??= session.DeviceName;
+                            entry.Platform ??= session.Platform;
+                        }
                     }
+                    database.SecurityEvents.AddRange(batch);
+                    await database.SaveChangesAsync(token);
                 }
-                database.SecurityEvents.AddRange(batch);
-                try { await database.SaveChangesAsync(token); }
-                catch (Exception error) when (StorageRecovery.IsRecoverableDatabase(error)) { return; }
+                catch (Exception error) when (StorageRecovery.IsRecoverableDatabase(error))
+                {
+                    foreach (var entry in batch)
+                    {
+                        if (retryBuffer.Count >= MaximumRetryBuffer) break;
+                        retryBuffer.Enqueue(entry);
+                    }
+                    return;
+                }
             }
             if (now >= nextPrune)
             {

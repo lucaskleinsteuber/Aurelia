@@ -263,7 +263,7 @@ public static partial class FilenameMetadataParser
     [GeneratedRegex(@"[-_]+\s*(?:extra|featurette|behind[ ._-]*the[ ._-]*scenes|deleted[ ._-]*scenes?|deleted|interview|scene|clip|short|other)(?:[\s._-]*\d+)?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ExtraSuffixExpression();
 
-    [GeneratedRegex(@"S(\d{1,2})[ ._-]*E(\d{1,3})\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"S(\d{1,2})[ ._-]*E(\d{1,3})(?:(?:[ ._-]*[-–—][ ._-]*E?|[ ._-]*E)\d{1,3})*\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SeasonEpisodeExpression();
 
     [GeneratedRegex(@"\b(\d{1,2})x(\d{1,3})\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]

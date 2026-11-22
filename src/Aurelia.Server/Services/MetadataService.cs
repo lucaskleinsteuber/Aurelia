@@ -199,6 +199,30 @@ public sealed class MetadataService(
 
     internal async Task ApplyAsync(MediaItem item, TmdbMetadata provider, double confidence, CancellationToken cancellationToken, Func<CancellationToken, Task<bool>>? canApply = null)
     {
+        if (canApply is not null && !await canApply(cancellationToken)) return;
+        // Download provider artwork before entering the global catalog mutation gate so slow
+        // TMDB transfers never block editing, deletion, or backup exports (audit SRV-DATA-006).
+        var backdropKind = item.Kind == MediaKind.Episode ? ArtworkKind.Still : ArtworkKind.Backdrop;
+        var existingArtwork = await database.ArtworkAssets.AsNoTracking()
+            .Where(asset => asset.MediaItemId == item.Id && !asset.IsManual)
+            .Select(asset => new { asset.Kind, asset.ProviderPath, asset.RelativeFilePath })
+            .ToListAsync(cancellationToken);
+        var prefetched = new Dictionary<(ArtworkKind Kind, string Path), byte[]>();
+        async Task PrefetchIfNeededAsync(ArtworkKind kind, string? providerPath)
+        {
+            if (string.IsNullOrWhiteSpace(providerPath) || prefetched.ContainsKey((kind, providerPath))) return;
+            if (existingArtwork.Any(asset => asset.Kind == kind && asset.ProviderPath == providerPath
+                    && artworkStore.HasStoredFile(asset.RelativeFilePath)))
+                return;
+            if (canApply is not null && !await canApply(cancellationToken)) return;
+            if (await artworkStore.PrefetchAsync(kind, providerPath, cancellationToken) is { } bytes)
+                prefetched[(kind, providerPath)] = bytes;
+        }
+        await PrefetchIfNeededAsync(ArtworkKind.Poster, provider.PosterPath);
+        await PrefetchIfNeededAsync(backdropKind, provider.BackdropPath);
+        foreach (var profilePath in provider.Credits.Select(credit => credit.ProfilePath).Where(path => !string.IsNullOrWhiteSpace(path)).Distinct().Take(ProfilePictures))
+            await PrefetchIfNeededAsync(ArtworkKind.Profile, profilePath);
+
         using var lease = await mutations.EnterAsync(cancellationToken);
         if (canApply is not null && !await canApply(cancellationToken)) return;
         // Refresh catalog entities after waiting for an editor/deletion transaction,
@@ -213,6 +237,7 @@ public sealed class MetadataService(
         if (fresh is null) return;
         var original = item;
         item = fresh;
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
         if (item.Metadata is null)
         {
             item.Metadata = new MediaMetadata { MediaItemId = item.Id };
@@ -239,10 +264,14 @@ public sealed class MetadataService(
         metadata.UpdatedAt = DateTimeOffset.UtcNow;
         await database.SaveChangesAsync(cancellationToken);
         var credits = ReplaceCredits(item, metadata, provider.Credits);
-        await artworkStore.StoreAsync(database, item.Id, ArtworkKind.Poster, provider.PosterPath, cancellationToken, canApply);
-        await artworkStore.StoreAsync(database, item.Id, item.Kind == MediaKind.Episode ? ArtworkKind.Still : ArtworkKind.Backdrop, provider.BackdropPath, cancellationToken, canApply);
-        await StoreProfilesAsync(item.Id, credits, canApply, cancellationToken);
-        if (canApply is not null && !await canApply(cancellationToken)) return;
+        await artworkStore.StoreAsync(database, item.Id, ArtworkKind.Poster, provider.PosterPath, cancellationToken, canApply, prefetched);
+        await artworkStore.StoreAsync(database, item.Id, backdropKind, provider.BackdropPath, cancellationToken, canApply, prefetched);
+        await StoreProfilesAsync(item.Id, credits, canApply, cancellationToken, prefetched);
+        if (canApply is not null && !await canApply(cancellationToken))
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return;
+        }
         metadata.ProviderCreditsJson = JsonSerializer.Serialize(credits.Select(credit => MediaEditorService.Credit(item, credit)), MediaEditorService.Json);
         var review = await database.MetadataReviews.SingleOrDefaultAsync(value => value.MediaItemId == item.Id, cancellationToken);
         if (review is not null) review.State = MetadataReviewState.Matched;
@@ -254,6 +283,7 @@ public sealed class MetadataService(
             await UpsertCollectionAsync(item, "tmdb", provider.Collection.ProviderId, provider.Collection.Name, provider.Collection, cancellationToken);
         await JoinUniversesAsync(item, provider.Keywords, cancellationToken);
         await database.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         collectionArtwork?.DeleteFileNames(staleFiles);
         if (wishes is not null)
             await wishes.AutoFulfillForMediaAsync(item.Id, item.Kind, metadata.Provider, metadata.ProviderMediaId, cancellationToken);
@@ -313,10 +343,10 @@ public sealed class MetadataService(
         return credits;
     }
 
-    private async Task StoreProfilesAsync(Guid itemId, IEnumerable<MediaCredit> credits, Func<CancellationToken, Task<bool>>? canApply, CancellationToken cancellationToken)
+    private async Task StoreProfilesAsync(Guid itemId, IEnumerable<MediaCredit> credits, Func<CancellationToken, Task<bool>>? canApply, CancellationToken cancellationToken, IReadOnlyDictionary<(ArtworkKind Kind, string Path), byte[]>? prefetched = null)
     {
         foreach (var profilePath in credits.Select(credit => credit.ProfilePath).Where(path => path is not null).Distinct().Take(ProfilePictures))
-            await artworkStore.StoreAsync(database, itemId, ArtworkKind.Profile, profilePath, cancellationToken, canApply);
+            await artworkStore.StoreAsync(database, itemId, ArtworkKind.Profile, profilePath, cancellationToken, canApply, prefetched);
     }
 
     /// <summary>
@@ -413,6 +443,7 @@ public sealed class MetadataService(
         CancellationToken cancellationToken)
     {
         var memberships = await database.MediaCollectionMembers
+            .IgnoreQueryFilters()
             .Include(member => member.Collection)
             .ThenInclude(collection => collection.Members)
             .Where(member => member.MediaItemId == mediaId
@@ -438,7 +469,10 @@ public sealed class MetadataService(
             database.MediaCollectionMembers.Remove(membership);
             collection.UpdatedAt = DateTimeOffset.UtcNow;
             collectionArtwork?.InvalidateCollectionCache(collection.Id);
-            if (collection.Members.Count == 0)
+            var hasOtherMembers = await database.MediaCollectionMembers
+                .IgnoreQueryFilters()
+                .AnyAsync(member => member.CollectionId == collection.Id && member.MediaItemId != mediaId, cancellationToken);
+            if (!hasOtherMembers)
             {
                 emptied.Add(collection);
             }

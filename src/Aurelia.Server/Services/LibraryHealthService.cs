@@ -72,7 +72,9 @@ public sealed class LibraryHealthService(
 
         var items = await database.MediaItems.AsNoTracking()
             .Where(item => item.Kind != MediaKind.Series
-                && (item.Availability != MediaAvailability.Available || item.LibraryRoot.Availability != LibraryAvailability.Available))
+                && (item.Availability != MediaAvailability.Available
+                    || item.LibraryRoot.Availability == LibraryAvailability.Unavailable
+                    || item.LibraryRoot.Availability == LibraryAvailability.Error))
             .Select(item => new
             {
                 Item = item,

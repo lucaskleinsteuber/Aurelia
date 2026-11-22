@@ -284,28 +284,32 @@ public sealed record MovieSummary(
     Guid Id,
     string Title,
     int? Year,
-    MediaAvailability Availability);
+    MediaAvailability Availability,
+    LibraryAvailability? LibraryAvailability = null);
 
 public sealed record MovieDetail(
     Guid Id,
     string Title,
     int? Year,
     MediaAvailability Availability,
-    IReadOnlyList<SupplementSummary> Supplements);
+    IReadOnlyList<SupplementSummary> Supplements,
+    LibraryAvailability? LibraryAvailability = null);
 
 public sealed record SeriesSummary(
     Guid Id,
     string Title,
     MediaAvailability Availability,
     int SeasonCount,
-    int EpisodeCount);
+    int EpisodeCount,
+    LibraryAvailability? LibraryAvailability = null);
 
 public sealed record SeriesDetail(
     Guid Id,
     string Title,
     MediaAvailability Availability,
     IReadOnlyList<SeasonSummary> Seasons,
-    IReadOnlyList<SupplementSummary> Supplements);
+    IReadOnlyList<SupplementSummary> Supplements,
+    LibraryAvailability? LibraryAvailability = null);
 
 public sealed record SeasonSummary(
     int Number,
