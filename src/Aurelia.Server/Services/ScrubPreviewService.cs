@@ -701,7 +701,7 @@ public sealed class ScrubPreviewService : BackgroundService
         }
     }
 
-    private bool IsBusyWithPlayback() => streams.PlaybackCount > 0 || live.Running > 0;
+    private bool IsBusyWithPlayback() => streams.PlaybackCount > 0 || live.RunningForPlayback > 0;
 
     private async Task WaitWhilePlaybackBusyAsync(CancellationToken cancellationToken)
     {

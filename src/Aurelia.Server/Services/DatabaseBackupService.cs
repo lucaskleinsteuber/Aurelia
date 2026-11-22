@@ -41,7 +41,7 @@ public sealed class DatabaseBackupService(
     /// Scheduled backups run only when the server is idle. Active playback streams
     /// or active live conversions defer scheduled runs to the next maintenance interval.
     /// </summary>
-    public bool IsServerBusy => isBusy?.Invoke() ?? ((activeStreams?.PlaybackCount > 0) || (liveConversions?.Running > 0));
+    public bool IsServerBusy => isBusy?.Invoke() ?? ((activeStreams?.PlaybackCount > 0) || (liveConversions?.RunningForPlayback > 0));
 
     public async Task<string> CreateBackupAsync(
         DatabaseBackupKind kind,

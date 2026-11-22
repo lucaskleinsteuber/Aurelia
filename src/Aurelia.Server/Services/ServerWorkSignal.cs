@@ -3,8 +3,8 @@ namespace Aurelia.Server.Services;
 /// <summary>
 /// Tells the Linux power saving (<c>aurelia-autosleep</c>) what the server is working on, in a
 /// <c>work</c> file in its data folder, renewed every 30 seconds while it lasts:
-/// <c>keepawake</c> while a library scan or metadata job runs, which should finish first;
-/// <c>analysis</c> while only intro, credits, speech or scrub-preview work runs. That work can take
+/// <c>keepawake</c> while a library scan, metadata job or owner-started speech job runs, which should finish first;
+/// <c>analysis</c> while only intro, credits, file-check or scrub-preview work runs. That work can take
 /// hours for a large library and continues after the next wake, where it left off, so it no longer
 /// keeps an unused computer awake through the processor load it causes (audit B-4). Without the
 /// file the power saving goes by the load as before.
@@ -95,9 +95,9 @@ public sealed partial class ServerWorkSignal(ServerRuntimeOptions runtime, TimeP
     {
         if (keep) Interlocked.Add(ref keepAwake, delta);
         else Interlocked.Add(ref analysis, delta);
-        // A new kind of work is written at once, so the power saving sees it before its next look;
-        // short repeats of the same work only wait for the next renewal.
-        if (delta > 0 && State != Volatile.Read(ref written)) Write();
+        // State changes are reflected immediately so power saving sees both starting work and
+        // its completion without waiting up to 30 seconds for the next renewal tick.
+        if (State != Volatile.Read(ref written)) Write();
     }
 
     private sealed class Lease : IDisposable

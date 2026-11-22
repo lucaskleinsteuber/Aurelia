@@ -96,6 +96,9 @@ public sealed class ServerPowerSettingsTests
         Assert.Equal("A sleep timer ended", AppHostedIdleStop.Decide(settings, now, now.AddMinutes(-6), 0, now.AddMinutes(-1), utc));
         Assert.Null(AppHostedIdleStop.Decide(settings with { AfterSleepTimer = false }, now, now.AddMinutes(-6), 0, now.AddMinutes(-1), utc));
         Assert.Null(AppHostedIdleStop.Decide(settings, now, now.AddMinutes(-6), 0, now.AddMinutes(-10), utc)); // someone watched after the timer
+        // A running scan, metadata job or speech job keeps an app-hosted server awake (audit SRV-BG-008).
+        Assert.Null(AppHostedIdleStop.Decide(settings, now, now.AddHours(-2), 0, null, utc, keepAwake: true));
+        Assert.Null(AppHostedIdleStop.Decide(settings, now, now.AddMinutes(-6), 0, now.AddMinutes(-1), utc, keepAwake: true));
     }
 
     [Fact]

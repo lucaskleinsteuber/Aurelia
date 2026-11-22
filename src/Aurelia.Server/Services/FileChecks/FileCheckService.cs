@@ -641,7 +641,7 @@ public sealed partial class FileCheckService : BackgroundService
         catch (ObjectDisposedException) { }
     }
 
-    private bool IsBusy(int ownConversions) => streams.PlaybackCount > 0 || live.Running > ownConversions;
+    private bool IsBusy(int ownConversions) => streams.PlaybackCount > 0 || live.RunningForPlayback > 0;
 
     private async Task WaitWhileBusyAsync(int ownConversions, CancellationToken cancellationToken)
     {
@@ -683,7 +683,7 @@ public sealed partial class FileCheckService : BackgroundService
             while (slot is null)
             {
                 await owner.WaitWhileBusyAsync(0, cancellationToken);
-                slot = await owner.live.EnterAsync(encodesVideo: false, cancellationToken);
+                slot = await owner.live.EnterAsync(encodesVideo: false, cancellationToken, background: true);
             }
         }
 

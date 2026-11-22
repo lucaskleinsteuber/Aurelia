@@ -91,6 +91,7 @@ public sealed partial class LiveConversionService : IDisposable
     private sealed record Slots(SemaphoreSlim All, int AllLimit, SemaphoreSlim Video, int VideoLimit);
     private readonly SemaphoreSlim probes = new(2, 2);
     private readonly ConcurrentDictionary<string, MediaProbeResult> probeCache = new(StringComparer.Ordinal);
+    private int backgroundRunning;
 
     public LiveConversionService(IConfiguration configuration, ServerRuntimeOptions runtime, ILogger<LiveConversionService> logger)
     {
@@ -138,10 +139,13 @@ public sealed partial class LiveConversionService : IDisposable
     /// <summary>The encoder for the next conversion with this server's tools and chip health.</summary>
     public (LiveVideoEncoder Kind, HardwareEncoder? Chip)? ChooseEncoder(FfmpegTools tools) => ChooseEncoder(tools, Health.IsResting);
 
-    /// <summary>Conversions running now.</summary>
+    /// <summary>Conversions running now (including background analysis).</summary>
     public int Running => slots.IsValueCreated && slots.Value.IsCompletedSuccessfully
         ? slots.Value.Result.AllLimit - slots.Value.Result.All.CurrentCount
         : 0;
+
+    /// <summary>Conversions running for playback or user downloads, excluding background analysis.</summary>
+    public int RunningForPlayback => Math.Max(0, Running - Volatile.Read(ref backgroundRunning));
 
     /// <summary>Picture encodes running now.</summary>
     public int RunningVideo => slots.IsValueCreated && slots.Value.IsCompletedSuccessfully
@@ -392,13 +396,16 @@ public sealed partial class LiveConversionService : IDisposable
     /// <summary>
     /// A place among the running conversions: three at a time, of which one may re-encode the
     /// picture. A seek replaces a stream, so a full server waits briefly for the old one to end.
+    /// Background analysis passes <paramref name="background"/> = true so background workers never
+    /// mistake each other for active playback.
     /// </summary>
-    public async Task<IDisposable?> EnterAsync(bool encodesVideo, CancellationToken cancellationToken)
+    public async Task<IDisposable?> EnterAsync(bool encodesVideo, CancellationToken cancellationToken, bool background = false)
     {
         var limits = await slots.Value;
         if (!await limits.All.WaitAsync(SlotWait, cancellationToken)) return null;
         if (encodesVideo && !await WaitOrRelease(limits, cancellationToken)) return null;
-        return new Slot(limits, encodesVideo);
+        if (background) Interlocked.Increment(ref backgroundRunning);
+        return new Slot(this, limits, encodesVideo, background);
     }
 
     private static async Task<bool> WaitOrRelease(Slots limits, CancellationToken cancellationToken)
@@ -416,12 +423,13 @@ public sealed partial class LiveConversionService : IDisposable
         return false;
     }
 
-    private sealed class Slot(Slots limits, bool encodesVideo) : IDisposable
+    private sealed class Slot(LiveConversionService owner, Slots limits, bool encodesVideo, bool background) : IDisposable
     {
         private int released;
         public void Dispose()
         {
             if (Interlocked.Exchange(ref released, 1) != 0) return;
+            if (background) Interlocked.Decrement(ref owner.backgroundRunning);
             if (encodesVideo) limits.Video.Release();
             limits.All.Release();
         }

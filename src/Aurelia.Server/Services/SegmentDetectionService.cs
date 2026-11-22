@@ -578,7 +578,7 @@ public sealed partial class SegmentDetectionService : BackgroundService
         while (slot is null)
         {
             await WaitWhilePlaybackBusyAsync(cancellationToken);
-            slot = await live.EnterAsync(encodesVideo: false, cancellationToken);
+            slot = await live.EnterAsync(encodesVideo: false, cancellationToken, background: true);
         }
         short[]? samples;
         try
@@ -616,7 +616,7 @@ public sealed partial class SegmentDetectionService : BackgroundService
         {
             activity = new Activity(info.Label, step);
             await WaitWhilePlaybackBusyAsync(cancellationToken);
-            using var slot = await live.EnterAsync(encodesVideo: false, cancellationToken);
+            using var slot = await live.EnterAsync(encodesVideo: false, cancellationToken, background: true);
             if (slot is null) continue;
             OpenMediaFile file;
             try
@@ -777,7 +777,7 @@ public sealed partial class SegmentDetectionService : BackgroundService
         !rows.TryGetValue(id, out var row) || row.AnalysisVersion != version || row.AnalyzedFileSize != fileSize
         || row.AnalyzedFileModifiedAt?.ToUnixTimeMilliseconds() != fileModifiedAt?.ToUnixTimeMilliseconds();
 
-    private bool IsBusyWithPlayback(int ownConversions = 0) => IsBusy(streams.PlaybackCount, live.Running, ownConversions);
+    private bool IsBusyWithPlayback(int ownConversions = 0) => IsBusy(streams.PlaybackCount, live.RunningForPlayback, 0);
 
     /// <summary>
     /// Whether someone is watching or converting. <paramref name="ownConversions"/> are the slots

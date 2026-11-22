@@ -177,10 +177,11 @@ if [[ "$used" =~ ^[0-9]+$ ]]; then
 elif ss -Htn state established '( sport = :43111 )' | grep -q .; then
   busy=true
 fi
-# The server says what it works on (Aurelia Server 2.18 and newer): a scan or metadata job keeps the
-# computer on; intro, credits, speech and preview analysis does not, since it continues after the
-# next wake where it left off and can run for hours (audit B-4). Without a fresh note the processor
-# load decides, as before: someone's own programs or an older server.
+# The server says what it works on (Aurelia Server 2.18 and newer): a scan, metadata job or
+# owner-started speech job keeps the computer on; intro, credits, file-check and preview analysis
+# does not, since it continues after the next wake where it left off and can run for hours
+# (audit B-4). Without a fresh note the processor load decides, as before: someone's own programs
+# or an older server.
 work=""
 if [ -f "$data/work" ] && [ ! -L "$data/work" ] && (( now - $(stat -c %Y "$data/work") < 120 )); then
   work=$(head -c 16 "$data/work" | tr -d '[:space:]')

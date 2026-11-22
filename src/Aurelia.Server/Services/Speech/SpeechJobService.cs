@@ -139,7 +139,7 @@ public sealed partial class SpeechJobService : BackgroundService
                 while (queue.TryDequeue(out var mediaId))
                 {
                     if (!jobs.TryGetValue(mediaId, out var job) || job.Finished) continue;
-                    using (ServerWorkSignal.Begin(scopes, keepAwake: false)) await RunAsync(job, stoppingToken);
+                    await RunAsync(job, stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -166,6 +166,9 @@ public sealed partial class SpeechJobService : BackgroundService
 
     private async Task RunAsync(Job job, CancellationToken stoppingToken)
     {
+        // Speech jobs are explicitly requested by the owner and keep progress in memory, so they
+        // keep the server awake until finished (audit SRV-BG-007).
+        using var work = ServerWorkSignal.Begin(scopes, keepAwake: true);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, job.Cancellation.Token);
         var token = linked.Token;
         try
@@ -295,7 +298,7 @@ public sealed partial class SpeechJobService : BackgroundService
         words.AddRange(trimmed.Select(word => word with { Start = word.Start + chunk.StartSeconds, End = word.End + chunk.StartSeconds }));
     }
 
-    private bool BusyWithPlayback() => streams.PlaybackCount > 0 || live.Running > 0;
+    private bool BusyWithPlayback() => streams.PlaybackCount > 0 || live.RunningForPlayback > 0;
 
     private async Task WaitWhilePlaybackAsync(Job job, CancellationToken token)
     {

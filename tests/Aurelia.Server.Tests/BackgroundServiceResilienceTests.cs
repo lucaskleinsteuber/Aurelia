@@ -95,6 +95,30 @@ public sealed class BackgroundServiceResilienceTests
         finally { Directory.Delete(Path.GetDirectoryName(rootDir)!, recursive: true); }
     }
 
+    [Fact]
+    public async Task BackgroundConversionSlotsDoNotCountAsPlayback()
+    {
+        using var factory = new AureliaServerFactory();
+        var live = factory.Services.GetRequiredService<LiveConversionService>();
+        Assert.Equal(0, live.Running);
+        Assert.Equal(0, live.RunningForPlayback);
+
+        using (var bgSlot = await live.EnterAsync(encodesVideo: false, CancellationToken.None, background: true))
+        {
+            Assert.NotNull(bgSlot);
+            Assert.Equal(1, live.Running);
+            Assert.Equal(0, live.RunningForPlayback);
+
+            using var playSlot = await live.EnterAsync(encodesVideo: false, CancellationToken.None, background: false);
+            Assert.NotNull(playSlot);
+            Assert.Equal(2, live.Running);
+            Assert.Equal(1, live.RunningForPlayback);
+        }
+
+        Assert.Equal(0, live.Running);
+        Assert.Equal(0, live.RunningForPlayback);
+    }
+
     private sealed class ThrowingTmdbClient : ITmdbClient
     {
         public Task ValidateAsync(string token, CancellationToken cancellationToken) => Task.CompletedTask;
