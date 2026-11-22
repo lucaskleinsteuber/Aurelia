@@ -963,9 +963,31 @@ function shell(content) {
   const current = state.route.name === "person" || state.route.name === "title" || state.route.name === "collection" ? null : state.route.name;
   const layout = sidebarLayout();
   const frame = h("div", { class: `app-shell${layout.hidden ? " sidebar-hidden" : ""}` });
-  const closeDrawer = () => frame.classList.remove("drawer-open");
+  const page = h("main", { class: "page", id: "page", tabindex: "-1" }, content);
+  const skipLink = h("a", {
+    class: "skip-link",
+    href: "#page",
+    onclick: (event) => {
+      event.preventDefault();
+      const target = page.querySelector("h1") ?? page;
+      if (target !== page && !target.hasAttribute("tabindex")) target.tabIndex = -1;
+      target.focus();
+    },
+  }, "Skip to Content");
+  let drawerEscape = null;
+  const closeDrawer = ({ restoreFocus = false } = {}) => {
+    const wasOpen = frame.classList.contains("drawer-open");
+    frame.classList.remove("drawer-open");
+    page.inert = false;
+    show.setAttribute("aria-expanded", "false");
+    if (drawerEscape) {
+      document.removeEventListener("keydown", drawerEscape, true);
+      drawerEscape = null;
+    }
+    if (restoreFocus && wasOpen) show.focus();
+  };
   const item = ([name, label, href]) => h("a", { class: `sidebar-item${current === name ? " selected" : ""}`, href, "data-route": true,
-    "aria-current": current === name ? "page" : null, onclick: closeDrawer },
+    "aria-current": current === name ? "page" : null, onclick: () => closeDrawer() },
     icon(SIDEBAR_SYMBOLS[name] ?? "library", { size: 17 }), h("span", {}, label), name === "wishes" ? wishBadge() : null);
 
   const menu = h("div", { class: "profile-menu", role: "menu", hidden: true, "aria-label": "Profile" },
@@ -1007,9 +1029,25 @@ function shell(content) {
     saveSidebarLayout({ ...sidebarLayout(), hidden });
   };
   const narrow = () => window.matchMedia?.("(max-width: 760px)")?.matches;
-  const hide = h("button", { class: "sidebar-toggle", "aria-label": "Hide Sidebar", title: "Hide Sidebar", onclick: () => setHidden(true) }, icon("sidebar", { size: 16 }));
+  const openDrawer = () => {
+    frame.classList.add("drawer-open");
+    page.inert = true;
+    show.setAttribute("aria-expanded", "true");
+    if (!drawerEscape) {
+      drawerEscape = (event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        closeDrawer({ restoreFocus: true });
+      };
+      document.addEventListener("keydown", drawerEscape, true);
+    }
+    sidebar.querySelector(".sidebar-item, button")?.focus();
+  };
+  const hide = h("button", { class: "sidebar-toggle", "aria-label": "Hide Sidebar", title: "Hide Sidebar",
+    onclick: () => (narrow() ? closeDrawer({ restoreFocus: true }) : setHidden(true)) }, icon("sidebar", { size: 16 }));
   const show = h("button", { class: "sidebar-toggle sidebar-show", "aria-label": "Show Sidebar", title: "Show Sidebar",
-    onclick: () => narrow() ? frame.classList.add("drawer-open") : setHidden(false) }, icon("sidebar", { size: 16 }));
+    "aria-expanded": "false",
+    onclick: () => (narrow() ? openDrawer() : setHidden(false)) }, icon("sidebar", { size: 16 }));
   // Dragging the sidebar's edge sets its width, as on the Mac.
   const handle = h("div", { class: "sidebar-resize", role: "separator", "aria-orientation": "vertical", "aria-label": "Sidebar Width" });
   handle.addEventListener("pointerdown", (event) => {
@@ -1032,9 +1070,10 @@ function shell(content) {
       yours.map(item)),
     h("div", { class: "sidebar-foot" },
       h("div", { class: "menu-anchor", style: { flex: "1", minWidth: "0", display: "flex" } }, profileButton, menu),
-      h("a", { class: `sidebar-gear${state.route.name === "settings" ? " selected" : ""}`, href: "/settings", "data-route": true, "aria-label": "Settings", title: "Settings", onclick: closeDrawer }, icon("gear", { size: 17 }))),
+      h("a", { class: `sidebar-gear${state.route.name === "settings" ? " selected" : ""}`, href: "/settings", "data-route": true, "aria-label": "Settings", title: "Settings", onclick: () => closeDrawer() }, icon("gear", { size: 17 }))),
     handle);
-  frame.append(sidebar, h("div", { class: "sidebar-backdrop", onclick: closeDrawer }), show, h("main", { class: "page", id: "page" }, content));
+  window.addEventListener("aurelia:page", () => closeDrawer(), { once: true });
+  frame.append(skipLink, sidebar, h("div", { class: "sidebar-backdrop", onclick: () => closeDrawer({ restoreFocus: true }) }), show, page);
   return frame;
 }
 
@@ -1147,7 +1186,25 @@ async function renderRoute({ quiet = false, restoreScroll = false, resetScroll =
   // Another settings page fades in where the last one was; the list stays still.
   if (inPlace) root.querySelector(".settings-content")?.classList.add("swap-in");
   isRenderingRoute = false;
-  if (route.name === "home" && !quiet && logic.tourPending(safeStorage())) setTimeout(() => startTour(), 600);
+  if (!quiet) {
+    if (route.name === "search" && state.focusSearch) {
+      state.focusSearch = false;
+      root.querySelector(".search .search-field")?.focus();
+    } else if (!inPlace) {
+      const pageEl = root.querySelector("#page");
+      if (pageEl && !pageEl.contains(document.activeElement)) {
+        const heading = pageEl.querySelector("h1");
+        if (heading) {
+          heading.tabIndex = -1;
+          heading.focus({ preventScroll: true });
+        } else {
+          pageEl.focus?.({ preventScroll: true });
+        }
+      }
+    }
+  }
+  const hasHomeTitles = Boolean(content.querySelector?.(".hero, .poster-card, .continue-card"));
+  if (route.name === "home" && hasHomeTitles && !quiet && logic.tourPending(safeStorage())) setTimeout(() => startTour(), 600);
   // The tab's title is set only for the page that is really shown (audit L13).
   const label = { home: "Home", library: "Library", watchlist: "Watchlist", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", history: "Watch History", statistics: "Statistics", settings: "Settings", "movie-night": "Movie Night", wishes: "Wishes", people: "People" }[route.name];
   const named = content.dataset?.pageTitle ?? label;
@@ -2193,7 +2250,7 @@ async function statisticsScreen() {
     yearContainer) : null;
   if (years.length) loadYear(years[0]);
 
-  container.append(
+  container.append(h("div", { class: "statistics-body" },
     summary,
     monthlyWrappedLaunch(),
     monthlyWrappedArchive(years),
@@ -2201,7 +2258,7 @@ async function statisticsScreen() {
     weeklySection ?? "",
     ranking("Most Watched", "Series count with all their episodes.", stats.topTitles) ?? "",
     ranking("Favorite Genres", "By the time you spent with them.", stats.topGenres) ?? "",
-    yearSection ?? "");
+    yearSection ?? ""));
   return container;
 }
 
@@ -2741,7 +2798,10 @@ document.addEventListener("keydown", (event) => {
     if (document.querySelector("dialog[open]")) return;
     event.preventDefault();
     if (state.route.name === "search") document.querySelector(".search .search-field")?.focus();
-    else navigate({ name: "search" });
+    else {
+      state.focusSearch = true;
+      navigate({ name: "search" });
+    }
     return;
   }
   if (event.key === "?" && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.altKey) {

@@ -47,10 +47,16 @@ export function createImportPreview({ api, app, kit }) {
 
     const byPath = (path) => items.find((item) => item.relativePath === path);
     const confirmDiscard = () => globalThis.confirm?.("Discard the changed assignments and analyze again? The library and the files stay unchanged.") ?? true;
+    const confirmHint = h("p", { class: "muted small attention import-confirm-hint", role: "status", hidden: true });
 
     function updateButtons() {
       edit.disabled = automatic.disabled = selected.size === 0;
-      confirm.disabled = !summary || summary.counts.errors !== 0;
+      const errorCount = summary?.counts?.errors ?? 0;
+      confirm.disabled = !summary || errorCount !== 0;
+      confirmHint.hidden = !(summary && errorCount > 0);
+      confirmHint.textContent = errorCount > 0
+        ? `${errorCount} error${errorCount === 1 ? "" : "s"} must be resolved or ignored before importing.`
+        : "";
     }
 
     function renderList() {
@@ -83,9 +89,15 @@ export function createImportPreview({ api, app, kit }) {
       items = loaded;
       selected.clear();
       const c = summary.counts;
-      counts.textContent = [`${c.files} files`, `${c.movies} movies · ${c.series} series · ${c.episodes} episodes`,
-        `${c.extras} extras · ${c.trailers} trailers`, `${c.pending} need review`].join("   ");
-      counts.className = `import-counts muted small${c.pending > 0 ? " attention" : ""}`;
+      const parts = [
+        `${c.files} files`,
+        `${c.movies} movies · ${c.series} series · ${c.episodes} episodes`,
+        `${c.extras} extras · ${c.trailers} trailers`,
+        `${c.pending} need review`,
+      ];
+      if (c.errors > 0) parts.push(`${c.errors} error${c.errors === 1 ? "" : "s"}`);
+      counts.textContent = parts.join("   ");
+      counts.className = `import-counts muted small${c.pending > 0 || c.errors > 0 ? " attention" : ""}`;
       clear(issues);
       issues.hidden = !summary.issues?.length;
       if (summary.issues?.length) {
@@ -159,7 +171,7 @@ export function createImportPreview({ api, app, kit }) {
       sheet.body.append(
         h("p", { class: "muted small mono" }, chosen.length === 1 ? chosen[0].relativePath || "Storage root" : `${chosen.length} selected files or folders`),
         field("Import As", kind), parentRow, entireRow, seasonRow, episodeRow, categoryRow,
-        oneFile ? field("Display Title", title) : null,
+        ...(oneFile ? [field("Display Title", title)] : []),
         h("p", { class: "muted small" }, "Folder rules apply to everything inside. A file's own assignment wins. Unnumbered episodes are numbered only with TV Show · Force Import."));
       update();
       sheet.ready();
@@ -177,6 +189,7 @@ export function createImportPreview({ api, app, kit }) {
       h("div", { class: "import-controls" }, search, filter, edit, automatic),
       list, issues,
       h("p", { class: "muted small" }, "Nothing is imported until you confirm. Files that still need review stay out; video files are never changed."),
+      confirmHint,
       h("div", { class: "button-row end" }, again, confirm));
     updateButtons();
     analyze();

@@ -500,3 +500,24 @@ test("the Wake-on-LAN check says what the server found and what only a test show
   assert.deepEqual(titles(wakeCheck({ available: true, mode: "sleep", wakeSupport: "pumbg" })),
     ["info: Network card not checked yet", "info: Try it once"]);
 });
+
+test("welcome screen step count matches whether power control is available", async (t) => {
+  const { createSettings } = await import("../../src/Aurelia.Server/WebApp/js/settings.js");
+  const { installDOM } = await import("./dom-fixture.mjs");
+  installDOM(t);
+  for (const [available, expected] of [[false, /Two steps/], [true, /Three steps/]]) {
+    const settings = createSettings({
+      api: {
+        libraries: async () => [],
+        metadataProvider: async () => ({ hasToken: false }),
+        serverPower: async () => ({ available }),
+      },
+      state: { profile: { id: "owner", role: "owner" }, server: { capabilities: [] } },
+      navigate: () => {},
+      toast: () => {},
+      handleError: () => false,
+    });
+    const screen = await settings.welcomeScreen();
+    assert.match(screen.textContent, expected);
+  }
+});

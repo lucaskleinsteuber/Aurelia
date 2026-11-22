@@ -298,8 +298,9 @@ export function importChoicesFor(items) {
 /** The editor's first choice for the selected rows. */
 export function importEditorStart(items) {
   const first = items[0];
+  const fallback = first?.isDirectory ? (first.status === "error" ? "ignore" : "movie") : "extra";
   return {
-    choice: IMPORT_CHOICES.some(([value]) => value === first?.kind) ? first.kind : "extra",
+    choice: IMPORT_CHOICES.some(([value]) => value === first?.kind) ? first.kind : fallback,
     parentPath: first?.parentRelativePath ?? "",
     entireSeries: first?.seasonNumber == null,
     season: String(first?.seasonNumber ?? 1),

@@ -1415,10 +1415,11 @@ export function createSettings(app) {
     const step = (number, title, text, done, ...actions) => h("section", { class: `welcome-step ${done ? "done" : ""}` },
       h("span", { class: "welcome-number", "aria-hidden": "true" }, done ? icon("check", { size: 15 }) : String(number)),
       h("div", { class: "welcome-body" }, h("h2", {}, title), h("p", { class: "muted" }, text), h("div", { class: "button-row" }, ...actions)));
+    const stepCount = power?.available ? "Three" : "Two";
     return h("div", { class: "welcome page-enter" },
       h("header", { class: "welcome-header" },
         h("h1", {}, "Welcome to Aurelia"),
-        h("p", { class: "muted" }, "Three steps and your library is ready. You can change all of this later in Settings.")),
+        h("p", { class: "muted" }, `${stepCount} steps and your library is ready. You can change all of this later in Settings.`)),
       step(1, "Add your media", libraries.length
         ? `${libraries.map((library) => library.name).join(", ")}. Add more folders any time.`
         : "Choose the folders on the server that hold your films and shows. Aurelia only reads them.",

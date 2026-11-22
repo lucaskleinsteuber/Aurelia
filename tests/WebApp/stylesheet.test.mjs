@@ -24,3 +24,11 @@ test("text fields inside vertical editor fields do not collapse under flex: 1", 
   const css = readFileSync(new URL("../../src/Aurelia.Server/WebApp/app.css", import.meta.url), "utf8");
   assert.match(css, /\.editor-field\s+\.text-field[^{]*\{[^}]*flex:\s*(?:none|0\s+0\s+auto)/);
 });
+
+test("palette color swatches keep their gradient backgrounds and increased-contrast + skip-link rules exist", () => {
+  const css = readFileSync(new URL("../../src/Aurelia.Server/WebApp/app.css", import.meta.url), "utf8");
+  assert.doesNotMatch(css, /\.picture-choice,\s*\.palette-choice\s*\{[^}]*background:\s*none/);
+  assert.match(css, /\.statistics-body\s*\{[^}]*padding:\s*0\s+var\(--gutter\)/);
+  assert.match(css, /\.skip-link\s*\{/);
+  assert.match(css, /@media\s*\(prefers-contrast:\s*more\)/);
+});

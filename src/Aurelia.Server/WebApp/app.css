@@ -248,7 +248,8 @@ img { display: block; }
 /* Name and Picture in Settings. */
 .picture-editor { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .picture-symbols, .picture-palettes { display: flex; flex-wrap: wrap; gap: 8px; }
-.picture-choice, .palette-choice { border: 2px solid transparent; border-radius: 50%; padding: 2px; background: none; cursor: pointer; line-height: 0; }
+.picture-choice, .palette-choice { border: 2px solid transparent; border-radius: 50%; padding: 2px; cursor: pointer; line-height: 0; }
+.picture-choice { background: none; }
 .picture-choice.selected, .palette-choice.selected { border-color: #fff; }
 .picture-choice:focus-visible, .palette-choice:focus-visible { outline: 2px solid var(--accent, #0a84ff); outline-offset: 2px; }
 .palette-choice { width: 28px; height: 28px; }
@@ -1453,6 +1454,7 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .stat-total { font-size: 34px; font-weight: 700; color: var(--text); }
 .stat-recent { display: flex; gap: 28px; text-align: right; }
 .stat-recent strong { font-size: 19px; }
+.statistics-body { padding: 0 var(--gutter) 40px; }
 .statistics-page .stat-cards-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
 .statistics-page .stat-card-value { font-size: 21px; }
 .chart-label { white-space: nowrap; font-size: 11px; }
@@ -1741,11 +1743,11 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
    Each slide is one color field with the number set huge, and the line slapped on as a
    sticker. On a phone it fills the screen; on a computer it is a phone-shaped story. */
 
-.wrapped-launch { display: flex; align-items: center; gap: 16px; width: 100%; margin-bottom: 18px; padding: 14px 18px; border: 0; border: 1px solid var(--hairline); border-radius: var(--compact-radius); background: var(--surface); color: var(--text); text-align: left; transition: background 0.12s; }
-.wrapped-launch:hover { background: var(--raised); }
+.wrapped-launch { display: flex; align-items: center; gap: 16px; width: 100%; margin-bottom: 18px; padding: 14px 18px; border: 1px solid rgba(114, 160, 255, 0.34); border-radius: var(--compact-radius); background: linear-gradient(135deg, rgba(10, 132, 255, 0.24), rgba(145, 92, 255, 0.22)); color: var(--text); text-align: left; transition: background 0.12s, border-color 0.12s; }
+.wrapped-launch:hover { background: linear-gradient(135deg, rgba(10, 132, 255, 0.34), rgba(145, 92, 255, 0.32)); border-color: rgba(142, 180, 255, 0.5); }
 .wrapped-launch > span:nth-child(2) { display: flex; flex-direction: column; flex: 1; }
-.wrapped-launch-year { font-size: 26px; font-weight: 800; letter-spacing: -0.03em; color: var(--accent); }
-.wrapped-launch .small { color: var(--muted); }
+.wrapped-launch-year { font-size: 26px; font-weight: 800; letter-spacing: -0.03em; color: #7cc0ff; }
+.wrapped-launch .small { color: rgba(255, 255, 255, 0.78); }
 .wrapped-launch.home { width: auto; margin: 0 var(--gutter) 16px; }
 .wrapped-months { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; margin-top: 12px; }
 .wrapped-month { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px; border: 1px solid var(--hairline); border-radius: var(--compact-radius); background: var(--surface); color: var(--text); text-align: left; transition: background 0.12s; }
@@ -2279,3 +2281,50 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .known-action { margin-top: 8px; min-height: 30px; display: flex; align-items: center; }
 .known-action .secondary-button.small { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; font-size: 13px; }
 .badge.wished { gap: 4px; display: inline-flex; padding: 0 9px; height: 26px; background: var(--surface); color: var(--muted); font-size: 12px; }
+
+/* Keyboard skip link (visually hidden until focused). */
+.skip-link {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 1000;
+  padding: 9px 14px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  transform: translateY(-200%);
+  transition: transform 0.12s var(--ease-out);
+}
+.skip-link:focus, .skip-link:focus-visible {
+  transform: translateY(0);
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.import-confirm-hint { margin: 8px 0 0; }
+
+/* Increased Contrast — mirrors the Mac app's dark-contrast appearance. */
+@media (prefers-contrast: more) {
+  :root {
+    --hairline: rgba(255, 255, 255, 0.34);
+    --separator: rgba(255, 255, 255, 0.44);
+    --hover: rgba(255, 255, 255, 0.16);
+    --selection: rgba(255, 255, 255, 0.24);
+    --text: #ffffff;
+    --muted: rgba(255, 255, 255, 0.82);
+    --text-muted: var(--muted);
+  }
+  .sidebar, .sheet, .stat-card, .stat-summary, .settings-card, .settings-section,
+  .secondary-button, .text-field, .select, .select-input, .poster-card .poster, .continue-card .still {
+    border-color: var(--separator);
+  }
+  .secondary-button, .text-field, .select, .select-input {
+    border-width: 1.5px;
+  }
+  :focus-visible {
+    outline: 2.5px solid #ffffff;
+    outline-offset: 2px;
+  }
+}
