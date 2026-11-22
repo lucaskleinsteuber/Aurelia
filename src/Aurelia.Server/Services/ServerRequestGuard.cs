@@ -209,13 +209,20 @@ public sealed class ServerRequestGuard
         var action = creating ? null : segments[5];
 
         using var body = await ReadJsonAsync(request, context.RequestAborted);
-        if (body is null) return false;
-        static UserRole? Role(JsonElement root) =>
-            root.TryGetProperty("role", out var value) && value.ValueKind == JsonValueKind.String
-                && Enum.TryParse<UserRole>(value.GetString(), ignoreCase: true, out var role) ? role : null;
-        static bool Elevated(UserRole? role) => role is UserRole.Owner or UserRole.Admin;
+        // Anything but an object can't bind to the request; the endpoint refuses it with 400.
+        if (body is null || body.RootElement.ValueKind != JsonValueKind.Object) return false;
         var root = body.RootElement;
-        if (creating) return Elevated(Role(root));
+        // The endpoint binds property names in any case, and of repeated names it keeps one; so every
+        // spelling and every copy of a name counts here (audit 2026-11-21, SRV-SEC-001).
+        IEnumerable<JsonElement> Values(string name) => root.EnumerateObject()
+            .Where(property => property.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+            .Select(property => property.Value);
+        List<UserRole> Roles() => [.. Values("role")
+            .Where(value => value.ValueKind == JsonValueKind.String)
+            .Select(value => Enum.TryParse<UserRole>(value.GetString(), ignoreCase: true, out var role) ? role : (UserRole?)null)
+            .OfType<UserRole>()];
+        static bool Elevated(UserRole role) => role is UserRole.Owner or UserRole.Admin;
+        if (creating) return Roles().Any(Elevated);
 
         var targetId = Guid.Parse(segments[4]);
         var target = await database.Users.AsNoTracking().Where(user => user.Id == targetId)
@@ -223,11 +230,11 @@ public sealed class ServerRequestGuard
         if (target is null) return false;
         var self = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value is { } actor
             && Guid.TryParse(actor, out var actorId) && actorId == targetId;
-        bool SwitchedOff() => root.TryGetProperty("isEnabled", out var enabled) && enabled.ValueKind == JsonValueKind.False;
-        bool NewPin() => root.TryGetProperty("pin", out var pin) && pin.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(pin.GetString());
+        bool SwitchedOff() => Values("isEnabled").Any(enabled => enabled.ValueKind == JsonValueKind.False);
+        bool NewPin() => Values("pin").Any(pin => pin.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(pin.GetString()));
         return action switch
         {
-            "profile" => (Role(root) is { } role && role != target.Role)
+            "profile" => Roles().Any(role => role != target.Role)
                 || (Elevated(target.Role) && (SwitchedOff() || (NewPin() && !self))),
             "enabled" or "access" => Elevated(target.Role) && SwitchedOff(),
             "pin" => Elevated(target.Role) && !self,

@@ -133,6 +133,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Security
 
+- Server: the Server Password is needed for a new owner or administrator, a changed role or an owner or administrator switched off however the request spells its fields. Before, `"Role"` written with a capital letter, or a second `"role"`, let an owner's PIN alone create an owner. A request body that isn't a JSON object now gets 400 instead of 500.
 - Mac: updates must carry the owner's signature, as on Linux, and the installer checks the new app with Apple's certificate chain and the team. The Linux app's signature also covers the release channel and repository, and the package is checked again right before it is installed.
 - Mac: sign-ins and keys move to the data-protection keychain. iPhone & iPad: the offline PIN waits after five wrong tries, as on the Mac.
 - Server: changing a role, creating an owner or administrator, and switching off an owner or administrator or giving them a new PIN need the Server Password, as the security model says. Wrong PINs lock per device with a higher limit for the profile, a PIN reset lifts the lock, and wrong pairing codes from one address no longer end pairing for everyone.

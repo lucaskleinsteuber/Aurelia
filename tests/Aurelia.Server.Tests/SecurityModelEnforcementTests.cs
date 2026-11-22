@@ -266,6 +266,56 @@ public sealed class SecurityModelEnforcementTests
         approvedResponse.EnsureSuccessStatusCode();
     }
 
+    // Audit 2026-11-21 (SRV-SEC-001): the endpoints bind property names in any case and keep one of
+    // repeated names, so "Role", "ROLE" or a second "role" must not slip past the Server Password.
+    [Fact]
+    public async Task AnySpellingOrCopyOfAFieldStillNeedsTheServerPassword()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+        async Task<HttpResponseMessage> SendRaw(HttpMethod method, string path, string json)
+        {
+            using var request = ApiTestClient.Authorized(method, path, owner.Token);
+            request.Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            return await client.SendAsync(request);
+        }
+        static async Task<string?> Refusal(HttpResponseMessage response) =>
+            response.StatusCode == HttpStatusCode.Forbidden ? (await ApiTestClient.ReadAsync<ApiProblem>(response)).Code : null;
+        var pin = ApiTestClient.TestPin;
+
+        foreach (var (name, json) in new[]
+        {
+            ("Role admin", $$"""{"username":"Synthetic A","password":null,"Role":"admin","pin":"{{pin}}"}"""),
+            ("ROLE owner", $$"""{"username":"Synthetic B","password":null,"ROLE":"owner","pin":"{{pin}}"}"""),
+            ("repeated role", $$"""{"username":"Synthetic C","password":null,"role":"user","Role":"owner","pin":"{{pin}}"}"""),
+            ("repeated lowercase role", $$"""{"username":"Synthetic D","password":null,"role":"user","role":"admin","pin":"{{pin}}"}"""),
+        })
+        {
+            using var response = await SendRaw(HttpMethod.Post, "/api/v1/users", json);
+            Assert.True("approval_required" == await Refusal(response), $"{name}: {(int)response.StatusCode}");
+        }
+        using (var plain = await SendRaw(HttpMethod.Post, "/api/v1/users",
+                   $$"""{"Username":"Synthetic Viewer","Password":null,"Role":"user","Pin":"{{pin}}"}"""))
+            plain.EnsureSuccessStatusCode();
+
+        using (var switchOff = await SendRaw(HttpMethod.Put, $"/api/v1/users/{owner.User.Id}/enabled", """{"IsEnabled":false}"""))
+            Assert.Equal("approval_required", await Refusal(switchOff));
+        using (var repeated = await SendRaw(HttpMethod.Put, $"/api/v1/users/{owner.User.Id}/enabled", """{"isEnabled":true,"ISENABLED":false}"""))
+            Assert.Equal("approval_required", await Refusal(repeated));
+
+        // A body that is not an object can't bind; it is refused as bad input, never with a 500.
+        using (var array = await SendRaw(HttpMethod.Post, "/api/v1/users", "[]"))
+            Assert.Equal(HttpStatusCode.BadRequest, array.StatusCode);
+        using (var text = await SendRaw(HttpMethod.Put, $"/api/v1/users/{owner.User.Id}/enabled", "\"off\""))
+            Assert.Equal(HttpStatusCode.BadRequest, text.StatusCode);
+
+        using var users = await client.SendAsync(ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/users", owner.Token));
+        var all = await ApiTestClient.ReadAsync<List<UserSummary>>(users);
+        Assert.DoesNotContain(all, user => user.Username.StartsWith("Synthetic ", StringComparison.Ordinal) && user.Role != UserRole.User);
+        Assert.Single(all, user => user.Role == UserRole.Owner);
+    }
+
     [Theory]
     [InlineData("POST", "/api/v1/users", true)]
     [InlineData("PUT", "/api/v1/users/6f0c1c6e-8a3d-4d0c-9b55-111111111111/profile", true)]
