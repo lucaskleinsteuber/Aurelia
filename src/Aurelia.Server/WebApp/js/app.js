@@ -13,7 +13,7 @@ import { supportsSecurity } from "./security.js";
 import { createSecurityAlerts } from "./security-view.js";
 import { describeWishError, formatWishNotification, supportsWishes, wishBadgeCount, wishPosterUrl } from "./wishes.js";
 import { openWrapped, readyMonth, readyMonths, wrappedYears, monthIsNew, MONTHS } from "./wrapped.js";
-import { Player } from "./player.js";
+import { Player, loadPreferences, seekGlyph } from "./player.js";
 import { clockTime, closedLabel } from "./screen-time.js";
 import { LIVE_FEATURE } from "./live-logic.js";
 import { ADAPTIVE_FEATURE } from "./hls-logic.js";
@@ -21,7 +21,6 @@ import { createSettings } from "./settings.js";
 import { createSetupMove, movedNotice } from "./server-move-view.js";
 import { movedDestination } from "./server-move.js";
 import { adScene, cinemaActs, cinemaWanted, comingUp, curtain, nextAd, AD_SECONDS, CURTAIN_EARLIEST, CURTAIN_LONGEST_WAIT, CURTAIN_OPENING, LAST_AD_KEY, TRAILER_LONGEST_SECONDS, TRAILER_START_SECONDS } from "./cinema.js";
-import { loadPreferences } from "./player.js";
 import { applyAppearance, loadGeneral, motionAllowed, sidebarShows, startPath, visibleTitles } from "./preferences.js";
 import { confirmSheet, openSheet } from "./sheet.js";
 
@@ -49,8 +48,17 @@ const cached = {
 };
 const root = document.getElementById("app");
 
+const loadedWebVersion = (() => {
+  try {
+    return new URL(import.meta.url).pathname.match(/^\/web\/v\/([^/]+)\//)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+})();
+
 const state = {
   server: null,
+  loadedVersion: null,
   profile: null,
   route: logic.parseRoute(location.pathname, location.search),
   renderToken: 0,
@@ -63,6 +71,7 @@ const state = {
   watchlistIds: new Set(),
   wishSummary: null,
   movedToken: null,
+  focusSearch: false,
 };
 
 // Settings › General: open on the chosen page when the app starts at Home.
@@ -96,6 +105,20 @@ async function start() {
   try {
     state.server = await api.serverInfo();
     state.offSince = null;
+    if (logic.serverVersionChanged({ loadedAssetVersion: loadedWebVersion, loadedServerVersion: state.loadedVersion, serverInfo: state.server })) {
+      const target = state.server?.webVersion ?? state.server?.version ?? "";
+      let alreadyTried = false;
+      try {
+        alreadyTried = Boolean(target) && sessionStorage.getItem("aurelia.reloadedVersion") === target;
+        if (!alreadyTried && target) sessionStorage.setItem("aurelia.reloadedVersion", target);
+      } catch { /* Proceed with a single reload attempt. */ }
+      if (!alreadyTried && typeof globalThis.location?.reload === "function") {
+        globalThis.location.reload();
+        return;
+      }
+    }
+    state.loadedVersion ??= state.server?.version ?? null;
+    try { sessionStorage.removeItem("aurelia.reloadedVersion"); } catch { /* Optional. */ }
     logic.rememberHosting(state.server?.hosting);
     document.title = state.server?.name && state.server.name !== "Aurelia" ? `Aurelia · ${state.server.name}` : "Aurelia";
   } catch (error) {
@@ -446,6 +469,15 @@ function showServerMoved(destination) {
 
 // MARK: Profiles
 
+function showProfilesError(error) {
+  render(screenFrame(emptyState(
+    "warning",
+    "Couldn’t Load Profiles",
+    error?.message || "The server couldn’t load profiles right now.",
+    h("button", { class: "primary-button", onclick: () => showProfiles() }, "Try Again"),
+  )));
+}
+
 async function showProfiles(note) {
   catalog.close();
   settings.closeEditors();
@@ -461,7 +493,8 @@ async function showProfiles(note) {
   } catch (error) {
     if (token !== state.renderToken) return;
     if (error instanceof ApiError && error.offline) return showServerOff();
-    return showPairing();
+    if (error instanceof ApiError && logic.sessionRefused(error.status, error.code)) return showPairing();
+    return showProfilesError(error);
   }
   if (token !== state.renderToken) return;
   const firstPin = picker.managementSetupRequired;
@@ -809,7 +842,10 @@ async function sessionEnded() {
     showProfiles("Your profile session ended. Choose your profile again.");
   } catch (error) {
     if (error instanceof ApiError && error.offline) return showServerOff();
-    showPairing("This browser was signed out. Ask the owner for a new code.");
+    if (error instanceof ApiError && logic.sessionRefused(error.status, error.code)) {
+      return showPairing("This browser was signed out. Ask the owner for a new code.");
+    }
+    showProfilesError(error);
   }
 }
 
@@ -1272,8 +1308,19 @@ async function homeScreen() {
   if (favorites.length) sections.push(rail("Favorites", favorites.map((item) => posterCard(item))));
   if (recent.length) sections.push(rail("Recently Added", recent.map((item) => posterCard(item))));
   if (home.collections?.length) sections.push(rail("Collections", home.collections.map((collection) => collectionCard(collection)), "poster", "/collections"));
-  if (!hero && sections.length === 0)
-    return emptyState("search", "Nothing Here Yet", "Your library is empty or this profile has no titles. Add a library folder in Aurelia on your Mac.");
+  if (!hero && sections.length === 0) {
+    const isOwner = logic.managementPermissions(state.profile).owner;
+    return isOwner
+      ? emptyState(
+        "search",
+        "Nothing Here Yet",
+        "Your library has no titles yet. Add a storage location to start scanning your films and shows.",
+        h("div", { class: "button-row" },
+          h("a", { class: "primary-button", href: "/settings/library", "data-route": true }, "Add Storage Location…"),
+          h("a", { class: "secondary-button", href: "/welcome", "data-route": true }, "Setup Checklist")),
+      )
+      : emptyState("search", "Nothing Here Yet", "This profile has no titles yet. Ask the owner to add a storage location or share titles with this profile.");
+  }
   return h("div", { class: "home" }, hero ? heroBanner(hero) : null, h("div", { class: "sections" }, monthIsNew() ? monthlyWrappedLaunch({ compact: true }) : null, movieNight.homeStrip(), sections));
 }
 
@@ -2223,14 +2270,15 @@ function showMiniRemote(device, target) {
 
   let isPlaying = true;
   let currentPosition = 0;
-  let duration = (target.progress?.durationMilliseconds ? target.progress.durationMilliseconds / 1000 : 0) || 1;
+  let duration = (target.progress?.durationMilliseconds ? target.progress.durationMilliseconds / 1000 : 0)
+    || (target.runtimeMinutes ? target.runtimeMinutes * 60 : 0);
   let pollTimer = null;
 
   const titleEl = h("div", { class: "mini-remote-title" }, target.title);
   const deviceEl = h("div", { class: "mini-remote-device" }, icon("airplay", { size: 14 }), `Playing on ${device.deviceName}`);
   const playBtn = h("button", { class: "icon-button mini-remote-btn", "aria-label": "Pause" }, icon("pause", { size: 18 }));
-  const skipBackBtn = h("button", { class: "icon-button mini-remote-btn", "aria-label": "Back 10 Seconds" }, icon("previous", { size: 16 }));
-  const skipForwardBtn = h("button", { class: "icon-button mini-remote-btn", "aria-label": "Forward 10 Seconds" }, icon("next", { size: 16 }));
+  const skipBackBtn = h("button", { class: "icon-button mini-remote-btn", "aria-label": "Back 10 Seconds" }, seekGlyph(false, 10, 18));
+  const skipForwardBtn = h("button", { class: "icon-button mini-remote-btn", "aria-label": "Forward 10 Seconds" }, seekGlyph(true, 10, 18));
   const closeBtn = h("button", { class: "icon-button mini-remote-btn", "aria-label": "Stop Remote Playback" }, icon("delete", { size: 16 }));
 
   const progressSlider = h("input", {
@@ -2239,6 +2287,7 @@ function showMiniRemote(device, target) {
     min: "0",
     max: "1000",
     value: "0",
+    disabled: !(duration > 0),
     "aria-label": "Remote Playback Position",
   });
 
@@ -2271,6 +2320,7 @@ function showMiniRemote(device, target) {
   });
 
   progressSlider.addEventListener("change", async () => {
+    if (!(duration > 0)) return;
     try {
       const fraction = Number(progressSlider.value) / 1000;
       const seekPos = fraction * duration;
@@ -2320,6 +2370,7 @@ function showMiniRemote(device, target) {
         }
         if (status.durationSeconds && status.durationSeconds > 0) {
           duration = status.durationSeconds;
+          progressSlider.disabled = false;
           if (status.positionSeconds !== undefined && status.positionSeconds !== null) {
             currentPosition = status.positionSeconds;
             const fraction = Math.min(1, Math.max(0, currentPosition / duration));

@@ -253,6 +253,7 @@ public static class ApiEndpointMappings
         ServerTlsIdentity tlsIdentity,
         LiveConversionService live,
         ServerMoveService moves,
+        WebAppAssets webAssets,
         Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions> json,
         CancellationToken cancellationToken)
     {
@@ -273,7 +274,8 @@ public static class ApiEndpointMappings
             await live.ReportedFeaturesAsync(),
             // A desktop or laptop that hosts Aurelia in its app is woken by its owner, not over the network.
             runtime.LanAccessEnabled && !ServerHosting.ByApp(ServerHosting.Kind(runtime)) ? WakeOnLan.LocalAddresses() : null,
-            ServerHosting.Kind(runtime));
+            ServerHosting.Kind(runtime),
+            webAssets.Version);
         if (moves.MovedTo is not { } movedTo) return Results.Ok(info);
         // A server that moved tells reconnecting devices where it went (docs/SERVER_MOVE.md).
         var options = json.Value.SerializerOptions;

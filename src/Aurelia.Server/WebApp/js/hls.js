@@ -341,17 +341,29 @@ export class HlsSource {
     this.seekTimer = setTimeout(async () => {
       this.seekTimer = null;
       if (this.destroyed || !this.buffer) return;
-      const time = this.video.currentTime;
-      if (rules.bufferedEnd(rules.ranges(this.buffer.buffered), time) != null) return this.wake();
-      const playlist = await this.playlist(this.current);
-      const target = hls.segmentAt(playlist.segments, time);
-      // A resumed title starts its stream at the right segment and then seeks there: the segment
-      // on its way is the one needed, so it isn't broken off and asked for again (audit X3).
-      if (this.streaming && target === this.next) return this.wake();
-      // After abort the parser starts over, so the quality's init segment is sent again; it is
-      // kept, so only the media segment is fetched anew.
-      this.loaded = -1;
-      this.continueAt(target);
+      const generation = this.generation;
+      try {
+        const time = this.video.currentTime;
+        if (rules.bufferedEnd(rules.ranges(this.buffer.buffered), time) != null) return this.wake();
+        const playlist = await this.playlist(this.current);
+        if (this.destroyed || generation !== this.generation || !this.buffer) return;
+        const target = hls.segmentAt(playlist.segments, time);
+        // A resumed title starts its stream at the right segment and then seeks there: the segment
+        // on its way is the one needed, so it isn't broken off and asked for again (audit X3).
+        if (this.streaming && target === this.next) return this.wake();
+        // After abort the parser starts over, so the quality's init segment is sent again; it is
+        // kept, so only the media segment is fetched anew.
+        this.loaded = -1;
+        this.continueAt(target);
+      } catch (error) {
+        if (this.destroyed || generation !== this.generation || error?.name === "AbortError") return;
+        this.streaming = false;
+        if (error?.status) {
+          this.onFailure?.(error.status, error.code);
+          return;
+        }
+        this.interrupted(generation);
+      }
     }, SEEK_SETTLE_MS);
   }
 

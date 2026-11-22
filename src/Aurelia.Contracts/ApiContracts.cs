@@ -28,7 +28,9 @@ public sealed record ServerInfoResponse(
     // From 2.10.0: "macApp" or "linuxApp" when Aurelia for Mac or for Linux hosts the server on a
     // desktop or laptop (no Wake-on-LAN then: when it is off, a device asks to start Aurelia there),
     // "linuxServer" for the Linux package, "server" otherwise.
-    string? Hosting = null);
+    string? Hosting = null,
+    // Hash of the server's bundled browser app assets, so open tabs notice an update on reconnect.
+    string? WebVersion = null);
 
 public sealed record SetupOwnerRequest(
     string Username,

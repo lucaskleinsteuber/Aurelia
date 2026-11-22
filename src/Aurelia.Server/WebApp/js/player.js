@@ -56,11 +56,11 @@ export function savePreferences(value) {
 }
 
 /** The circular arrow with the interval inside, like SF Symbols' gobackward.10. */
-function seekGlyph(forward, seconds) {
+export function seekGlyph(forward, seconds, size = 24) {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("width", "24");
-  svg.setAttribute("height", "24");
+  svg.setAttribute("width", String(size));
+  svg.setAttribute("height", String(size));
   svg.setAttribute("class", "icon");
   svg.setAttribute("aria-hidden", "true");
   const arc = document.createElementNS(svg.namespaceURI, "path");
@@ -671,6 +671,8 @@ export class Player {
     }
     if (target?.isContentEditable || target?.tagName === "SELECT") return;
     if ((target instanceof HTMLInputElement && target.type !== "range") || target instanceof HTMLTextAreaElement) return;
+    // When the volume slider has focus, Left/Right adjust volume natively rather than seeking.
+    if (target === this.volume && (event.key === "ArrowLeft" || event.key === "ArrowRight")) return;
     const seconds = this.preferences.seekInterval;
     // Return or S skips the intro while Skip Intro is offered.
     if (this.skipIntroButton?.hidden === false && !event.repeat && (event.key === "Enter" || event.key === "s" || event.key === "S")

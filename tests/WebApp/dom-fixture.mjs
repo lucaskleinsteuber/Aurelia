@@ -22,6 +22,7 @@ export class TestNode extends EventTarget {
     if (["value", "type", "class"].includes(key)) this[key === "class" ? "className" : key] = String(value);
   }
   getAttribute(key) { return this.attributes.get(key) ?? null; }
+  removeAttribute(key) { this.attributes.delete(key); }
   append(...nodes) {
     for (let node of nodes) {
       if (!(node instanceof TestNode)) node = new TestNode("", String(node));

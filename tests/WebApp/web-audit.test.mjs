@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import { cssName, h } from "../../src/Aurelia.Server/WebApp/js/dom.js";
 import { createApi } from "../../src/Aurelia.Server/WebApp/js/api.js";
 import { confirmSheet, openSheet } from "../../src/Aurelia.Server/WebApp/js/sheet.js";
-import { installDOM, flush, button, all } from "./dom-fixture.mjs";
+import { openTrimEditor } from "../../src/Aurelia.Server/WebApp/js/segments-view.js";
+import { installDOM, flush, deferred, button, all } from "./dom-fixture.mjs";
 
 test("inline styles written as in scripts reach the element (audit L2)", (t) => {
   installDOM(t);
@@ -72,4 +73,31 @@ test("reads the page makes by itself say so, and the feed starts at the newest c
   // A change the person makes always counts, even during a quiet refresh.
   await api.request("/api/v1/server/file-checks", { method: "PUT", body: { enabled: true } });
   assert.equal(requests.at(-1).headers["X-Aurelia-Background"], undefined);
+});
+
+test("closing the segment trim sheet before playback creation resolves revokes the ticket and skips video loading", async (t) => {
+  installDOM(t);
+  const pending = deferred();
+  const revoked = [];
+  const api = {
+    createPlayback: () => pending.promise,
+    revokePlayback: async (id) => { revoked.push(id); },
+  };
+  openTrimEditor({
+    api,
+    item: { id: "ep-1", title: "Pilot" },
+    part: "intro",
+    times: { introStartMilliseconds: 1000, introEndMilliseconds: 30_000 },
+    canPreview: false,
+  });
+  const sheet = globalThis.document.body.children.at(-1);
+  const video = all(sheet).find((node) => node.tagName === "VIDEO");
+  video.pause = () => {};
+  video.load = () => {};
+  sheet.close();
+  assert.equal(sheet.isConnected, false);
+  pending.resolve({ id: "ticket-1", contentType: "video/mp4", streamPath: "/api/v1/streams/ticket-1", progress: { durationMilliseconds: 600_000 } });
+  await flush();
+  assert.deepEqual(revoked, ["ticket-1"]);
+  assert.equal(video.src, undefined);
 });

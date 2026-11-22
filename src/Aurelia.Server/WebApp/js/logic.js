@@ -993,9 +993,11 @@ export class ProgressSaver {
     const recordedAt = this.now();
     if (this.inFlight && options.keepalive) {
       // The page is closing: a queued save would never be sent, so the last position goes out
-      // now on its own keepalive request instead of waiting for the running one.
+      // now on its own keepalive request instead of waiting for the running one. Skip revision
+      // enforcement so it does not 409 against the in-flight periodic save; if the periodic save
+      // arrives later with the older revision, its own revision check rejects it.
       this.next = null;
-      const body = { ...values, clientMutationId: this.newId(), enforceRevision: true, expectedRevision: this.revision };
+      const body = { ...values, clientMutationId: this.newId(), enforceRevision: false };
       return Promise.resolve(this.send(this.mediaId, body, options)).then(() => true, () => false);
     }
     if (this.inFlight) {
@@ -1753,6 +1755,13 @@ export function syncFailure(error, failures, offlineInRow) {
  */
 export function sessionRefused(status, code) {
   return status === 401 || (status === 403 && /session|profile|device/.test(String(code ?? "")));
+}
+
+/** Whether a reconnecting page is running an older bundled browser app than the server now serves. */
+export function serverVersionChanged({ loadedAssetVersion = null, loadedServerVersion = null, serverInfo = null } = {}) {
+  if (loadedAssetVersion && serverInfo?.webVersion && loadedAssetVersion !== serverInfo.webVersion) return true;
+  if (loadedServerVersion && serverInfo?.version && loadedServerVersion !== serverInfo.version) return true;
+  return false;
 }
 
 /**

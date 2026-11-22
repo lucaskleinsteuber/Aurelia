@@ -124,3 +124,23 @@ test("Retry-After delays are parsed and clamped for 429 HLS retries", () => {
   assert.equal(retryAfterDelayMs(null), 2000);
   assert.equal(retryAfterDelayMs("invalid", 3000), 3000);
 });
+
+test("HlsSource.seeking reports playlist errors through onFailure without unhandled rejection", async () => {
+  const { HlsSource } = await import("../../src/Aurelia.Server/WebApp/js/hls.js");
+  const failures = [];
+  const source = Object.assign(Object.create(HlsSource.prototype), {
+    destroyed: false,
+    generation: 2,
+    current: 0,
+    streaming: true,
+    buffer: { buffered: { length: 0 } },
+    video: { currentTime: 120 },
+    playlist: async () => { throw Object.assign(new Error("Expired"), { status: 401, code: "invalid_session" }); },
+    onFailure: (status, code) => failures.push([status, code]),
+    interrupted: () => failures.push(["interrupted"]),
+  });
+  source.seeking();
+  await new Promise((resolve) => setTimeout(resolve, 260));
+  assert.deepEqual(failures, [[401, "invalid_session"]]);
+  assert.equal(source.streaming, false);
+});
