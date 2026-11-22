@@ -253,4 +253,32 @@ public sealed class SidecarSubtitleTests : IDisposable
         Assert.NotEmpty(bytes);
         Assert.Equal(initialFileCount, Directory.GetFiles(tempDir).Length);
     }
+
+    [Fact]
+    public void SubtitleMemoryCacheEvictsLeastRecentlyUsedAndInvalidatesChangedFiles()
+    {
+        var cache = new SidecarSubtitles.SubtitleMemoryCache(maximumEntries: 2, maximumTotalBytes: 1024, maximumEntryBytes: 512);
+        cache.Set("a", 1, 10, "WEBVTT\n\nA"u8.ToArray());
+        cache.Set("b", 1, 10, "WEBVTT\n\nB"u8.ToArray());
+        // Touch "a" so "b" becomes least recently used.
+        Assert.True(cache.TryGet("a", 1, 10, out var aBytes));
+        Assert.Contains("A", Encoding.UTF8.GetString(aBytes));
+
+        cache.Set("c", 1, 10, "WEBVTT\n\nC"u8.ToArray());
+        Assert.True(cache.TryGet("a", 1, 10, out _));
+        Assert.False(cache.TryGet("b", 1, 10, out _));
+        Assert.True(cache.TryGet("c", 1, 10, out _));
+
+        // File change invalidates cached bytes.
+        Assert.False(cache.TryGet("a", 2, 10, out _));
+    }
+
+    [Fact]
+    public void EmbeddedSubtitleTimeoutScalesWithLargeRemuxFileSize()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(30), LiveConversionService.SubtitleTimeoutFor(0));
+        Assert.Equal(TimeSpan.FromSeconds(30), LiveConversionService.SubtitleTimeoutFor(10 * 1024 * 1024));
+        Assert.True(LiveConversionService.SubtitleTimeoutFor(10L * 1024 * 1024 * 1024) >= TimeSpan.FromMinutes(3));
+        Assert.Equal(TimeSpan.FromMinutes(10), LiveConversionService.SubtitleTimeoutFor(50L * 1024 * 1024 * 1024));
+    }
 }

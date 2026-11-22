@@ -257,8 +257,10 @@ segment and no temporary file.
    which the server keeps in its data folder (`Subtitles/`), never beside the media. All of them are
    listed by `GET {streamPath}/subtitles` with `isSidecar: true`. The response is `text/vtt; charset=utf-8`, private and uncached. SubRip (`.srt`),
    ASS/SSA (`.ass`, `.ssa`), `mov_text`, WebVTT (`.vtt`) and plain text are supported and converted
-   in-memory; bitmap tracks (`.sub`/`.idx`) return `422 subtitle_not_supported`. All converted text
-   subtitles are capped at 5 MB in memory with an LRU cache; no converted files are ever written to disk.
+   in-memory; bitmap tracks (`.sub`/`.idx`) return `422 subtitle_not_supported`. Sidecar and
+   downloaded subtitle files are capped at 5 MB and extracted embedded tracks at 8 MB; converted
+   WebVTT tracks up to 2 MB are kept in a bounded in-memory LRU cache (up to 100 tracks / 32 MB)
+   and no converted files are ever written to disk.
 
 Reading paces the conversion: when the player stops reading, ffmpeg waits. Closing the
 connection ends ffmpeg. PQ/HLG pictures re-encoded to H.264 are tone- and gamut-mapped to SDR

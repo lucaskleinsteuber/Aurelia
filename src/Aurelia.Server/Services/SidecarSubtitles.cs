@@ -30,13 +30,63 @@ public static partial class SidecarSubtitles
         ".sub", ".idx"
     };
 
-    private static readonly ConcurrentDictionary<string, CachedSubtitle> MemoryCache = new();
-    // Converted subtitles are small; the cap keeps a few large files from filling a small server's memory.
-    private const long MaximumCachedBytes = 32 * 1024 * 1024;
-    private const int MaximumCachedFileBytes = 2 * 1024 * 1024;
-    private static long cachedBytes;
+    private static readonly SubtitleMemoryCache MemoryCache = new(maximumEntries: 100, maximumTotalBytes: 32 * 1024 * 1024, maximumEntryBytes: 2 * 1024 * 1024);
 
-    private sealed record CachedSubtitle(long LastModifiedTicks, long FileLength, byte[] Content);
+    internal sealed class SubtitleMemoryCache(int maximumEntries, long maximumTotalBytes, int maximumEntryBytes)
+    {
+        private sealed record Entry(string Key, long LastModifiedTicks, long FileLength, byte[] Content);
+
+        private readonly object gate = new();
+        private readonly Dictionary<string, LinkedListNode<Entry>> map = new(StringComparer.Ordinal);
+        private readonly LinkedList<Entry> order = new();
+        private long totalBytes;
+
+        public int Count { get { lock (gate) return map.Count; } }
+
+        public bool TryGet(string key, long lastModifiedTicks, long fileLength, out byte[] content)
+        {
+            lock (gate)
+            {
+                if (map.TryGetValue(key, out var node))
+                {
+                    if (node.Value.LastModifiedTicks == lastModifiedTicks && node.Value.FileLength == fileLength)
+                    {
+                        order.Remove(node);
+                        order.AddFirst(node);
+                        content = node.Value.Content;
+                        return true;
+                    }
+                    RemoveLocked(node);
+                }
+            }
+            content = [];
+            return false;
+        }
+
+        public void Set(string key, long lastModifiedTicks, long fileLength, byte[] content)
+        {
+            if (content.Length > maximumEntryBytes || content.Length > maximumTotalBytes) return;
+            lock (gate)
+            {
+                if (map.TryGetValue(key, out var existing)) RemoveLocked(existing);
+                while (order.Last is { } oldest && (map.Count >= maximumEntries || totalBytes + content.Length > maximumTotalBytes))
+                {
+                    RemoveLocked(oldest);
+                }
+                var node = new LinkedListNode<Entry>(new Entry(key, lastModifiedTicks, fileLength, content));
+                order.AddFirst(node);
+                map[key] = node;
+                totalBytes += content.Length;
+            }
+        }
+
+        private void RemoveLocked(LinkedListNode<Entry> node)
+        {
+            order.Remove(node);
+            map.Remove(node.Value.Key);
+            totalBytes -= node.Value.Content.Length;
+        }
+    }
 
     /// <summary>
     /// Subtitle files that belong to a video, in a stable order (track numbers are positions in
@@ -279,9 +329,9 @@ public static partial class SidecarSubtitles
         var ticks = fileInfo.LastWriteTimeUtc.Ticks;
         var length = fileInfo.Length;
 
-        if (MemoryCache.TryGetValue(filePath, out var cached) && cached.LastModifiedTicks == ticks && cached.FileLength == length)
+        if (MemoryCache.TryGet(filePath, ticks, length, out var cached))
         {
-            return cached.Content;
+            return cached;
         }
 
         byte[] rawBytes;
@@ -317,18 +367,7 @@ public static partial class SidecarSubtitles
         }
 
         var resultBytes = Encoding.UTF8.GetBytes(vtt);
-        if (resultBytes.Length <= MaximumCachedFileBytes)
-        {
-            if (MemoryCache.Count >= 100 || Interlocked.Read(ref cachedBytes) + resultBytes.Length > MaximumCachedBytes)
-            {
-                MemoryCache.Clear();
-                Interlocked.Exchange(ref cachedBytes, 0);
-            }
-            if (MemoryCache.TryAdd(filePath, new CachedSubtitle(ticks, length, resultBytes)))
-                Interlocked.Add(ref cachedBytes, resultBytes.Length);
-            else
-                MemoryCache[filePath] = new CachedSubtitle(ticks, length, resultBytes);
-        }
+        MemoryCache.Set(filePath, ticks, length, resultBytes);
         return resultBytes;
     }
 

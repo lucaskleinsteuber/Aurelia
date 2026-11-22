@@ -545,6 +545,85 @@ public sealed partial class LiveConversionTests
         Assert.Equal("conversion_unavailable", (await ApiTestClient.ReadAsync<ApiProblem>(response)).Code);
     }
 
+    [Fact]
+    public async Task OversizedSidecarSubtitleReturns422InsteadOf500()
+    {
+        var root = Path.Combine(TestPaths.CreateDataDirectory(), "Sidecar Errors");
+        Directory.CreateDirectory(root);
+        var videoPath = Path.Combine(root, "Oversized Film.mkv");
+        var subtitlePath = Path.Combine(root, "Oversized Film.en.srt");
+        try
+        {
+            await File.WriteAllBytesAsync(videoPath, [1, 2, 3, 4]);
+            using (var fs = new FileStream(subtitlePath, FileMode.CreateNew))
+            {
+                fs.SetLength(SidecarSubtitles.MaximumFileBytes + 1024);
+            }
+            using var factory = Factory("off");
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var mediaId = await AddMediaAsync(factory, root, videoPath);
+            var playback = await CreatePlaybackAsync(client, owner.Token, mediaId);
+
+            using var request = ApiTestClient.Authorized(HttpMethod.Get, $"{playback.StreamPath}/subtitles/1000", owner.Token);
+            using var response = await client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+            var problem = await ApiTestClient.ReadAsync<ApiProblem>(response);
+            Assert.Equal("subtitle_too_large", problem.Code);
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(root)!, recursive: true); }
+    }
+
+    [Fact]
+    public async Task EmbeddedSubtitlesAreCachedInMemoryAndServedWithoutUsingAConversionSlot()
+    {
+        if (Installed() is not { } maker) return;
+        var ffmpeg = Tools() ?? maker;
+        var root = Path.Combine(TestPaths.CreateDataDirectory(), "Embedded Subtitles Cache");
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "Captioned.mkv");
+        try
+        {
+            await MakeSubtitleMediaAsync(maker, path, "srt");
+            using var factory = Factory(ffmpeg);
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var mediaId = await AddMediaAsync(factory, root, path);
+            var playback = await CreatePlaybackAsync(client, owner.Token, mediaId);
+            var live = factory.Services.GetRequiredService<LiveConversionService>();
+
+            // First fetch extracts embedded track and caches it in memory.
+            using (var firstReq = ApiTestClient.Authorized(HttpMethod.Get, $"{playback.StreamPath}/subtitles/1", owner.Token))
+            using (var firstRes = await client.SendAsync(firstReq))
+            {
+                firstRes.EnsureSuccessStatusCode();
+                var text = await firstRes.Content.ReadAsStringAsync();
+                Assert.Contains("First cue", text, StringComparison.Ordinal);
+            }
+
+            // Second fetch hits in-memory cache even if every conversion slot is occupied.
+            var slots = new List<IDisposable>();
+            try
+            {
+                while (await live.EnterAsync(encodesVideo: false, CancellationToken.None) is { } held)
+                {
+                    slots.Add(held);
+                    if (slots.Count >= 16) break;
+                }
+                using var secondReq = ApiTestClient.Authorized(HttpMethod.Get, $"{playback.StreamPath}/subtitles/1", owner.Token);
+                using var secondRes = await client.SendAsync(secondReq);
+                secondRes.EnsureSuccessStatusCode();
+                var cachedText = await secondRes.Content.ReadAsStringAsync();
+                Assert.Contains("First cue", cachedText, StringComparison.Ordinal);
+            }
+            finally
+            {
+                foreach (var held in slots) held.Dispose();
+            }
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(root)!, recursive: true); }
+    }
+
     private static ProbedVideo Video(string codec, string? profile, int level, int width = 1920, int height = 1080,
         string? pixelFormat = "yuv420p", int bitDepth = 8, int index = 0) =>
         new(index, codec, profile, level, width, height, pixelFormat, bitDepth);

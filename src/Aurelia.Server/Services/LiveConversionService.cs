@@ -61,7 +61,24 @@ public sealed partial class LiveConversionService : IDisposable
     private const int ErrorTailCharacters = 4096;
     private const int MaximumProbeBytes = 256 * 1024;
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(15);
-    private static readonly TimeSpan SubtitleTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan MinimumSubtitleTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan MaximumSubtitleTimeout = TimeSpan.FromMinutes(10);
+    private const long SubtitleBytesPerExtraSecond = 50L * 1024 * 1024;
+    private readonly SidecarSubtitles.SubtitleMemoryCache embeddedSubtitleCache =
+        new(maximumEntries: 100, maximumTotalBytes: 32 * 1024 * 1024, maximumEntryBytes: 2 * 1024 * 1024);
+
+    /// <summary>
+    /// Time allowed to demux an embedded text subtitle track: 30 seconds for typical files, scaling
+    /// with file size up to 10 minutes so large remuxes on slower disks finish cleanly.
+    /// </summary>
+    public static TimeSpan SubtitleTimeoutFor(long fileBytes)
+    {
+        if (fileBytes <= 0) return MinimumSubtitleTimeout;
+        var extraSeconds = fileBytes / SubtitleBytesPerExtraSecond;
+        var totalSeconds = Math.Clamp((long)MinimumSubtitleTimeout.TotalSeconds + extraSeconds,
+            (long)MinimumSubtitleTimeout.TotalSeconds, (long)MaximumSubtitleTimeout.TotalSeconds);
+        return TimeSpan.FromSeconds(totalSeconds);
+    }
     private static readonly TimeSpan SlotWait = TimeSpan.FromSeconds(5);
 
     private readonly ILogger<LiveConversionService> logger;
@@ -315,11 +332,21 @@ public sealed partial class LiveConversionService : IDisposable
         finally { probes.Release(); }
     }
 
-    /// <summary>Extracts one text track to bounded request memory, never to a temporary file or cache.</summary>
+    private static string EmbeddedSubtitleKey(string checkedPath, int index) => $"{checkedPath}\0{index}";
+
+    /// <summary>Returns a previously extracted embedded WebVTT track from bounded memory if the file has not changed.</summary>
+    public byte[]? TryGetCachedSubtitles(OpenMediaFile file, string checkedPath, int index) =>
+        embeddedSubtitleCache.TryGet(EmbeddedSubtitleKey(checkedPath, index), file.LastModified.UtcTicks, file.Length, out var cached)
+            ? cached
+            : null;
+
+    /// <summary>Extracts one text track to bounded memory (and a small in-memory LRU cache), never to disk.</summary>
     public async Task<byte[]> ExtractSubtitlesAsync(FfmpegTools tools, OpenMediaFile file, string checkedPath, int index, CancellationToken cancellationToken)
     {
+        var cacheKey = EmbeddedSubtitleKey(checkedPath, index);
+        if (embeddedSubtitleCache.TryGet(cacheKey, file.LastModified.UtcTicks, file.Length, out var cached)) return cached;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(SubtitleTimeout);
+        timeout.CancelAfter(SubtitleTimeoutFor(file.Length));
         using var process = Start(tools.Ffmpeg, LiveSubtitles.Arguments(InputPath(file.Stream, checkedPath), index));
         var errors = ReadTailAsync(process.StandardError);
         using var stopOnAbort = timeout.Token.Register(() => Kill(process));
@@ -328,7 +355,11 @@ public sealed partial class LiveConversionService : IDisposable
             var output = await ReadLimitedAsync(process.StandardOutput.BaseStream, LiveSubtitles.MaximumBytes, timeout.Token);
             await process.WaitForExitAsync(timeout.Token);
             EnsureInputMatchesHandle(file.Stream.SafeFileHandle, checkedPath);
-            if (process.ExitCode == 0 && output.AsSpan().StartsWith("WEBVTT"u8)) return output;
+            if (process.ExitCode == 0 && output.AsSpan().StartsWith("WEBVTT"u8))
+            {
+                embeddedSubtitleCache.Set(cacheKey, file.LastModified.UtcTicks, file.Length, output);
+                return output;
+            }
             LogFailed(logger, "ffmpeg subtitles", process.ExitCode, await errors, checkedPath);
             throw new PlaybackException("subtitle_conversion_failed", "The server couldn’t read this subtitle track.", StatusCodes.Status422UnprocessableEntity);
         }
