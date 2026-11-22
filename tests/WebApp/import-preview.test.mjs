@@ -75,8 +75,9 @@ test("the preview is analyzed, a file is assigned and the recognized items are i
     confirmImportPreview: async (_library, _preview, revision) => calls.push(`confirm ${revision}`),
   };
   const toasts = [];
+  let savedRefreshes = 0;
   const app = { api, state: { profile: { id: "owner", role: "owner" } }, toast: (text) => toasts.push(text), handleError: () => false };
-  const editors = createManagementEditors({ ...app, onSaved: () => {} });
+  const editors = createManagementEditors({ ...app, onSaved: () => { savedRefreshes += 1; editors.close(); } });
   t.after(() => editors.close());
   let done = 0;
   createImportPreview({ api, app, kit: editors.kit }).open({ id: "lib", name: "Invented Media", path: "/srv/invented", importPreviewRequired: true }, { onDone: () => done++ });
@@ -94,6 +95,8 @@ test("the preview is analyzed, a file is assigned and the recognized items are i
   all(sheet).find((node) => node.tagName === "FORM").dispatchEvent(new Event("submit", { cancelable: true }));
   await flush();
   assert.equal(sheet.open, false);
+  assert.equal(preview.open, true, "saving a nested assignment keeps the Import Preview open");
+  assert.equal(savedRefreshes, 0, "saving a nested assignment must not trigger Settings navigation");
   button(preview, "Import Recognized Items").click();
   await flush();
   assert.deepEqual(calls, ["analyze lib", "assign 1 Invented Show/bonus.mkv=extra", "confirm 2"]);

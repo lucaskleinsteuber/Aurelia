@@ -463,6 +463,10 @@ public sealed class WebAppTests
                 Assert.NotEqual(HttpStatusCode.Unauthorized, draft.StatusCode);
             using (var discard = await cookies.SendAsync(browser, new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/media/{mediaId}/editor/uploads/{Guid.NewGuid()}")))
                 Assert.Equal(HttpStatusCode.Unauthorized, discard.StatusCode);
+            using (var collectionDraft = await cookies.SendAsync(browser, new HttpRequestMessage(HttpMethod.Get, $"/api/v1/collections/{Guid.NewGuid()}/editor/uploads/{Guid.NewGuid()}")))
+                Assert.NotEqual(HttpStatusCode.Unauthorized, collectionDraft.StatusCode);
+            using (var collectionDiscard = await cookies.SendAsync(browser, new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/collections/{Guid.NewGuid()}/editor/uploads/{Guid.NewGuid()}")))
+                Assert.Equal(HttpStatusCode.Unauthorized, collectionDiscard.StatusCode);
             // Changing data with only the cookie is refused.
             var save = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/media/{mediaId}/progress")
             {
@@ -501,6 +505,7 @@ public sealed class WebAppTests
             Assert.Equal("text/html", page.Content.Headers.ContentType?.MediaType);
             var policy = Assert.Single(page.Headers.GetValues("Content-Security-Policy"));
             Assert.Contains("script-src 'self'", policy, StringComparison.Ordinal);
+            Assert.Contains("img-src 'self' data: blob:", policy, StringComparison.Ordinal);
             Assert.Contains("frame-ancestors 'none'", policy, StringComparison.Ordinal);
             Assert.DoesNotContain("unsafe", policy, StringComparison.Ordinal);
             Assert.True(page.Headers.CacheControl?.NoCache);

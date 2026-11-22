@@ -168,7 +168,7 @@ export function securitySection({ api, app, kit, refresh }) {
         h("div", { class: "settings-card-actions" },
           device.isNew ? h("button", { type: "button", class: "secondary-button", onclick: () => run(() => api.acknowledgeDevice(device.id)) }, "That Was Me") : null,
           !device.isCurrent ? h("button", { type: "button", class: "secondary-button", onclick: async () => {
-            if (await confirmSignOutDevice(device)) run(() => api.approved(`/api/v1/auth/sessions/${device.id}`, { method: "DELETE" }), `${device.deviceName} is signed out.`);
+            if (await confirmSignOutDevice(device)) run(() => api.approvedIfAsked(`/api/v1/auth/sessions/${device.id}`, { method: "DELETE" }), `${device.deviceName} is signed out.`);
           } }, "Sign Out…") : null,
           device.canBlock ? h("button", { type: "button", class: "secondary-button danger", onclick: async () => {
             if (await confirmBlock(device)) run(() => api.blockDevice(device.id), `${device.deviceName} is blocked and signed out.`);

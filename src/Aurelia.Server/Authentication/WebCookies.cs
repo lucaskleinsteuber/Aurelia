@@ -23,16 +23,20 @@ public static class WebCookies
         if (purpose.Length == 0 && (HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method))
             && (request.Path.StartsWithSegments("/api/v1/streams") || request.Path.StartsWithSegments("/api/v1/artwork")
                 || request.Path.StartsWithSegments("/api/v1/wishes/poster")
-                || (request.Path.StartsWithSegments("/api/v1/media") && IsMediaImage(request.Path.Value ?? string.Empty))))
+                || (request.Path.StartsWithSegments("/api/v1/media") && IsMediaImage(request.Path.Value ?? string.Empty))
+                || (request.Path.StartsWithSegments("/api/v1/collections") && IsCollectionImage(request.Path.Value ?? string.Empty))))
             return request.Cookies[Profile];
         return null;
     }
 
-    // Scrub previews and the media editor's artwork and image drafts are shown in <img> elements.
+    // Scrub previews and the media/collection editors' artwork and image drafts are shown in <img> elements.
     private static bool IsMediaImage(string path) =>
         path.Contains("/scrub-previews/", StringComparison.Ordinal)
         || path.Contains("/editor/artwork/", StringComparison.Ordinal)
         || path.Contains("/editor/uploads/", StringComparison.Ordinal);
+
+    private static bool IsCollectionImage(string path) =>
+        path.Contains("/editor/uploads/", StringComparison.Ordinal);
 
     /// <param name="expires">Null keeps the cookie only until the browser closes.</param>
     public static void Set(HttpContext context, string name, string value, DateTimeOffset? expires, string path = "/") =>

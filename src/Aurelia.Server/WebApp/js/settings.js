@@ -706,7 +706,7 @@ export function createSettings(app) {
             h("button", { type: "button", class: "secondary-button", onclick: () => confirmSheet({
               symbol: "lock", title: `Sign Out “${device.deviceName}”?`, confirm: "Sign Out",
               message: "It needs a new code to use Aurelia again.",
-              work: () => api.approved(`/api/v1/auth/sessions/${device.id}`, { method: "DELETE" }),
+              work: () => api.approvedIfAsked(`/api/v1/auth/sessions/${device.id}`, { method: "DELETE" }),
             }).then((done) => { if (done) { app.toast(`${device.deviceName} is signed out.`); refresh(); } }, (error) => { if (!app.handleError(error)) app.toast(error.message); }) }, "Sign Out…"))))) : null,
 
       permissions.owner ? section("User Accounts", "lock", "Choose who can watch and what they can see.",

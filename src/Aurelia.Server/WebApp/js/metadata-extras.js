@@ -378,7 +378,11 @@ export function cropPicture(address, picture, startCrop, {
       Object.assign(frame.style, { left: `${crop.x * 100}%`, top: `${crop.y * 100}%`, width: `${crop.width * 100}%`, height: `${crop.height * 100}%` });
       result = crop;
     };
+    const errorNote = h("p", { class: "error-text", role: "alert", hidden: true });
+    const useCrop = button("Use Crop", () => sheet.close(), "primary-button");
     image.addEventListener("load", () => {
+      errorNote.hidden = true;
+      useCrop.disabled = false;
       if (startCrop) {
         const full = cropFrame({ imageWidth: image.naturalWidth, imageHeight: image.naturalHeight, aspect: picture.aspect });
         state.zoom = Math.min(4, Math.max(1, full.width / startCrop.width));
@@ -386,6 +390,12 @@ export function cropPicture(address, picture, startCrop, {
       }
       place();
     }, { once: true });
+    image.addEventListener("error", () => {
+      result = null;
+      useCrop.disabled = true;
+      errorNote.textContent = "This browser couldn’t open that picture. Choose a JPEG or PNG photo.";
+      errorNote.hidden = false;
+    });
     zoom.addEventListener("input", () => { state.zoom = Number(zoom.value); place(); });
     let drag = null;
     frame.addEventListener("pointerdown", (event) => {
@@ -405,10 +415,11 @@ export function cropPicture(address, picture, startCrop, {
     const sheet = h("dialog", { class: "sheet crop-sheet", "aria-label": `Crop ${picture.label}` },
       h("h2", {}, `Crop ${picture.label}`),
       h("p", { class: "muted small" }, "Drag the frame and zoom until it shows the part you want."),
+      errorNote,
       stage, field("Zoom", zoom),
       h("div", { class: "button-row end" },
         button("Cancel", () => { result = null; sheet.close(); }),
-        button("Use Crop", () => sheet.close(), "primary-button")));
+        useCrop));
     sheet.addEventListener("cancel", () => { result = null; });
     sheet.addEventListener("close", () => { sheet.remove(); resolve(result); }, { once: true });
     document.body.append(sheet);

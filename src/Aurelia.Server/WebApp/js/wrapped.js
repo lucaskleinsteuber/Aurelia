@@ -3,6 +3,7 @@
 // left moves on or back, holding pauses, and Escape closes.
 
 import { h, icon, clear } from "./dom.js";
+import { motionAllowed } from "./preferences.js";
 
 export const SLIDE_MS = 6000;
 
@@ -72,7 +73,7 @@ export function monthIsNew(today = new Date()) {
  * makes picture addresses.
  */
 export async function openWrapped({ api, year, month = null, artworkUrl }) {
-  const reduce = Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+  const reduce = !motionAllowed();
   const opener = document.activeElement;
   const frame = h("div", { class: "wrapped-frame" }, h("div", { class: "spinner visible" }));
   const overlay = h("div", { class: "wrapped", role: "dialog", "aria-modal": "true", "aria-label": month ? `Your ${MONTHS[month - 1]} Wrapped` : `Your ${year} Wrapped` }, frame);

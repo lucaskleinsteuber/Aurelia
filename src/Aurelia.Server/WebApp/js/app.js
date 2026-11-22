@@ -22,7 +22,7 @@ import { createSetupMove, movedNotice } from "./server-move-view.js";
 import { movedDestination } from "./server-move.js";
 import { adScene, cinemaActs, cinemaWanted, comingUp, curtain, nextAd, AD_SECONDS, CURTAIN_EARLIEST, CURTAIN_LONGEST_WAIT, CURTAIN_OPENING, LAST_AD_KEY, TRAILER_LONGEST_SECONDS, TRAILER_START_SECONDS } from "./cinema.js";
 import { loadPreferences } from "./player.js";
-import { applyAppearance, loadGeneral, sidebarShows, startPath, visibleTitles } from "./preferences.js";
+import { applyAppearance, loadGeneral, motionAllowed, sidebarShows, startPath, visibleTitles } from "./preferences.js";
 import { confirmSheet, openSheet } from "./sheet.js";
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -1009,11 +1009,6 @@ function heroReady(content) {
   return Promise.race([art.decode().catch(() => {}), new Promise((resolve) => setTimeout(resolve, 150))]);
 }
 
-/** Whether pages may move: the system's and this browser's Reduce Motion both keep them still. */
-function motionAllowed() {
-  return !window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches && document.body.dataset.heroMotion !== "reduced";
-}
-
 /** The horizontal rails' positions, so a page built again in place keeps them (audit L4). */
 function railPositions() {
   return [...root.querySelectorAll(".rail-track, .hrail-track")].map((track) => track.scrollLeft);
@@ -1300,7 +1295,7 @@ function heroBanner(item) {
 
 function rail(title, cards, kind = "poster", allHref) {
   const track = h("div", { class: `rail-track ${kind}` }, cards);
-  const scrollBehavior = () => window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth";
+  const scrollBehavior = () => motionAllowed() ? "smooth" : "auto";
   const scroll = (direction) => track.scrollBy({ left: direction * track.clientWidth * 0.85, behavior: scrollBehavior() });
   return (h("section", { class: "rail" },
     h("div", { class: "section-header" }, h("h2", {}, title), h("span", { class: "count" }, String(cards.length)),
@@ -1632,7 +1627,7 @@ function hrail(cards, { label, className = "" } = {}) {
   const track = h("div", { class: `hrail-track ${className}`, role: "list", "aria-label": label }, cards);
   const back = h("button", { class: "rail-arrow back", "aria-label": `Scroll ${label} back`, hidden: true }, icon("back", { size: 18 }));
   const forward = h("button", { class: "rail-arrow forward", "aria-label": `Scroll ${label} forward`, hidden: true }, icon("forward", { size: 18 }));
-  const scrollBehavior = () => window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth";
+  const scrollBehavior = () => motionAllowed() ? "smooth" : "auto";
   const update = () => {
     back.hidden = track.scrollLeft <= 4;
     forward.hidden = track.scrollLeft + track.clientWidth >= track.scrollWidth - 4;

@@ -19,3 +19,8 @@ test("every block in app.css closes, so no rule falls into the wrong media query
   const before = css.slice(0, last);
   assert.equal((before.match(/{/g) ?? []).length, (before.match(/}/g) ?? []).length);
 });
+
+test("text fields inside vertical editor fields do not collapse under flex: 1", () => {
+  const css = readFileSync(new URL("../../src/Aurelia.Server/WebApp/app.css", import.meta.url), "utf8");
+  assert.match(css, /\.editor-field\s+\.text-field[^{]*\{[^}]*flex:\s*(?:none|0\s+0\s+auto)/);
+});

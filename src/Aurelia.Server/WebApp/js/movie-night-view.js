@@ -2,6 +2,7 @@
 // The session lives here, outside the page, so moving around the app keeps this browser in it.
 
 import { h, icon, clear } from "./dom.js";
+import { motionAllowed } from "./preferences.js";
 import { createMovieNight, swipeChoice, cardMeta, slowpokes, screenOf, isHost, SWIPE_DISTANCE, PROGRAM, programChoices, programSummary, flingDuration } from "./movie-night.js";
 
 export function createMovieNightView({ api, artwork, playTitle, navigate, deviceName }) {
@@ -211,7 +212,7 @@ export function createMovieNightView({ api, artwork, playTitle, navigate, device
     if (!card || card.classList.contains("gone")) return;
     dragging = true;
     card.classList.add("gone");
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    const reduce = !motionAllowed();
     const duration = flingDuration(velocity);
     card.style.setProperty("--fling", `${duration}ms`);
     card.style.setProperty(choice === "like" ? "--like" : "--nope", "1");

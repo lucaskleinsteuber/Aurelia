@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ACCENTS, accentFor, countTarget, countValue, stepFrom, readyMonth, readyMonths, wrappedYears, monthIsNew } from "../../src/Aurelia.Server/WebApp/js/wrapped.js";
+import { ACCENTS, accentFor, countTarget, countValue, stepFrom, readyMonth, readyMonths, wrappedYears, monthIsNew, openWrapped } from "../../src/Aurelia.Server/WebApp/js/wrapped.js";
+import { installDOM, all, flush } from "./dom-fixture.mjs";
 
 // Wrapped's rules in the browser; the slides themselves come from the server.
 test("every color the server names has a field and readable ink", () => {
@@ -45,4 +46,46 @@ test("past months of Wrapped are listed by year", () => {
   assert.deepEqual(readyMonths(2027, today), []);
   assert.deepEqual(wrappedYears([2024, 2026, 2027], today), [2026, 2024]);
   assert.deepEqual(wrappedYears([], today), [2026]);
+});
+
+test("app-level Reduce Motion keeps Wrapped slides still until tapped", async (t) => {
+  installDOM(t);
+  const previousWindow = globalThis.window;
+  const previousRaf = globalThis.requestAnimationFrame;
+  const previousCancelRaf = globalThis.cancelAnimationFrame;
+  globalThis.window = { matchMedia: () => ({ matches: false }) };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  t.after(() => {
+    globalThis.window = previousWindow;
+    globalThis.requestAnimationFrame = previousRaf;
+    globalThis.cancelAnimationFrame = previousCancelRaf;
+  });
+  document.body.dataset.heroMotion = "reduced";
+  document.body.classList ??= { add() {}, remove() {}, toggle() {} };
+  document.addEventListener ??= () => {};
+  document.removeEventListener ??= () => {};
+  const api = {
+    wrapped: async () => ({
+      slides: [
+        { kind: "stat", accent: "night", eyebrow: "2026", headline: "First slide", bigNumber: "12", quip: "Nice" },
+        { kind: "stat", accent: "gold", eyebrow: "2026", headline: "Second slide", bigNumber: "24", quip: "Still nice" },
+      ],
+    }),
+  };
+  await openWrapped({ api, year: 2026, artworkUrl: () => "" });
+  await flush();
+  const overlay = document.body.children.at(-1);
+  assert.match(overlay.textContent, /First slide/);
+  const runningBar = all(overlay).find((node) => node.tagName === "I");
+  assert.ok(runningBar);
+  runningBar.dispatchEvent(new Event("animationend"));
+  await flush();
+  assert.match(overlay.textContent, /First slide/, "animationend must not auto-advance when Settings > General Reduce Motion is active");
+  const forward = all(overlay).find((node) => node.getAttribute?.("aria-label") === "Next slide");
+  forward.click();
+  await flush();
+  assert.match(overlay.textContent, /Second slide/);
+  const closeButton = all(overlay).find((node) => node.getAttribute?.("aria-label") === "Close Wrapped");
+  closeButton.click();
 });

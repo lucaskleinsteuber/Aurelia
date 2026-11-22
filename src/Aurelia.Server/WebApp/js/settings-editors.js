@@ -20,7 +20,7 @@ export function createManagementEditors(app) {
   const dialogs = new Set();
   const metadataExtras = createMetadataExtras({ api, app, kit: { input, field, choice, button } });
 
-  function editor(title, saveLabel, onSave) {
+  function editor(title, saveLabel, onSave, { refresh = true } = {}) {
     const profileID = state.profile?.id;
     const controller = new AbortController();
     const body = h("div", { class: "editor-body" });
@@ -38,7 +38,7 @@ export function createManagementEditors(app) {
     let ready = false;
     let valid = true;
     const alive = () => !controller.signal.aborted && profileID === state.profile?.id && dialog.isConnected;
-    const finish = () => { dialog.close(); app.onSaved?.(); };
+    const finish = () => { dialog.close(); if (refresh) app.onSaved?.(); };
     const setBusy = (value, cancellable = true) => {
       busy = value;
       canCancel = !value || cancellable;

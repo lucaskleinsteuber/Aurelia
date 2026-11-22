@@ -145,7 +145,7 @@ export function createImportPreview({ api, app, kit }) {
         const changes = importAssignmentChanges(chosen, { choice: kind.value, parentPath: parent.value, entireSeries: entire.checked,
           season: season.value, episode: episode.value, category: category.value, title: title.value }, targets);
         await save(changes);
-      });
+      }, { refresh: false });
       const update = () => {
         const needsParent = ["episode", "extra", "trailer"].includes(kind.value);
         const series = targets.find((target) => target.relativePath === parent.value)?.kind === "series";

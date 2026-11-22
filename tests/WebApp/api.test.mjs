@@ -130,8 +130,8 @@ test("successive guarded changes obtain distinct one-time grants and empty chang
   let grants = 0;
   const { calls, fetch } = fakeFetch((path) => path === "/api/v1/management/approval" ? json(200, { token: `synthetic-grant-${++grants}` }) : json(204));
   const api = createApi(fetch);
-  await api.removeLibrary("synthetic-one");
-  await api.removeLibrary("synthetic-two");
+  await api.removeTitle("synthetic-one");
+  await api.removeTitle("synthetic-two");
   assert.equal(grants, 2);
   assert.equal(calls.length, 4);
   assert.equal(calls[1].headers["X-Aurelia-Approval"], "synthetic-grant-1");
@@ -155,7 +155,7 @@ test("refused or missing approval cannot send the guarded mutation", async () =>
     [204, undefined, "invalid_response"],
   ]) {
     const { calls, fetch } = fakeFetch(() => json(status, answer));
-    await assert.rejects(createApi(fetch).createProfile({ name: "Synthetic viewer" }), (error) => error instanceof ApiError && error.code === expected);
+    await assert.rejects(createApi(fetch).resetUserPassword("synthetic-user", "correct horse battery staple"), (error) => error instanceof ApiError && error.code === expected);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].path, "/api/v1/management/approval");
   }
@@ -164,13 +164,13 @@ test("refused or missing approval cannot send the guarded mutation", async () =>
 test("management mutation failures retain authentication codes without replay or a password prompt", async () => {
   for (const [status, code] of [[401, "profile_session_expired"], [403, "management_locked"], [403, "approval_required"]]) {
     const { calls, fetch } = fakeFetch((path) => path === "/api/v1/management/approval" ? json(200, { token: "synthetic-grant" }) : json(status, { code, message: "Synthetic authorization refusal." }));
-    await assert.rejects(createApi(fetch).updateProfile("synthetic", { name: "Updated" }), (error) => error instanceof ApiError && error.status === status && error.code === code && error.message === "Synthetic authorization refusal.");
+    await assert.rejects(createApi(fetch).resetUserPassword("synthetic", "correct horse battery staple"), (error) => error instanceof ApiError && error.status === status && error.code === code && error.message === "Synthetic authorization refusal.");
     assert.equal(calls.length, 2);
-    assert.equal(calls[1].path, "/api/v1/users/synthetic/profile");
+    assert.equal(calls[1].path, "/api/v1/users/synthetic/password");
   }
 });
 
-test("new storage, profile and metadata calls use their encoded routes, methods, bodies and cancellation signal", async () => {
+test("storage and profile changes run without approval by default and upgrade only on approval_required", async () => {
   const item = "synthetic/a ?#&";
   const encoded = "synthetic%2Fa%20%3F%23%26";
   const payload = { name: "Invented", path: "/Synthetic Media/A & B", revision: 7 };
@@ -188,21 +188,29 @@ test("new storage, profile and metadata calls use their encoded routes, methods,
     [(api, signal) => api.selectMetadataMatch(item, payload, { signal }), `/api/v1/media/${encoded}/metadata/match`, "PUT", payload],
     [(api, signal) => api.clearMetadataMatch(item, { signal }), `/api/v1/media/${encoded}/metadata/match`, "DELETE"],
   ];
-  for (const [invoke, path, method, body, guarded = false] of cases) {
+  for (const [invoke, path, method, body, upgradeable = false] of cases) {
     const controller = new AbortController();
-    const { calls, fetch } = fakeFetch((address) => address === "/api/v1/management/approval" ? json(200, { token: "synthetic-route-grant" }) : json(204));
+    const { calls, fetch } = fakeFetch(() => json(204));
     await invoke(createApi(fetch), controller.signal);
-    assert.equal(calls.length, guarded ? 2 : 1, `${method} ${path}`);
-    const call = calls.at(-1);
+    assert.equal(calls.length, 1, `${method} ${path} should not ask for approval upfront`);
+    const call = calls[0];
     assert.equal(call.path, path);
     assert.equal(call.method, method);
     assert.equal(call.body, body === undefined ? undefined : JSON.stringify(body));
     assert.equal(call.signal, controller.signal);
-    if (guarded) {
-      assert.equal(calls[0].signal, controller.signal);
-      assert.equal(JSON.parse(calls[0].body).action, `${method} ${path}`);
-      assert.equal(call.headers["X-Aurelia-Approval"], "synthetic-route-grant");
-    } else assert.equal("X-Aurelia-Approval" in call.headers, false);
+    assert.equal("X-Aurelia-Approval" in call.headers, false);
+
+    if (upgradeable) {
+      let attempt = 0;
+      const upgraded = fakeFetch((address) => {
+        if (address === "/api/v1/management/approval") return json(200, { token: "synthetic-route-grant" });
+        return ++attempt === 1 ? json(403, { code: "approval_required", message: "Approval required." }) : json(204);
+      });
+      await invoke(createApi(upgraded.fetch), controller.signal);
+      assert.equal(upgraded.calls.length, 3, `${method} ${path} upgrades on approval_required`);
+      assert.equal(upgraded.calls[1].path, "/api/v1/management/approval");
+      assert.equal(upgraded.calls[2].headers["X-Aurelia-Approval"], "synthetic-route-grant");
+    }
   }
 });
 
