@@ -27,10 +27,10 @@ public sealed class SegmentDetectionTests
     private static readonly double[] ColdOpens = [5, 15, 25, 35];
     private static readonly double[] AfterCredits = [0, 0, 0, 10];
 
-    [Fact]
+    [FfmpegFact]
     public async Task ASeasonGetsItsTimesFromSoundAndOnlyTimestampsAreStored()
     {
-        if (Installed() is not { } maker) return;
+        var maker = FfmpegTestTools.RequireInstalled();
         var ffmpeg = Tools() ?? maker;
         var parent = TestPaths.CreateDataDirectory();
         var root = Path.Combine(parent, "Invented Series");
@@ -182,10 +182,10 @@ public sealed class SegmentDetectionTests
         }
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task ChaptersNamedIntroAndCreditsTakePrecedenceOverSound()
     {
-        if (Installed() is not { } maker) return;
+        var maker = FfmpegTestTools.RequireInstalled();
         var ffmpeg = Tools() ?? maker;
         var parent = TestPaths.CreateDataDirectory();
         var root = Path.Combine(parent, "Invented Chapters");
@@ -214,10 +214,10 @@ public sealed class SegmentDetectionTests
         }
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task CreditsWithoutSharedMusicAreFoundInPicturesWithoutWritingFiles()
     {
-        if (Installed() is not { } maker) return;
+        var maker = FfmpegTestTools.RequireInstalled();
         var ffmpeg = Tools() ?? maker;
         var parent = TestPaths.CreateDataDirectory();
         var root = Path.Combine(parent, "Invented Pictures");
@@ -286,10 +286,10 @@ public sealed class SegmentDetectionTests
         }
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task AMoviesCreditsAreFoundInItsLastPicturesWithoutExaminingEpisodesAgain()
     {
-        if (Installed() is not { } maker) return;
+        var maker = FfmpegTestTools.RequireInstalled();
         var ffmpeg = Tools() ?? maker;
         var parent = TestPaths.CreateDataDirectory();
         var root = Path.Combine(parent, "Invented Movies");
@@ -358,10 +358,11 @@ public sealed class SegmentDetectionTests
     /// read longer than two seconds stopped itself and began again without end: a small server
     /// never finished, stayed busy and so never went to sleep or turned off (found 14.11.2026).
     /// </summary>
-    [Fact]
+    [FfmpegFact(skipOnWindows: true)]
     public async Task ASlowPictureReadFinishesInsteadOfStoppingItself()
     {
-        if (OperatingSystem.IsWindows() || Installed() is not { } maker) return;
+        if (OperatingSystem.IsWindows()) return;
+        var maker = FfmpegTestTools.RequireInstalled();
         var real = Tools() ?? maker;
         var parent = TestPaths.CreateDataDirectory();
         var root = Path.Combine(parent, "Invented Movies");

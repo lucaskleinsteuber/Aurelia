@@ -66,9 +66,8 @@ public sealed class SegmentAudioReader(LiveConversionService live, ILogger<Segme
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         // Decoding the picture is slow on small servers; an hour covers six minutes of 4K.
         timeout.CancelAfter(TimeSpan.FromHours(1));
-        using var process = live.Start(tools.Ffmpeg, PictureArguments(LiveConversionService.InputPath(file.Stream, checkedPath), videoIndex, start, length), lowPriority: true);
-        try { process.PriorityClass = System.Diagnostics.ProcessPriorityClass.Idle; }
-        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        using var process = live.Start(tools.Ffmpeg, PictureArguments(LiveConversionService.InputPath(file.Stream, checkedPath), videoIndex, start, length), lowPriority: true, backgroundIo: true);
+        BackgroundPriority.ApplyToProcess(process, idle: true);
         var errors = LiveConversionService.ReadTailAsync(process.StandardError);
         using var stopOnAbort = timeout.Token.Register(() => LiveConversionService.Kill(process));
         var builder = new Segments.CreditsPictures.Builder(start);
@@ -114,7 +113,7 @@ public sealed class SegmentAudioReader(LiveConversionService live, ILogger<Segme
         var maximumBytes = (int)Math.Min(int.MaxValue / 2, (length * 1.1 + 2) * SampleRate * sizeof(short));
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(Timeout);
-        using var process = live.Start(tools.Ffmpeg, Arguments(LiveConversionService.InputPath(file.Stream, checkedPath), track, start, length), lowPriority: true);
+        using var process = live.Start(tools.Ffmpeg, Arguments(LiveConversionService.InputPath(file.Stream, checkedPath), track, start, length), lowPriority: true, backgroundIo: true);
         var errors = LiveConversionService.ReadTailAsync(process.StandardError);
         using var stopOnAbort = timeout.Token.Register(() => LiveConversionService.Kill(process));
         try

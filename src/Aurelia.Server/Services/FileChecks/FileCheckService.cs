@@ -25,7 +25,7 @@ public sealed partial class FileCheckService : BackgroundService
     public static readonly IReadOnlyList<int> RecheckChoices = [0, 30, 90, 180];
 
     private const int ReadBlock = 1 << 20;
-    private const long YieldEveryBytes = 64L << 20;
+    private const long YieldEveryBytes = 8L << 20;
     private static readonly TimeSpan StallLimit = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan FailureBackoff = TimeSpan.FromDays(1);
     private static readonly TimeSpan RoundInterval = TimeSpan.FromHours(1);
@@ -365,12 +365,16 @@ public sealed partial class FileCheckService : BackgroundService
         if (file.Length != size || !SameTime(file.LastModified, modified)) return false;
         var checkedPath = Path.GetFullPath(media.SourcePath);
 
+        var started = clock.GetTimestamp();
+        using var hold = new Hold(this);
+        await hold.EnterAsync(cancellationToken);
+
         double? duration = sameVersion && existing!.DurationMilliseconds is { } known ? known / 1000.0 : null;
         if (duration is null && tools is not null)
         {
             try
             {
-                duration = (await live.ProbeAsync(tools, file, checkedPath, media.Id, cancellationToken)).DurationSeconds;
+                duration = (await live.ProbeAsync(tools, file, checkedPath, media.Id, cancellationToken, lowPriority: true)).DurationSeconds;
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -379,9 +383,6 @@ public sealed partial class FileCheckService : BackgroundService
             }
         }
 
-        var started = clock.GetTimestamp();
-        using var hold = new Hold(this);
-        await hold.EnterAsync(cancellationToken);
         activity = new Activity(label, verifyOnly ? "Reading again and comparing" : "Reading every byte", 0);
         var read = await ReadAllAsync(stream, file.Length, hold, label, verifyOnly, cancellationToken);
         if (read is null || !StillTheSame(checkedPath, file)) return false;
@@ -470,47 +471,53 @@ public sealed partial class FileCheckService : BackgroundService
         status = null;
     }
 
-    /// <summary>Reads the whole file once and returns its SHA-256, or where the drive could not read it.</summary>
-    private async Task<ReadResult?> ReadAllAsync(FileStream stream, long length, Hold hold, string label, bool verifyOnly, CancellationToken cancellationToken)
-    {
-        var buffer = ArrayPool<byte>.Shared.Rent(ReadBlock);
-        try
+    /// <summary>
+    /// Reads the whole file once on a dedicated low-priority/background-I/O thread and returns its
+    /// SHA-256, or where the drive could not read it (audit SRV-LIB-008, SRV-BG-011).
+    /// </summary>
+    private Task<ReadResult?> ReadAllAsync(FileStream stream, long length, Hold hold, string label, bool verifyOnly, CancellationToken cancellationToken) =>
+        Task.Factory.StartNew(() =>
         {
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            stream.Seek(0, SeekOrigin.Begin);
-            long offset = 0;
-            long sinceYield = 0;
-            while (true)
+            using var priority = BackgroundPriority.EnterCurrentThread();
+            var buffer = ArrayPool<byte>.Shared.Rent(ReadBlock);
+            try
             {
-                int count;
-                try
+                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                stream.Seek(0, SeekOrigin.Begin);
+                long offset = 0;
+                long sinceYield = 0;
+                while (true)
                 {
-                    count = await stream.ReadAsync(buffer.AsMemory(0, ReadBlock), cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    int count;
+                    try
+                    {
+                        count = stream.Read(buffer, 0, ReadBlock);
+                    }
+                    catch (IOException)
+                    {
+                        return new ReadResult(null, offset);
+                    }
+                    if (count == 0) break;
+                    hash.AppendData(buffer, 0, count);
+                    offset += count;
+                    sinceYield += count;
+                    if (sinceYield >= YieldEveryBytes)
+                    {
+                        sinceYield = 0;
+                        var fraction = length > 0 ? Math.Clamp((double)offset / length, 0, 1) : 0;
+                        activity = new Activity(label, verifyOnly ? "Reading again and comparing" : "Reading every byte", verifyOnly ? fraction : fraction / 2);
+                        hold.YieldIfBusyAsync(null, cancellationToken).GetAwaiter().GetResult();
+                    }
                 }
-                catch (IOException)
-                {
-                    return new ReadResult(null, offset);
-                }
-                if (count == 0) break;
-                hash.AppendData(buffer, 0, count);
-                offset += count;
-                sinceYield += count;
-                if (sinceYield >= YieldEveryBytes)
-                {
-                    sinceYield = 0;
-                    var fraction = length > 0 ? Math.Clamp((double)offset / length, 0, 1) : 0;
-                    activity = new Activity(label, verifyOnly ? "Reading again and comparing" : "Reading every byte", verifyOnly ? fraction : fraction / 2);
-                    await hold.YieldIfBusyAsync(null, cancellationToken);
-                }
+                // A file that grew or shrank while it was read is examined again in its new version.
+                return offset == length ? new ReadResult(hash.GetHashAndReset(), null) : null;
             }
-            // A file that grew or shrank while it was read is examined again in its new version.
-            return offset == length ? new ReadResult(hash.GetHashAndReset(), null) : null;
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
-    }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
+        }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
     /// <summary>Lets ffmpeg read every packet, or decode everything; with the chip first and the processor again for a problem.</summary>
     private async Task<FileFinding?> InspectAsync(FfmpegTools tools, FileStream stream, string checkedPath, FileCheckDepth depth,
@@ -551,9 +558,8 @@ public sealed partial class FileCheckService : BackgroundService
     {
         var step = depth == FileCheckDepth.Decode ? "Decoding picture and sound" : "Reading every packet";
         activity = new Activity(label, step, 0.5);
-        using var process = live.Start(tools.Ffmpeg, Arguments(input, depth, chip), lowPriority: true);
-        try { process.PriorityClass = ProcessPriorityClass.Idle; }
-        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        using var process = live.Start(tools.Ffmpeg, Arguments(input, depth, chip), lowPriority: true, backgroundIo: true);
+        BackgroundPriority.ApplyToProcess(process, idle: true);
         var output = new FfmpegCheckOutput(input);
         var lines = ReadLinesAsync(process.StandardError, output, checkedPath);
         try

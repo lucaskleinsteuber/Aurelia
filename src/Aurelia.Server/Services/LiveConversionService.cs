@@ -289,7 +289,13 @@ public sealed partial class LiveConversionService : IDisposable
     }
 
     /// <summary>The file's header description, from memory while size and modification time are unchanged.</summary>
-    public async Task<MediaProbeResult> ProbeAsync(FfmpegTools tools, OpenMediaFile file, string checkedPath, Guid mediaId, CancellationToken cancellationToken)
+    public async Task<MediaProbeResult> ProbeAsync(
+        FfmpegTools tools,
+        OpenMediaFile file,
+        string checkedPath,
+        Guid mediaId,
+        CancellationToken cancellationToken,
+        bool lowPriority = false)
     {
         var key = $"{mediaId:N}:{file.Length}:{file.LastModified.UtcTicks}";
         if (probeCache.TryGetValue(key, out var cached)) return cached;
@@ -299,7 +305,7 @@ public sealed partial class LiveConversionService : IDisposable
             if (probeCache.TryGetValue(key, out cached)) return cached;
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(ProbeTimeout);
-            using var process = Start(tools.Ffprobe, MediaProbe.Arguments(InputPath(file.Stream, checkedPath)), lowPriority: false);
+            using var process = Start(tools.Ffprobe, MediaProbe.Arguments(InputPath(file.Stream, checkedPath)), lowPriority: lowPriority, backgroundIo: lowPriority);
             var errors = ReadTailAsync(process.StandardError);
             string json;
             try
@@ -436,7 +442,7 @@ public sealed partial class LiveConversionService : IDisposable
     }
 
     /// <summary>Starts ffmpeg or ffprobe without a shell, in the empty read-only folder, at low priority.</summary>
-    public Process Start(string program, IReadOnlyList<string> arguments, bool lowPriority = true)
+    public Process Start(string program, IReadOnlyList<string> arguments, bool lowPriority = true, bool backgroundIo = false)
     {
         var start = new ProcessStartInfo(program)
         {
@@ -459,7 +465,11 @@ public sealed partial class LiveConversionService : IDisposable
         }
         var process = Process.Start(start) ?? throw new InvalidOperationException("ffmpeg did not start.");
         process.StandardInput.Close();
-        if (lowPriority)
+        if (backgroundIo)
+        {
+            BackgroundPriority.ApplyToProcess(process);
+        }
+        else if (lowPriority)
         {
             try { process.PriorityClass = ProcessPriorityClass.BelowNormal; }
             catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception) { }

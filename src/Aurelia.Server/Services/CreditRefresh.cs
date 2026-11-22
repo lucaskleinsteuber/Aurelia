@@ -17,10 +17,13 @@ public sealed partial class CreditRefresh(
     ILogger<CreditRefresh> logger) : BackgroundService
 {
     public const string MarkerName = "credits-v2";
+    private const string ProgressName = "credits-v2.progress";
     private static readonly TimeSpan StartDelay = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan Pause = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan MaximumRateLimitWait = TimeSpan.FromSeconds(60);
 
     private string MarkerPath => Path.Combine(runtime.DataDirectory, MarkerName);
+    private string ProgressPath => Path.Combine(runtime.DataDirectory, ProgressName);
 
     private static readonly Action<ILogger, Exception?> UnexpectedFailure = LoggerMessage.Define(
         LogLevel.Warning, new EventId(4411, nameof(UnexpectedFailure)), "Cast and crew refresh stopped after an unexpected failure.");
@@ -44,6 +47,7 @@ public sealed partial class CreditRefresh(
     public async Task<bool> RunAsync(TimeSpan pause, CancellationToken token)
     {
         if (File.Exists(MarkerPath)) return true;
+        using var work = ServerWorkSignal.Begin(scopes, keepAwake: false);
         List<(Guid Id, string? Provider, string ProviderId, string MediaType)> matched;
         MetadataProviderConfiguration settings;
         await using (var scope = scopes.CreateAsyncScope())
@@ -54,43 +58,67 @@ public sealed partial class CreditRefresh(
             matched = (await database.MediaMetadata
                 .Where(metadata => metadata.ProviderMediaId != null
                     && (metadata.MediaItem.Kind == MediaKind.Movie || metadata.MediaItem.Kind == MediaKind.Series))
+                .OrderBy(metadata => metadata.MediaItemId)
                 .Select(metadata => new { metadata.MediaItemId, metadata.Provider, metadata.ProviderMediaId, metadata.ProviderMediaType, metadata.MediaItem.Kind })
                 .ToListAsync(token))
                 .Select(title => (title.MediaItemId, title.Provider, title.ProviderMediaId!, title.ProviderMediaType ?? (title.Kind == MediaKind.Movie ? "movie" : "tv")))
                 .ToList();
         }
 
+        var completed = ContentRatingRefresh.LoadProgress(ProgressPath);
         var changed = 0;
         foreach (var title in matched)
         {
-            if (title.Provider is { } provider && !provider.Equals("tmdb", StringComparison.OrdinalIgnoreCase)) continue;
-            // A fresh scope per title keeps the change tracker small over a large library.
-            await using var scope = scopes.CreateAsyncScope();
-            try
+            if (completed.Contains(title.Id)) continue;
+            if (title.Provider is { } provider && !provider.Equals("tmdb", StringComparison.OrdinalIgnoreCase))
             {
-                var details = await scope.ServiceProvider.GetRequiredService<ITmdbClient>()
-                    .GetAsync(settings.Token, settings.Language, title.MediaType, title.ProviderId, token);
-                if (await scope.ServiceProvider.GetRequiredService<MetadataService>().RefreshCreditsAsync(title.Id, details, token)) changed++;
-            }
-            catch (MetadataException exception) when (exception.StatusCode is StatusCodes.Status404NotFound or StatusCodes.Status400BadRequest)
-            {
+                await ContentRatingRefresh.RecordProgressAsync(ProgressPath, runtime.DataDirectory, title.Id, token);
+                completed.Add(title.Id);
                 continue;
             }
-            catch (Exception exception) when (exception is MetadataException or HttpRequestException or TaskCanceledException && !token.IsCancellationRequested)
+            var retriedRateLimit = false;
+            while (true)
             {
-                Postponed(logger, exception.GetType().Name);
-                return false;
+                // A fresh scope per title keeps the change tracker small over a large library.
+                await using var scope = scopes.CreateAsyncScope();
+                try
+                {
+                    var details = await scope.ServiceProvider.GetRequiredService<ITmdbClient>()
+                        .GetAsync(settings.Token, settings.Language, title.MediaType, title.ProviderId, token);
+                    if (await scope.ServiceProvider.GetRequiredService<MetadataService>().RefreshCreditsAsync(title.Id, details, token)) changed++;
+                    break;
+                }
+                catch (MetadataProviderException exception) when (exception.RetryAfter is { } retryAfter && !retriedRateLimit && !token.IsCancellationRequested)
+                {
+                    retriedRateLimit = true;
+                    var delay = retryAfter < TimeSpan.FromSeconds(1)
+                        ? TimeSpan.FromSeconds(1)
+                        : retryAfter > MaximumRateLimitWait ? MaximumRateLimitWait : retryAfter;
+                    await Task.Delay(delay, token);
+                }
+                catch (MetadataException exception) when (exception.StatusCode is StatusCodes.Status404NotFound or StatusCodes.Status400BadRequest)
+                {
+                    break;
+                }
+                catch (Exception exception) when (exception is MetadataException or HttpRequestException or TaskCanceledException && !token.IsCancellationRequested)
+                {
+                    Postponed(logger, exception.GetType().Name);
+                    return false;
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    UnexpectedFailure(logger, exception);
+                    return false;
+                }
             }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                UnexpectedFailure(logger, exception);
-                return false;
-            }
+            await ContentRatingRefresh.RecordProgressAsync(ProgressPath, runtime.DataDirectory, title.Id, token);
+            completed.Add(title.Id);
             if (pause > TimeSpan.Zero) await Task.Delay(pause, token);
         }
 
         PrivateFilePermissions.CreatePrivateDirectory(runtime.DataDirectory);
         await File.WriteAllTextAsync(MarkerPath, changed.ToString(System.Globalization.CultureInfo.InvariantCulture), token);
+        ContentRatingRefresh.DeleteProgress(ProgressPath);
         Finished(logger, matched.Count, changed);
         return true;
     }

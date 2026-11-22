@@ -251,10 +251,10 @@ public sealed partial class LiveConversionTests
         }
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task AnInventedMkvStreamsOverHlsInMemoryWithoutWritingFiles()
     {
-        if (Installed() is not { } maker) return;
+        var maker = FfmpegTestTools.RequireInstalled();
         var ffmpeg = Tools() ?? maker;
         var root = Path.Combine(TestPaths.CreateDataDirectory(), "Adaptive Streaming");
         Directory.CreateDirectory(root);
@@ -324,6 +324,7 @@ public sealed partial class LiveConversionTests
 
             Assert.Equal(0, sessions.Count);
             await WaitUntilAsync(() => live.Running == 0);
+            await WaitUntilAsync(() => FfmpegTestTools.ChildFfmpegProcessCount() == 0);
         }
         finally { Directory.Delete(Path.GetDirectoryName(root)!, recursive: true); }
     }
@@ -370,10 +371,10 @@ public sealed partial class LiveConversionTests
         }
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task RevokingLastPlaybackTicketEndsHlsSessionWhileRenewalKeepsIt()
     {
-        if (Installed() is not { } maker) return;
+        var maker = FfmpegTestTools.RequireInstalled();
         var ffmpeg = Tools() ?? maker;
         var root = Path.Combine(TestPaths.CreateDataDirectory(), "Revoke Hls");
         Directory.CreateDirectory(root);
@@ -405,15 +406,15 @@ public sealed partial class LiveConversionTests
                 renewedRevoked.EnsureSuccessStatusCode();
             Assert.Equal(0, sessions.Count);
             await WaitUntilAsync(() => live.Running == 0);
+            await WaitUntilAsync(() => FfmpegTestTools.ChildFfmpegProcessCount() == 0);
         }
         finally { Directory.Delete(Path.GetDirectoryName(root)!, recursive: true); }
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task ServerInfoReportsTheSameCapabilitiesAsCapabilitiesEndpoint()
     {
-        var ffmpeg = Tools() ?? Installed();
-        if (ffmpeg is null) return;
+        var ffmpeg = Tools() ?? FfmpegTestTools.RequireInstalled();
         using var factory = Factory(ffmpeg);
         using var client = factory.CreateClient();
         using var infoResponse = await client.GetAsync("/api/v1/server/info");
@@ -426,10 +427,10 @@ public sealed partial class LiveConversionTests
         Assert.Contains(ServerFeatures.ConvertedDownloads, info.Capabilities);
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task ConvertingFromALaterSegmentPutsAKeyFrameAtTheStartOfEverySegment()
     {
-        if (Installed() is not { } ffmpeg) return;
+        var ffmpeg = FfmpegTestTools.RequireInstalled();
         var root = Path.Combine(TestPaths.CreateDataDirectory(), "Segment Key Frames");
         Directory.CreateDirectory(root);
         var path = Path.Combine(root, "Invented Film.mkv");

@@ -35,6 +35,7 @@ public sealed partial class SegmentDetectionService : BackgroundService
     private const int NeighbourReach = 8;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan StatusLifetime = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan FailureBackoff = TimeSpan.FromDays(1);
 
     private readonly ServerRuntimeOptions runtime;
     private readonly IServiceScopeFactory scopes;
@@ -50,6 +51,8 @@ public sealed partial class SegmentDetectionService : BackgroundService
     private readonly SemaphoreSlim processing = new(1, 1);
     private readonly ConcurrentQueue<(Guid Series, int Season)> queue = new();
     private readonly ConcurrentDictionary<(Guid Series, int Season), byte> queued = new();
+    private readonly ConcurrentDictionary<Guid, (long? FileSize, long? ModifiedMilliseconds, DateTimeOffset At)> failedItems = new();
+    private readonly ConcurrentDictionary<(Guid Series, int Season), DateTimeOffset> failedSeasons = new();
 
     private StoredSettings settings;
     private int running;
@@ -152,6 +155,7 @@ public sealed partial class SegmentDetectionService : BackgroundService
     public void RequestSeason(Guid seriesId, int seasonNumber)
     {
         if (!IsEnabled) return;
+        failedSeasons.TryRemove((seriesId, seasonNumber), out _);
         Enqueue(seriesId, seasonNumber);
         Signal();
     }
@@ -160,6 +164,8 @@ public sealed partial class SegmentDetectionService : BackgroundService
     public void RequestMovie(Guid movieId)
     {
         if (!IsEnabled) return;
+        failedItems.TryRemove(movieId, out _);
+        failedSeasons.TryRemove((movieId, MovieEntry), out _);
         Enqueue(movieId, MovieEntry);
         Signal();
     }
@@ -220,6 +226,8 @@ public sealed partial class SegmentDetectionService : BackgroundService
         }
         if (updated.Enabled)
         {
+            failedItems.Clear();
+            failedSeasons.Clear();
             Interlocked.Exchange(ref rescanRequested, 1);
             Signal();
         }
@@ -253,6 +261,8 @@ public sealed partial class SegmentDetectionService : BackgroundService
                 .ExecuteUpdateAsync(update => update.SetProperty(segment => segment.AnalysisVersion, 0), cancellationToken);
         }
         status = null;
+        failedItems.Clear();
+        failedSeasons.Clear();
         Interlocked.Exchange(ref rescanRequested, 1);
         Signal();
         return await ReadSettingsAsync(cancellationToken);
@@ -270,6 +280,8 @@ public sealed partial class SegmentDetectionService : BackgroundService
                 .ExecuteUpdateAsync(update => update.SetProperty(segment => segment.AnalysisVersion, 0), cancellationToken);
         }
         status = null;
+        failedItems.TryRemove(movieId, out _);
+        failedSeasons.TryRemove((movieId, MovieEntry), out _);
         RequestMovie(movieId);
         return await ReadSettingsAsync(cancellationToken);
     }
@@ -305,7 +317,7 @@ public sealed partial class SegmentDetectionService : BackgroundService
                 series.Count(),
                 series.Count(episode => !Needs(rows, episode) && rows[episode.Id].IntroSource != MediaSegmentSource.None),
                 series.Count(episode => !Needs(rows, episode) && rows[episode.Id].CreditsSource != MediaSegmentSource.None),
-                series.Count(episode => Needs(rows, episode) && comparable.Contains(episode.Id))))
+                series.Count(episode => Needs(rows, episode) && comparable.Contains(episode.Id) && !IsBackedOff(episode.Id, episode.FileSize, episode.FileModifiedAt))))
             .OrderBy(series => series.Title, StringComparer.CurrentCultureIgnoreCase)];
     }
 
@@ -330,12 +342,14 @@ public sealed partial class SegmentDetectionService : BackgroundService
         var added = 0;
         foreach (var season in episodes.GroupBy(episode => (episode.Series, episode.Season)))
         {
-            if (season.Count() < 2 || !season.Any(episode => Needs(rows, episode))) continue;
+            if (season.Count() < 2 || IsSeasonBackedOff(season.Key)) continue;
+            if (!season.Any(episode => Needs(rows, episode) && !IsBackedOff(episode.Id, episode.FileSize, episode.FileModifiedAt))) continue;
             if (Enqueue(season.Key.Series, season.Key.Season)) added++;
         }
         foreach (var movie in movies)
         {
-            if (Needs(rows, movie) && Enqueue(movie.Id, MovieEntry)) added++;
+            if (Needs(rows, movie) && !IsBackedOff(movie.Id, movie.FileSize, movie.FileModifiedAt)
+                && !IsSeasonBackedOff((movie.Id, MovieEntry)) && Enqueue(movie.Id, MovieEntry)) added++;
         }
         return added;
     }
@@ -360,6 +374,7 @@ public sealed partial class SegmentDetectionService : BackgroundService
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
+                    failedSeasons[season] = clock.GetUtcNow();
                     if (season.Season == MovieEntry) LogMovieFailed(logger, season.Series, exception);
                     else LogSeasonFailed(logger, season.Series, season.Season, exception);
                 }
@@ -401,7 +416,9 @@ public sealed partial class SegmentDetectionService : BackgroundService
         if (episodes.Count < 2) return 0;
         episodes = [.. episodes.OrderBy(item => item.EpisodeNumber ?? int.MaxValue).ThenBy(item => item.SourcePath, StringComparer.Ordinal)];
 
-        bool NeedsAnalysis(MediaItem item) => !rows.TryGetValue(item.Id, out var row) || !IsCurrent(row, MediaKind.Episode, item.FileSize, item.FileModifiedAt);
+        bool NeedsAnalysis(MediaItem item) =>
+            (!rows.TryGetValue(item.Id, out var row) || !IsCurrent(row, MediaKind.Episode, item.FileSize, item.FileModifiedAt))
+            && !IsBackedOff(item.Id, item.FileSize, item.FileModifiedAt);
         var needing = Enumerable.Range(0, episodes.Count).Where(index => NeedsAnalysis(episodes[index])).ToArray();
         if (needing.Length == 0) return 0;
 
@@ -437,13 +454,20 @@ public sealed partial class SegmentDetectionService : BackgroundService
             cancellationToken.ThrowIfCancellationRequested();
             if (!IsEnabled) break;
             var info = infos[index];
-            if (!NeedsAnalysis(info.Media) || info.Offline) continue;
+            if (!NeedsAnalysis(info.Media)) continue;
+            if (info.Offline)
+            {
+                RememberFailure(info.Media);
+                status = null;
+                continue;
+            }
             var started = clock.GetTimestamp();
             activity = new Activity(info.Label, "Comparing with other episodes");
             var result = info.Duration >= MinimumEpisodeSeconds
                 ? await analyzer.AnalyzeAsync(index, cancellationToken)
                 : DetectedSegments.Nothing;
             await SaveAsync(info.Media, result, AnalysisVersion, cancellationToken);
+            failedItems.TryRemove(info.Media.Id, out _);
             analyzed++;
             status = null;
             // A running average, so the estimate follows this server's speed and the library's mix.
@@ -474,9 +498,15 @@ public sealed partial class SegmentDetectionService : BackgroundService
             title = (await TitlesAsync(database, [movieId], cancellationToken)).GetValueOrDefault(movieId, string.Empty);
         }
         if (row is not null && IsCurrent(row, MediaKind.Movie, movie.FileSize, movie.FileModifiedAt)) return 0;
+        if (IsBackedOff(movie.Id, movie.FileSize, movie.FileModifiedAt)) return 0;
         var started = clock.GetTimestamp();
         var info = await DescribeAsync(tools, movie, cancellationToken);
-        if (info.Offline) return 0;
+        if (info.Offline)
+        {
+            RememberFailure(movie);
+            status = null;
+            return 0;
+        }
         info.Label = title;
         activity = new Activity(title, "Looking for the credits");
         try
@@ -486,6 +516,7 @@ public sealed partial class SegmentDetectionService : BackgroundService
             var result = await analyzer.AnalyzeAsync(cancellationToken);
             if (!IsEnabled) return 0;
             await SaveAsync(movie, result, MovieAnalysisVersion, cancellationToken);
+            failedItems.TryRemove(movie.Id, out _);
         }
         finally
         {
@@ -540,7 +571,7 @@ public sealed partial class SegmentDetectionService : BackgroundService
         info.LastModified = file.LastModified;
         try
         {
-            var probe = await live.ProbeAsync(tools, file, Path.GetFullPath(media.SourcePath), media.Id, cancellationToken);
+            var probe = await live.ProbeAsync(tools, file, Path.GetFullPath(media.SourcePath), media.Id, cancellationToken, lowPriority: true);
             info.Duration = probe.DurationSeconds ?? 0;
             info.Track = LiveSpeechAudio.Choose(probe.Audio, null);
             info.VideoIndex = probe.Video?.Index;
@@ -725,11 +756,12 @@ public sealed partial class SegmentDetectionService : BackgroundService
         foreach (var season in episodes.GroupBy(episode => (episode.Series, episode.Season)))
         {
             var comparable = season.Count() >= 2;
+            var seasonBackedOff = IsSeasonBackedOff(season.Key);
             foreach (var episode in season)
             {
                 if (Needs(rows, episode))
                 {
-                    if (comparable) pending++;
+                    if (comparable && !seasonBackedOff && !IsBackedOff(episode.Id, episode.FileSize, episode.FileModifiedAt)) pending++;
                 }
                 else if (rows[episode.Id] is { IntroSource: MediaSegmentSource.None, CreditsSource: MediaSegmentSource.None })
                 {
@@ -741,12 +773,25 @@ public sealed partial class SegmentDetectionService : BackgroundService
                 }
             }
         }
-        var moviesPending = movies.Count(movie => Needs(rows, movie));
+        var moviesPending = movies.Count(movie => Needs(rows, movie) && !IsBackedOff(movie.Id, movie.FileSize, movie.FileModifiedAt)
+            && !IsSeasonBackedOff((movie.Id, MovieEntry)));
         var moviesWithCredits = movies.Count(movie => !Needs(rows, movie) && rows[movie.Id].CreditsSource != MediaSegmentSource.None);
         var counts = new Counts(pending, analyzed, noResult, movies.Count, moviesWithCredits, moviesPending);
         status = (clock.GetUtcNow(), counts);
         return counts;
     }
+
+    private void RememberFailure(MediaItem media) =>
+        failedItems[media.Id] = (media.FileSize, media.FileModifiedAt?.ToUnixTimeMilliseconds(), clock.GetUtcNow());
+
+    private bool IsBackedOff(Guid id, long? fileSize, DateTimeOffset? modifiedAt) =>
+        failedItems.TryGetValue(id, out var entry)
+        && entry.FileSize == fileSize
+        && entry.ModifiedMilliseconds == modifiedAt?.ToUnixTimeMilliseconds()
+        && clock.GetUtcNow() - entry.At < FailureBackoff;
+
+    private bool IsSeasonBackedOff((Guid Series, int Season) key) =>
+        failedSeasons.TryGetValue(key, out var at) && clock.GetUtcNow() - at < FailureBackoff;
 
     private async Task<LibraryState> LoadStateAsync(CancellationToken cancellationToken)
     {

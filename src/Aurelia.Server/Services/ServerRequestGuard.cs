@@ -145,12 +145,42 @@ public sealed class ServerRequestGuard
             || path.Contains("/continue-watching", StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>A stream read or scrub-preview read that a client marked as a timeline preview.</summary>
-    public static bool IsPreviewStream(HttpRequest request) =>
-        (request.Path.StartsWithSegments("/api/v1/streams")
-            && string.Equals(request.Headers["X-Aurelia-Stream-Purpose"], "preview", StringComparison.OrdinalIgnoreCase))
-        || (request.Path.StartsWithSegments("/api/v1/media")
-            && (request.Path.Value ?? string.Empty).Contains("/scrub-previews", StringComparison.Ordinal));
+    /// <summary>Maximum byte span allowed for a client-marked timeline preview range read (4 MiB).</summary>
+    public const long MaximumPreviewRangeBytes = 4L * 1024 * 1024;
+
+    /// <summary>A bounded direct file-stream read (or HEAD) or scrub-preview read marked as a timeline preview.</summary>
+    public static bool IsPreviewStream(HttpRequest request)
+    {
+        if (request.Path.StartsWithSegments("/api/v1/media")
+            && (request.Path.Value ?? string.Empty).Contains("/scrub-previews", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (!string.Equals(request.Headers["X-Aurelia-Stream-Purpose"], "preview", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // Only direct file stream reads (/api/v1/streams/{ticket}) may use the preview lane;
+        // never /live, /hls, /speech-audio, or /subtitles.
+        if (!request.Path.StartsWithSegments("/api/v1/streams", out var remaining))
+            return false;
+        var segment = (remaining.Value ?? string.Empty).Trim('/');
+        if (segment.Length == 0 || segment.Contains('/'))
+            return false;
+
+        if (HttpMethods.IsHead(request.Method))
+            return true;
+        if (!HttpMethods.IsGet(request.Method))
+            return false;
+
+        var range = request.GetTypedHeaders().Range;
+        if (range is null || !string.Equals(range.Unit.Value, "bytes", StringComparison.OrdinalIgnoreCase) || range.Ranges.Count != 1)
+            return false;
+        var span = range.Ranges.First();
+        if (span.From is not { } from || span.To is not { } to || from < 0 || to < from)
+            return false;
+        return (to - from + 1) <= MaximumPreviewRangeBytes;
+    }
 
     public static bool RequiresApproval(HttpRequest request)
     {

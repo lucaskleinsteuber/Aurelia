@@ -128,7 +128,7 @@ public sealed partial class HlsSessionManager(
     /// Ends one running download conversion so someone can watch. The download's session stays;
     /// its next segment starts converting again once a place is free.
     /// </summary>
-    internal async Task<bool> PauseDownloadAsync(HlsSession forSession)
+    internal async Task<bool> PauseDownloadAsync(HlsSession? forSession = null)
     {
         HlsSession? download;
         lock (gate)

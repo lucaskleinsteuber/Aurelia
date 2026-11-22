@@ -161,10 +161,10 @@ public sealed class ServerSpeechTests
         }
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task AJobWritesSubtitlesFromSpeechAndStoresNothingElse()
     {
-        if (Installed() is not { } ffmpeg) return;
+        var ffmpeg = FfmpegTestTools.RequireInstalled();
         var parent = TestPaths.CreateDataDirectory();
         var root = Path.Combine(parent, "Invented Films");
         Directory.CreateDirectory(root);
@@ -247,10 +247,10 @@ public sealed class ServerSpeechTests
         }
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task SpeechJobRunsDespiteBackgroundAnalysisSlotAndReportsKeepAwake()
     {
-        if (Installed() is not { } ffmpeg) return;
+        var ffmpeg = FfmpegTestTools.RequireInstalled();
         var parent = TestPaths.CreateDataDirectory();
         var root = Path.Combine(parent, "Speech Priority");
         Directory.CreateDirectory(root);

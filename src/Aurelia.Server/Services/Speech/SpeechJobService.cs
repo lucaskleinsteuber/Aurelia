@@ -67,6 +67,8 @@ public sealed partial class SpeechJobService : BackgroundService
 
     public bool ModelReady => models.Current is not null;
 
+    public bool HasActiveJobs => jobs.Values.Any(job => !job.Finished);
+
     public IReadOnlyList<SpeechJobStatus> Jobs => [.. jobs.Values.Select(job => job.Status()).OrderBy(job => job.Title, StringComparer.CurrentCulture)];
 
     public SpeechJobStatus? Status(Guid mediaId) => jobs.TryGetValue(mediaId, out var job) ? job.Status() : null;
@@ -185,7 +187,7 @@ public sealed partial class SpeechJobService : BackgroundService
             catch (PlaybackException) { throw new SpeechJobException("The video file is offline."); }
             await using var stream = file.Stream;
             var path = Path.GetFullPath(media.SourcePath);
-            var probe = await live.ProbeAsync(tools, file, path, media.Id, token);
+            var probe = await live.ProbeAsync(tools, file, path, media.Id, token, lowPriority: true);
             var track = LiveSpeechAudio.Choose(probe.Audio, job.Request.AudioIndex) ?? throw new SpeechJobException("The title has no sound track.");
             IReadOnlyList<SubtitleCue>? original = null;
             if (job.Request.Kind == SpeechJobKind.Sync)
@@ -260,9 +262,8 @@ public sealed partial class SpeechJobService : BackgroundService
     private async Task<List<SpeechWord>> ListenAsync(Job job, FfmpegTools tools, OpenMediaFile file, string path, ProbedAudio track,
         double duration, string modelPath, CancellationToken token)
     {
-        using var process = live.Start(tools.Ffmpeg, LiveSpeechAudio.Arguments(LiveConversionService.InputPath(file.Stream, path), track), lowPriority: true);
-        try { process.PriorityClass = System.Diagnostics.ProcessPriorityClass.Idle; }
-        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        using var process = live.Start(tools.Ffmpeg, LiveSpeechAudio.Arguments(LiveConversionService.InputPath(file.Stream, path), track), lowPriority: true, backgroundIo: true);
+        BackgroundPriority.ApplyToProcess(process, idle: true);
         using var stop = token.Register(() => LiveConversionService.Kill(process));
         var words = new List<SpeechWord>();
         var chunker = new SpeechChunker(Rate * ChunkSeconds, Rate * CutSearchSeconds);
@@ -293,7 +294,7 @@ public sealed partial class SpeechJobService : BackgroundService
     private async Task RecognizeAsync(Job job, SpeechChunk chunk, string modelPath, List<SpeechWord> words, CancellationToken token)
     {
         await WaitWhilePlaybackAsync(job, token);
-        var heard = await recognizer.RecognizeAsync(chunk.Samples, job.Request.Language, modelPath, token);
+        var heard = await recognizer.RecognizeAsync(chunk.Samples, job.Request.Language, modelPath, BusyWithPlayback, paused => job.Paused = paused, token);
         var trimmed = SpeechTiming.TrimmingSilence(heard, SpeechTiming.Levels(chunk.Samples));
         words.AddRange(trimmed.Select(word => word with { Start = word.Start + chunk.StartSeconds, End = word.End + chunk.StartSeconds }));
     }

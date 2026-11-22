@@ -16,10 +16,10 @@ namespace Aurelia.Server.Tests;
 [Collection(LiveConversionRuns.Name)]
 public sealed class ScrubPreviewTests
 {
-    [Fact]
+    [FfmpegFact]
     public async Task OffModeExtractsInMemoryAndWritesNothingToDataTempOrMediaFolders()
     {
-        if (Installed() is not { } maker) return;
+        var maker = FfmpegTestTools.RequireInstalled();
         var ffmpeg = Tools() ?? maker;
         var root = Path.Combine(TestPaths.CreateDataDirectory(), "Scrub Preview Off");
         Directory.CreateDirectory(root);
@@ -95,10 +95,10 @@ public sealed class ScrubPreviewTests
         }
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task OnOpenModeStoresOnlyStillImageStripsInDataFolderRespectsCapInvalidatesOnSourceChangeAndDeletesAll()
     {
-        if (Installed() is not { } maker) return;
+        var maker = FfmpegTestTools.RequireInstalled();
         var ffmpeg = Tools() ?? maker;
         var root = Path.Combine(TestPaths.CreateDataDirectory(), "Scrub Preview Strips");
         Directory.CreateDirectory(root);
@@ -218,10 +218,10 @@ public sealed class ScrubPreviewTests
     // Audit 2026-11-21 (SRV-BG-001/-002/-003, SRV-PLAY-001): "afterImport" looped forever on an idle
     // server because the library keeps file times in milliseconds while strips were named with the
     // file's exact 100-ns time, a failing title was queued again at once, and the worker woke itself.
-    [Fact]
+    [FfmpegFact]
     public async Task AfterImportFindsItsStripsSkipsFailedTitlesAndRestsWhenIdle()
     {
-        if (Installed() is not { } maker) return;
+        var maker = FfmpegTestTools.RequireInstalled();
         var ffmpeg = Tools() ?? maker;
         var root = Path.Combine(TestPaths.CreateDataDirectory(), "Scrub Preview After Import");
         Directory.CreateDirectory(root);

@@ -94,7 +94,10 @@ jobs:
         with:
           global-json-file: global.json
       - name: Verify formatting, build, and tests
+        env:
+          AURELIA_REQUIRE_FFMPEG: "1"
         run: |
+          command -v ffmpeg >/dev/null || brew install ffmpeg
           dotnet tool restore
           dotnet restore Aurelia.slnx
           dotnet format Aurelia.slnx --verify-no-changes --no-restore

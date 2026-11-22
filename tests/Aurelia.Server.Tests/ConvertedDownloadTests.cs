@@ -65,21 +65,26 @@ public sealed partial class LiveConversionTests
         Assert.False(manager.PlaybackWaiting);
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task ADownloadThatStopsInTheMiddleGoesOnAndItsPiecesMakeOneFile()
     {
-        if (Installed() is not { } maker) return;
+        var maker = FfmpegTestTools.RequireInstalled();
         var ffmpeg = Tools() ?? maker;
-        var root = Path.Combine(TestPaths.CreateDataDirectory(), "Converted Download");
+        var baseDir = TestPaths.CreateDataDirectory();
+        var root = Path.Combine(baseDir, "Converted Download");
+        var verifyDir = Path.Combine(baseDir, "Verify Output");
         Directory.CreateDirectory(root);
+        Directory.CreateDirectory(verifyDir);
         var path = Path.Combine(root, "Invented Film.mkv");
         try
         {
             await MakeMediaAsync(maker, path);
+            var before = (File.GetLastWriteTimeUtc(path), new FileInfo(path).Length);
             using var factory = Factory(ffmpeg);
             using var client = factory.CreateClient();
             var owner = await ApiTestClient.SetupOwnerAsync(client);
             var mediaId = await AddMediaAsync(factory, root, path);
+            var live = factory.Services.GetRequiredService<LiveConversionService>();
             var sessions = factory.Services.GetRequiredService<HlsSessionManager>();
 
             using (var capabilities = await client.GetAsync("/api/v1/capabilities"))
@@ -101,6 +106,8 @@ public sealed partial class LiveConversionTests
 
             var playback = await CreatePlaybackAsync(client, owner.Token, mediaId);
             var hls = $"{playback.StreamPath}/hls/360p";
+            var dataFiles = Files(factory.DataDirectory);
+            var temporaryFiles = TemporaryVideoFiles();
             using (var odd = ApiTestClient.Authorized(HttpMethod.Get, $"{hls}/init.mp4?audio=1&purpose=keep", owner.Token))
             using (var refused = await client.SendAsync(odd))
                 Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
@@ -116,7 +123,15 @@ public sealed partial class LiveConversionTests
             Assert.Equal(init, await ReadStreamAsync(client, owner.Token, $"{hls}/init.mp4?audio=1&purpose=download"));
             for (var index = 2; index < 5; index++) file.AddRange(await ReadStreamAsync(client, owner.Token, $"{hls}/{index}.m4s?audio=1&purpose=download"));
 
-            var kept = Path.Combine(root, "Downloaded.mp4");
+            // Converted downloads obey the media rule too: no converted video in data, temp or media folders (audit SRV-PLAY-010).
+            var newDataFiles = Files(factory.DataDirectory).Except(dataFiles).Where(item => !ServerBookkeeping(factory.DataDirectory, item)).ToList();
+            Assert.True(newDataFiles.Count == 0, string.Join(", ", newDataFiles));
+            Assert.Empty(TemporaryVideoFiles().Except(temporaryFiles));
+            Assert.Equal([path], Directory.GetFiles(root));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(factory.DataDirectory, "Converter")));
+            Assert.Equal(before, (File.GetLastWriteTimeUtc(path), new FileInfo(path).Length));
+
+            var kept = Path.Combine(verifyDir, "Downloaded.mp4");
             await File.WriteAllBytesAsync(kept, [.. file]);
             var probe = await RunToolAsync(Path.Combine(Path.GetDirectoryName(maker)!, "ffprobe"),
                 "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", kept);
@@ -124,8 +139,10 @@ public sealed partial class LiveConversionTests
             var decode = await RunToolAsync(maker, "-v", "error", "-i", kept, "-f", "null", "-");
             Assert.True(decode.Errors.Length == 0, decode.Errors);
             await sessions.DisposeAsync();
+            await WaitUntilAsync(() => live.Running == 0);
+            await WaitUntilAsync(() => FfmpegTestTools.ChildFfmpegProcessCount() == 0);
         }
-        finally { Directory.Delete(Path.GetDirectoryName(root)!, recursive: true); }
+        finally { Directory.Delete(baseDir, recursive: true); }
     }
 
     private static async Task<(string Output, string Errors)> RunToolAsync(string program, params string[] arguments)

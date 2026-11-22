@@ -98,6 +98,11 @@ public static class ScrubPreviewEndpoints
         {
             return Problem(exception.Code, exception.Message, exception.StatusCode);
         }
+        catch (IOException)
+        {
+            scrubPreviews.InvalidateMedia(mediaId);
+            return Problem("scrub_preview_unavailable", "Scrub preview images are not available for this title right now.", StatusCodes.Status503ServiceUnavailable);
+        }
     }
 
     private static bool IsUnchanged(HttpContext context, EntityTagHeaderValue entityTag) =>

@@ -3,6 +3,7 @@ using Aurelia.Contracts;
 using Aurelia.Server.Authentication;
 using Aurelia.Server.Data;
 using Aurelia.Server.Services;
+using Aurelia.Server.Services.Hls;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
 
@@ -106,6 +107,7 @@ public static partial class LiveConversionEndpoints
         string? video,
         PlaybackService playback,
         LiveConversionService live,
+        HlsSessionManager hlsSessions,
         CatalogMutationGate mutations,
         ILogger<LiveConversionService> logger,
         CancellationToken cancellationToken)
@@ -188,8 +190,21 @@ public static partial class LiveConversionEndpoints
                 return Problem("invalid_conversion", "This sound track has to be converted.", StatusCodes.Status400BadRequest);
         }
 
-        using var slot = await live.EnterAsync(encodeVideo.Value, cancellationToken);
-        if (slot is null)
+        IDisposable? slot;
+        if (encodeVideo.Value)
+        {
+            using (hlsSessions.WaitForPlace())
+            {
+                if (live.VideoPlacesTaken) await hlsSessions.PauseDownloadAsync();
+                slot = await live.EnterAsync(encodesVideo: true, cancellationToken);
+            }
+        }
+        else
+        {
+            slot = await live.EnterAsync(encodesVideo: false, cancellationToken);
+        }
+        using var slotLease = slot;
+        if (slotLease is null)
         {
             context.Response.Headers.RetryAfter = "5";
             return Problem("conversion_busy", "The server is converting as many titles as it can. Try again shortly.", StatusCodes.Status429TooManyRequests);

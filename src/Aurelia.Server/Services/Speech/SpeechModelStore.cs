@@ -40,14 +40,16 @@ public sealed partial class SpeechModelStore
     private readonly string folder;
     private readonly HttpClient http;
     private readonly ILogger<SpeechModelStore> logger;
+    private readonly TimeSpan readInactivityTimeout;
     private readonly object gate = new();
     private CancellationTokenSource? downloading;
 
-    public SpeechModelStore(ServerRuntimeOptions runtime, ILogger<SpeechModelStore> logger, HttpClient? http = null)
+    public SpeechModelStore(ServerRuntimeOptions runtime, ILogger<SpeechModelStore> logger, HttpClient? http = null, TimeSpan? readInactivityTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         folder = Path.Combine(runtime.DataDirectory, FolderName);
         this.logger = logger;
+        this.readInactivityTimeout = readInactivityTimeout ?? TimeSpan.FromSeconds(60);
         this.http = http ?? new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
         if (http is null) this.http.DefaultRequestHeaders.UserAgent.ParseAdd("Aurelia v" + ServerProductVersion.Current);
     }
@@ -103,24 +105,51 @@ public sealed partial class SpeechModelStore
 
     private async Task DownloadAsync(SpeechModelChoice choice, CancellationTokenSource cancellation)
     {
-        var partial = PathOf(choice.Name) + ".partial";
+        // Unique temp path per attempt so rapid restarts never unlink each other's partial file (audit SRV-BG-010).
+        var partial = PathOf(choice.Name) + $".{Guid.NewGuid():N}.partial";
         try
         {
             Directory.CreateDirectory(folder);
-            using var response = await http.GetAsync(new Uri(Source, $"ggml-{choice.Name}.bin"), HttpCompletionOption.ResponseHeadersRead, cancellation.Token);
-            response.EnsureSuccessStatusCode();
-            var total = response.Content.Headers.ContentLength ?? choice.Bytes;
+            HttpResponseMessage response;
+            using (var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token))
+            {
+                connectTimeout.CancelAfter(readInactivityTimeout);
+                try
+                {
+                    response = await http.GetAsync(new Uri(Source, $"ggml-{choice.Name}.bin"), HttpCompletionOption.ResponseHeadersRead, connectTimeout.Token);
+                }
+                catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+                {
+                    throw new TimeoutException("The speech model download timed out waiting for the server to respond.");
+                }
+            }
+            using var ownedResponse = response;
+            ownedResponse.EnsureSuccessStatusCode();
+            var total = ownedResponse.Content.Headers.ContentLength ?? choice.Bytes;
             if (total > choice.Bytes * 2) throw new InvalidDataException("The model is larger than expected.");
             using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
             long written = 0;
-            await using (var input = await response.Content.ReadAsStreamAsync(cancellation.Token))
+            await using (var input = await ownedResponse.Content.ReadAsStreamAsync(cancellation.Token))
             await using (var output = File.Create(partial))
             {
                 var buffer = new byte[1 << 20];
                 long received = 0;
-                int read;
-                while ((read = await input.ReadAsync(buffer, cancellation.Token)) > 0)
+                while (true)
                 {
+                    int read;
+                    using (var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token))
+                    {
+                        readTimeout.CancelAfter(readInactivityTimeout);
+                        try
+                        {
+                            read = await input.ReadAsync(buffer, readTimeout.Token);
+                        }
+                        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+                        {
+                            throw new TimeoutException("The speech model download stalled without receiving data.");
+                        }
+                    }
+                    if (read <= 0) break;
                     await output.WriteAsync(buffer.AsMemory(0, read), cancellation.Token);
                     hash.AppendData(buffer, 0, read);
                     received += read;
@@ -141,7 +170,7 @@ public sealed partial class SpeechModelStore
                 downloading = null;
             }
         }
-        catch (Exception exception) when (exception is HttpRequestException or IOException or InvalidDataException or OperationCanceledException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is HttpRequestException or IOException or InvalidDataException or OperationCanceledException or TimeoutException or UnauthorizedAccessException)
         {
             lock (gate)
             {
@@ -149,10 +178,14 @@ public sealed partial class SpeechModelStore
                 {
                     Download = null;
                     downloading = null;
-                    DownloadError = exception is OperationCanceledException ? null : "The model could not be downloaded. Check the server's internet connection and try again.";
+                    DownloadError = exception is OperationCanceledException && cancellation.IsCancellationRequested
+                        ? null
+                        : exception is TimeoutException
+                            ? "The model download timed out. Check the server's internet connection and try again."
+                            : "The model could not be downloaded. Check the server's internet connection and try again.";
                 }
             }
-            if (exception is not OperationCanceledException) LogFailed(logger, exception.GetType().Name);
+            if (exception is not OperationCanceledException || !cancellation.IsCancellationRequested) LogFailed(logger, exception.GetType().Name);
         }
         finally
         {

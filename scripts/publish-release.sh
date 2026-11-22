@@ -1,6 +1,6 @@
 #!/bin/bash
 # Publish one verified product from pushed source. Every product has its own tags; GitHub's Latest
-# is the newest stable server (promote-release.sh), never a Mac release, which are all betas.
+# is the newest stable server (direct stable --server or promote-release.sh), never a Mac release, which are all betas.
 #   --beta    publishes a GitHub pre-release: only apps with "Beta updates" on offer it.
 #   --promote <tag>  turns a tested beta into the stable release without rebuilding it.
 set -euo pipefail
@@ -25,7 +25,7 @@ case "$#:${1:-}" in
     # The Mac app is development-signed and runs only on registered Macs, so it ships as betas
     # only (owner's decision, 11.11.2026); everyone else uses Aurelia in a browser.
     [ "$beta" = true ] || { echo "The Mac app is published as a beta only: use publish-release.sh --beta." >&2; exit 1; } ;;
-  1:--server) product=Server; latest=false ;;
+  1:--server) product=Server; latest=true ;;
   *) echo "Usage: publish-release.sh [--beta] [--server | --linux-app] | --promote <tag>" >&2; exit 1 ;;
 esac
 # A beta never becomes GitHub's Latest release; promoting it later does.

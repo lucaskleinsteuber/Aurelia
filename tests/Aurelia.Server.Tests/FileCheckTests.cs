@@ -178,10 +178,10 @@ public sealed class FileCheckTests
         Assert.Null(DriveHealthService.ParsePlist("<plist"));
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task TheWatchFindsCutOffAndSilentlyChangedFilesAndOnlyReadsThem()
     {
-        if (Installed() is not { } ffmpeg) return;
+        var ffmpeg = FfmpegTestTools.RequireInstalled();
         var parent = TestPaths.CreateDataDirectory();
         var root = Path.Combine(parent, "Invented Movies");
         Directory.CreateDirectory(root);
@@ -305,10 +305,10 @@ public sealed class FileCheckTests
         }
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task TheWatchWaitsWhileSomeoneWatches()
     {
-        if (Installed() is not { } ffmpeg) return;
+        var ffmpeg = FfmpegTestTools.RequireInstalled();
         var parent = TestPaths.CreateDataDirectory();
         var root = Path.Combine(parent, "Invented Movies");
         Directory.CreateDirectory(root);
