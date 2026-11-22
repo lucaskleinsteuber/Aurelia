@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
+using Aurelia.Contracts;
 using Microsoft.Win32.SafeHandles;
 
 namespace Aurelia.Server.Services;
@@ -141,6 +142,10 @@ public sealed partial class LiveConversionService : IDisposable
 
     /// <summary>Whether sound tracks can be read for subtitles from speech.</summary>
     public async Task<bool> SpeechAudioAvailableAsync() => (await tools)?.Speech is SpeechAudioSupport.Plain or SpeechAudioSupport.CenterMix;
+
+    /// <summary>The features this server advertises in both /server/info and /capabilities.</summary>
+    public async Task<IReadOnlyList<string>> ReportedFeaturesAsync() =>
+        ServerFeatures.Reported(await IsAvailableAsync(), await SpeechAudioAvailableAsync(), await CanEncodeVideoAsync());
 
     /// <summary>The ffmpeg to use: the configured one, the Mac app's own, then the system's on Linux.</summary>
     public static IEnumerable<string> Candidates(string? configured)

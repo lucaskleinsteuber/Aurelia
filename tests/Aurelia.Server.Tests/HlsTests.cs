@@ -331,6 +331,23 @@ public sealed partial class LiveConversionTests
     }
 
     [Fact]
+    public async Task ServerInfoReportsTheSameCapabilitiesAsCapabilitiesEndpoint()
+    {
+        var ffmpeg = Tools() ?? Installed();
+        if (ffmpeg is null) return;
+        using var factory = Factory(ffmpeg);
+        using var client = factory.CreateClient();
+        using var infoResponse = await client.GetAsync("/api/v1/server/info");
+        using var capabilitiesResponse = await client.GetAsync("/api/v1/capabilities");
+        var info = await ApiTestClient.ReadAsync<ServerInfoResponse>(infoResponse);
+        var capabilities = await ApiTestClient.ReadAsync<ClientCapabilitiesResponse>(capabilitiesResponse);
+        Assert.NotNull(info.Capabilities);
+        Assert.Equal(capabilities.Capabilities, info.Capabilities);
+        Assert.Contains(ServerFeatures.AdaptiveStreaming, info.Capabilities);
+        Assert.Contains(ServerFeatures.ConvertedDownloads, info.Capabilities);
+    }
+
+    [Fact]
     public async Task ConvertingFromALaterSegmentPutsAKeyFrameAtTheStartOfEverySegment()
     {
         if (Installed() is not { } ffmpeg) return;
