@@ -64,8 +64,4 @@ public sealed partial class PowerNowService(
 }
 
 /// <summary>A power action this server can't do now, as an API problem.</summary>
-public sealed class PowerNowException(string code, string message, int statusCode) : Exception(message)
-{
-    public string Code { get; } = code;
-    public int StatusCode { get; } = statusCode;
-}
+public sealed class PowerNowException(string code, string message, int statusCode) : ApiException(code, message, statusCode);

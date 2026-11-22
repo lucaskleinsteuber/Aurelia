@@ -485,7 +485,7 @@ app.Use(async (context, next) =>
                 securityTarget ?? (securityChange.Kind == "management_unlocked" ? "Server Password" : null),
                 securityChange.Kind == "profile_opened" ? securityChange.TargetId : null);
     }
-    catch (AccountException exception) when (!context.Response.HasStarted)
+    catch (ApiException exception) when (!context.Response.HasStarted)
     {
         // Expected proof handshakes and a closed administrative window are state
         // transitions, not authentication attacks. Record the precise code once.
@@ -498,6 +498,7 @@ app.Use(async (context, next) =>
                 SecurityTargets.Path(context.Request.Path.Value));
         context.Response.StatusCode = exception.StatusCode;
         if (exception.StatusCode == 429) context.Response.Headers.RetryAfter = exception.Code == "device_pairing_slow_down" ? "5" : "60";
+        else if (exception is PlaybackException && exception.StatusCode == StatusCodes.Status503ServiceUnavailable) context.Response.Headers.RetryAfter = "2";
         await context.Response.WriteAsJsonAsync(new ApiProblem(exception.Code, exception.Message));
     }
     catch (InvalidDataException) when (!context.Response.HasStarted)
@@ -523,6 +524,15 @@ app.Use(async (context, next) =>
     catch (IOException) when (context.RequestAborted.IsCancellationRequested)
     {
         // The device went away mid-request; nothing failed on the server.
+    }
+    catch (Exception exception) when (!context.Response.HasStarted && ServerStorageErrors.IsStorageFull(exception,
+        context.RequestServices.GetRequiredService<ServerRuntimeOptions>().DataDirectory))
+    {
+        context.Response.StatusCode = StatusCodes.Status507InsufficientStorage;
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("storage_full", "error",
+            context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, StatusCodes.Status507InsufficientStorage);
+        context.Items["Aurelia.FailureRecorded"] = true;
+        await context.Response.WriteAsJsonAsync(new ApiProblem("storage_full", "The server's storage drive is full. Free disk space and try again."));
     }
     catch (IOException) when (!context.Response.HasStarted && (context.Request.Path.StartsWithSegments("/api/v1/server")
         || context.Request.Path.StartsWithSegments("/api/v1/media") || context.Request.Path.StartsWithSegments("/api/v1/libraries")))

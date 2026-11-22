@@ -63,6 +63,12 @@ public static class MediaEditingEndpoints
             {
                 var source = await database.MediaExclusions.SingleOrDefaultAsync(value => value.LibraryRootId == id && value.Id == excluded, token)
                     ?? throw new AccountException("exclusion_not_found", "The excluded source was not found.", 404);
+                var hasActiveScan = await database.LibraryScans.AnyAsync(
+                    scan => scan.LibraryRootId == id
+                        && (scan.State == LibraryScanState.Queued || scan.State == LibraryScanState.Running || scan.State == LibraryScanState.WaitingForStorage),
+                    token);
+                if (hasActiveScan)
+                    throw new LibraryException("library_scan_active", "This library already has an active scan.", StatusCodes.Status409Conflict);
                 var root = await database.LibraryRoots.SingleAsync(value => value.Id == id, token);
                 await using var transaction = await database.Database.BeginTransactionAsync(token);
                 var prefix = source.NormalizedSourcePath.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;

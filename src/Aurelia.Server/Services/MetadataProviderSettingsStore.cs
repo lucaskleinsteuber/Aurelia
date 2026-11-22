@@ -146,11 +146,7 @@ public sealed record MetadataProviderConfiguration(
     string? Token,
     long ArtworkLimitBytes);
 
-public class MetadataException(string code, string message, int statusCode) : Exception(message)
-{
-    public string Code { get; } = code;
-    public int StatusCode { get; } = statusCode;
-}
+public class MetadataException(string code, string message, int statusCode) : ApiException(code, message, statusCode);
 
 public sealed class MetadataProviderException(
     string message,
