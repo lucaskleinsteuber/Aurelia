@@ -4849,9 +4849,15 @@ final class AppModel: ObservableObject {
     remoteDeviceHeartbeatTask = Task { [weak self] in
       while !Task.isCancelled {
         guard let self, !self.isResting, let profile = self.profile else { return }
+        let activeController = PlaybackShutdownCoordinator.shared.activeController
         let isPlaying = self.playback != nil
-        let mediaId = self.playback?.mediaId
-        let title = self.playback?.title
+        let mediaId = activeController?.presentation.mediaId ?? self.playback?.mediaId
+        let title = activeController?.presentation.title ?? self.playback?.title
+        let positionSeconds = activeController.map { Double($0.currentTimeMilliseconds) / 1_000.0 }
+        let durationSeconds = activeController.flatMap {
+          $0.durationMilliseconds > 0 ? Double($0.durationMilliseconds) / 1_000.0 : nil
+        }
+        let isPaused = activeController.map { !$0.isPlaying } ?? false
         let req = PlayerHeartbeatRequest(
           deviceId: deviceId,
           deviceName: deviceName,
@@ -4859,9 +4865,9 @@ final class AppModel: ObservableObject {
           isPlaying: isPlaying,
           mediaId: mediaId,
           title: title,
-          positionSeconds: nil,
-          durationSeconds: nil,
-          isPaused: false
+          positionSeconds: positionSeconds,
+          durationSeconds: durationSeconds,
+          isPaused: isPaused
         )
         _ = try? await APIClient(profile: profile).sendPlayerHeartbeat(req)
         do { try await Task.sleep(nanoseconds: 15_000_000_000) } catch { return }
@@ -4892,18 +4898,35 @@ final class AppModel: ObservableObject {
     }
   }
 
-  private func handleIncomingRemoteCommand(_ command: RemotePlaybackCommand) {
+  func handleIncomingRemoteCommand(_ command: RemotePlaybackCommand) {
+    let controller = PlaybackShutdownCoordinator.shared.activeController
     switch command.action.lowercased() {
     case "play":
       if let mediaId = command.mediaId {
+        let intent: PlaybackStartIntent
+        if let pos = command.positionSeconds, pos > 0 {
+          intent = .position(Int64((pos * 1_000).rounded()))
+        } else {
+          intent = .play
+        }
         Task { @MainActor [weak self] in
           guard let self else { return }
-          self.startPlayback(
-            mediaId: mediaId,
-            title: "",
-            startIntent: (command.positionSeconds ?? 0) > 0 ? .resume : .play
-          )
+          self.startPlayback(mediaId: mediaId, title: "", startIntent: intent)
         }
+      } else {
+        _ = controller?.play()
+      }
+    case "resume":
+      _ = controller?.play()
+    case "pause":
+      _ = controller?.pause()
+    case "skip":
+      if let seconds = command.skipSeconds {
+        controller?.skip(seconds: Int64(seconds.rounded()))
+      }
+    case "seek":
+      if let pos = command.positionSeconds {
+        controller?.seek(to: Int64(max(0, pos * 1_000).rounded()))
       }
     case "stop":
       Task { @MainActor [weak self] in

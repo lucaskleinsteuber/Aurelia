@@ -399,6 +399,21 @@ struct PlayerView: View {
             y: viewport.height - bottomInset - 56)
       }
 
+      if let notice = controller.noticeMessage, controller.errorMessage == nil {
+        HStack(spacing: 8) {
+          Image(systemName: "info.circle")
+          Text(notice).font(.caption).lineLimit(2)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
+        .frame(maxWidth: controlWidth)
+        .allowsHitTesting(false)
+        .position(
+          x: viewport.width / 2,
+          y: viewport.height - bottomInset - (controller.progressMessage == nil ? 142 : 186))
+      }
+
       if let message = controller.progressMessage {
         HStack(spacing: 10) {
           Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")

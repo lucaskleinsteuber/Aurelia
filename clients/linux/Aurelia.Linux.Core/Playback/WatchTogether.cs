@@ -52,6 +52,10 @@ public static class WatchTogetherFollower
     public static TimeSpan Offset(DateTimeOffset serverTime, DateTimeOffset sent, DateTimeOffset received) =>
         serverTime - (sent + (received - sent) / 2);
 
+    /// <summary>Measures clock offset only from short immediate responses, ignoring waited long-polls.</summary>
+    public static TimeSpan? MeasuredOffset(DateTimeOffset serverTime, DateTimeOffset sent, DateTimeOffset received, bool isLongPoll) =>
+        isLongPoll || received - sent > TimeSpan.FromSeconds(4) ? null : Offset(serverTime, sent, received);
+
     /// <summary>"Mia paused", the last thing someone did, for a short notice in the player.</summary>
     public static string? Notice(WatchPartyState state) => (state.LastAction, state.LastActionBy) switch
     {
@@ -257,7 +261,8 @@ public sealed class WatchTogetherSession(LibraryClient client, string deviceName
 
     private void Receive(WatchPartyState next, DateTimeOffset sent, bool own)
     {
-        offset = WatchTogetherFollower.Offset(next.ServerTime, sent, time.GetUtcNow());
+        if (WatchTogetherFollower.MeasuredOffset(next.ServerTime, sent, time.GetUtcNow(), isLongPoll: !own) is { } measured)
+            offset = measured;
         if (own) ownRevisions.Add(next.Revision);
         // Answers can arrive out of order; an older state never undoes a newer one.
         if (State is { } known && known.Id == next.Id && next.Revision < known.Revision) return;

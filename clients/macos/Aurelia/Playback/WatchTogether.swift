@@ -37,13 +37,23 @@ enum WatchTogetherFollower {
   }
 }
 
-/// Server times and this Mac's clock: the offset is measured from each answer, assuming the
-/// answer was written halfway through the request.
+/// Server times and this Mac's clock: the offset is measured from short immediate answers
+/// (create, join, command), assuming the answer was written halfway through the request.
+/// Long-polls stamp serverTime at the end of WaitAsync and must not adjust the clock offset.
 enum WatchTogetherClock {
+  static let maxMeasurementRTT: TimeInterval = 4
+
   static func offset(serverTime: String, sent: Date, received: Date) -> TimeInterval? {
     guard let server = date(serverTime) else { return nil }
     let middle = sent.addingTimeInterval(received.timeIntervalSince(sent) / 2)
     return server.timeIntervalSince(middle)
+  }
+
+  static func measuredOffset(
+    serverTime: String, sent: Date, received: Date, isLongPoll: Bool
+  ) -> TimeInterval? {
+    guard !isLongPoll, received.timeIntervalSince(sent) <= maxMeasurementRTT else { return nil }
+    return offset(serverTime: serverTime, sent: sent, received: received)
   }
 
   /// Reads "2026-11-07T20:00:00.1234567+00:00"; fractions longer than milliseconds are cut.
@@ -225,8 +235,8 @@ final class WatchTogetherSession: ObservableObject {
   }
 
   private func receive(_ next: WatchPartyState, sent: Date, own: Bool) {
-    if let measured = WatchTogetherClock.offset(
-      serverTime: next.serverTime, sent: sent, received: Date())
+    if let measured = WatchTogetherClock.measuredOffset(
+      serverTime: next.serverTime, sent: sent, received: Date(), isLongPoll: !own)
     {
       offset = measured
     }

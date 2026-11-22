@@ -1544,6 +1544,8 @@ final class FakePlaybackEngine: PlaybackEngine {
   var opensAtStartPosition = false
   private(set) var startPositions: [Int64] = []
   private(set) var seekTargets: [Int64] = []
+  private(set) var addedSubtitleSlaves: [URL] = []
+  var dialogueBoostResult: AudioChangeResult = .applied
 
   func attach(to view: NSView) {}
   func load(url: URL, startAt milliseconds: Int64) {
@@ -1604,6 +1606,12 @@ final class FakePlaybackEngine: PlaybackEngine {
   func selectSubtitleTrack(id: Int32?) {
     selectedSubtitleTrackID = id
     onUpdate?()
+  }
+  func addSubtitleSlave(url: URL) {
+    addedSubtitleSlaves.append(url)
+  }
+  func applyDialogueBoost(_ mode: DialogueBoost) -> AudioChangeResult {
+    dialogueBoostResult
   }
   func selectChapter(index: Int32) {
     currentChapterIndex = index

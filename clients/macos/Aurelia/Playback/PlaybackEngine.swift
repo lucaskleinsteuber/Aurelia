@@ -115,7 +115,9 @@ final class VLCPlaybackEngine: PlaybackEngine {
   private var videoFillGeometry: String?
   private var timeObserver: NSObjectProtocol?
   private var stateObserver: NSObjectProtocol?
-  private var appliedTrackPreferences = false
+  private var appliedAudioPreferences = false
+  private var appliedSubtitlePreferences = false
+  private var userSelectedSubtitle = false
   private var playbackGeneration: UInt64 = 0
   private var acceptsPlayerEvents = false
   private var deliveredTerminalEvent = false
@@ -307,7 +309,9 @@ final class VLCPlaybackEngine: PlaybackEngine {
     }
     player.drawable = attachedVideoView
     applyVideoFill()
-    appliedTrackPreferences = false
+    appliedAudioPreferences = false
+    appliedSubtitlePreferences = false
+    userSelectedSubtitle = false
     deliveredTerminalEvent = false
     lastKnownTimeMilliseconds = 0
     lastKnownDurationMilliseconds = 0
@@ -387,6 +391,8 @@ final class VLCPlaybackEngine: PlaybackEngine {
   }
 
   func selectSubtitleTrack(id: Int32?) {
+    userSelectedSubtitle = true
+    appliedSubtitlePreferences = true
     player.currentVideoSubTitleIndex = id ?? -1
     PlaybackTrackPreferenceStore.shared.rememberSubtitle(
       id.flatMap { selected in
@@ -397,6 +403,10 @@ final class VLCPlaybackEngine: PlaybackEngine {
 
   func addSubtitleSlave(url: URL) {
     player.addPlaybackSlave(url, type: .subtitle, enforce: false)
+    // Re-evaluate remembered/default subtitle preference when the async sidecar track appears.
+    if !userSelectedSubtitle {
+      appliedSubtitlePreferences = false
+    }
   }
 
   func selectChapter(index: Int32) {
@@ -449,38 +459,45 @@ final class VLCPlaybackEngine: PlaybackEngine {
   }
 
   private func applyTrackPreferencesIfNeeded() {
-    guard !appliedTrackPreferences, !audioTracks.isEmpty || !subtitleTracks.isEmpty else {
-      return
-    }
-    appliedTrackPreferences = true
-
     let store = PlaybackTrackPreferenceStore.shared
     let defaults = PlaybackPreferencesStore.shared.preferences
-    if let preference = store.audio(scope: trackScope, profileId: profileScope) {
-      if let track = bestMatch(preference, tracks: audioTracks) {
+
+    if !appliedAudioPreferences, !audioTracks.isEmpty {
+      appliedAudioPreferences = true
+      if let preference = store.audio(scope: trackScope, profileId: profileScope) {
+        if let track = bestMatch(preference, tracks: audioTracks) {
+          player.currentAudioTrackIndex = track.id
+        }
+      } else if let track = PlaybackLanguage.track(
+        in: audioTracks, for: defaults.defaultAudioLanguage)
+      {
         player.currentAudioTrackIndex = track.id
       }
-    } else if let track = PlaybackLanguage.track(
-      in: audioTracks, for: defaults.defaultAudioLanguage)
-    {
-      player.currentAudioTrackIndex = track.id
     }
-    let subChoice = store.subtitleChoice(scope: trackScope, profileId: profileScope)
-    if !subChoice.chosen {
-      // Without a choice for this series, Settings › Playback may pick a subtitle language;
-      // otherwise the file's own default (such as forced subtitles) stays.
-      if let track = PlaybackLanguage.track(
-        in: subtitleTracks, for: defaults.defaultSubtitleLanguage)
-      {
-        player.currentVideoSubTitleIndex = track.id
-      }
-    } else {
-      if let preference = subChoice.preference {
+
+    if !appliedSubtitlePreferences, !userSelectedSubtitle, !subtitleTracks.isEmpty {
+      let subChoice = store.subtitleChoice(scope: trackScope, profileId: profileScope)
+      if !subChoice.chosen {
+        // Without a choice for this series, Settings › Playback may pick a subtitle language;
+        // otherwise the file's own default (such as forced subtitles) stays.
+        if !defaults.defaultSubtitleLanguage.isEmpty {
+          if let track = PlaybackLanguage.track(
+            in: subtitleTracks, for: defaults.defaultSubtitleLanguage)
+          {
+            player.currentVideoSubTitleIndex = track.id
+            appliedSubtitlePreferences = true
+          }
+        } else {
+          appliedSubtitlePreferences = true
+        }
+      } else if let preference = subChoice.preference {
         if let track = bestMatch(preference, tracks: subtitleTracks) {
           player.currentVideoSubTitleIndex = track.id
+          appliedSubtitlePreferences = true
         }
       } else {
         player.currentVideoSubTitleIndex = -1
+        appliedSubtitlePreferences = true
       }
     }
   }
