@@ -103,6 +103,25 @@ struct ManagementLifecycleTests {
     #expect(model.administrationErrorMessage == nil)
   }
 
+  @Test func wrongServerPasswordDuringUnlockKeepsViewingSession() async {
+    let active = profile()
+    var endedSessions = 0
+    let model = AppModel(
+      store: InMemoryServerProfileStore(), initialProfile: active, profileSelectionEnabled: true,
+      profileSessionEnder: { _ in endedSessions += 1 },
+      managementUnlocker: { _, _ in
+        throw APIClientError.httpFailure(
+          status: 401, retryAfter: nil, code: "invalid_credentials",
+          message: "The Server Password is incorrect.")
+      })
+    let unlocked = await model.unlockManagement(password: "wrong-password")
+    for _ in 0..<20 { await Task.yield() }
+    #expect(!unlocked)
+    #expect(model.profile == active)
+    #expect(endedSessions == 0)
+    #expect(model.administrationErrorMessage == "The Server Password is incorrect.")
+  }
+
   private func profile(role: UserRole = .owner) -> StoredServerProfile {
     StoredServerProfile(
       serverId: UUID(), name: "Synthetic Server", baseURL: URL(string: "https://fixture.invalid")!,

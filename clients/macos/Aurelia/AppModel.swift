@@ -4220,6 +4220,13 @@ final class AppModel: ObservableObject {
 
   private func handleSessionFailure(_ error: Error) -> Bool {
     guard usesProfileSelection, let failure = error as? APIClientError else { return false }
+    // Credential-entry errors (wrong Server Password, PIN, or Touch ID verification) return 401
+    // with an explicit problem code; keep the active viewing/device session and show the error locally.
+    if failure.problemCode == "invalid_credentials" || failure.problemCode == "invalid_profile_pin"
+      || failure.problemCode == "passkey_invalid"
+    {
+      return false
+    }
     if failure.problemCode == "device_session_revoked"
       || (failure.httpStatus == 401 && profile?.isViewingSession != true)
     {

@@ -92,7 +92,7 @@ final class ServerReconnectCoordinator {
       var seen = Set<URL>()
       var addresses = Array(
         ([stored.baseURL] + discovered).filter { seen.insert($0).inserted }.prefix(16))
-      var selected: InspectedServer?
+      var savedAddressError: Error?
       var index = 0
       while index < addresses.count {
         let address = addresses[index]
@@ -109,16 +109,24 @@ final class ServerReconnectCoordinator {
             addresses += next
             continue
           }
-          selected = selected ?? result
+          // Return immediately on the first verified match so spoofed or failing Bonjour entries
+          // cannot disrupt or abort a working connection.
+          return result
         } catch {
           try Task.checkCancellation()
           guard generation == run else { throw CancellationError() }
-          // An answering server with a different identity requires a visible decision.
-          if error as? APIClientError == .serverIdentityMismatch { throw error }
-          if !ServerReconnectPolicy.isConnectivityFailure(error) { throw error }
+          // Only surface an identity mismatch or non-connectivity failure from the paired saved
+          // address itself (and only if no other candidate matches); untrusted LAN announcements
+          // with wrong identities or broken TLS must never abort reconnection.
+          if address == stored.baseURL,
+            error as? APIClientError == .serverIdentityMismatch
+              || !ServerReconnectPolicy.isConnectivityFailure(error)
+          {
+            savedAddressError = error
+          }
         }
       }
-      if let selected { return selected }
+      if let savedAddressError { throw savedAddressError }
       attempt = min(attempt + 1, 3)
     }
     throw CancellationError()
