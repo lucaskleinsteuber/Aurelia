@@ -24,9 +24,14 @@ for script in "${scripts[@]}"; do
   function_of "$script" | cmp -s - "$work/check.sh" || fail "$script checks signatures differently"
   [ "$(value_of "$script" signing_public_key)" = "$app_key" ] || fail "$script does not carry the owner's key"
   first=$(value_of "$script" first_signed_build)
-  [ "$first" = "$(value_of "${scripts[0]}" first_signed_build)" ] || fail "$script starts signatures at another build"
-  # Every build from the next one on must be signed.
-  [ -n "$first" ] && [ "$first" -le $((build + 1)) ] || fail "$script lets build $((build + 1)) go unsigned"
+  if [ "$script" = "${scripts[0]}" ]; then
+    # `aurelia update` knows when signing began; every build from the next one on must be signed.
+    [ -n "$first" ] && [ "$first" -le $((build + 1)) ] || fail "$script lets build $((build + 1)) go unsigned"
+  else
+    # The one-line install and the Docker build always require the signature, old builds included.
+    [ -z "$first" ] && ! grep -q 'first_signed_build' "$repository/$script" \
+      || fail "$script lets some builds go unsigned"
+  fi
 done
 grep -F 'packaging/linux/aurelia' "$repository/scripts/publish-release.sh" >/dev/null \
   && grep -F 'SHA256SUMS.minisig' "$repository/scripts/publish-release.sh" >/dev/null \
