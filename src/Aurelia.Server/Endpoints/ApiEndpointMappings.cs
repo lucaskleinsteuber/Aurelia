@@ -863,14 +863,29 @@ public static class ApiEndpointMappings
     private static Task<IResult> GetMonthlyWrappedAsync(HttpContext context, int year, int month, WatchHistoryService history, CancellationToken cancellationToken) =>
         ExecuteAsync(() => history.GetWrappedAsync(context.User.RequireUserId(), year, month, cancellationToken));
 
-    private static Task<IResult> GetHealthDuplicatesAsync(int? offset, int? limit, LibraryHealthService health, CancellationToken cancellationToken) =>
-        ExecuteAsync(() => health.GetDuplicatesAsync(offset ?? 0, limit ?? 50, cancellationToken));
+    private static Task<IResult> GetHealthDuplicatesAsync(HttpContext context, int? offset, int? limit, LibraryHealthService health, CancellationToken cancellationToken) =>
+        ExecuteAsync(async () =>
+        {
+            var (items, total) = await health.GetDuplicatesPageAsync(offset ?? 0, limit ?? 50, cancellationToken);
+            context.Response.Headers["X-Total-Count"] = total.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return items;
+        });
 
-    private static Task<IResult> GetHealthOfflineAsync(int? days, int? offset, int? limit, LibraryHealthService health, CancellationToken cancellationToken) =>
-        ExecuteAsync(() => health.GetOfflineAsync(days ?? 7, offset ?? 0, limit ?? 50, cancellationToken));
+    private static Task<IResult> GetHealthOfflineAsync(HttpContext context, int? days, int? offset, int? limit, LibraryHealthService health, CancellationToken cancellationToken) =>
+        ExecuteAsync(async () =>
+        {
+            var (items, total) = await health.GetOfflinePageAsync(days ?? 7, offset ?? 0, limit ?? 50, cancellationToken);
+            context.Response.Headers["X-Total-Count"] = total.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return items;
+        });
 
-    private static Task<IResult> GetHealthUnmatchedAsync(int? offset, int? limit, LibraryHealthService health, CancellationToken cancellationToken) =>
-        ExecuteAsync(() => health.GetUnmatchedAsync(offset ?? 0, limit ?? 50, cancellationToken));
+    private static Task<IResult> GetHealthUnmatchedAsync(HttpContext context, int? offset, int? limit, LibraryHealthService health, CancellationToken cancellationToken) =>
+        ExecuteAsync(async () =>
+        {
+            var (items, total) = await health.GetUnmatchedPageAsync(offset ?? 0, limit ?? 50, cancellationToken);
+            context.Response.Headers["X-Total-Count"] = total.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return items;
+        });
 
     private static Task<IResult> MergeHealthMediaAsync(HttpContext context, MergeMediaRequest request, LibraryHealthService health, CancellationToken cancellationToken) =>
         ExecuteNoContentAsync(() => health.MergeAsync(context.User.RequireUserId(), request.SourceMediaId, request.TargetMediaId, cancellationToken));
@@ -892,11 +907,22 @@ public static class ApiEndpointMappings
         {
             var hasBody = context.Request.ContentLength is > 0
                 || context.Request.Headers.TransferEncoding.Count > 0;
-            var job = hasBody
-                ? await metadata.StartAsync(
-                    await context.Request.ReadFromJsonAsync<StartMetadataJobRequest>(cancellationToken)
-                        ?? throw new MetadataException("invalid_metadata_job", "The metadata job request is invalid.", StatusCodes.Status400BadRequest),
-                    cancellationToken)
+            StartMetadataJobRequest? request = null;
+            if (hasBody)
+            {
+                try
+                {
+                    request = await context.Request.ReadFromJsonAsync<StartMetadataJobRequest>(cancellationToken);
+                }
+                catch (System.Text.Json.JsonException)
+                {
+                    throw new MetadataException("invalid_metadata_job", "The metadata job request is invalid.", StatusCodes.Status400BadRequest);
+                }
+                if (request is null)
+                    throw new MetadataException("invalid_metadata_job", "The metadata job request is invalid.", StatusCodes.Status400BadRequest);
+            }
+            var job = request is not null
+                ? await metadata.StartAsync(request, cancellationToken)
                 : await metadata.StartAsync(libraryId, mediaId, cancellationToken);
             return Results.Accepted($"/api/v1/metadata/jobs/{job.Id}", job);
         });

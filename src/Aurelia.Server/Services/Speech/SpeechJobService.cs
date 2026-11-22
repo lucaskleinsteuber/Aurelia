@@ -79,7 +79,7 @@ public sealed partial class SpeechJobService : BackgroundService
             throw new MetadataException("speech_unavailable", "Speech recognition (whisper.cpp) isn't installed on this server.", StatusCodes.Status409Conflict);
         if (models.Current is null)
             throw new MetadataException("speech_model_missing", "Download a speech model in the server settings first.", StatusCodes.Status409Conflict);
-        if (!SidecarSubtitles.TryParseLanguage(request.Language.Trim(), out var language))
+        if (!SidecarSubtitles.TryParseLanguage((request.Language ?? string.Empty).Trim(), out var language))
             throw new MetadataException("invalid_subtitle_language", "Choose the language that is spoken.", StatusCodes.Status400BadRequest);
         if (request.Kind == SpeechJobKind.Sync && request.SubtitleIndex is null)
             throw new MetadataException("subtitle_track_required", "Choose the subtitles to sync.", StatusCodes.Status400BadRequest);

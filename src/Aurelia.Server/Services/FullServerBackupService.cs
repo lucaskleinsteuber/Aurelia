@@ -102,24 +102,37 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
         {
             PrepareTransferDirectory();
             var path = TransferPath(id);
+            if (File.Exists(path))
+                throw new AccountException("backup_upload_exists", "This backup upload identifier has already been used. Start a new upload.", StatusCodes.Status409Conflict);
             var created = false;
             try
             {
-                await using var output = PrivateFilePermissions.OpenNewPrivateFile(path);
-                created = true;
-                var buffer = new byte[1024 * 1024];
-                long written = 0;
-                while (true)
+                FileStream output;
+                try
                 {
-                    var count = await source.ReadAsync(buffer, token);
-                    if (count == 0) break;
-                    written += count;
-                    if (written > length) throw new InvalidDataException("Backup transfer length changed.");
-                    await output.WriteAsync(buffer.AsMemory(0, count), token);
-                    progress?.Invoke(written);
+                    output = PrivateFilePermissions.OpenNewPrivateFile(path);
                 }
-                if (written != length) throw new InvalidDataException("The encrypted backup transfer was truncated.");
-                await output.FlushAsync(token);
+                catch (IOException) when (File.Exists(path))
+                {
+                    throw new AccountException("backup_upload_exists", "This backup upload identifier has already been used. Start a new upload.", StatusCodes.Status409Conflict);
+                }
+                await using (output)
+                {
+                    created = true;
+                    var buffer = new byte[1024 * 1024];
+                    long written = 0;
+                    while (true)
+                    {
+                        var count = await source.ReadAsync(buffer, token);
+                        if (count == 0) break;
+                        written += count;
+                        if (written > length) throw new InvalidDataException("Backup transfer length changed.");
+                        await output.WriteAsync(buffer.AsMemory(0, count), token);
+                        progress?.Invoke(written);
+                    }
+                    if (written != length) throw new InvalidDataException("The encrypted backup transfer was truncated.");
+                    await output.FlushAsync(token);
+                }
             }
             catch { if (created && File.Exists(path)) File.Delete(path); throw; }
         }

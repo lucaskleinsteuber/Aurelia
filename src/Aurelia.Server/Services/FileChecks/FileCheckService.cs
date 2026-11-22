@@ -208,10 +208,12 @@ public sealed partial class FileCheckService : BackgroundService
     }
 
     /// <summary>Files with a finding other than Ok in their current version: open problems, or the ones set aside.</summary>
-    public async Task<IReadOnlyList<FileProblemSummary>> ProblemsAsync(bool ignored, int offset, int limit, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<FileProblemSummary>> ProblemsAsync(bool ignored, int offset, int limit, CancellationToken cancellationToken) =>
+        (await ProblemsPageAsync(ignored, offset, limit, cancellationToken)).Items;
+
+    public async Task<(IReadOnlyList<FileProblemSummary> Items, int Total)> ProblemsPageAsync(bool ignored, int offset, int limit, CancellationToken cancellationToken)
     {
-        offset = Math.Max(0, offset);
-        limit = Math.Clamp(limit, 1, 100);
+        TextInputValidation.ValidatePage(offset, limit, 100);
         await using var scope = scopes.CreateAsyncScope();
         var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
         var rows = await database.MediaFileChecks.IgnoreQueryFilters().AsNoTracking()
@@ -220,9 +222,11 @@ public sealed partial class FileCheckService : BackgroundService
             .Include(check => check.MediaItem).ThenInclude(item => item.Parent).ThenInclude(parent => parent!.Metadata)
             .Include(check => check.MediaItem).ThenInclude(item => item.LibraryRoot)
             .ToListAsync(cancellationToken);
-        return rows
+        var current = rows
             .Where(row => row.MediaItem.Availability == MediaAvailability.Available && IsCurrent(row, row.MediaItem.FileSize, row.MediaItem.FileModifiedAt))
             .OrderBy(row => Severity(row.State)).ThenByDescending(row => row.CheckedAt).ThenBy(row => row.MediaItemId)
+            .ToList();
+        var page = current
             .Skip(offset).Take(limit)
             .Select(row => new FileProblemSummary(
                 row.MediaItemId,
@@ -239,6 +243,7 @@ public sealed partial class FileCheckService : BackgroundService
                 row.CheckedAt,
                 row.Ignored))
             .ToList();
+        return (page, current.Count);
     }
 
     private static int Severity(FileCheckState state) => state switch

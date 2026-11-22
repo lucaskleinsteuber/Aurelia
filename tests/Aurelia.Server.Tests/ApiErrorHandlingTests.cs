@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text;
 using Aurelia.Contracts;
 using Aurelia.Server.Data;
@@ -177,5 +178,175 @@ public sealed class ApiErrorHandlingTests
         Assert.False(LibraryMonitoringService.IsRelevant(root, "/media/home/.git/HEAD", "/other/data"));
         Assert.True(LibraryMonitoringService.IsRelevant(root, "/media/home/Movies/Film.mkv", dataDir));
         Assert.True(LibraryMonitoringService.IsRelevant(root, "/media/home/Movies/New Season", dataDir));
+    }
+
+    [Fact]
+    public async Task ApiValidationGuardsRejectEmptyBodiesBadMetadataControlCharsConflictingAgeLimitAndDuplicateUploads()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+
+        // DYN-API-004: control and bidi-override characters rejected in collections and wishes.
+        using (var badCol = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/collections", owner.Token,
+            new SaveCollectionRequest("Evil\u202EName")))
+        using (var resp = await client.SendAsync(badCol))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+            Assert.Equal("invalid_collection", (await ApiTestClient.ReadAsync<ApiProblem>(resp)).Code);
+        }
+
+        using (var badWish = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/wishes", owner.Token,
+            new CreateWishRequest(MediaKind.Movie, "Bad\u0007Title")))
+        using (var resp = await client.SendAsync(badWish))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+            Assert.Equal("invalid_wish_title", (await ApiTestClient.ReadAsync<ApiProblem>(resp)).Code);
+        }
+
+        // DYN-API-005: ageLimit combined with selectedTitles or titleIds returns 400.
+        using (var conflictKid = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token,
+            new CreateUserRequest("KidConflict", null, UserRole.User, null, PinProtectionEnabled: false,
+                AccessMode: ProfileAccessMode.SelectedTitles, TitleIds: [Guid.NewGuid()], AgeLimit: 12)))
+        using (var resp = await client.SendAsync(conflictKid))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+            Assert.Equal("invalid_profile_access", (await ApiTestClient.ReadAsync<ApiProblem>(resp)).Code);
+        }
+
+        // DYN-API-008: duplicate backup upload ID returns 409 backup_upload_exists (not 507).
+        var uploadId = Guid.NewGuid();
+        using (var first = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/server/backups/uploads/{uploadId}", owner.Token))
+        {
+            first.Content = new ByteArrayContent([1, 2, 3, 4]);
+            using var resp = await client.SendAsync(first);
+            Assert.Equal(HttpStatusCode.NoContent, resp.StatusCode);
+        }
+        using (var second = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/server/backups/uploads/{uploadId}", owner.Token))
+        {
+            second.Content = new ByteArrayContent([1, 2, 3, 4]);
+            using var resp = await client.SendAsync(second);
+            Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
+            Assert.Equal("backup_upload_exists", (await ApiTestClient.ReadAsync<ApiProblem>(resp)).Code);
+        }
+
+        // SRV-API-006 & SRV-API-009: metadata provider empty body / unsupported language / bad job mode return 400 (no Build 9 text).
+        using (var emptyProvider = ApiTestClient.Authorized(HttpMethod.Put, "/api/v1/metadata/provider", owner.Token))
+        {
+            emptyProvider.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+            using var resp = await client.SendAsync(emptyProvider);
+            Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+            var problem = await ApiTestClient.ReadAsync<ApiProblem>(resp);
+            Assert.Equal("unsupported_metadata_language", problem.Code);
+            Assert.DoesNotContain("Build 9", problem.Message, StringComparison.Ordinal);
+        }
+
+        using (var badJob = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/metadata/jobs", owner.Token))
+        {
+            badJob.Content = new StringContent("""{"mode":"nope"}""", Encoding.UTF8, "application/json");
+            using var resp = await client.SendAsync(badJob);
+            Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+            Assert.Equal("invalid_metadata_job", (await ApiTestClient.ReadAsync<ApiProblem>(resp)).Code);
+        }
+
+        // SRV-API-007: missing required query parameter returns 400 with ApiProblem body.
+        using (var missingQuery = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/devices/player/commands", owner.Token))
+        using (var resp = await client.SendAsync(missingQuery))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+            Assert.Equal("invalid_request", (await ApiTestClient.ReadAsync<ApiProblem>(resp)).Code);
+        }
+
+        // SRV-API-008: uniform pagination validation and X-Total-Count header on health lists.
+        foreach (var badPage in new[]
+        {
+            "/api/v1/history?limit=0",
+            "/api/v1/history?offset=-1",
+            "/api/v1/people?limit=1000",
+            "/api/v1/library/health/offline?days=-1",
+            "/api/v1/library/health/duplicates?offset=-1",
+            "/api/v1/library/health/files?limit=0",
+        })
+        {
+            using var req = ApiTestClient.Authorized(HttpMethod.Get, badPage, owner.Token);
+            using var resp = await client.SendAsync(req);
+            Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+            Assert.Equal("invalid_page", (await ApiTestClient.ReadAsync<ApiProblem>(resp)).Code);
+        }
+
+        using (var healthDup = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/library/health/duplicates", owner.Token))
+        using (var resp = await client.SendAsync(healthDup))
+        {
+            resp.EnsureSuccessStatusCode();
+            Assert.True(resp.Headers.Contains("X-Total-Count"));
+        }
+
+        // SRV-API-010: empty {} body on settings/favorite endpoints returns 400 instead of toggling to false.
+        foreach (var path in new[]
+        {
+            "/api/v1/server/media-segments",
+            "/api/v1/server/file-checks",
+            $"/api/v1/media/{Guid.NewGuid()}/favorite",
+        })
+        {
+            using var req = ApiTestClient.Authorized(HttpMethod.Put, path, owner.Token);
+            req.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+            using var resp = await client.SendAsync(req);
+            Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+            var problem = await ApiTestClient.ReadAsync<ApiProblem>(resp);
+            Assert.False(string.IsNullOrWhiteSpace(problem.Code));
+        }
+
+        // MAIN-006: EnsureApiSuccessAsync parses ApiProblem instead of dumping raw HTTP status text.
+        using var problemResponse = new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("""{"code":"invalid_pin_format","message":"Enter a 4 to 8 digit PIN."}""", Encoding.UTF8, "application/json"),
+        };
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CommandClientSecurity.EnsureApiSuccessAsync(problemResponse, CancellationToken.None));
+        Assert.Contains("invalid_pin_format", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Enter a 4 to 8 digit PIN.", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConcurrentWishSupportCallsSucceedIdempotently()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+
+        using var createViewer = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token,
+            new CreateUserRequest("Viewer", null, UserRole.User, null, PinProtectionEnabled: false,
+                AccessMode: ProfileAccessMode.EntireLibrary));
+        using var viewerResp = await client.SendAsync(createViewer);
+        viewerResp.EnsureSuccessStatusCode();
+        var viewer = await ApiTestClient.ReadAsync<UserSummary>(viewerResp);
+
+        using var loginResp = await client.PostAsJsonAsync("/api/v1/auth/login",
+            new LoginRequest(owner.User.Username, "correct horse battery staple", "Test Device"), ApiTestClient.JsonOptions);
+        loginResp.EnsureSuccessStatusCode();
+        var deviceAuth = await ApiTestClient.ReadAsync<AuthenticationResponse>(loginResp);
+
+        using var unlockReq = ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/profiles/{viewer.Id}/unlock", deviceAuth.Token,
+            new UnlockProfileRequest(null));
+        using var unlockResp = await client.SendAsync(unlockReq);
+        unlockResp.EnsureSuccessStatusCode();
+        var viewerSession = await ApiTestClient.ReadAsync<ProfileSessionResponse>(unlockResp);
+
+        using var wishReq = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/wishes", owner.Token,
+            new CreateWishRequest(MediaKind.Movie, "Concurrent Wish"));
+        using var wishResp = await client.SendAsync(wishReq);
+        wishResp.EnsureSuccessStatusCode();
+        var created = await ApiTestClient.ReadAsync<CreateWishResponse>(wishResp);
+
+        var tasks = Enumerable.Range(0, 12).Select(async _ =>
+        {
+            using var req = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/wishes/{created.Wish.Id}/support",
+                viewerSession.Token, new SetWishSupportRequest(true));
+            using var resp = await client.SendAsync(req);
+            return resp.StatusCode;
+        });
+        var statuses = await Task.WhenAll(tasks);
+        Assert.All(statuses, status => Assert.Equal(HttpStatusCode.OK, status));
     }
 }

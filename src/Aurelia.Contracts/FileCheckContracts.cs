@@ -62,7 +62,7 @@ public sealed record FileCheckSettingsResponse(
 
 /// <param name="Depth">Null keeps the current depth.</param>
 /// <param name="RecheckDays">Null keeps the current rhythm; allowed are 0, 30, 90 and 180.</param>
-public sealed record UpdateFileCheckSettingsRequest(bool Enabled, FileCheckDepth? Depth = null, int? RecheckDays = null);
+public sealed record UpdateFileCheckSettingsRequest([property: System.Text.Json.Serialization.JsonRequired] bool Enabled, FileCheckDepth? Depth = null, int? RecheckDays = null);
 
 /// <summary>A file the watch found a problem in, for Library Health.</summary>
 /// <param name="ProblemAtSeconds">About where in the title the first problem is, when known.</param>

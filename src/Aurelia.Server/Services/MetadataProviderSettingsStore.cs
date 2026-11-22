@@ -96,13 +96,13 @@ public sealed class MetadataProviderSettingsStore(ServerRuntimeOptions runtime)
             settings?.ArtworkLimitBytes is > 0 ? settings.ArtworkLimitBytes : DefaultArtworkLimit);
     }
 
-    private static string NormalizeLanguage(string language)
+    private static string NormalizeLanguage(string? language)
     {
-        var normalized = language.Trim();
+        var normalized = (language ?? string.Empty).Trim();
         if (!string.Equals(normalized, "en", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(normalized, "en-US", StringComparison.OrdinalIgnoreCase))
         {
-            throw new MetadataException("unsupported_metadata_language", "Build 9 supports English metadata only.", StatusCodes.Status400BadRequest);
+            throw new MetadataException("unsupported_metadata_language", "Aurelia loads metadata in English (en-US) only.", StatusCodes.Status400BadRequest);
         }
 
         return "en-US";

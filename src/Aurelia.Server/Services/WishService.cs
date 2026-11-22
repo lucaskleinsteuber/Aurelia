@@ -256,8 +256,8 @@ public sealed class WishService(
             throw new AccountException("invalid_wish_kind", "Choose movie or series.", StatusCodes.Status400BadRequest);
 
         var title = (request.Title ?? string.Empty).Trim();
-        if (title.Length == 0 || title.Length > 512)
-            throw new AccountException("invalid_wish_title", "Enter a title between 1 and 512 characters.", StatusCodes.Status400BadRequest);
+        if (title.Length == 0 || title.Length > 512 || TextInputValidation.HasForbiddenControlCharacters(title))
+            throw new AccountException("invalid_wish_title", "Enter a title between 1 and 512 visible characters.", StatusCodes.Status400BadRequest);
 
         if (request.Year is < 1888 or > 2100)
             throw new AccountException("invalid_wish_year", "Enter a year between 1888 and 2100.", StatusCodes.Status400BadRequest);
@@ -316,14 +316,22 @@ public sealed class WishService(
                 var now = clock.GetUtcNow();
                 if (existingOpen.UserId != callerId && !existingOpen.Supports.Any(support => support.UserId == callerId))
                 {
-                    database.WishSupports.Add(new WishSupport
+                    var addedSupport = new WishSupport
                     {
                         WishId = existingOpen.Id,
                         UserId = callerId,
                         CreatedAt = now,
-                    });
+                    };
+                    database.WishSupports.Add(addedSupport);
                     await EmitUserStateChangesAsync([existingOpen.UserId, callerId], includeAdmins: true, now, cancellationToken);
-                    await database.SaveChangesAsync(cancellationToken);
+                    try
+                    {
+                        await database.SaveChangesAsync(cancellationToken);
+                    }
+                    catch (DbUpdateException exception) when (IsUniqueConstraintViolation(exception))
+                    {
+                        database.Entry(addedSupport).State = EntityState.Detached;
+                    }
                 }
 
                 var reloaded = await LoadWishRequiredAsync(existingOpen.Id, cancellationToken);
@@ -422,14 +430,16 @@ public sealed class WishService(
         var now = clock.GetUtcNow();
         var changed = false;
 
+        WishSupport? addedSupport = null;
         if (supported && existingSupport is null)
         {
-            database.WishSupports.Add(new WishSupport
+            addedSupport = new WishSupport
             {
                 WishId = wish.Id,
                 UserId = callerId,
                 CreatedAt = now,
-            });
+            };
+            database.WishSupports.Add(addedSupport);
             changed = true;
         }
         else if (!supported && existingSupport is not null)
@@ -441,12 +451,28 @@ public sealed class WishService(
         if (changed)
         {
             await EmitUserStateChangesAsync([wish.UserId, callerId], includeAdmins: true, now, cancellationToken);
-            await database.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await database.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException exception) when (supported && addedSupport is not null && IsUniqueConstraintViolation(exception))
+            {
+                // Concurrent duplicate "Me Too" from the same profile: idempotent success.
+                database.Entry(addedSupport).State = EntityState.Detached;
+            }
+            catch (DbUpdateConcurrencyException) when (!supported && existingSupport is not null)
+            {
+                // Concurrent removal of the same support row: idempotent success.
+                database.Entry(existingSupport).State = EntityState.Detached;
+            }
             wish = await LoadWishRequiredAsync(wish.Id, cancellationToken);
         }
 
         return ToSummary(wish, callerId, []);
     }
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException exception) =>
+        exception.InnerException is Microsoft.Data.Sqlite.SqliteException { SqliteErrorCode: 19 };
 
     public async Task<WishSummary> UpdateStateAsync(
         Guid adminUserId,

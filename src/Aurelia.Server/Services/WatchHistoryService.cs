@@ -19,8 +19,7 @@ public sealed partial class WatchHistoryService(AureliaDbContext database, TimeP
         int limit,
         CancellationToken cancellationToken)
     {
-        offset = Math.Max(0, offset);
-        limit = Math.Clamp(limit, 1, 100);
+        TextInputValidation.ValidatePage(offset, limit, 100);
 
         var query = database.WatchEvents.AsNoTracking()
             .Where(e => e.UserId == userId)

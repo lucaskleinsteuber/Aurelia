@@ -558,7 +558,7 @@ public sealed record SyncChangesResponse(
     IReadOnlyList<Guid> ChangedMediaIds,
     string? Generation = null);
 
-public sealed record SetFavoriteRequest(bool IsFavorite);
+public sealed record SetFavoriteRequest([property: System.Text.Json.Serialization.JsonRequired] bool IsFavorite);
 
 public sealed record SetWatchlistRequest(bool IsWatchlisted);
 

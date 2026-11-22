@@ -81,6 +81,13 @@ if (commandLine.Command == "database")
 }
 
 var builder = WebApplication.CreateBuilder(args);
+if (commandLine.Command != "run")
+{
+    // Keep stdout clean for machine-readable command output (e.g. setup-owner JSON) by routing
+    // framework logs such as EF Core migration warnings to stderr.
+    builder.Services.Configure<Microsoft.Extensions.Logging.Console.ConsoleLoggerOptions>(options =>
+        options.LogToStandardErrorThreshold = LogLevel.Trace);
+}
 var runtime = ServerRuntimeOptions.Resolve(builder.Configuration, args);
 
 PrivateFilePermissions.CreatePrivateDirectory(runtime.DataDirectory);
@@ -505,6 +512,16 @@ app.Use(async (context, next) =>
             await next(context);
         }
         else await next(context);
+        if (context.Response.StatusCode == StatusCodes.Status400BadRequest
+            && !context.Response.HasStarted
+            && string.IsNullOrEmpty(context.Response.ContentType)
+            && context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Items["Aurelia.FailureRecorded"] = true;
+            await context.Response.WriteAsJsonAsync(new ApiProblem(
+                "invalid_request",
+                "The request is missing required parameters or contains invalid values."));
+        }
         if (context.Items["Aurelia.AdministrationApproved"] is true && context.Response.StatusCode < 400)
             context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("owner_change_completed", "information", context.User.RequireUserId(), context.Response.StatusCode);
         if (securityChange is not null && context.Response.StatusCode < 400 && context.User.Identity?.IsAuthenticated == true)
@@ -544,9 +561,14 @@ app.Use(async (context, next) =>
         context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("request_body_rejected", "warning",
             context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, exception.StatusCode);
         context.Items["Aurelia.FailureRecorded"] = true;
-        await context.Response.WriteAsJsonAsync(exception.StatusCode == StatusCodes.Status413PayloadTooLarge
+        var problem = exception.StatusCode == StatusCodes.Status413PayloadTooLarge
             ? new ApiProblem("request_too_large", "The request is larger than the server accepts.")
-            : new ApiProblem("request_incomplete", "The request did not arrive completely. Try again."));
+            : exception.InnerException is JsonException
+                || exception.Message.Contains("parameter", StringComparison.OrdinalIgnoreCase)
+                || exception.Message.Contains("JSON", StringComparison.OrdinalIgnoreCase)
+                ? new ApiProblem("invalid_request", "The request is missing required parameters or contains invalid values.")
+                : new ApiProblem("request_incomplete", "The request did not arrive completely. Try again.");
+        await context.Response.WriteAsJsonAsync(problem);
     }
     catch (IOException) when (context.RequestAborted.IsCancellationRequested)
     {

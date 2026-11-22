@@ -31,8 +31,7 @@ public sealed partial class PeopleService(
     /// </summary>
     public async Task<PeoplePageResponse> ListAsync(string? query, int offset, int limit, CancellationToken cancellationToken)
     {
-        offset = Math.Max(0, offset);
-        limit = Math.Clamp(limit <= 0 ? 60 : limit, 1, MaximumPage);
+        TextInputValidation.ValidatePage(offset, limit, MaximumPage);
         var titles = database.MediaItems.AsNoTracking().Where(item => item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series);
         var credits = database.MediaCredits.AsNoTracking()
             .Where(credit => credit.ProviderPersonId != null)

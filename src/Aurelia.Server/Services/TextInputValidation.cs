@@ -1,0 +1,35 @@
+namespace Aurelia.Server.Services;
+
+/// <summary>Shared input validation helpers for display names and page bounds.</summary>
+public static class TextInputValidation
+{
+    /// <summary>
+    /// Returns true if the text contains ASCII/Unicode control characters or bidirectional
+    /// override/isolate formatting characters (which can spoof visual text direction).
+    /// </summary>
+    public static bool HasForbiddenControlCharacters(string value)
+    {
+        foreach (var ch in value)
+        {
+            if (char.IsControl(ch)) return true;
+            if (ch is '\u200E' or '\u200F' or '\u061C'
+                or (>= '\u202A' and <= '\u202E')
+                or (>= '\u2066' and <= '\u2069'))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static void ValidatePage(int offset, int limit, int maximumLimit)
+    {
+        if (offset < 0 || limit < 1 || limit > maximumLimit)
+        {
+            throw new LibraryException(
+                "invalid_page",
+                $"Offset must be at least 0 and limit must be between 1 and {maximumLimit}.",
+                StatusCodes.Status400BadRequest);
+        }
+    }
+}

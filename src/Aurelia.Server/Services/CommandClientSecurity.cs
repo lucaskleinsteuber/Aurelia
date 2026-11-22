@@ -47,16 +47,34 @@ public static class CommandClientSecurity
         using var response = await client.GetAsync("/api/v1/profiles", token);
         var picker = await PairingCommandClient.ReadSuccessAsync<ProfilePickerResponse>(response, token);
         var pin = commandLine.ReadSecret(picker.ManagementSetupRequired ? "New owner viewing PIN (4–8 digits): " : "Viewing PIN: ");
+        if (string.IsNullOrWhiteSpace(pin))
+        {
+            throw new InvalidOperationException(picker.ManagementSetupRequired
+                ? "Owner viewing PIN setup is required before using this command. Enter a 4–8 digit PIN interactively, or pass the PIN as a second line on standard input."
+                : "A 4–8 digit owner viewing PIN is required. Enter it interactively or pass it as a second line on standard input.");
+        }
         if (picker.ManagementSetupRequired)
         {
             using var setup = await client.PostAsJsonAsync("/api/v1/profiles/initialize", new InitializeProfilesRequest(password, pin), Json, token);
-            setup.EnsureSuccessStatusCode();
+            await EnsureApiSuccessAsync(setup, token);
         }
         using var unlocked = await client.PostAsJsonAsync($"/api/v1/profiles/{device.User.Id}/unlock", new UnlockProfileRequest(pin), Json, token);
         var profile = await PairingCommandClient.ReadSuccessAsync<ProfileSessionResponse>(unlocked, token);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", profile.Token);
         using var management = await client.PostAsJsonAsync("/api/v1/management/unlock", new UnlockManagementRequest(password), Json, token);
-        management.EnsureSuccessStatusCode();
+        await EnsureApiSuccessAsync(management, token);
+    }
+
+    public static async Task EnsureApiSuccessAsync(HttpResponseMessage response, CancellationToken token)
+    {
+        if (response.IsSuccessStatusCode) return;
+        ApiProblem? problem = null;
+        try { problem = await response.Content.ReadFromJsonAsync<ApiProblem>(Json, token); }
+        catch (JsonException) { }
+        catch (NotSupportedException) { }
+        if (problem is not null && !string.IsNullOrWhiteSpace(problem.Message))
+            throw new InvalidOperationException($"{problem.Code}: {problem.Message}");
+        throw new InvalidOperationException($"Request failed with HTTP {(int)response.StatusCode} ({response.ReasonPhrase}).");
     }
 
     public static async Task EndCommandSessionAsync(HttpClient client, AuthenticationResponse device)

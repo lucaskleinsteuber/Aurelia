@@ -803,8 +803,8 @@ public sealed class PresentationService(
     private async Task ApplyCollectionAsync(MediaCollectionRecord collection, SaveCollectionRequest request, CancellationToken cancellationToken)
     {
         var name = request.Name?.Trim() ?? string.Empty;
-        if (name.Length is < 1 or > 512)
-            throw new MetadataException("invalid_collection", "A collection needs a name between 1 and 512 characters.", StatusCodes.Status400BadRequest);
+        if (name.Length is < 1 or > 512 || TextInputValidation.HasForbiddenControlCharacters(name))
+            throw new MetadataException("invalid_collection", "A collection needs a name between 1 and 512 visible characters.", StatusCodes.Status400BadRequest);
 
         if (request.Overview is not null)
         {

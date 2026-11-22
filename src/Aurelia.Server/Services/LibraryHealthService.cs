@@ -16,10 +16,12 @@ public sealed class LibraryHealthService(
     TimeProvider clock,
     WatchlistService? watchlist = null)
 {
-    public async Task<IReadOnlyList<DuplicateGroup>> GetDuplicatesAsync(int offset, int limit, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<DuplicateGroup>> GetDuplicatesAsync(int offset, int limit, CancellationToken cancellationToken) =>
+        (await GetDuplicatesPageAsync(offset, limit, cancellationToken)).Items;
+
+    public async Task<(IReadOnlyList<DuplicateGroup> Items, int Total)> GetDuplicatesPageAsync(int offset, int limit, CancellationToken cancellationToken)
     {
-        offset = Math.Max(0, offset);
-        limit = Math.Clamp(limit, 1, 50);
+        TextInputValidation.ValidatePage(offset, limit, 50);
 
         // Movies match by provider identity (or, without one, by title and year); episodes only
         // when the same series has several files for the same season and episode.
@@ -49,23 +51,28 @@ public sealed class LibraryHealthService(
             .GroupBy(item => $"episode:{item.ParentId}:{item.SeasonNumber}:{item.EpisodeNumber}")
             .Where(group => group.Count() > 1);
 
-        return movieGroups.Concat(episodeGroups)
+        var all = movieGroups.Concat(episodeGroups)
             .Select(group => ToGroup(group.Key, group.OrderBy(item => item.CreatedAt).ThenBy(item => item.Id).ToList()))
             .OrderBy(group => group.Title, StringComparer.OrdinalIgnoreCase).ThenBy(group => group.Key, StringComparer.Ordinal)
-            .Skip(offset).Take(limit)
             .ToList();
+        return (all.Skip(offset).Take(limit).ToList(), all.Count);
     }
 
     /// <summary>Titles whose file has been missing for at least the given number of days.</summary>
-    public async Task<IReadOnlyList<OfflineTitleSummary>> GetOfflineAsync(int days, int offset, int limit, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<OfflineTitleSummary>> GetOfflineAsync(int days, int offset, int limit, CancellationToken cancellationToken) =>
+        (await GetOfflinePageAsync(days, offset, limit, cancellationToken)).Items;
+
+    public async Task<(IReadOnlyList<OfflineTitleSummary> Items, int Total)> GetOfflinePageAsync(int days, int offset, int limit, CancellationToken cancellationToken)
     {
-        offset = Math.Max(0, offset);
-        limit = Math.Clamp(limit, 1, 100);
+        if (days < 0)
+            throw new LibraryException("invalid_page", "Days must be at least 0.", StatusCodes.Status400BadRequest);
+        TextInputValidation.ValidatePage(offset, limit, 100);
         var now = clock.GetUtcNow();
-        var cutoff = now.AddDays(-Math.Max(0, days));
+        var cutoff = now.AddDays(-days);
 
         var items = await database.MediaItems.AsNoTracking()
-            .Where(item => item.Kind != MediaKind.Series && item.Availability != MediaAvailability.Available)
+            .Where(item => item.Kind != MediaKind.Series
+                && (item.Availability != MediaAvailability.Available || item.LibraryRoot.Availability != LibraryAvailability.Available))
             .Select(item => new
             {
                 Item = item,
@@ -76,8 +83,10 @@ public sealed class LibraryHealthService(
             })
             .ToListAsync(cancellationToken);
 
-        return items.Where(value => value.LastSeen <= cutoff)
+        var matching = items.Where(value => value.LastSeen <= cutoff)
             .OrderBy(value => value.LastSeen).ThenBy(value => value.Item.Id)
+            .ToList();
+        var page = matching
             .Skip(offset).Take(limit)
             .Select(value =>
             {
@@ -86,26 +95,31 @@ public sealed class LibraryHealthService(
                     Path.GetFileName(value.Item.SourcePath), value.LastSeen, (int)Math.Max(0, (now - value.LastSeen).TotalDays));
             })
             .ToList();
+        return (page, matching.Count);
     }
 
-    public async Task<IReadOnlyList<UnmatchedTitleSummary>> GetUnmatchedAsync(int offset, int limit, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<UnmatchedTitleSummary>> GetUnmatchedAsync(int offset, int limit, CancellationToken cancellationToken) =>
+        (await GetUnmatchedPageAsync(offset, limit, cancellationToken)).Items;
+
+    public async Task<(IReadOnlyList<UnmatchedTitleSummary> Items, int Total)> GetUnmatchedPageAsync(int offset, int limit, CancellationToken cancellationToken)
     {
-        offset = Math.Max(0, offset);
-        limit = Math.Clamp(limit, 1, 100);
+        TextInputValidation.ValidatePage(offset, limit, 100);
 
         // Episodes take their details from the series, so only movies and series need a match.
-        var items = await database.MediaItems.AsNoTracking()
+        var query = database.MediaItems.AsNoTracking()
             .Where(item => (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series)
                 && (item.Metadata == null
                     || item.Metadata.ReviewState == MetadataReviewState.NeedsReview
-                    || (string.IsNullOrEmpty(item.Metadata.ProviderOverview) && string.IsNullOrEmpty(item.Metadata.ManualOverview))))
+                    || (string.IsNullOrEmpty(item.Metadata.ProviderOverview) && string.IsNullOrEmpty(item.Metadata.ManualOverview))));
+        var total = await query.CountAsync(cancellationToken);
+        var items = await query
             .Include(item => item.Metadata)
             .OrderBy(item => item.DetectedTitle).ThenBy(item => item.Id)
             .Skip(offset)
             .Take(limit)
             .ToListAsync(cancellationToken);
 
-        return items.Select(item => new UnmatchedTitleSummary(
+        var page = items.Select(item => new UnmatchedTitleSummary(
             item.Id,
             MetadataPresentation.ToSummary(item).Title,
             item.Kind,
@@ -117,6 +131,7 @@ public sealed class LibraryHealthService(
                 { ReviewState: MetadataReviewState.NeedsReview } => "Match needs review",
                 _ => "No overview",
             })).ToList();
+        return (page, total);
     }
 
     /// <summary>
