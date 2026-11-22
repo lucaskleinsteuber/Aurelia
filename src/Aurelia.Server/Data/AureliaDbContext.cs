@@ -1,5 +1,6 @@
 using Aurelia.Contracts;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Aurelia.Server.Data;
@@ -113,6 +114,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entry.Entity.Revision = entry.State == EntityState.Added ? 1 : checked(entry.Entity.Revision + 1);
         var changes = new HashSet<(SyncChangeArea Area, Guid? UserId, Guid? MediaId)>();
         var affectedLibraries = new HashSet<Guid>();
+        var affectedCatalogLibraries = new HashSet<Guid>();
         var changedCollections = new HashSet<Guid>();
         var progressMediaIds = ChangeTracker.Entries<PlaybackProgress>()
             .Where(entry => entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
@@ -130,7 +132,11 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                 case LibraryRoot root:
                     affectedLibraries.Add(root.Id);
                     changes.Add((SyncChangeArea.Libraries, null, null));
-                    changes.Add((SyncChangeArea.Catalog, null, null));
+                    if (entry.State != EntityState.Modified || LibraryRootAffectsCatalog(entry))
+                    {
+                        affectedCatalogLibraries.Add(root.Id);
+                        changes.Add((SyncChangeArea.Catalog, null, null));
+                    }
                     break;
                 case LibraryScan or LibraryDiscovery or LibraryImportReview or LibraryImportAssignment:
                     var rootId = entry.Property("LibraryRootId").CurrentValue as Guid?;
@@ -142,8 +148,15 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                     changes.Add((SyncChangeArea.Libraries, null, null));
                     break;
                 case MediaItem item:
-                    if (entry.State == EntityState.Deleted) affectedLibraries.Add(item.LibraryRootId);
-                    changes.Add((SyncChangeArea.Catalog, null, item.Id));
+                    if (entry.State == EntityState.Deleted)
+                    {
+                        affectedLibraries.Add(item.LibraryRootId);
+                        affectedCatalogLibraries.Add(item.LibraryRootId);
+                    }
+                    if (entry.State != EntityState.Modified || MediaItemAffectsCatalog(entry))
+                    {
+                        changes.Add((SyncChangeArea.Catalog, null, item.Id));
+                    }
                     break;
                 case MediaMetadata metadata:
                     changes.Add((SyncChangeArea.Metadata, null, metadata.MediaItemId));
@@ -192,10 +205,13 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                 || user.LibraryGrants.Any(grant => affectedLibraries.Contains(grant.LibraryRootId))
                 || UserTitleGrants.Any(grant => grant.UserId == user.Id && affectedLibraries.Contains(grant.MediaItem.LibraryRootId)))
                 .Select(user => user.Id).ToList())
-            {
                 changes.Add((SyncChangeArea.Libraries, userId, null));
+        if (affectedCatalogLibraries.Count > 0)
+            foreach (var userId in Users.IgnoreQueryFilters().Where(user => user.AccessMode == ProfileAccessMode.EntireLibrary
+                || user.LibraryGrants.Any(grant => affectedCatalogLibraries.Contains(grant.LibraryRootId))
+                || UserTitleGrants.Any(grant => grant.UserId == user.Id && affectedCatalogLibraries.Contains(grant.MediaItem.LibraryRootId)))
+                .Select(user => user.Id).ToList())
                 changes.Add((SyncChangeArea.Catalog, userId, null));
-            }
         if (changedCollections.Count > 0)
             foreach (var userId in Users.IgnoreQueryFilters().Where(user => user.AccessMode == ProfileAccessMode.EntireLibrary
                 || user.LibraryGrants.Any(grant => MediaCollectionMembers.IgnoreQueryFilters().Any(member => changedCollections.Contains(member.CollectionId)
@@ -216,6 +232,50 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                 CreatedAt = now,
             });
         }
+    }
+
+    private static bool MediaItemAffectsCatalog(EntityEntry entry)
+    {
+        foreach (var property in entry.Properties)
+        {
+            if (!property.IsModified)
+            {
+                continue;
+            }
+            if (property.Metadata.Name is nameof(MediaItem.LastSeenScanId) or nameof(MediaItem.UpdatedAt))
+            {
+                continue;
+            }
+            if (!Equals(property.OriginalValue, property.CurrentValue))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool LibraryRootAffectsCatalog(EntityEntry entry)
+    {
+        foreach (var property in entry.Properties)
+        {
+            if (!property.IsModified)
+            {
+                continue;
+            }
+            if (property.Metadata.Name is nameof(LibraryRoot.LastScanStartedAt)
+                or nameof(LibraryRoot.LastScanCompletedAt)
+                or nameof(LibraryRoot.LastObservedAt)
+                or nameof(LibraryRoot.LastError)
+                or nameof(LibraryRoot.MonitoringEnabled))
+            {
+                continue;
+            }
+            if (!Equals(property.OriginalValue, property.CurrentValue))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

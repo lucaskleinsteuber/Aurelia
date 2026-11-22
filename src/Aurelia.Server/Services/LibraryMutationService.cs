@@ -99,6 +99,17 @@ public sealed class LibraryMutationService(AureliaDbContext database, CatalogMut
                     });
             }
         }
+        var affected = items.Select(item => item.LibraryRootId).Concat(roots).Distinct().ToArray();
+        // Capture every affected profile before ExecuteDelete cascades UserTitleGrants.
+        var users = await database.Users.IgnoreQueryFilters()
+            .Where(user => user.Role == UserRole.Owner
+                || user.AccessMode == ProfileAccessMode.EntireLibrary
+                || user.LibraryGrants.Any(grant => affected.Contains(grant.LibraryRootId))
+                || (ids.Length > 0 && database.UserTitleGrants.IgnoreQueryFilters().Any(grant => grant.UserId == user.Id && ids.Contains(grant.MediaItemId)))
+                || (affected.Length > 0 && database.UserTitleGrants.IgnoreQueryFilters().Any(grant => grant.UserId == user.Id && affected.Contains(grant.MediaItem.LibraryRootId))))
+            .Select(user => user.Id)
+            .Distinct()
+            .ToListAsync(token);
         // Explicitly delete leaves first; ParentId deliberately has a restrictive FK.
         var remaining = items.ToDictionary(item => item.Id);
         while (remaining.Count > 0)
@@ -109,10 +120,7 @@ public sealed class LibraryMutationService(AureliaDbContext database, CatalogMut
             await database.MediaItems.Where(item => leaves.Contains(item.Id)).ExecuteDeleteAsync(token);
             foreach (var id in leaves) remaining.Remove(id);
         }
-        var affected = items.Select(item => item.LibraryRootId).Concat(roots).Distinct().ToArray();
-        var users = await database.UserLibraryGrants.IgnoreQueryFilters().Where(grant => affected.Contains(grant.LibraryRootId)).Select(grant => grant.UserId).Distinct().ToListAsync(token);
-        users.AddRange(await database.Users.Where(user => user.Role == UserRole.Owner).Select(user => user.Id).ToListAsync(token));
-        foreach (var account in users.Distinct())
+        foreach (var account in users)
             foreach (var area in new[] { SyncChangeArea.Catalog, SyncChangeArea.Libraries })
                 database.SyncChanges.Add(new SyncChange { Area = area, UserId = account, CreatedAt = DateTimeOffset.UtcNow });
         if (roots.Count > 0) await database.LibraryRoots.Where(root => roots.Contains(root.Id)).ExecuteDeleteAsync(token);

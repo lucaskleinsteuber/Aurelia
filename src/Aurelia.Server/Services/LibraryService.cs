@@ -470,12 +470,24 @@ public sealed class LibraryService(
                 StatusCodes.Status409Conflict);
         }
 
+        // Capture title-grant recipients before ExecuteDelete cascades UserTitleGrants.
+        var titleGrantUsers = await database.UserTitleGrants.IgnoreQueryFilters()
+            .Where(grant => grant.MediaItem.LibraryRootId == libraryId)
+            .Select(grant => grant.UserId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
         await database.MediaItems
             .Where(item => item.LibraryRootId == libraryId && item.ParentId != null)
             .ExecuteDeleteAsync(cancellationToken);
         await database.MediaItems
             .Where(item => item.LibraryRootId == libraryId)
             .ExecuteDeleteAsync(cancellationToken);
+        foreach (var userId in titleGrantUsers)
+        {
+            database.SyncChanges.Add(new SyncChange { Area = SyncChangeArea.Libraries, UserId = userId, CreatedAt = DateTimeOffset.UtcNow });
+            database.SyncChanges.Add(new SyncChange { Area = SyncChangeArea.Catalog, UserId = userId, CreatedAt = DateTimeOffset.UtcNow });
+        }
         database.LibraryRoots.Remove(library);
         await database.SaveChangesAsync(cancellationToken);
     }
