@@ -61,6 +61,12 @@ public sealed class ServerPowerSettingsTests
         var older = fixture.Store.Update(new("sleep", 30, null, null));
         Assert.True(older.WakeOnAccess);
         Assert.False(fixture.Store.Update(new("sleep", 30, null, null, WakeOnAccess: false)).WakeOnAccess);
+
+        // When Wake-on-LAN support is reported without magic packet ("g"), sleep and shutdown are refused.
+        File.WriteAllText(fixture.WakeSupportPath, "\n");
+        Assert.Equal("wake_on_lan_unavailable", Assert.Throws<AccountException>(() => fixture.Store.Update(new("sleep", 30, null, null))).Code);
+        Assert.Equal("wake_on_lan_unavailable", Assert.Throws<AccountException>(() => fixture.Store.Update(new("shutdown", 30, null, null))).Code);
+        Assert.Equal("stop", fixture.Store.Update(new("stop", 30, null, null)).Mode);
     }
 
     [Fact]

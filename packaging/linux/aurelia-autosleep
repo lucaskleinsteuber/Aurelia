@@ -89,7 +89,19 @@ save_power() {
   if [ "$dry_run" = 1 ]; then echo "$verb until $until: $1"; exit 0; fi
   rm -f "$ready" "$state/woke"
   # The settings may have changed in the app since the start: the card wakes as they say now.
-  "${AURELIA_WAKE_ON_LAN:-/opt/aurelia/aurelia-wake-on-lan}" >/dev/null 2>&1 || true
+  # Never put the computer to sleep or turn it off unless Wake-on-LAN ("g") is actually active.
+  if ! "${AURELIA_WAKE_ON_LAN:-/opt/aurelia/aurelia-wake-on-lan}" >/dev/null 2>&1; then
+    logger -t aurelia-autosleep "Wake-on-LAN could not be enabled; keeping this computer awake so Aurelia stays reachable."
+    exit 0
+  fi
+  local wake_now=""
+  if [ -f "$data/wake-on-lan-status" ] && [ ! -L "$data/wake-on-lan-status" ]; then
+    wake_now=$(awk -F= '$1 == "WAKE_ON" { print $2; exit }' "$data/wake-on-lan-status" 2>/dev/null || true)
+  fi
+  if [[ "$wake_now" != *g* ]]; then
+    logger -t aurelia-autosleep "Wake-on-LAN is not enabled on the network card (WAKE_ON=${wake_now:-unknown}); keeping this computer awake so Aurelia stays reachable."
+    exit 0
+  fi
   if [ "$MODE" = shutdown ]; then
     logger -t aurelia-autosleep "$1: turning off until $until."
     if [ -n "$wake" ]; then
@@ -104,11 +116,14 @@ save_power() {
   # After waking, devices get a fresh idle period to connect.
   echo "$now" > "$state/last-active"
   if [ -n "$wake" ]; then
-    rtcwake -m mem -t "$wake" >/dev/null
+    rtcwake -m no -t "$wake" >/dev/null || true
   else
     # A wake time left from earlier awake hours must not wake it now.
     rtcwake -m disable >/dev/null 2>&1 || true
-    echo mem > /sys/power/state
+  fi
+  if ! systemctl suspend; then
+    logger -t aurelia-autosleep "Suspend was inhibited or failed; staying awake."
+    exit 0
   fi
   date +%s > "$state/last-active"
   date +%s > "$state/woke"
