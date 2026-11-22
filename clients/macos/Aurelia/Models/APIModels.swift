@@ -1589,7 +1589,13 @@ struct MetadataJobSummary: Codable, Identifiable, Equatable, Sendable {
 }
 
 enum SyncChangeArea: String, Codable, Sendable {
-  case catalog, libraries, metadata, collections, userState
+  case catalog, libraries, metadata, collections, userState, unknown
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    let raw = try container.decode(String.self)
+    self = SyncChangeArea(rawValue: raw) ?? .unknown
+  }
 }
 
 struct SyncChangesResponse: Codable, Equatable, Sendable {

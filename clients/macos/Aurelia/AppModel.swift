@@ -181,6 +181,7 @@ final class AppModel: ObservableObject {
         await WishNotificationCenter.shared.notify(detailed)
       }
     }
+    guard isCurrent(generation), self.profile?.user?.id == sessionUserId else { return }
     wishSummary = next
   }
   @Published private(set) var hostSnapshot: NativeHostSnapshot = .stopped
@@ -286,9 +287,8 @@ final class AppModel: ObservableObject {
   private var hasStarted = false
   /// The offline mode: downloads only, without the server; see `openOfflineMode`.
   @Published private(set) var offlineMode: OfflineModeState?
-  /// Wrong offline PINs in a row, and until when the next try must wait.
-  private var offlinePINFailures = 0
-  @Published private(set) var offlinePINLockedUntil: Date?
+  /// Cached offline profile choices so SwiftUI bodies never hit Keychain on every render.
+  @Published private(set) var offlineProfileChoices: [OfflineProfileChoice] = []
   lazy var offlineProfileStore: any OfflineProfileStoring =
     Self.isTestProcess ? MemoryOfflineProfileStore() : KeychainOfflineProfileStore()
   private var hostPollTask: Task<Void, Never>?
@@ -418,6 +418,18 @@ final class AppModel: ObservableObject {
     syncStartTask?.cancel()
     syncStartTask = nil
     stopRemoteDeviceTasks()
+    clearRemotePlaybackState()
+  }
+
+  private func clearRemotePlaybackState() {
+    remoteDeviceStatusTask?.cancel()
+    remoteDeviceStatusTask = nil
+    activeRemotePlayer = nil
+    remotePlaybackTitle = nil
+    remotePlaybackPosition = 0
+    remotePlaybackDuration = 0
+    isRemotePlaying = false
+    remoteSeekSentAt = nil
   }
 
   private func stopRemoteDeviceTasks() {
@@ -545,6 +557,8 @@ final class AppModel: ObservableObject {
       .unregister()
     }
     try? store.delete()
+    PasskeyStore.removeAll()
+    KeychainOfflineProfileStore().forgetAll()
     UserDefaults.standard.removePersistentDomain(forName: AppEdition.bundleIdentifier)
     UserDefaults.standard.synchronize()
     let files = FileManager.default
@@ -2976,25 +2990,27 @@ final class AppModel: ObservableObject {
   /// smaller copy the server converts when it offers one and the setting asks for it.
   func download(_ item: CatalogItemSummary) {
     guard let profile, item.kind == .movie || item.kind == .episode, item.isPlayable else { return }
+    let generation = connectionGeneration
+    let sessionId = profile.sessionId
     let preference =
       UserDefaults.standard.string(forKey: DownloadQualityPreference.key)
       ?? DownloadQualityPreference.ask
     guard libraryCapabilities.contains(ServerFeatureNames.convertedDownloads),
       preference != DownloadQualityPreference.original
     else {
-      startDownload(item)
+      startDownload(item, using: profile)
       return
     }
     Task {
       let options = try? await APIClient(profile: profile).downloadOptions(mediaId: item.id)
-      guard self.profile?.serverId == profile.serverId else { return }
+      guard isCurrent(generation), self.profile?.sessionId == sessionId else { return }
       switch DownloadQualityPreference.resolve(preference, options: options) {
-      case .original: startDownload(item)
+      case .original: startDownload(item, using: profile)
       case .ask:
         if let options { downloadChoice = PendingDownloadChoice(item: item, options: options) }
       case .converted(let quality):
         startDownload(
-          item, quality: quality, audio: options?.audioTrack,
+          item, using: profile, quality: quality, audio: options?.audioTrack,
           expectedBytes: options?.qualities.first { $0.id == quality }?.estimatedBytes)
       }
     }
@@ -3009,6 +3025,8 @@ final class AppModel: ObservableObject {
         && downloads.active[$0.id] == nil
     }
     guard let profile, let first = wanted.first else { return }
+    let generation = connectionGeneration
+    let sessionId = profile.sessionId
     let others = Array(wanted.dropFirst())
     let preference =
       UserDefaults.standard.string(forKey: DownloadQualityPreference.key)
@@ -3016,55 +3034,62 @@ final class AppModel: ObservableObject {
     guard libraryCapabilities.contains(ServerFeatureNames.convertedDownloads),
       preference != DownloadQualityPreference.original
     else {
-      for item in wanted { startDownload(item) }
+      for item in wanted { startDownload(item, using: profile) }
       return
     }
     Task {
       let options = try? await APIClient(profile: profile).downloadOptions(mediaId: first.id)
-      guard self.profile?.serverId == profile.serverId else { return }
+      guard isCurrent(generation), self.profile?.sessionId == sessionId else { return }
       switch DownloadQualityPreference.resolve(preference, options: options) {
       case .original:
-        for item in wanted { startDownload(item) }
+        for item in wanted { startDownload(item, using: profile) }
       case .ask:
         if let options {
           downloadChoice = PendingDownloadChoice(item: first, options: options, others: others)
         }
       case .converted(let quality):
         startDownload(
-          first, quality: quality, audio: options?.audioTrack,
+          first, using: profile, quality: quality, audio: options?.audioTrack,
           expectedBytes: options?.qualities.first { $0.id == quality }?.estimatedBytes)
-        await startDownloads(others, quality: quality)
+        await startDownloads(others, quality: quality, using: profile, generation: generation)
       }
     }
   }
 
   /// Starts further episodes in `quality`, or the nearest one the server offers for each; nil
   /// keeps their original files.
-  func startDownloads(_ items: [CatalogItemSummary], quality: String?) async {
-    guard let profile else { return }
+  func startDownloads(
+    _ items: [CatalogItemSummary], quality: String?,
+    using capturedProfile: StoredServerProfile? = nil,
+    generation capturedGeneration: UUID? = nil
+  ) async {
+    guard let profile = capturedProfile ?? self.profile else { return }
+    let generation = capturedGeneration ?? connectionGeneration
+    let sessionId = profile.sessionId
     for item in items {
+      guard isCurrent(generation), self.profile?.sessionId == sessionId else { return }
       guard let quality else {
-        startDownload(item)
+        startDownload(item, using: profile)
         continue
       }
       let options = try? await APIClient(profile: profile).downloadOptions(mediaId: item.id)
-      guard self.profile?.serverId == profile.serverId else { return }
+      guard isCurrent(generation), self.profile?.sessionId == sessionId else { return }
       if case .converted(let own) = DownloadQualityPreference.resolve(quality, options: options) {
         startDownload(
-          item, quality: own, audio: options?.audioTrack,
+          item, using: profile, quality: own, audio: options?.audioTrack,
           expectedBytes: options?.qualities.first { $0.id == own }?.estimatedBytes)
       } else {
-        startDownload(item)
+        startDownload(item, using: profile)
       }
     }
   }
 
   /// Starts a download in the chosen quality; nil keeps the original file.
   func startDownload(
-    _ item: CatalogItemSummary, quality: String? = nil, audio: Int? = nil,
-    expectedBytes: Int64? = nil
+    _ item: CatalogItemSummary, using capturedProfile: StoredServerProfile? = nil,
+    quality: String? = nil, audio: Int? = nil, expectedBytes: Int64? = nil
   ) {
-    guard let profile else { return }
+    guard let profile = capturedProfile ?? self.profile else { return }
     let subtitle =
       item.kind == .episode
       ? [
@@ -3121,10 +3146,13 @@ final class AppModel: ObservableObject {
     return OfflineDownloads.shared.titles.contains { $0.serverId == server }
   }
 
-  /// The profiles that have downloads on this Mac, with their offline card when they have
-  /// one. A profile without a card has not been opened here since offline mode exists.
-  var offlineProfileChoices: [OfflineProfileChoice] {
-    guard let server = offlineServerId else { return [] }
+  /// Loads the profiles that have downloads on this Mac once on demand so SwiftUI bodies do not
+  /// query Keychain on every render.
+  func refreshOfflineProfileChoices() {
+    guard let server = offlineServerId else {
+      offlineProfileChoices = []
+      return
+    }
     let cards = offlineProfileStore.cards(serverId: server)
     let owners = Set(OfflineDownloads.shared.titles.filter { $0.serverId == server }.map(\.userId))
     var choices = cards.filter { owners.contains($0.userId) }.map {
@@ -3133,7 +3161,13 @@ final class AppModel: ObservableObject {
     for owner in owners where !cards.contains(where: { $0.userId == owner }) {
       choices.append(OfflineProfileChoice(userId: owner, card: nil))
     }
-    return choices
+    offlineProfileChoices = choices
+  }
+
+  func offlinePINLockedUntil(for card: OfflineProfileCard, now: Date = Date()) -> Date? {
+    let current =
+      offlineProfileChoices.first(where: { $0.userId == card.userId })?.card ?? card
+    return current.lockedUntil(now: now)
   }
 
   /// The downloads the open offline profile sees.
@@ -3148,6 +3182,7 @@ final class AppModel: ObservableObject {
     guard canOfferOfflineMode, let server = offlineServerId else { return }
     stopLookingForServer()
     isSettingsPresented = false
+    refreshOfflineProfileChoices()
     if let open = profile, let user = open.user,
       open.isViewingSession || !usesProfileSelection,
       OfflineDownloads.shared.titles.contains(where: {
@@ -3168,23 +3203,25 @@ final class AppModel: ObservableObject {
     }
   }
 
-  /// Opens a profile's downloads offline. Returns false for a wrong PIN; after five wrong PINs
-  /// each further try waits, doubling up to five minutes.
+  /// Opens a profile's downloads offline. Runs PBKDF2 off the MainActor and persists per-card
+  /// lockout state in Keychain so restarting the app does not reset wrong-PIN throttling.
   @discardableResult
-  func openOfflineProfile(_ card: OfflineProfileCard, pin: String) -> Bool {
+  func openOfflineProfile(_ card: OfflineProfileCard, pin: String, now: Date = Date()) async -> Bool
+  {
     guard offlineMode != nil, card.serverId == offlineServerId else { return false }
-    if let until = offlinePINLockedUntil, until > Date() { return false }
-    guard card.accepts(pin) else {
-      offlinePINFailures += 1
-      if offlinePINFailures >= 5 {
-        let seconds = min(300.0, 30 * pow(2, Double(offlinePINFailures - 5)))
-        offlinePINLockedUntil = Date().addingTimeInterval(seconds)
-      }
-      return false
-    }
-    offlinePINFailures = 0
-    offlinePINLockedUntil = nil
-    offlineMode = .open(OfflineSession(card: card))
+    var currentCard =
+      offlineProfileChoices.first(where: { $0.userId == card.userId })?.card ?? card
+    if currentCard.lockedUntil(now: now) != nil { return false }
+    let cardSnapshot = currentCard
+    let accepted = await Task.detached(priority: .userInitiated) {
+      cardSnapshot.accepts(pin)
+    }.value
+    guard offlineMode != nil, currentCard.serverId == offlineServerId else { return false }
+    currentCard.recordPINAttempt(succeeded: accepted, now: now)
+    offlineProfileStore.remember(currentCard)
+    refreshOfflineProfileChoices()
+    guard accepted else { return false }
+    offlineMode = .open(OfflineSession(card: currentCard))
     return true
   }
 
@@ -3192,6 +3229,7 @@ final class AppModel: ObservableObject {
   func chooseOtherOfflineProfile() {
     guard offlineMode != nil else { return }
     if playback?.offlineID != nil { dismissPlayback() }
+    refreshOfflineProfileChoices()
     offlineMode = .choosingProfile
   }
 
@@ -3200,6 +3238,7 @@ final class AppModel: ObservableObject {
     guard offlineMode != nil else { return }
     if playback?.offlineID != nil { dismissPlayback() }
     offlineMode = nil
+    offlineProfileChoices = []
     // Opening Aurelia may still be on its first attempt; it shows its own progress.
     guard !isStarting else { return }
     await retryConnection()
@@ -3513,6 +3552,7 @@ final class AppModel: ObservableObject {
       let active = viewingProfile(response, device: device)
       acceptedProfile = active
       rememberForOffline(choice, pin: pin, serverId: device.serverId)
+      if deviceConnection == nil { deviceConnection = device }
       profile = active
       profileSelectionError = nil
       errorMessage = nil
@@ -3748,6 +3788,15 @@ final class AppModel: ObservableObject {
     wishPosterCache.clear()
     clearAdministrationState()
     artworkLoader.removeAll()
+    wrappedLaunch = nil
+    movieNightLaunch = nil
+    requestedMediaDetail = nil
+    requestedPersonDetail = nil
+    requestedDestination = nil
+    downloadChoice = nil
+    showingCollectionEditor = false
+    preselectedCollectionItem = nil
+    clearRemotePlaybackState()
     isMediaManagerPresented = false
     importPreviewLibrary = nil
     sceneNotesVersion &+= 1
@@ -3823,10 +3872,24 @@ final class AppModel: ObservableObject {
     }
     let current = profile
     let paired = deviceConnection
+    await leaveWatchTogether()
     if let server = paired?.serverId ?? current?.serverId {
       offlineProfileStore.forget(serverId: server)
+      PasskeyStore.removeAll(server: server)
     }
+    ArtworkDiskCache.standard?.removeAll()
+    wishPosterCache.clearDisk()
     offlineMode = nil
+    offlineProfileChoices = []
+    clearRemotePlaybackState()
+    wrappedLaunch = nil
+    movieNightLaunch = nil
+    requestedMediaDetail = nil
+    requestedPersonDetail = nil
+    requestedDestination = nil
+    downloadChoice = nil
+    showingCollectionEditor = false
+    preselectedCollectionItem = nil
     let retiredGeneration = connectionGeneration
     inspectionGeneration = UUID()
     profile = nil
@@ -4257,6 +4320,10 @@ final class AppModel: ObservableObject {
     // Keep the saved credential until an explicit disconnect/replacement. A network
     // failure never erases it; a confirmed device rejection shows connection UI.
     guard usesProfileSelection else { return }
+    if let session = watchParty {
+      watchParty = nil
+      Task { await session.leave() }
+    }
     profileExpiryTask?.cancel()
     managementExpiryTask?.cancel()
     managementExpiresAt = nil
@@ -4759,6 +4826,8 @@ final class AppModel: ObservableObject {
     on device: RemotePlayerDevice, item: CatalogItemSummary, startPosition: Double = 0
   ) {
     guard let profile else { return }
+    let generation = connectionGeneration
+    let sessionId = profile.sessionId
     activeRemotePlayer = device
     remotePlaybackTitle = item.title
     remotePlaybackPosition = startPosition
@@ -4776,7 +4845,8 @@ final class AppModel: ObservableObject {
         )
       } catch {
         await MainActor.run {
-          self.stopRemotePlayback()
+          guard self.isCurrent(generation), self.profile?.sessionId == sessionId else { return }
+          self.clearRemotePlaybackState()
           self.errorMessage = self.failureMessage(error)
         }
       }
@@ -4789,34 +4859,49 @@ final class AppModel: ObservableObject {
     action: String, positionSeconds: Double? = nil, skipSeconds: Double? = nil
   ) {
     guard let profile, let device = activeRemotePlayer else { return }
+    let generation = connectionGeneration
+    let sessionId = profile.sessionId
+    let previousPlaying = isRemotePlaying
+    let previousPosition = remotePlaybackPosition
     if action == "pause" { isRemotePlaying = false }
     if action == "resume" { isRemotePlaying = true }
     if let pos = positionSeconds { remotePlaybackPosition = pos }
     if let skip = skipSeconds { remotePlaybackPosition = max(0, remotePlaybackPosition + skip) }
     if positionSeconds != nil || skipSeconds != nil { remoteSeekSentAt = Date() }
 
-    Task {
-      _ = try? await APIClient(profile: profile).sendPlayerCommand(
-        deviceId: device.deviceId,
-        action: action,
-        positionSeconds: positionSeconds,
-        skipSeconds: skipSeconds
-      )
+    Task { [weak self] in
+      guard let self else { return }
+      do {
+        _ = try await APIClient(profile: profile).sendPlayerCommand(
+          deviceId: device.deviceId,
+          action: action,
+          positionSeconds: positionSeconds,
+          skipSeconds: skipSeconds
+        )
+      } catch {
+        await MainActor.run {
+          guard self.isCurrent(generation), self.profile?.sessionId == sessionId else { return }
+          if action == "pause" || action == "resume" { self.isRemotePlaying = previousPlaying }
+          if positionSeconds != nil || skipSeconds != nil {
+            self.remotePlaybackPosition = previousPosition
+            self.remoteSeekSentAt = nil
+          }
+          self.errorMessage = self.failureMessage(error)
+        }
+      }
     }
   }
 
   func stopRemotePlayback() {
-    remoteDeviceStatusTask?.cancel()
-    remoteDeviceStatusTask = nil
-    if let device = activeRemotePlayer, let profile {
+    let device = activeRemotePlayer
+    let capturedProfile = profile
+    clearRemotePlaybackState()
+    if let device, let capturedProfile {
       Task {
-        _ = try? await APIClient(profile: profile).sendPlayerCommand(
+        _ = try? await APIClient(profile: capturedProfile).sendPlayerCommand(
           deviceId: device.deviceId, action: "stop")
       }
     }
-    activeRemotePlayer = nil
-    remotePlaybackTitle = nil
-    isRemotePlaying = false
   }
 
   private func startRemoteStatusPolling(device: RemotePlayerDevice) {

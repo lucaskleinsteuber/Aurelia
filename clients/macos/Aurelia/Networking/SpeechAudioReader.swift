@@ -67,16 +67,14 @@ final class SpeechAudioReader: NSObject, URLSessionDataDelegate, @unchecked Send
       @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) ->
       Void
   ) {
-    guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-      challenge.protectionSpace.host.caseInsensitiveCompare(host) == .orderedSame,
-      let trust = challenge.protectionSpace.serverTrust,
-      let presented = try? ServerPublicKeyFingerprint.calculate(from: trust),
-      presented.caseInsensitiveCompare(fingerprint) == .orderedSame
+    guard
+      let credential = TLSTrustDelegate.evaluatePinnedServerTrust(
+        challenge, allowedHost: host, expectedFingerprint: fingerprint)
     else {
       completionHandler(.cancelAuthenticationChallenge, nil)
       return
     }
-    completionHandler(.useCredential, URLCredential(trust: trust))
+    completionHandler(.useCredential, credential)
   }
 
   func urlSession(

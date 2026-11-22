@@ -54,6 +54,10 @@ final class WishPosterCache {
     return decodedImages.object(forKey: key as NSString)
   }
 
+  func clearDisk() {
+    diskCache?.removeAll()
+  }
+
   func image(posterPath: String?, width: Int = 342, profile: StoredServerProfile) async -> NSImage?
   {
     guard let normalized = normalizePath(posterPath),

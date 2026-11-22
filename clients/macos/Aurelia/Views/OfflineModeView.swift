@@ -40,6 +40,7 @@ private struct OfflineProfileChooser: View {
   @State private var choice: OfflineProfileCard?
   @State private var pin = ""
   @State private var error: String?
+  @State private var verifying = false
   @FocusState private var pinFocused: Bool
 
   var body: some View {
@@ -157,7 +158,7 @@ private struct OfflineProfileChooser: View {
             .background(Circle().fill(pin.isEmpty ? Color.white.opacity(0.12) : Color.white))
         }
         .buttonStyle(AureliaPressableButtonStyle())
-        .disabled(pin.isEmpty)
+        .disabled(pin.isEmpty || verifying)
         .accessibilityLabel("Open Profile")
       }
       .padding(.leading, 20).padding(.trailing, 8)
@@ -165,7 +166,7 @@ private struct OfflineProfileChooser: View {
       .background(Capsule().fill(.ultraThinMaterial))
       .overlay { Capsule().strokeBorder(.white.opacity(0.16)) }
       TimelineView(.periodic(from: .now, by: 1)) { context in
-        if let until = model.offlinePINLockedUntil, until > context.date {
+        if let until = model.offlinePINLockedUntil(for: card), until > context.date {
           Text(
             "Too many wrong PINs. Try again in \(Int(until.timeIntervalSince(context.date).rounded(.up))) s."
           )
@@ -189,16 +190,22 @@ private struct OfflineProfileChooser: View {
     if card.pinProtected {
       choice = card
     } else {
-      model.openOfflineProfile(card, pin: "")
+      Task { _ = await model.openOfflineProfile(card, pin: "") }
     }
   }
 
   private func submit(_ card: OfflineProfileCard) {
-    guard !pin.isEmpty else { return }
-    if !model.openOfflineProfile(card, pin: pin) {
-      error = ProfilePIN.incorrect
-      pin = ""
-      pinFocused = true
+    guard !pin.isEmpty, !verifying else { return }
+    let entered = pin
+    verifying = true
+    Task {
+      let ok = await model.openOfflineProfile(card, pin: entered)
+      verifying = false
+      if !ok {
+        error = ProfilePIN.incorrect
+        pin = ""
+        pinFocused = true
+      }
     }
   }
 

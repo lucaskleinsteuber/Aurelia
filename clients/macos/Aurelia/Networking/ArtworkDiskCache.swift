@@ -74,6 +74,17 @@ struct ArtworkDiskCache: Sendable {
     }
   }
 
+  /// Removes every cached artwork file on disk (for example when disconnecting from a server).
+  func removeAll() {
+    guard
+      let files = try? FileManager.default.contentsOfDirectory(
+        at: directory, includingPropertiesForKeys: nil)
+    else { return }
+    for file in files where file.pathExtension == "artwork" {
+      try? FileManager.default.removeItem(at: file)
+    }
+  }
+
   private func fileURL(forKey key: String) -> URL {
     let digest = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
     return directory.appendingPathComponent(digest + ".artwork", isDirectory: false)

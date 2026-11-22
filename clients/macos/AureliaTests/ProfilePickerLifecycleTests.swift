@@ -209,6 +209,34 @@ struct ProfilePickerLifecycleTests {
     await controller.stop()
   }
 
+  @Test func switchingWatchingProfileClearsOverlaysRoutesAndRemotePlayback() async throws {
+    let selection = choice()
+    let response = session(selection)
+    let controller = LibrarySyncController(fetchChanges: { _, _, _, _ in throw CancellationError() }
+    )
+    let model = makeModel(
+      unlocker: { _, _, _ in response },
+      refresher: { _ in },
+      syncController: controller)
+    #expect(await model.selectWatchingProfile(selection, pin: "1234"))
+
+    model.wrappedLaunch = WrappedLaunch(year: 2026)
+    model.movieNightLaunch = MovieNightLaunch(joining: nil)
+    model.requestedMediaDetail = UUID()
+    model.requestedDestination = .wishes
+    model.showingCollectionEditor = true
+
+    await model.switchWatchingProfile()
+    #expect(model.wrappedLaunch == nil)
+    #expect(model.movieNightLaunch == nil)
+    #expect(model.requestedMediaDetail == nil)
+    #expect(model.requestedDestination == nil)
+    #expect(!model.showingCollectionEditor)
+    #expect(model.activeRemotePlayer == nil)
+    #expect(model.watchParty == nil)
+    await controller.stop()
+  }
+
   private func makeModel(
     unlocker:
       @escaping @MainActor (StoredServerProfile, UUID, String) async throws ->

@@ -60,6 +60,7 @@ actor LibrarySyncController {
     pollingTask = Task {
       var cursor = cursors[key] ?? Cursor()
       var failures = 0
+      var invalidResponses = 0
       while !Task.isCancelled, activeRun == run, isForeground {
         do {
           let started = Date()
@@ -99,6 +100,7 @@ actor LibrarySyncController {
           }
           cursors[key] = cursor
           failures = 0
+          invalidResponses = 0
           guard !Task.isCancelled, activeRun == run else { return }
           await onSuccess?()
           // Prevent a malformed or older endpoint from driving an unbounded empty poll loop.
@@ -121,6 +123,14 @@ actor LibrarySyncController {
             if !failure.isRetryableTransient {
               await onFailure?(failure)
               return
+            }
+            if failure == .invalidResponse {
+              invalidResponses += 1
+              if invalidResponses >= 3 {
+                await onFailure?(failure)
+              }
+            } else {
+              invalidResponses = 0
             }
           }
           if ServerReconnectPolicy.isConnectivityFailure(error) { await onTransportFailure?() }

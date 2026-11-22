@@ -108,14 +108,15 @@ struct RootView: View {
       }
 
       // Movie Night and Wrapped take the whole window, over the library and Settings.
-      if model.playback == nil, let launch = model.movieNightLaunch, let api = model.profileClient()
+      if model.playback == nil, !model.requiresProfileSelection,
+        let launch = model.movieNightLaunch, let api = model.profileClient()
       {
         MovieNightView(api: api, joining: launch.joining)
           .id(launch.id)
           .transition(.opacity)
           .zIndex(8)
       }
-      if model.playback == nil, let launch = model.wrappedLaunch {
+      if model.playback == nil, !model.requiresProfileSelection, let launch = model.wrappedLaunch {
         WrappedStoryView(launch: launch)
           .id(launch.id)
           .transition(.opacity)

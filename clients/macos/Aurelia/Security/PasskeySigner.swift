@@ -104,6 +104,41 @@ enum PasskeyStore {
     AureliaKeychain.delete(baseQuery(server: server, profile: profile))
   }
 
+  /// Removes every Touch ID passkey stored for `server` (called when disconnecting).
+  static func removeAll(server: UUID) {
+    let query = AureliaKeychain.item([
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecReturnAttributes as String: true,
+      kSecMatchLimit as String: kSecMatchLimitAll,
+      kSecAttrSynchronizable as String: false,
+    ])
+    var result: CFTypeRef?
+    guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+      let items = result as? [[String: Any]]
+    else { return }
+    let prefix = server.uuidString + "."
+    for item in items {
+      guard let account = item[kSecAttrAccount as String] as? String, account.hasPrefix(prefix)
+      else { continue }
+      AureliaKeychain.delete([
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: service,
+        kSecAttrAccount as String: account,
+        kSecAttrSynchronizable as String: false,
+      ])
+    }
+  }
+
+  /// Removes every passkey for this edition's Keychain service (used by Reset App Data).
+  static func removeAll() {
+    AureliaKeychain.delete([
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrSynchronizable as String: false,
+    ])
+  }
+
   private static func baseQuery(server: UUID, profile: UUID) -> [String: Any] {
     [
       kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,

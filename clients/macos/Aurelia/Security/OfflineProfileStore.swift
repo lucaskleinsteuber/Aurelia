@@ -15,8 +15,31 @@ struct OfflineProfileCard: Codable, Equatable, Identifiable, Sendable {
   var salt: Data?
   var check: Data?
   var rememberedAt: Date
+  var failedPinAttempts: Int? = nil
+  var pinLockedUntil: Date? = nil
 
   var id: UUID { userId }
+
+  /// Active lockout deadline for this profile card, if too many wrong PINs were entered.
+  func lockedUntil(now: Date = Date()) -> Date? {
+    guard let until = pinLockedUntil, until > now else { return nil }
+    return until
+  }
+
+  /// Updates persisted per-card PIN lockout state (persisted in Keychain across app restarts).
+  mutating func recordPINAttempt(succeeded: Bool, now: Date = Date()) {
+    if succeeded {
+      failedPinAttempts = 0
+      pinLockedUntil = nil
+      return
+    }
+    let failures = (failedPinAttempts ?? 0) + 1
+    failedPinAttempts = failures
+    if failures >= 5 {
+      let seconds = min(300.0, 30 * pow(2, Double(failures - 5)))
+      pinLockedUntil = now.addingTimeInterval(seconds)
+    }
+  }
 
   /// Whether this PIN opens the profile offline. A profile without a PIN opens without one.
   func accepts(_ pin: String) -> Bool {
@@ -138,6 +161,14 @@ struct KeychainOfflineProfileStore: OfflineProfileStoring {
     for card in cards(serverId: serverId) {
       AureliaKeychain.delete(baseQuery(account: Self.account(card)))
     }
+  }
+
+  func forgetAll() {
+    AureliaKeychain.delete([
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrSynchronizable as String: false,
+    ])
   }
 
   private func baseQuery(account: String) -> [String: Any] {

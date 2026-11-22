@@ -339,4 +339,53 @@ struct PinnedHostMatchingTests {
     #expect(!TLSTrustDelegate.sameHost("fd00::5", "fd00::6"))
     #expect(!TLSTrustDelegate.sameHost("", ""))
   }
+
+  @Test func unknownSyncChangeAreasDecodeTolerantlyAndTriggerFullRefresh() throws {
+    let payload = Data(
+      """
+      {"cursor":12,"resetRequired":false,"changedAreas":["catalog","futureArea"],"changedMediaIds":[]}
+      """.utf8)
+    let response = try JSONDecoder().decode(SyncChangesResponse.self, from: payload)
+    #expect(response.changedAreas == [.catalog, .unknown])
+    let onlyFuture = SyncChangesResponse(
+      cursor: 13, resetRequired: false, changedAreas: [.unknown], changedMediaIds: [])
+    let plan = SyncRefreshPlan(onlyFuture)
+    #expect(plan.fullCatalog)
+    #expect(plan.collections)
+    #expect(plan.home)
+  }
+
+  @Test func repeatedSyncDecodeFailuresReportVisibleError() async throws {
+    let failures = FailureBox()
+    let controller = LibrarySyncController(
+      fetchChanges: { _, _, _, _ in throw APIClientError.invalidResponse },
+      delay: { _ in try await Task.sleep(for: .milliseconds(1)) })
+    let profile = StoredServerProfile(
+      serverId: UUID(), name: "Synthetic", baseURL: URL(string: "https://fixture.invalid")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64), token: "test-only",
+      sessionId: UUID(), expiresAt: "2099-01-01T00:00:00Z")
+    await controller.start(
+      profile: profile,
+      onFailure: { error in await failures.append(error) },
+      onChanges: { _ in })
+    for _ in 0..<400 {
+      if await failures.count > 0 { break }
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    await controller.stop()
+    #expect(await failures.first == .invalidResponse)
+  }
+
+  @Test func backupUploadResourceTimeoutScalesForLargeFiles() {
+    #expect(APIClient.backupUploadResourceTimeout(fileSize: 10 * 1_024 * 1_024) == 600)
+    let fourGiB: Int64 = 4 * 1_024 * 1_024 * 1_024
+    #expect(APIClient.backupUploadResourceTimeout(fileSize: fourGiB) > 10_000)
+  }
+}
+
+private actor FailureBox {
+  private var items: [APIClientError] = []
+  func append(_ error: APIClientError) { items.append(error) }
+  var count: Int { items.count }
+  var first: APIClientError? { items.first }
 }
