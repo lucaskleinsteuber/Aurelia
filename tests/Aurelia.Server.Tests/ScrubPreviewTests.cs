@@ -215,6 +215,111 @@ public sealed class ScrubPreviewTests
         }
     }
 
+    // Audit 2026-11-21 (SRV-BG-001/-002/-003, SRV-PLAY-001): "afterImport" looped forever on an idle
+    // server because the library keeps file times in milliseconds while strips were named with the
+    // file's exact 100-ns time, a failing title was queued again at once, and the worker woke itself.
+    [Fact]
+    public async Task AfterImportFindsItsStripsSkipsFailedTitlesAndRestsWhenIdle()
+    {
+        if (Installed() is not { } maker) return;
+        var ffmpeg = Tools() ?? maker;
+        var root = Path.Combine(TestPaths.CreateDataDirectory(), "Scrub Preview After Import");
+        Directory.CreateDirectory(root);
+        var good = Path.Combine(root, "Invented Good.mkv");
+        var broken = Path.Combine(root, "Invented Broken.mkv");
+        try
+        {
+            await MakeMediaAsync(maker, good);
+            // A file time below the millisecond, as APFS and ext4 keep it.
+            var exact = new DateTime(2026, 11, 21, 12, 0, 0, DateTimeKind.Utc).AddTicks(1_234_567);
+            File.SetLastWriteTimeUtc(good, exact);
+            await File.WriteAllBytesAsync(broken, Encoding.ASCII.GetBytes("not a video at all, only invented bytes"));
+            File.SetLastWriteTimeUtc(broken, exact);
+
+            using var factory = Factory(ffmpeg);
+            using var client = factory.CreateClient();
+            await ApiTestClient.SetupOwnerAsync(client);
+            var goodId = await AddMediaAsync(factory, root, good, "Invented Good");
+            await AddMediaAsync(factory, root, broken, "Invented Broken");
+            var service = factory.Services.GetRequiredService<ScrubPreviewService>();
+
+            await service.UpdateSettingsAsync(new UpdateScrubPreviewSettingsRequest("afterImport", 10, 50));
+            Assert.Equal(2, (await service.ReadSettingsAsync()).PendingCount);
+            Assert.Equal(1, await service.ProcessPendingQueueAsync(TimeSpan.Zero, CancellationToken.None));
+
+            // The strip is found by the library's time, and the broken title isn't tried again.
+            Assert.Equal(0, await service.QueueUncachedLibraryTitlesAsync(CancellationToken.None));
+            var scrubDir = Path.Combine(factory.DataDirectory, "ScrubPreviews");
+            var strip = Assert.Single(Directory.GetFiles(scrubDir, "*.strip"));
+
+            // A strip named by an earlier version with the exact time is renamed, not made again.
+            var legacy = strip.Replace($"-m{exact.Ticks - exact.Ticks % TimeSpan.TicksPerMillisecond:x}-", $"-m{exact.Ticks:x}-", StringComparison.Ordinal);
+            Assert.NotEqual(strip, legacy);
+            File.Move(strip, legacy);
+            var before = (await service.ReadSettingsAsync()).CompletedCount;
+            Assert.True(await service.GenerateTitleStripAsync(goodId, TimeSpan.Zero, CancellationToken.None));
+            Assert.True(File.Exists(strip));
+            Assert.False(File.Exists(legacy));
+
+            // A full store is not refilled; background work would only push other strips out.
+            File.Delete(strip);
+            var filler = Path.Combine(scrubDir, "invented-filler.strip");
+            await using (var fill = File.Create(filler)) fill.SetLength(50L * 1024 * 1024);
+            Assert.Equal(0, await service.QueueUncachedLibraryTitlesAsync(CancellationToken.None));
+            File.Delete(filler);
+            Assert.Equal(1, await service.QueueUncachedLibraryTitlesAsync(CancellationToken.None));
+            Assert.Equal(1, await service.ProcessPendingQueueAsync(TimeSpan.Zero, CancellationToken.None));
+
+            // The real worker: with everything done it waits instead of scheduling again and again.
+            using var stop = new CancellationTokenSource();
+            await service.StartAsync(stop.Token);
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1));
+                var first = (await service.ReadSettingsAsync()).TotalScheduledCount;
+                await Task.Delay(TimeSpan.FromSeconds(2));
+                var second = await service.ReadSettingsAsync();
+                Assert.Equal(first, second.TotalScheduledCount);
+                Assert.Equal(0, second.PendingCount);
+                Assert.True(second.CompletedCount >= before);
+            }
+            finally
+            {
+                await stop.CancelAsync();
+                await service.StopAsync(CancellationToken.None);
+            }
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(root)!, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AfterImportQueuesNothingWithoutFfmpeg()
+    {
+        var root = Path.Combine(TestPaths.CreateDataDirectory(), "Scrub Preview No Ffmpeg");
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "Invented Film.mkv");
+        try
+        {
+            await File.WriteAllBytesAsync(path, Encoding.ASCII.GetBytes("invented bytes"));
+            using var factory = Factory(Path.Combine(root, "no-ffmpeg-here", "ffmpeg"));
+            using var client = factory.CreateClient();
+            await ApiTestClient.SetupOwnerAsync(client);
+            await AddMediaAsync(factory, root, path);
+            var service = factory.Services.GetRequiredService<ScrubPreviewService>();
+
+            await service.UpdateSettingsAsync(new UpdateScrubPreviewSettingsRequest("afterImport", 10, 50));
+            Assert.Equal(0, await service.QueueUncachedLibraryTitlesAsync(CancellationToken.None));
+            Assert.Equal(0, (await service.ReadSettingsAsync()).TotalScheduledCount);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(root)!, recursive: true);
+        }
+    }
+
     private static string? Tools() =>
         Environment.GetEnvironmentVariable("AURELIA_TEST_FFMPEG") is { Length: > 0 } chosen ? chosen : null;
 

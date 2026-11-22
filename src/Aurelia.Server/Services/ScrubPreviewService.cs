@@ -32,6 +32,18 @@ public sealed class ScrubPreviewService : BackgroundService
     public const int MaximumMemoryBytes = 16 * 1024 * 1024;
     public static readonly IReadOnlyList<string> Modes = ["off", "onOpenOrPlay", "afterImport"];
 
+    /// <summary>Titles read per database page while looking for ones without a strip.</summary>
+    public const int RefillPageSize = 2_000;
+    /// <summary>A title whose strip couldn't be made is tried again after this, or when its file changes.</summary>
+    public static readonly TimeSpan FailedTitleRetry = TimeSpan.FromHours(24);
+    /// <summary>A background loop that failed unexpectedly waits this long before it goes on.</summary>
+    public static readonly TimeSpan UnexpectedFailurePause = TimeSpan.FromSeconds(30);
+
+    private static readonly Action<ILogger, Guid, Exception?> TitleFailed = LoggerMessage.Define<Guid>(
+        LogLevel.Warning, new EventId(4301, nameof(TitleFailed)), "Scrub previews for title {MediaId} could not be made.");
+    private static readonly Action<ILogger, Exception?> LoopFailed = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(4302, nameof(LoopFailed)), "Scrub previews paused after an unexpected failure.");
+
     private static readonly ReadOnlyMemory<byte> StripMagic = "AUSTPV01"u8.ToArray();
     private static readonly TimeSpan FrameTimeout = TimeSpan.FromSeconds(15);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -50,6 +62,10 @@ public sealed class ScrubPreviewService : BackgroundService
     private readonly ConcurrentQueue<Guid> priorityQueue = new();
     private readonly ConcurrentQueue<Guid> importQueue = new();
     private readonly ConcurrentDictionary<Guid, byte> queuedIds = new();
+    // Titles whose strip couldn't be made (no file, no video, no frames, no room), by the file
+    // stamp the library knows, so the idle refill doesn't try them again and again (audit SRV-BG-002).
+    private readonly ConcurrentDictionary<Guid, (long FileSize, long ModifiedMilliseconds, DateTimeOffset At)> failedTitles = new();
+    private readonly ILogger<ScrubPreviewService>? logger;
 
     private StoredSettings settings;
     private int modeCode; // 0 = off, 1 = onOpenOrPlay, 2 = afterImport
@@ -75,13 +91,15 @@ public sealed class ScrubPreviewService : BackgroundService
         IServiceScopeFactory scopes,
         LiveConversionService live,
         ActiveStreamRegistry streams,
-        TimeProvider? clock = null)
+        TimeProvider? clock = null,
+        ILogger<ScrubPreviewService>? logger = null)
     {
         this.runtime = runtime;
         this.scopes = scopes;
         this.live = live;
         this.streams = streams;
         this.clock = clock ?? TimeProvider.System;
+        this.logger = logger;
         settingsPath = Path.Combine(runtime.DataDirectory, SettingsFileName);
         stripsDirectory = Path.Combine(runtime.DataDirectory, DirectoryName);
         settings = LoadSettings();
@@ -175,6 +193,8 @@ public sealed class ScrubPreviewService : BackgroundService
             finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }
 
+        // New settings (a larger store, another interval) deserve another try for every title.
+        failedTitles.Clear();
         PruneDiskToCap((long)updated.StorageCapMegabytes * 1024 * 1024, requiredBytes: 0);
         if (updated.Mode == "off")
         {
@@ -404,12 +424,21 @@ public sealed class ScrubPreviewService : BackgroundService
     /// persisting mode ("onOpenOrPlay" or "afterImport") is active. Pauses while playback or live
     /// conversion is active.
     /// </summary>
-    public async Task<bool> GenerateTitleStripAsync(Guid mediaId, TimeSpan framePause, CancellationToken cancellationToken)
+    public Task<bool> GenerateTitleStripAsync(Guid mediaId, TimeSpan framePause, CancellationToken cancellationToken) =>
+        GenerateTitleStripAsync(mediaId, framePause, background: false, cancellationToken);
+
+    /// <summary>
+    /// Makes one title's strip. <paramref name="background"/> work from the idle refill never pushes
+    /// another title's strip out of a full store: otherwise the two would replace each other forever.
+    /// </summary>
+    private async Task<bool> GenerateTitleStripAsync(Guid mediaId, TimeSpan framePause, bool background, CancellationToken cancellationToken)
     {
         StoredSettings current;
         lock (settingsGate) current = settings;
         if (current.Mode == "off") return false;
         if (await live.ToolsAsync() is not { } tools) return false;
+        var capBytes = (long)current.StorageCapMegabytes * 1024 * 1024;
+        if (background && MeasureDiskUsage().UsedBytes >= capBytes) return false;
 
         var epoch = Volatile.Read(ref generationEpoch);
         await using var scope = scopes.CreateAsyncScope();
@@ -425,6 +454,12 @@ public sealed class ScrubPreviewService : BackgroundService
             return false;
         }
 
+        bool Failed()
+        {
+            RememberFailure(media);
+            return false;
+        }
+
         OpenMediaFile file;
         try
         {
@@ -433,7 +468,7 @@ public sealed class ScrubPreviewService : BackgroundService
         catch (PlaybackException)
         {
             InvalidateMedia(mediaId);
-            return false;
+            return Failed();
         }
 
         await using var stream = file.Stream;
@@ -451,10 +486,10 @@ public sealed class ScrubPreviewService : BackgroundService
         }
         catch (PlaybackException)
         {
-            return false;
+            return Failed();
         }
 
-        if (probe.Video is not { } video) return false;
+        if (probe.Video is not { } video) return Failed();
         var durationSeconds = Math.Max(1, (int)Math.Round(probe.DurationSeconds ?? 1));
         var interval = EffectiveInterval(durationSeconds, current.IntervalSeconds);
         var buckets = new List<int>();
@@ -492,8 +527,9 @@ public sealed class ScrubPreviewService : BackgroundService
                     await Task.Delay(framePause, cancellationToken);
             }
 
-            if (frames.Count == 0 || Volatile.Read(ref generationEpoch) != epoch || Volatile.Read(ref modeCode) == 0)
+            if (Volatile.Read(ref generationEpoch) != epoch || Volatile.Read(ref modeCode) == 0)
                 return false;
+            if (frames.Count == 0) return Failed();
 
             // Verify the source file was not modified or removed while frames were being extracted.
             var latestInfo = new FileInfo(checkedPath);
@@ -503,16 +539,19 @@ public sealed class ScrubPreviewService : BackgroundService
                 return false;
             }
 
-            await WriteStripFileAsync(
+            if (!await WriteStripFileAsync(
                 media.Id,
                 file.Length,
                 modifiedTicks,
-                 current.IntervalSeconds,
+                current.IntervalSeconds,
                 interval,
                 durationSeconds,
                 frames,
-                (long)current.StorageCapMegabytes * 1024 * 1024,
-                cancellationToken);
+                capBytes,
+                mayPushOthersOut: !background,
+                cancellationToken))
+                return Failed();
+            failedTitles.TryRemove(media.Id, out _);
             return true;
         }
         finally
@@ -525,11 +564,24 @@ public sealed class ScrubPreviewService : BackgroundService
     public async Task<int> ProcessPendingQueueAsync(TimeSpan framePause, CancellationToken cancellationToken)
     {
         var processed = 0;
-        while (TryDequeueNext(out var mediaId))
+        while (TryDequeueNext(out var mediaId, out var background))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (Volatile.Read(ref modeCode) == 0) break;
-            if (await GenerateTitleStripAsync(mediaId, framePause, cancellationToken))
+            bool made;
+            try
+            {
+                made = await GenerateTitleStripAsync(mediaId, framePause, background, cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                // One title must never end the service or the server, e.g. a file replaced while its
+                // stills are taken (audit SRV-PLAY-001); it is tried again when its file changes.
+                if (logger is not null) TitleFailed(logger, mediaId, exception);
+                await RememberFailureAsync(mediaId, cancellationToken);
+                continue;
+            }
+            if (made)
             {
                 Interlocked.Increment(ref completedCount);
                 processed++;
@@ -538,59 +590,115 @@ public sealed class ScrubPreviewService : BackgroundService
         return processed;
     }
 
-    public async Task<int> QueueUncachedLibraryTitlesAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Queues every available title without a strip, largest first, in "afterImport" mode. Titles
+    /// that failed and haven't changed are skipped, nothing is queued without ffmpeg or while the
+    /// store is full, and <paramref name="signal"/> wakes the worker only when called from outside it.
+    /// </summary>
+    public async Task<int> QueueUncachedLibraryTitlesAsync(CancellationToken cancellationToken) =>
+        await QueueUncachedLibraryTitlesAsync(signal: true, cancellationToken);
+
+    private async Task<int> QueueUncachedLibraryTitlesAsync(bool signal, CancellationToken cancellationToken)
     {
         StoredSettings current;
         lock (settingsGate) current = settings;
         if (current.Mode != "afterImport") return 0;
+        if (await live.ToolsAsync() is null) return 0;
+        if (MeasureDiskUsage().UsedBytes >= (long)current.StorageCapMegabytes * 1024 * 1024) return 0;
 
         await using var scope = scopes.CreateAsyncScope();
         var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
-        // Slowest / largest files first when idle, as specified in Part B.
-        var candidates = await database.MediaItems
-            .IgnoreQueryFilters()
-            .AsNoTracking()
-            .Where(item => item.Kind != MediaKind.Series && item.Availability == MediaAvailability.Available)
-            .OrderByDescending(item => item.FileSize)
-            .ThenBy(item => item.Id)
-            .Select(item => new { item.Id, item.FileSize, item.FileModifiedAt })
-            .Take(2_000)
-            .ToListAsync(cancellationToken);
-
+        var now = clock.GetUtcNow();
         var added = 0;
-        foreach (var candidate in candidates)
+        // Largest files first when idle, read page by page so smaller titles are reached too.
+        for (var offset = 0; ; offset += RefillPageSize)
         {
-            if (candidate.FileSize is not > 0 || candidate.FileModifiedAt is not { } modifiedAt)
-                continue;
-            if (HasStripOnDisk(candidate.Id, candidate.FileSize.Value, modifiedAt.UtcTicks, current.IntervalSeconds))
-                continue;
-            if (queuedIds.TryAdd(candidate.Id, 1))
+            var candidates = await database.MediaItems
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .Where(item => item.Kind != MediaKind.Series && item.Availability == MediaAvailability.Available)
+                .OrderByDescending(item => item.FileSize)
+                .ThenBy(item => item.Id)
+                .Select(item => new { item.Id, item.FileSize, item.FileModifiedAt })
+                .Skip(offset)
+                .Take(RefillPageSize)
+                .ToListAsync(cancellationToken);
+
+            foreach (var candidate in candidates)
             {
-                Interlocked.Increment(ref totalScheduledCount);
-                importQueue.Enqueue(candidate.Id);
-                added++;
+                if (candidate.FileSize is not > 0 || candidate.FileModifiedAt is not { } modifiedAt)
+                    continue;
+                if (HasStripOnDisk(candidate.Id, candidate.FileSize.Value, modifiedAt.UtcTicks, current.IntervalSeconds))
+                    continue;
+                if (failedTitles.TryGetValue(candidate.Id, out var failure)
+                    && failure.FileSize == candidate.FileSize.Value
+                    && failure.ModifiedMilliseconds == modifiedAt.ToUnixTimeMilliseconds()
+                    && now - failure.At < FailedTitleRetry)
+                    continue;
+                if (queuedIds.TryAdd(candidate.Id, 1))
+                {
+                    Interlocked.Increment(ref totalScheduledCount);
+                    importQueue.Enqueue(candidate.Id);
+                    added++;
+                }
             }
+            if (candidates.Count < RefillPageSize) break;
         }
-        if (added > 0) SignalWork();
+        if (signal && added > 0) SignalWork();
         return added;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        try
+        var refill = Volatile.Read(ref modeCode) == 2;
+        while (!stoppingToken.IsCancellationRequested)
         {
-            if (Volatile.Read(ref modeCode) == 2)
-                await QueueUncachedLibraryTitlesAsync(stoppingToken);
-
-            while (!stoppingToken.IsCancellationRequested)
+            try
             {
+                // The worker refills its own queue only when it is woken and has nothing queued; it
+                // never wakes itself, so an idle server waits here (audit SRV-BG-001).
+                if (refill && Volatile.Read(ref modeCode) == 2 && priorityQueue.IsEmpty && importQueue.IsEmpty)
+                    await QueueUncachedLibraryTitlesAsync(signal: false, stoppingToken);
+                if (!priorityQueue.IsEmpty || !importQueue.IsEmpty)
+                    using (ServerWorkSignal.Begin(scopes, keepAwake: false)) await ProcessPendingQueueAsync(TimeSpan.FromMilliseconds(25), stoppingToken);
                 await workSignal.WaitAsync(stoppingToken);
-                if (Volatile.Read(ref modeCode) == 2 && priorityQueue.IsEmpty && importQueue.IsEmpty)
-                    await QueueUncachedLibraryTitlesAsync(stoppingToken);
-                using (ServerWorkSignal.Begin(scopes, keepAwake: false)) await ProcessPendingQueueAsync(TimeSpan.FromMilliseconds(25), stoppingToken);
+                refill = true;
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                // Never end the server: wait a little and go on (audit SRV-BG-004).
+                if (logger is not null) LoopFailed(logger, exception);
+                try { await Task.Delay(UnexpectedFailurePause, clock, stoppingToken); }
+                catch (OperationCanceledException) { return; }
             }
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+    }
+
+    private void RememberFailure(MediaItem media)
+    {
+        if (media.FileSize is not > 0 || media.FileModifiedAt is not { } modifiedAt) return;
+        failedTitles[media.Id] = (media.FileSize.Value, modifiedAt.ToUnixTimeMilliseconds(), clock.GetUtcNow());
+    }
+
+    private async Task RememberFailureAsync(Guid mediaId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            var media = await database.MediaItems.IgnoreQueryFilters().AsNoTracking()
+                .SingleOrDefaultAsync(item => item.Id == mediaId, cancellationToken);
+            if (media is not null) RememberFailure(media);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Not remembered: the title is simply tried again at the next refill.
+            if (logger is not null) TitleFailed(logger, mediaId, exception);
+        }
     }
 
     private bool IsBusyWithPlayback() => streams.PlaybackCount > 0 || live.Running > 0;
@@ -784,7 +892,14 @@ public sealed class ScrubPreviewService : BackgroundService
     private static string MemoryKey(Guid mediaId, long fileSize, long modifiedTicks, int intervalSeconds, int bucketSeconds) =>
         $"{mediaId:N}:{fileSize:x}:{modifiedTicks:x}:{intervalSeconds}:{bucketSeconds}";
 
+    // The name carries the file time in whole milliseconds, as the library keeps it, so the idle
+    // refill (which knows only the library's time) finds the strip the worker named after the file
+    // (audit SRV-BG-001). The strip's header keeps the exact time.
     private static string StripStem(Guid mediaId, long fileSize, long modifiedTicks, int configuredInterval) =>
+        $"{mediaId:N}-s{fileSize:x}-m{modifiedTicks - modifiedTicks % TimeSpan.TicksPerMillisecond:x}-i{configuredInterval}-v1";
+
+    // Strips written by earlier versions were named with the file's exact time.
+    private static string LegacyStripStem(Guid mediaId, long fileSize, long modifiedTicks, int configuredInterval) =>
         $"{mediaId:N}-s{fileSize:x}-m{modifiedTicks:x}-i{configuredInterval}-v1";
 
     private string StripPath(string stem) => Path.Combine(stripsDirectory, stem + ".strip");
@@ -792,8 +907,21 @@ public sealed class ScrubPreviewService : BackgroundService
     private bool HasStripOnDisk(Guid mediaId, long fileSize, long modifiedTicks, int configuredInterval)
     {
         if (!Directory.Exists(stripsDirectory)) return false;
-        var info = new FileInfo(StripPath(StripStem(mediaId, fileSize, modifiedTicks, configuredInterval)));
-        return info.Exists && info.LinkTarget is null && info.Length >= 48;
+        var path = StripPath(StripStem(mediaId, fileSize, modifiedTicks, configuredInterval));
+        var info = new FileInfo(path);
+        if (info.Exists) return info.LinkTarget is null && info.Length >= 48;
+        // An older strip of the same file keeps its stills: it is only renamed.
+        var legacy = new FileInfo(StripPath(LegacyStripStem(mediaId, fileSize, modifiedTicks, configuredInterval)));
+        if (legacy.FullName == info.FullName || !legacy.Exists || legacy.LinkTarget is not null || legacy.Length < 48) return false;
+        try
+        {
+            legacy.MoveTo(path);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private void DeleteStaleStripFiles(Guid mediaId, string? keepStem)
@@ -883,7 +1011,11 @@ public sealed class ScrubPreviewService : BackgroundService
         }
     }
 
-    private async Task WriteStripFileAsync(
+    /// <summary>
+    /// Writes a title's strip, pushing the oldest strips out when the store is full only if
+    /// <paramref name="mayPushOthersOut"/>. False when it doesn't fit.
+    /// </summary>
+    private async Task<bool> WriteStripFileAsync(
         Guid mediaId,
         long fileSize,
         long modifiedTicks,
@@ -892,12 +1024,14 @@ public sealed class ScrubPreviewService : BackgroundService
         int durationSeconds,
         List<(int Seconds, byte[] Data)> frames,
         long capBytes,
+        bool mayPushOthersOut,
         CancellationToken cancellationToken)
     {
         var headerLength = 52 + frames.Count * 12;
         var totalPayload = frames.Sum(frame => frame.Data.Length);
         var totalLength = headerLength + totalPayload;
-        if (totalLength > capBytes) return;
+        if (totalLength > capBytes) return false;
+        if (!mayPushOthersOut && MeasureDiskUsage().UsedBytes + totalLength > capBytes) return false;
 
         var buffer = new byte[totalLength];
         StripMagic.Span.CopyTo(buffer.AsSpan(0, 8));
@@ -921,7 +1055,7 @@ public sealed class ScrubPreviewService : BackgroundService
         }
 
         PrivateFilePermissions.CreatePrivateDirectory(stripsDirectory);
-        if (new DirectoryInfo(stripsDirectory).LinkTarget is not null) return;
+        if (new DirectoryInfo(stripsDirectory).LinkTarget is not null) return false;
         var stem = StripStem(mediaId, fileSize, modifiedTicks, configuredInterval);
         DeleteStaleStripFiles(mediaId, keepStem: stem);
         PruneDiskToCap(capBytes, buffer.LongLength);
@@ -943,6 +1077,7 @@ public sealed class ScrubPreviewService : BackgroundService
         {
             if (File.Exists(temporary)) File.Delete(temporary);
         }
+        return true;
     }
 
     private (long UsedBytes, int StripCount) MeasureDiskUsage()
@@ -1012,12 +1147,14 @@ public sealed class ScrubPreviewService : BackgroundService
         }
     }
 
-    private bool TryDequeueNext(out Guid mediaId)
+    private bool TryDequeueNext(out Guid mediaId, out bool background)
     {
+        background = false;
         while (priorityQueue.TryDequeue(out mediaId))
         {
             if (queuedIds.TryRemove(mediaId, out _)) return true;
         }
+        background = true;
         while (importQueue.TryDequeue(out mediaId))
         {
             if (queuedIds.TryRemove(mediaId, out _)) return true;
@@ -1031,6 +1168,7 @@ public sealed class ScrubPreviewService : BackgroundService
         while (priorityQueue.TryDequeue(out _)) { }
         while (importQueue.TryDequeue(out _)) { }
         queuedIds.Clear();
+        failedTitles.Clear();
         Interlocked.Exchange(ref completedCount, 0);
         Interlocked.Exchange(ref totalScheduledCount, 0);
     }
