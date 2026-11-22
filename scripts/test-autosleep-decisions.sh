@@ -114,16 +114,32 @@ printf 'MODE=sleep\nIDLE_MINUTES=15\n' > "$work/data/sleep-settings"
 : > "$work/state/last-active"
 decide "" >/dev/null || fail "an empty last-active must not stop the check"
 
-# A scan or metadata job the server reports keeps the computer on; its analysis note alone does not
-# (audit B-4). The load of this computer is real, so only the scan case can be checked exactly.
+# A scan or metadata job the server reports keeps the computer on, even after an ended sleep timer
+# (audit LNX-PKG-012); its analysis note alone does not (audit B-4).
 echo $(( $(date +%s) - 3600 )) > "$work/state/last-active"
 echo keepawake > "$work/data/work"
 decide "" | grep -Fx 'awake: in use' >/dev/null || fail "a scan the server reports must keep the computer on"
+date +%s > "$work/data/sleep-ready"
+decide "" | grep -Fx 'awake: in use' >/dev/null || fail "an ended sleep timer must not interrupt an active scan/keepawake job"
+[ -e "$work/data/sleep-ready" ] || fail "the sleep timer signal must stay while keepawake work runs"
+rm -f "$work/data/sleep-ready"
 echo $(( $(date +%s) - 3600 )) > "$work/state/last-active"
 echo analysis > "$work/data/work"
 touch -d '10 minutes ago' "$work/data/work"
 decide "" | grep -F 'Unused for 15 minutes' >/dev/null || [ "$(awk '{ print ($1 > 0.5) }' /proc/loadavg)" = 1 ] \
   || fail "an old work note must not count"
 rm -f "$work/data/work"
+
+# With MODE=stop and Aurelia already stopped behind aurelia-start.socket, --now must still consume
+# power-now rather than exiting early and causing systemd path unit start-limit-hit (audit LNX-PKG-007).
+printf 'MODE=stop\nIDLE_MINUTES=15\n' > "$work/data/sleep-settings"
+echo shutdown > "$work/data/power-now"
+PATH="$work/bin:$PATH" ACTIVE="aurelia-start.socket" AURELIA_DATA_DIR="$work/data" \
+  AURELIA_SLEEP_SETTINGS_LIBRARY="$repository/packaging/linux/aurelia-sleep-settings" \
+  AURELIA_AUTOSLEEP_DRY_RUN=1 AURELIA_AUTOSLEEP_STATE="$work/state" \
+  bash "$repository/packaging/linux/aurelia-autosleep" --now \
+  | grep -F 'turn off until a Wake-on-LAN call: Asked from an app' >/dev/null \
+  || fail "--now must still process power-now when MODE=stop and aurelia-start.socket is active"
+rm -f "$work/data/power-now"
 
 echo "aurelia-autosleep decisions: all checks passed."

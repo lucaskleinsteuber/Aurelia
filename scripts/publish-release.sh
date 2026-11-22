@@ -64,7 +64,12 @@ if [ "$product" = Server ]; then
     || { echo "The signature does not match the servers' public key; nothing was uploaded." >&2; exit 1; }
   files+=("$output/SHA256SUMS.minisig")
   title="Aurelia Server $version ($build)"
-  downloads="- **Linux server:** Download the x64 or arm64 package. Existing installations can use \`sudo aurelia update\` or Settings › Updates › Server Updates in Aurelia for Mac."
+  downloads=$(cat <<EOF
+- **Linux x64:** \`Aurelia-Server-$build_tag-linux-x64.tar.gz\`
+- **Linux arm64 (e.g. Raspberry Pi):** \`Aurelia-Server-$build_tag-linux-arm64.tar.gz\`
+- **Updating an existing installation:** Run \`sudo aurelia update\` or use **Settings › Updates › Server Updates** in Aurelia.
+EOF
+)
 else
   config="$repository_root/clients/macos/Configuration/BuildNumber.xcconfig"
   version=$(sed -n 's/^MARKETING_VERSION = //p' "$config")

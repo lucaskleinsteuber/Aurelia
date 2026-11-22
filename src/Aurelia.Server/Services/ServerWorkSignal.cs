@@ -9,7 +9,12 @@ namespace Aurelia.Server.Services;
 /// keeps an unused computer awake through the processor load it causes (audit B-4). Without the
 /// file the power saving goes by the load as before.
 /// </summary>
-public sealed partial class ServerWorkSignal(ServerRuntimeOptions runtime, TimeProvider clock, ILogger<ServerWorkSignal> logger) : BackgroundService
+public sealed partial class ServerWorkSignal(
+    ServerRuntimeOptions runtime,
+    TimeProvider clock,
+    ILogger<ServerWorkSignal> logger,
+    ActiveStreamRegistry? streams = null,
+    ServerUseClock? useClock = null) : BackgroundService
 {
     public const string FileName = "work";
     private int keepAwake;
@@ -51,7 +56,7 @@ public sealed partial class ServerWorkSignal(ServerRuntimeOptions runtime, TimeP
         {
             do
             {
-                try { Write(); }
+                try { Tick(); }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
                     WorkLoopFailed(logger, exception);
@@ -61,6 +66,13 @@ public sealed partial class ServerWorkSignal(ServerRuntimeOptions runtime, TimeP
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
         finally { Remove(); }
+    }
+
+    /// <summary>Refreshes the work file and updates last-use while playback streams are open (audit LNX-PKG-013).</summary>
+    internal void Tick()
+    {
+        Write();
+        if (streams is { PlaybackCount: > 0 }) useClock?.Record();
     }
 
     /// <summary>Writes the current state, or removes the file when nothing runs.</summary>

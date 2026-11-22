@@ -57,7 +57,15 @@ IFS=$'\t' read -r build version name url sums_url signature_url <<<"$newest"
 echo "Aurelia Server $version ($build) for $arch"
 curl -fsSL --retry 3 "$url" -o "$work/$name"
 curl -fsSL --retry 3 "$sums_url" -o "$work/SHA256SUMS"
-[ -n "$signature_url" ] && curl -fsSL --retry 3 "$signature_url" -o "$work/SHA256SUMS.minisig" \
+if [ -z "$signature_url" ]; then
+  if [ "$build" -lt 153 ]; then
+    echo "Build $build predates signed releases (build 153 and newer); only signed releases can be installed." >&2
+  else
+    echo "The release is not signed by the owner of Aurelia." >&2
+  fi
+  exit 1
+fi
+curl -fsSL --retry 3 "$signature_url" -o "$work/SHA256SUMS.minisig" \
   && mkdir "$work/signature" && signature_valid "$work/SHA256SUMS" "$work/SHA256SUMS.minisig" "$work/signature" \
   || { echo "The release is not signed by the owner of Aurelia." >&2; exit 1; }
 expected=$(awk -v file="$name" '{ sub(/^\*/, "", $2); sub(/^\.\//, "", $2) } $2 == file { print $1 }' "$work/SHA256SUMS")

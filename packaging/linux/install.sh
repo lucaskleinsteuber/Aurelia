@@ -147,6 +147,10 @@ fi
 
 updating=false
 [ -d "$install_root/server" ] && updating=true
+if command -v flock >/dev/null 2>&1; then
+  exec 8>/run/aurelia-install.lock
+  flock 8
+fi
 # A device connecting meanwhile must not start the program while it is replaced.
 systemctl stop aurelia-start.socket aurelia 2>/dev/null || true
 

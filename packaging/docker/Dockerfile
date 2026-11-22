@@ -3,7 +3,7 @@
 FROM docker.io/library/debian:trixie-slim
 
 ARG AURELIA_REPOSITORY=lucaskleinsteuber/Aurelia
-# Empty for the newest stable release, or a build number such as 135.
+# Empty for the newest stable release, or a signed build number (153 and newer), such as 175.
 ARG AURELIA_BUILD=
 ARG TARGETARCH
 

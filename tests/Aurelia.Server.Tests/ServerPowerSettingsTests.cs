@@ -202,6 +202,59 @@ public sealed class ServerPowerSettingsTests
         Assert.Contains(info!.Hosting, new[] { ServerHosting.Server, ServerHosting.LinuxServer, ServerHosting.MacApp, ServerHosting.LinuxApp });
     }
 
+    [Fact]
+    public async Task ReadPlainSetupCodeRejectsSymlinksAndControlCharacters()
+    {
+        var dir = Directory.CreateTempSubdirectory("aurelia-setup-code-");
+        try
+        {
+            var plain = Path.Combine(dir.FullName, "browser-setup-code");
+            await File.WriteAllTextAsync(plain, "ABCD-1234\n");
+            Assert.Equal("ABCD-1234", await ServerMoveCommandClient.ReadPlainSetupCodeAsync(plain, CancellationToken.None));
+
+            await File.WriteAllTextAsync(plain, "\x1b[31mEVIL");
+            Assert.Equal(string.Empty, await ServerMoveCommandClient.ReadPlainSetupCodeAsync(plain, CancellationToken.None));
+
+            var target = Path.Combine(dir.FullName, "secret");
+            await File.WriteAllTextAsync(target, "TOP-SECRET");
+            var link = Path.Combine(dir.FullName, "linked-code");
+            File.CreateSymbolicLink(link, target);
+            Assert.Equal(string.Empty, await ServerMoveCommandClient.ReadPlainSetupCodeAsync(link, CancellationToken.None));
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ServerWorkSignalRefreshesLastUseWhilePlaybackStreamIsOpen()
+    {
+        var dir = Directory.CreateTempSubdirectory("aurelia-last-use-");
+        try
+        {
+            var runtime = new ServerRuntimeOptions(dir.FullName, Path.Combine(dir.FullName, "unused.db"),
+                "http://127.0.0.1:43110", "Synthetic", false, 43111, "", "", null);
+            var streams = new ActiveStreamRegistry();
+            var useClock = new ServerUseClock(runtime, TimeProvider.System);
+            var signal = new ServerWorkSignal(runtime, TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger<ServerWorkSignal>.Instance, streams, useClock);
+
+            signal.Tick();
+            Assert.Null(useClock.LastUse);
+
+            using (streams.Enter(Guid.NewGuid(), Guid.NewGuid(), 32, 4, CancellationToken.None, preview: false))
+            {
+                signal.Tick();
+                Assert.NotNull(useClock.LastUse);
+                Assert.True(File.Exists(Path.Combine(dir.FullName, ServerUseClock.FileName)));
+            }
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
     private sealed class Fixture : IDisposable
     {
         private readonly DirectoryInfo root = Directory.CreateTempSubdirectory("aurelia-power-");

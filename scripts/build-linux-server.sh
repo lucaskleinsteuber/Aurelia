@@ -37,12 +37,10 @@ for arch in x64 arm64; do
   zsh "$repository_root/scripts/collect-third-party-notices.sh" \
     "$stage/server/Aurelia.Server.deps.json" "$assets_path" "$stage/notices"
   cp "$repository_root/LICENSE" "$stage/notices/Aurelia-LICENSE.txt"
-  for file in install.sh aurelia aurelia.service aurelia-autosleep aurelia-sleep-settings aurelia-autosleep.service \
-    aurelia-autosleep.timer aurelia-wake-on-lan aurelia-wake-on-lan.service aurelia-start.socket \
-    aurelia-start.service aurelia-update-request.path aurelia-update-request.service aurelia-update-check.timer \
-    aurelia-update-check.service aurelia-power-request.path aurelia-power-request.service; do
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
     cp "$repository_root/packaging/linux/$file" "$stage/"
-  done
+  done < "$repository_root/packaging/linux/PACKAGE_FILES"
   chmod 0755 "$stage/install.sh" "$stage/aurelia" "$stage/aurelia-autosleep" "$stage/aurelia-wake-on-lan" \
     "$stage/server/Aurelia.Server"
   printf '%s (%s)\n' "$version" "$build" > "$stage/VERSION"

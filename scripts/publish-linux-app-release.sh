@@ -74,7 +74,10 @@ if [ "$beta" = true ]; then title="$title Beta"; fi
 {
   if [ "$beta" = true ]; then cat "$repository_root/scripts/beta-notice.md"; printf '\n'; fi
   cat "$notes_file"
-  printf '\n\n'
+  printf '\n\n## Downloads\n\n'
+  printf -- '- **Linux x64:** `%s-amd64.deb` (Debian/Ubuntu) · `%s-x86_64.rpm` (Fedora/RPM) · `%s-x86_64.pkg.tar.zst` (Arch) · `%s-x86_64.flatpak` (Flatpak)\n' "$base" "$base" "$base" "$base"
+  printf -- '- **Linux arm64 (e.g. Raspberry Pi):** `%s-arm64.deb` (Debian/Ubuntu) · `%s-aarch64.rpm` (Fedora/RPM) · `%s-aarch64.pkg.tar.zst` (Arch)\n' "$base" "$base" "$base"
+  printf '\n'
   python3 "$repository_root/scripts/release-links.py" "$repository" --candidate "Linux Desktop" "$version" "$build" "$tag"
 } > "$rendered_notes"
 notes_file=$rendered_notes

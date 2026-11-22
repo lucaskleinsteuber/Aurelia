@@ -27,6 +27,11 @@ state=${AURELIA_AUTOSLEEP_STATE:-/run/aurelia-autosleep}
 ready=$data/sleep-ready
 
 mkdir -p "$state"
+# Serialize timer checks and --now requests so a race cannot skip power-now or double-trigger (audit LNX-PKG-007).
+if command -v flock >/dev/null 2>&1; then
+  exec 8>"$state/lock"
+  flock 8
+fi
 now=$(date +%s)
 if [ ! -f "$state/last-active" ]; then
   echo "$now" > "$state/last-active"
@@ -39,20 +44,29 @@ fi
 
 say() { if [ "$dry_run" = 1 ]; then echo "$1"; fi; }
 
-# Aurelia stopped earlier and is waiting for a device. If stopping is no longer wanted, it starts
-# again (starting it closes the waiting socket).
-if ! systemctl is-active --quiet aurelia && systemctl is-active --quiet aurelia-start.socket; then
-  if [ "$MODE" = stop ]; then say "stopped: Aurelia starts when a device connects"; exit 0; fi
-  [ "$dry_run" = 1 ] || systemctl start aurelia
-fi
+# True when either a systemd update unit or a manual `sudo aurelia update` holds the update lock (audit LNX-PKG-009).
+update_running() {
+  if systemctl is-active --quiet aurelia-update-request.service aurelia-update-check.service; then
+    return 0
+  fi
+  local lock=${AURELIA_UPDATE_LOCK:-/run/aurelia-update.lock}
+  if [ -f "$lock" ] && command -v flock >/dev/null 2>&1; then
+    if ! (exec 9<"$lock" && flock -n 9) 2>/dev/null; then
+      return 0
+    fi
+  fi
+  return 1
+}
 
-# While nothing is to be saved, no time counts as unused, so turning it on starts a fresh period.
-if [ "$MODE" = off ] && [ "${1:-}" != --now ]; then
-  echo "$now" > "$state/last-active"
-  [ "$dry_run" = 1 ] || rm -f "$ready"
-  say "running: power saving is off"
-  exit 0
-fi
+write_power_status() {
+  local state_name=$1 message=${2:-}
+  [ "$dry_run" = 1 ] && return 0
+  [ -d "$data" ] && id aurelia >/dev/null 2>&1 || return 0
+  message=$(printf '%s' "$message" | tr -cd '[:print:]' | cut -c1-200)
+  printf 'STATE=%s\nAT=%s\nMESSAGE=%s\n' "$state_name" "$now" "$message" \
+    | runuser -u aurelia -- /bin/sh -c 'umask 077; t=$(mktemp "$1.XXXXXX") && cat > "$t" && mv -f "$t" "$1"' sh "$data/power-status" \
+    || true
+}
 
 minutes() { echo $(( 10#${1%%:*} * 60 + 10#${1##*:} )); }
 
@@ -75,6 +89,7 @@ save_power() {
     # If it cannot listen, Aurelia must not stay unreachable.
     if ! systemctl start aurelia-start.socket; then
       logger -t aurelia-autosleep "Could not wait for devices; Aurelia Server keeps running."
+      write_power_status failed "Could not start the waiting socket; Aurelia Server kept running."
       systemctl start aurelia
     fi
     exit 0
@@ -92,6 +107,8 @@ save_power() {
   # Never put the computer to sleep or turn it off unless Wake-on-LAN ("g") is actually active.
   if ! "${AURELIA_WAKE_ON_LAN:-/opt/aurelia/aurelia-wake-on-lan}" >/dev/null 2>&1; then
     logger -t aurelia-autosleep "Wake-on-LAN could not be enabled; keeping this computer awake so Aurelia stays reachable."
+    write_power_status failed "Wake-on-LAN could not be enabled; keeping this computer awake."
+    echo "$now" > "$state/last-active"
     exit 0
   fi
   local wake_now=""
@@ -100,38 +117,53 @@ save_power() {
   fi
   if [[ "$wake_now" != *g* ]]; then
     logger -t aurelia-autosleep "Wake-on-LAN is not enabled on the network card (WAKE_ON=${wake_now:-unknown}); keeping this computer awake so Aurelia stays reachable."
+    write_power_status failed "Wake-on-LAN is not active on the network card; keeping this computer awake."
+    echo "$now" > "$state/last-active"
     exit 0
   fi
   if [ "$MODE" = shutdown ]; then
-    logger -t aurelia-autosleep "$1: turning off until $until."
     if [ -n "$wake" ]; then
-      rtcwake -m no -t "$wake" >/dev/null || true
+      rtcwake -m no -t "$wake" >/dev/null 2>&1 || logger -t aurelia-autosleep "Could not schedule RTC wake for $until; turning off anyway."
     else
       rtcwake -m disable >/dev/null 2>&1 || true
     fi
-    systemctl poweroff
+    logger -t aurelia-autosleep "$1: turning off until $until."
+    if ! systemctl poweroff; then
+      logger -t aurelia-autosleep "Could not turn off: systemctl poweroff failed; staying awake."
+      write_power_status failed "Power off was refused or failed; staying awake."
+      echo "$now" > "$state/last-active"
+    fi
     exit 0
   fi
-  logger -t aurelia-autosleep "$1: sleeping until $until."
+  if ! grep -qw mem /sys/power/state 2>/dev/null; then
+    logger -t aurelia-autosleep "Could not sleep: suspend to RAM is not supported on this computer; staying awake."
+    write_power_status failed "Suspend to RAM is not supported on this computer. Use Stop Aurelia or Shut Down instead."
+    echo "$now" > "$state/last-active"
+    exit 0
+  fi
   # After waking, devices get a fresh idle period to connect.
   echo "$now" > "$state/last-active"
   if [ -n "$wake" ]; then
-    rtcwake -m no -t "$wake" >/dev/null || true
+    rtcwake -m no -t "$wake" >/dev/null 2>&1 || logger -t aurelia-autosleep "Could not schedule RTC wake for $until; sleeping until a Wake-on-LAN call."
   else
     # A wake time left from earlier awake hours must not wake it now.
     rtcwake -m disable >/dev/null 2>&1 || true
   fi
+  logger -t aurelia-autosleep "$1: sleeping until $until."
   if ! systemctl suspend; then
-    logger -t aurelia-autosleep "Suspend was inhibited or failed; staying awake."
+    logger -t aurelia-autosleep "Could not sleep: suspend was inhibited or failed; staying awake."
+    write_power_status failed "Suspend was inhibited or failed; staying awake."
+    echo "$now" > "$state/last-active"
     exit 0
   fi
+  write_power_status ok ""
   date +%s > "$state/last-active"
   date +%s > "$state/woke"
   exit 0
 }
 
-# Asked to save power now. Only the three words the server writes are accepted; the file is
-# checked not to be a link, read once and removed.
+# Asked to save power now. Handled before MODE=stop/MODE=off early exits so power-now is always
+# consumed and aurelia-power-request.path can never loop to start-limit-hit (audit LNX-PKG-007).
 if [ "${1:-}" = --now ]; then
   request=$data/power-now
   # Anything else at that name (a folder, a link) is removed unread: left there, it would start this
@@ -149,11 +181,26 @@ if [ "${1:-}" = --now ]; then
     *) logger -t aurelia-autosleep "Ignored an unknown request to save power."; exit 0 ;;
   esac
   # An update must finish first; the request is not kept.
-  if systemctl is-active --quiet aurelia-update-request.service aurelia-update-check.service; then
+  if update_running; then
     logger -t aurelia-autosleep "Asked to $action now, but an update is running; staying on."
     exit 0
   fi
   save_power "Asked from an app"
+  exit 0
+fi
+
+# Aurelia stopped earlier and is waiting for a device. If stopping is no longer wanted, it starts
+# again (starting it closes the waiting socket).
+if ! systemctl is-active --quiet aurelia && systemctl is-active --quiet aurelia-start.socket; then
+  if [ "$MODE" = stop ]; then say "stopped: Aurelia starts when a device connects"; exit 0; fi
+  [ "$dry_run" = 1 ] || systemctl start aurelia
+fi
+
+# While nothing is to be saved, no time counts as unused, so turning it on starts a fresh period.
+if [ "$MODE" = off ]; then
+  echo "$now" > "$state/last-active"
+  [ "$dry_run" = 1 ] || rm -f "$ready"
+  say "running: power saving is off"
   exit 0
 fi
 
@@ -166,9 +213,23 @@ fi
 
 # An update is being checked or installed: sleeping now could leave a half-replaced program.
 # This also holds after an ended sleep timer; the timer's signal stays for the next check.
-if systemctl is-active --quiet aurelia-update-request.service aurelia-update-check.service; then
+if update_running; then
   echo "$now" > "$state/last-active"
   say "awake: updating"
+  exit 0
+fi
+
+# The server says what it works on (Aurelia Server 2.18 and newer): a scan, metadata job or
+# owner-started speech job keeps the computer on, including after an ended sleep timer so a scan
+# finishes first (audit LNX-PKG-012); intro, credits, file-check and preview analysis does not,
+# since it continues after the next wake where it left off (audit B-4).
+work=""
+if [ -f "$data/work" ] && [ ! -L "$data/work" ] && (( now - $(stat -c %Y "$data/work") < 120 )); then
+  work=$(head -c 16 "$data/work" | tr -d '[:space:]')
+fi
+if [ "$work" = keepawake ]; then
+  echo "$now" > "$state/last-active"
+  say "awake: in use"
   exit 0
 fi
 
@@ -179,31 +240,21 @@ if [ -f "$ready" ]; then
   [ "$dry_run" = 1 ] || rm -f "$ready"
 fi
 
-# In use: someone used Aurelia on a device, or the computer is working (a scan, an update).
-# Aurelia Server notes in last-use when someone last browsed, played or saved progress; an app
-# that is merely open keeps its sync and Play On connections without counting. A server without
-# that file (an older one still running) counts every connected device instead.
+# In use: someone used Aurelia on a device, or the computer is working.
+# Aurelia Server notes in last-use when someone last browsed, played or saved progress (and keeps
+# it fresh while playback streams are open); an app that is merely open keeps its sync and Play On
+# connections without counting. A server without that file counts every connected device instead.
 busy=false
 used=""
-[ -f "$data/last-use" ] && used=$(head -c 20 "$data/last-use" 2>/dev/null || true)
+[ -f "$data/last-use" ] && [ ! -L "$data/last-use" ] && used=$(head -c 20 "$data/last-use" 2>/dev/null || true)
 if [[ "$used" =~ ^[0-9]+$ ]]; then
   (( used > now )) && used=$now
   (( used > $(cat "$state/last-active") )) && echo "$used" > "$state/last-active"
 elif ss -Htn state established '( sport = :43111 )' | grep -q .; then
   busy=true
 fi
-# The server says what it works on (Aurelia Server 2.18 and newer): a scan, metadata job or
-# owner-started speech job keeps the computer on; intro, credits, file-check and preview analysis
-# does not, since it continues after the next wake where it left off and can run for hours
-# (audit B-4). Without a fresh note the processor load decides, as before: someone's own programs
-# or an older server.
-work=""
-if [ -f "$data/work" ] && [ ! -L "$data/work" ] && (( now - $(stat -c %Y "$data/work") < 120 )); then
-  work=$(head -c 16 "$data/work" | tr -d '[:space:]')
-fi
-[ "$work" = keepawake ] && busy=true
 if [ "$work" != analysis ] && awk '{ exit !($1 > 0.5) }' /proc/loadavg; then busy=true; fi
-if systemctl is-active --quiet aurelia-update-request.service aurelia-update-check.service; then busy=true; fi
+if update_running; then busy=true; fi
 if $busy; then
   echo "$now" > "$state/last-active"
   say "awake: in use"

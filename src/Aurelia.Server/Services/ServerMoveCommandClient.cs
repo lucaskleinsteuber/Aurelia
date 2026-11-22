@@ -162,11 +162,25 @@ public static class ServerMoveCommandClient
     }
 
     /// <summary>Moves into this server, which has no owner yet, from the old server or a moving file.</summary>
+    /// <summary>
+    /// Reads the browser setup code only from a regular, non-symlink file and validates its format
+    /// so a compromised server process cannot redirect a root caller to another file (audit LNX-PKG-011).
+    /// </summary>
+    internal static async Task<string> ReadPlainSetupCodeAsync(string path, CancellationToken token)
+    {
+        var info = new FileInfo(path);
+        if (!info.Exists || info.LinkTarget is not null || info.Length > 64) return string.Empty;
+        var raw = (await File.ReadAllTextAsync(path, token)).Trim();
+        if (raw.Length is 0 or > 32 || !raw.All(ch => char.IsAsciiLetterOrDigit(ch) || ch == '-'))
+            return string.Empty;
+        return raw;
+    }
+
     private static async Task<int> ReceiveAsync(ServerCommandLine commandLine, CancellationToken token)
     {
         var codeFile = commandLine.Option("--setup-code-file")
             ?? Path.Combine(commandLine.Option("--data-dir") ?? "/var/lib/aurelia", BrowserSetup.FileName);
-        var setupCode = File.Exists(codeFile) ? (await File.ReadAllTextAsync(codeFile, token)).Trim() : string.Empty;
+        var setupCode = await ReadPlainSetupCodeAsync(codeFile, token);
         if (setupCode.Length == 0)
         {
             Console.Error.WriteLine("No setup code: this server already has an owner, or it isn't running. Run: sudo aurelia status");

@@ -78,7 +78,8 @@ github_fetch() {
   [ -n "${AURELIA_UPDATE_API:-}" ] && protocols="=http,https"
   {
     [ -z "$update_token" ] || printf 'header = "Authorization: Bearer %s"\n' "$update_token"
-  } | curl -sSL --proto "$protocols" --proto-redir "$protocols" --connect-timeout 15 --retry 2 \
+  } | curl -sSL --proto "$protocols" --proto-redir "$protocols" --connect-timeout 15 --max-time 1800 \
+    --speed-limit 1024 --speed-time 60 --retry 2 \
     -H "Accept: $accept" -H "X-GitHub-Api-Version: 2022-11-28" -K - -o "$output" -w '%{http_code}' "$url" \
     || true
 }
@@ -86,10 +87,12 @@ github_fetch() {
 # Tells the app what `aurelia update` found or does. Aurelia Server reads update-status from its
 # data folder, so the file belongs to the server's user; values stay plain and short.
 report_update=false
+update_status_final=false
 status_newest_version="" status_newest_build="" status_target="" status_checked_at=""
 write_update_status() {
   local state=$1 message=${2:-}
   $report_update || return 0
+  if [ "$state" = idle ] || [ "$state" = failed ]; then update_status_final=true; fi
   message=$(printf '%s' "$message" | tr -cd '[:print:]' | cut -c1-200)
   # Written as the server's user: root changing owners in that user's folder could be led along
   # a link onto any file of the computer.
@@ -130,9 +133,10 @@ github_failed() {
 newest_package() {
   jq -r --arg arch "$arch" --argjson beta "${beta_updates:-false}" '
     [ .[] | select((.draft | not) and ($beta or (.prerelease | not)))
-      | first(.assets[] | select(.name == "SHA256SUMS") | .url) as $sums
-      | (first(.assets[] | select(.name == "SHA256SUMS.minisig") | .url) // "") as $signature
-      | .assets[]
+      | (.assets // []) as $assets
+      | first($assets[] | select(.name == "SHA256SUMS") | .url) as $sums
+      | (first($assets[] | select(.name == "SHA256SUMS.minisig") | .url) // "") as $signature
+      | $assets[]
       | (.name | capture("^Aurelia-Server-(?<version>[0-9][0-9.]*)-(?<build>[0-9]+)-linux-" + $arch + "\\.tar\\.gz$")) as $found
       | [($found.build | tonumber), $found.version, .name, .url, $sums, $signature] ]
     | max_by(.[0]) // empty | .[0] |= tostring | join("\t")' "$1"
@@ -180,11 +184,18 @@ Commands that change the server ask for the owner's name, Server Password and PI
 USAGE
 }
 
+# Reads the browser setup code only from a plain non-symlink file and strips control characters (audit LNX-PKG-011).
+read_setup_code() {
+  local path="$data_dir/browser-setup-code"
+  [ -f "$path" ] && [ ! -L "$path" ] || return 0
+  head -c 64 "$path" 2>/dev/null | tr -cd 'A-Za-z0-9-' | cut -c1-32
+}
+
 # The addresses and the one-time code for setting this server up in a browser.
 show_browser_setup() {
   local code="" tries=0
   while [ -z "$code" ] && [ $tries -lt 20 ]; do
-    code=$(cat "$data_dir/browser-setup-code" 2>/dev/null || true)
+    code=$(read_setup_code)
     [ -n "$code" ] || { sleep 0.5; tries=$((tries + 1)); }
   done
   if [ -z "$code" ]; then
@@ -234,10 +245,11 @@ case "$command" in
     fi
     if [ "$kind" = move ]; then
       # A fresh start makes a fresh setup code, which the move uses on this computer only.
+      # Run as aurelia so root never reads or forwards a symlinked file from the server data folder (audit LNX-PKG-011).
       systemctl stop aurelia-start.socket aurelia 2>/dev/null || true
       systemctl start aurelia
       wait_until_ready
-      "$server" move receive --data-dir "$data_dir" || exit 1
+      (cd "$data_dir" && runuser -u aurelia -- "$server" move receive --data-dir "$data_dir") || exit 1
       echo
       echo "Choose how much power this computer uses with: sudo aurelia sleep (always on unless changed)"
       exit 0
@@ -322,7 +334,7 @@ case "$command" in
     # Moving to a new server (docs/SERVER_MOVE.md). code, export, status and undo sign in as the
     # owner; receive is what `sudo aurelia setup --move` runs on the new server.
     case "${1:-}" in
-      receive) require_root move receive; ensure_running; exec "$server" move receive --data-dir "$data_dir" ;;
+      receive) require_root move receive; ensure_running; cd "$data_dir"; exec runuser -u aurelia -- "$server" move receive --data-dir "$data_dir" ;;
       code|export|status|undo) ensure_running; exec "$server" move "$@" ;;
       *) echo "Use: aurelia move code | export FILE | status | undo" >&2; exit 2 ;;
     esac
@@ -361,6 +373,10 @@ case "$command" in
           [ "$AWAKE_FROM" != "$AWAKE_UNTIL" ] || { echo "--awake needs a different start and end." >&2; exit 2; }
         fi
         case "$action" in server) MODE=stop ;; shutdown) MODE=shutdown ;; *) MODE=sleep ;; esac
+        if [ "$MODE" = sleep ] && ! grep -qw mem /sys/power/state 2>/dev/null; then
+          echo "Suspend to RAM is not supported on this computer. Use 'sudo aurelia sleep server' or 'sudo aurelia sleep shutdown'." >&2
+          exit 1
+        fi
         write_sleep_settings "$settings"
         systemctl enable --now aurelia-autosleep.timer >/dev/null
         if [ "$MODE" = stop ]; then
@@ -452,7 +468,7 @@ case "$command" in
     systemctl --no-pager status aurelia | head -n 5 || true
     echo
     "$server" server identity || true
-    if [ -r "$data_dir/browser-setup-code" ]; then
+    if [ -n "$(read_setup_code)" ]; then
       echo
       show_browser_setup
     fi
@@ -492,13 +508,13 @@ case "$command" in
     done
     # Checks and updates tell the app what they found; setting the token does not.
     if ! $set_token && [ -d "$data_dir" ] && id aurelia >/dev/null 2>&1; then report_update=true; fi
+    # Consume app trigger files before checking the lock so systemd's path unit does not loop (audit LNX-PKG-009).
+    from_app_kind=""
     if $from_app; then
       if [ -e "$data_dir/update-requested" ]; then
-        assume_yes=true
-        write_update_status installing
+        from_app_kind=install
       elif [ -e "$data_dir/update-check-requested" ]; then
-        check_only=true
-        write_update_status checking
+        from_app_kind=check
       else
         exit 0
       fi
@@ -506,21 +522,44 @@ case "$command" in
       # would start this again and again.
       rm -rf -- "$data_dir/update-requested" "$data_dir/update-check-requested"
     fi
+    # Serialize checks, app-triggered installs and manual updates (audit LNX-PKG-009).
+    if ! $set_token && command -v flock >/dev/null 2>&1; then
+      exec 9>"${AURELIA_UPDATE_LOCK:-/run/aurelia-update.lock}"
+      if ! flock -n 9; then
+        echo "An Aurelia update is already running." >&2
+        exit 0
+      fi
+    fi
+    work=""
+    cleanup_update() {
+      local rc=$?
+      [ -n "$work" ] && rm -rf "$work"
+      if [ "$rc" -ne 0 ] && $report_update && ! $update_status_final; then
+        write_update_status failed "The update stopped unexpectedly. See: journalctl -u aurelia-update-request"
+      fi
+    }
+    trap cleanup_update EXIT
+    if [ "$from_app_kind" = install ]; then
+      assume_yes=true
+      write_update_status installing
+    elif [ "$from_app_kind" = check ]; then
+      check_only=true
+      write_update_status checking
+    fi
     if [ -z "$update_repository" ]; then
       echo "This installation does not know where its updates come from. Install a newer package by hand once." >&2
       write_update_status failed "This installation does not know where its updates come from."
       exit 1
     fi
     if ! command -v jq >/dev/null 2>&1; then
-      command -v apt-get >/dev/null 2>&1 || { echo "Updating needs jq. Install it with your package manager first." >&2; exit 1; }
+      command -v apt-get >/dev/null 2>&1 || { echo "Updating needs jq. Install it with your package manager first." >&2; write_update_status failed "Updating needs jq."; exit 1; }
       apt-get install -y jq >/dev/null
     fi
     if ! command -v openssl >/dev/null 2>&1; then
-      command -v apt-get >/dev/null 2>&1 || { echo "Updating needs openssl. Install it with your package manager first." >&2; exit 1; }
+      command -v apt-get >/dev/null 2>&1 || { echo "Updating needs openssl. Install it with your package manager first." >&2; write_update_status failed "Updating needs openssl."; exit 1; }
       apt-get install -y openssl >/dev/null
     fi
     work=$(mktemp -d /var/tmp/aurelia-update.XXXXXX)
-    trap 'rm -rf "$work"' EXIT
     releases="$update_api/repos/$update_repository/releases"
 
     if $set_token; then

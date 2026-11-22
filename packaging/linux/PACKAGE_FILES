@@ -1,0 +1,17 @@
+install.sh
+aurelia
+aurelia.service
+aurelia-autosleep
+aurelia-sleep-settings
+aurelia-autosleep.service
+aurelia-autosleep.timer
+aurelia-wake-on-lan
+aurelia-wake-on-lan.service
+aurelia-start.socket
+aurelia-start.service
+aurelia-update-request.path
+aurelia-update-request.service
+aurelia-update-check.timer
+aurelia-update-check.service
+aurelia-power-request.path
+aurelia-power-request.service
