@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  initialVariant, masterUrl, nextVariant, normalizeQuality, parseMaster, parseMedia, qualityLabel, segmentAt, smoothed,
-  startsAdaptive, stallsCallForAdaptive,
+  initialVariant, masterUrl, nextVariant, normalizeQuality, parseMaster, parseMedia, qualityLabel, retryAfterDelayMs,
+  segmentAt, smoothed, startsAdaptive, stallsCallForAdaptive,
 } from "../../src/Aurelia.Server/WebApp/js/hls-logic.js";
 
 const MASTER = `#EXTM3U
@@ -115,4 +115,12 @@ test("Automatic starts with the repackaged picture and streams qualities only wh
     "stalls older than a minute are forgotten");
   assert.equal(stallsCallForAdaptive([0, 1, 2].map((index) => ({ start: now - 10_000 + index * 2_000, end: now - 9_500 + index * 2_000 })), now), true);
   assert.equal(stallsCallForAdaptive([{ start: now - 9_000, end: now }], now), true, "eight seconds of waiting");
+});
+
+test("Retry-After delays are parsed and clamped for 429 HLS retries", () => {
+  assert.equal(retryAfterDelayMs("5"), 5000);
+  assert.equal(retryAfterDelayMs("0.1"), 500);
+  assert.equal(retryAfterDelayMs("120"), 15000);
+  assert.equal(retryAfterDelayMs(null), 2000);
+  assert.equal(retryAfterDelayMs("invalid", 3000), 3000);
 });

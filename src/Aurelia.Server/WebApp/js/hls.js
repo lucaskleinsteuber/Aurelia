@@ -65,25 +65,32 @@ export class HlsSource {
   }
 
   async request(path, signal, type = "text") {
-    const response = await fetch(path, {
-      credentials: "same-origin",
-      cache: "no-store",
-      signal,
-      headers: { "X-Aurelia-Web": "profile" },
-    });
-    if (!response.ok) {
-      let code = `http_${response.status}`;
-      try {
-        code = (await response.json())?.code ?? code;
-      } catch {
-        // No problem details.
+    for (let attempt = 0; ; attempt += 1) {
+      const response = await fetch(path, {
+        credentials: "same-origin",
+        cache: "no-store",
+        signal,
+        headers: { "X-Aurelia-Web": "profile" },
+      });
+      if (!response.ok) {
+        if (response.status === 429 && attempt < RETRIES && !this.destroyed && !signal?.aborted) {
+          await this.sleep(hls.retryAfterDelayMs(response.headers?.get?.("Retry-After")));
+          if (this.destroyed || signal?.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
+          continue;
+        }
+        let code = `http_${response.status}`;
+        try {
+          code = (await response.json())?.code ?? code;
+        } catch {
+          // No problem details.
+        }
+        const error = new Error(code);
+        error.status = response.status;
+        error.code = code;
+        throw error;
       }
-      const error = new Error(code);
-      error.status = response.status;
-      error.code = code;
-      throw error;
+      return type === "text" ? response.text() : new Uint8Array(await response.arrayBuffer());
     }
-    return type === "text" ? response.text() : new Uint8Array(await response.arrayBuffer());
   }
 
   /** Reads the qualities, attaches a new MediaSource and starts at `at` seconds. */

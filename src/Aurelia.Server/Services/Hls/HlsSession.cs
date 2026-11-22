@@ -90,6 +90,8 @@ public sealed partial class HlsSession : IAsyncDisposable
     private int failures;
     private long lastUsedTicks;
     private double speed;
+    private volatile bool yielded;
+    private volatile bool completed;
 
     internal HlsSession(
         HlsSessionManager manager,
@@ -146,6 +148,12 @@ public sealed partial class HlsSession : IAsyncDisposable
 
     /// <summary>Whether ffmpeg runs for this session now.</summary>
     public bool IsProducing { get { lock (store) return producer is { IsCompleted: false }; } }
+
+    /// <summary>Whether ffmpeg is running but paused because the player is far behind.</summary>
+    internal bool IsPaused => IsProducing && store.ShouldPause;
+
+    /// <summary>Whether this session yielded to another quality or finished converting and can be reclaimed.</summary>
+    internal bool IsReclaimable => !IsProducing && (yielded || completed);
 
     /// <summary>The encoder of the conversion, once one started.</summary>
     public LiveVideoEncoder? Encoder => encoder?.Kind;
@@ -235,6 +243,8 @@ public sealed partial class HlsSession : IAsyncDisposable
             // Only one conversion per title and profile session: an earlier quality yields its place.
             await manager.YieldOthersAsync(this);
             var slot = await EnterAsync(cancellationToken) ?? throw new HlsBusyException();
+            yielded = false;
+            completed = false;
             encoder ??= live.ChooseEncoder(tools) ?? throw new InvalidOperationException("The server cannot encode pictures.");
             var stop = CancellationTokenSource.CreateLinkedTokenSource(ending.Token);
             var options = new LiveStreamOptions(index * HlsPlaylists.SegmentSeconds, Video, encoder.Value.Kind, Audio, CopyAudio: false,
@@ -263,8 +273,16 @@ public sealed partial class HlsSession : IAsyncDisposable
         using (manager.WaitForPlace())
         {
             if (live.VideoPlacesTaken) await manager.PauseDownloadAsync(this);
+            if (live.VideoPlacesTaken) await manager.PausePausedSiblingAsync(this);
             return await live.EnterAsync(encodesVideo: true, cancellationToken);
         }
+    }
+
+    /// <summary>Stops converting because another quality of the same title took over.</summary>
+    internal async Task YieldAsync()
+    {
+        yielded = true;
+        await StopProducerAsync();
     }
 
     /// <summary>Ends the running ffmpeg, if any, and waits until it is gone.</summary>
@@ -346,6 +364,7 @@ public sealed partial class HlsSession : IAsyncDisposable
         }
         finally
         {
+            if (finished && fragments > 0 && !cancellationToken.IsCancellationRequested) completed = true;
             store.EndProducing(finished && fragments > 0);
             if (fragments == 0 && !cancellationToken.IsCancellationRequested)
             {

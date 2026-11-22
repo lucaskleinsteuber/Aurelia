@@ -19,7 +19,8 @@ public sealed class PlaybackService(
     PlaybackTicketPolicy? ticketPolicy = null,
     ProfileSessionStore? profiles = null,
     MediaSegmentService? segments = null,
-    ScreenTimeService? screenTime = null)
+    ScreenTimeService? screenTime = null,
+    Hls.HlsSessionManager? hlsSessions = null)
 {
     private const int CleanupBatchSize = 100;
 
@@ -122,8 +123,27 @@ public sealed class PlaybackService(
                 "The playback ticket was not found.",
                 StatusCodes.Status404NotFound);
 
-        ticket.RevokedAt ??= DateTimeOffset.UtcNow;
+        var now = DateTimeOffset.UtcNow;
+        ticket.RevokedAt ??= now;
         await database.SaveChangesAsync(cancellationToken);
+
+        // End the title's HLS conversion once no active playback ticket remains for it in this
+        // profile session (renewal creates the replacement ticket before revoking the old one).
+        if (hlsSessions is not null && ticket.ProfileSessionId is { } profileSessionId)
+        {
+            var hasAnotherActiveTicket = await database.PlaybackTickets.AnyAsync(
+                candidate => candidate.Id != ticket.Id
+                    && candidate.UserId == userId
+                    && candidate.ProfileSessionId == profileSessionId
+                    && candidate.MediaItemId == ticket.MediaItemId
+                    && candidate.RevokedAt == null
+                    && candidate.ExpiresAt > now,
+                cancellationToken);
+            if (!hasAnotherActiveTicket)
+            {
+                await hlsSessions.EndTitleAsync(profileSessionId, ticket.MediaItemId);
+            }
+        }
     }
 
     public async Task<PlaybackStreamSource?> OpenStreamAsync(

@@ -243,7 +243,10 @@ segment and no temporary file.
    stream started at 600 seconds reports positions from about 600 on (repackaging starts at
    the key frame at or before that point). To seek outside what has arrived, close the stream
    and open a new one at the target. A stream counts against the device's stream limit like a
-   direct one and ends with its ticket, session or profile. The server runs at most three
+   direct one. Revoking a playback ticket rejects any further requests with that ticket and ends
+   the title's HLS session once no other active ticket for that title remains in the profile
+   session; an already-running direct or `/live` stream ends with its profile session, profile or
+   title so clients can renew tickets seamlessly during playback. The server runs at most three
    conversions at once, at most one of them re-encoding the picture on the processor (three
    on a video chip, see [Video chips](#video-chips)), and answers `429 conversion_busy` with
    `Retry-After` beyond that.
@@ -306,8 +309,10 @@ kept in memory only, for as long as someone plays them, and are never written an
 A session per profile session, title, quality and sound track runs one ffmpeg that converts
 ahead of the player (up to 15 segments or 96 MB) and pauses there. A segment it has not reached
 starts it again at that segment (a seek). Another quality of the same title makes the first one
-stop converting. A session ends a minute after its last request, or at once with its user,
-profile session or title; at most six run at a time (`429 conversion_busy` beyond that). A
+stop converting. A session ends a minute after its last request, or at once when its last active
+playback ticket, user, profile session or title is revoked; at most six run at a time (at most four
+per user; yielded or finished qualities are reclaimed first so switching qualities never blocks
+another title, with `429 conversion_busy` beyond that). A
 title without a known length answers `422 stream_length_unknown`, a quality the title does not
 have `404 stream_quality_not_found`.
 
