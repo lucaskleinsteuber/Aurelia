@@ -382,9 +382,14 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
         foreach (var name in journal.Originals)
         {
             var saved = Path.Combine(undo, name);
-            if (File.Exists(saved)) File.Move(saved, Path.Combine(runtime.DataDirectory, name), true);
+            var target = Path.Combine(runtime.DataDirectory, name);
+            if (File.Exists(saved))
+            {
+                PrivateFilePermissions.CreatePrivateDirectory(Path.GetDirectoryName(target)!);
+                File.Move(saved, target, true);
+            }
             // If it was never moved, the original is still in its active location.
-            else if (!File.Exists(Path.Combine(runtime.DataDirectory, name)))
+            else if (!File.Exists(target))
                 throw new InvalidDataException("An original restore entry is missing.");
         }
         File.Delete(marker);
@@ -431,7 +436,7 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
         {
             if (!EncryptedBackupContainer.AllowedName(name) || !File.Exists(Path.Combine(stage, name)))
                 throw new InvalidDataException("The backup is missing referenced manual artwork.");
-            EditorArtworkStore.ValidateStoredImage(Path.Combine(stage, name));
+            EditorArtworkStore.ValidateStoredImage(Path.Combine(stage, name), allowProviderWebP: name.EndsWith(".webp", StringComparison.OrdinalIgnoreCase));
         }
         await using var command = database.CreateCommand();
         command.CommandText = "SELECT count(*) FROM pragma_table_info('Users') WHERE name='IsEnabled';";
@@ -452,6 +457,11 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
             if (document.RootElement.GetProperty("version").GetInt32() != 1)
                 throw new InvalidDataException("The metadata configuration is incompatible.");
         }
+        foreach (var jsonFile in StateFiles(stage).Where(name => name.EndsWith(".json", StringComparison.Ordinal)
+            && name is not ServerHostSettings.FileName and not "metadata-settings.json"))
+        {
+            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(stage, jsonFile), token));
+        }
     }
     private static async Task<Guid> ServerIdAsync(string databasePath, CancellationToken token)
     {
@@ -471,7 +481,19 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
     private static List<string> StateFiles(string directory)
     {
         var names = new List<string>();
-        foreach (var name in new[] { "aurelia.db", ServerHostSettings.FileName, "server-certificate.pem", "server-private-key.pem", "metadata-settings.json", "Secrets/tmdb-token" })
+        foreach (var name in new[]
+        {
+            "aurelia.db",
+            ServerHostSettings.FileName,
+            "server-certificate.pem",
+            "server-private-key.pem",
+            "metadata-settings.json",
+            "security-settings.json",
+            "subtitle-settings.json",
+            "Secrets/tmdb-token",
+            "Secrets/opensubtitles-key",
+            "Secrets/opensubtitles-account",
+        })
             if (File.Exists(Path.Combine(directory, name))) names.Add(name);
         var keys = Path.Combine(directory, "DataProtectionKeys");
         if (Directory.Exists(keys))
@@ -484,6 +506,35 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
         {
             if (new DirectoryInfo(artwork).LinkTarget is not null) throw new InvalidDataException("Unsafe artwork directory.");
             names.AddRange(Directory.EnumerateFiles(artwork).Select(path => "Artwork/" + Path.GetFileName(path)).Where(EncryptedBackupContainer.AllowedName));
+            var collections = Path.Combine(artwork, "Collections");
+            if (Directory.Exists(collections))
+            {
+                if (new DirectoryInfo(collections).LinkTarget is not null) throw new InvalidDataException("Unsafe collection artwork directory.");
+                names.AddRange(Directory.EnumerateFiles(collections).Select(path => "Artwork/Collections/" + Path.GetFileName(path)).Where(EncryptedBackupContainer.AllowedName));
+            }
+        }
+        var watchlist = Path.Combine(directory, "Watchlist");
+        if (Directory.Exists(watchlist))
+        {
+            if (new DirectoryInfo(watchlist).LinkTarget is not null) throw new InvalidDataException("Unsafe watchlist directory.");
+            names.AddRange(Directory.EnumerateFiles(watchlist).Select(path => "Watchlist/" + Path.GetFileName(path)).Where(EncryptedBackupContainer.AllowedName));
+        }
+        var subtitles = Path.Combine(directory, "Subtitles");
+        if (Directory.Exists(subtitles))
+        {
+            if (new DirectoryInfo(subtitles).LinkTarget is not null) throw new InvalidDataException("Unsafe subtitles directory.");
+            var automatic = Path.Combine(subtitles, "automatic.json");
+            if (File.Exists(automatic)) names.Add("Subtitles/automatic.json");
+            foreach (var folder in Directory.EnumerateDirectories(subtitles))
+            {
+                var info = new DirectoryInfo(folder);
+                if (info.LinkTarget is not null) throw new InvalidDataException("Unsafe subtitle folder.");
+                var folderName = info.Name;
+                if (!Guid.TryParseExact(folderName, "N", out _)) continue;
+                names.AddRange(Directory.EnumerateFiles(folder)
+                    .Select(path => $"Subtitles/{folderName}/{Path.GetFileName(path)}")
+                    .Where(EncryptedBackupContainer.AllowedName));
+            }
         }
         return names;
     }
@@ -491,23 +542,28 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
     {
         await using var database = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         await database.OpenAsync(token);
-        await using var command = database.CreateCommand();
-        command.CommandText = "SELECT count(*) FROM pragma_table_info('ArtworkAssets') WHERE name='IsManual';";
-        if (Convert.ToInt64(await command.ExecuteScalarAsync(token), System.Globalization.CultureInfo.InvariantCulture) == 0) return [];
-        command.CommandText = "SELECT RelativeFilePath, OriginalFilePath FROM ArtworkAssets WHERE IsManual=1;";
         var names = new HashSet<string>(StringComparer.Ordinal);
+        await CollectManualArtworkAsync(database, "ArtworkAssets", "Artwork/", names, token);
+        await CollectManualArtworkAsync(database, "CollectionArtworkAssets", "Artwork/Collections/", names, token);
+        return names.ToArray();
+    }
+    private static async Task CollectManualArtworkAsync(SqliteConnection database, string table, string prefix, HashSet<string> names, CancellationToken token)
+    {
+        await using var command = database.CreateCommand();
+        command.CommandText = $"SELECT count(*) FROM pragma_table_info('{table}') WHERE name='IsManual';";
+        if (Convert.ToInt64(await command.ExecuteScalarAsync(token), System.Globalization.CultureInfo.InvariantCulture) == 0) return;
+        command.CommandText = $"SELECT RelativeFilePath, OriginalFilePath FROM {table} WHERE IsManual=1;";
         await using var reader = await command.ExecuteReaderAsync(token);
         while (await reader.ReadAsync(token))
         {
             for (var index = 0; index < 2; index++)
             {
                 if (reader.IsDBNull(index)) continue;
-                var name = "Artwork/" + reader.GetString(index);
+                var name = prefix + reader.GetString(index);
                 if (!EncryptedBackupContainer.AllowedName(name)) throw new InvalidDataException("Invalid manual artwork reference.");
                 names.Add(name);
             }
         }
-        return names.ToArray();
     }
     private static string RestoreStage(ServerRuntimeOptions runtime, Guid id) => Path.Combine(runtime.DataDirectory, "Backups", ".restore-" + id.ToString("N"));
     private static async Task CopyPrivateAsync(string source, string destination, CancellationToken token)

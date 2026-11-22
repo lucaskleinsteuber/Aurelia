@@ -31,12 +31,19 @@ public sealed class LibraryMutationService(AureliaDbContext database, CatalogMut
             throw new AccountException("reset_conflict", "The library changed since your confirmation. Review a fresh preview before resetting.", 409);
         var items = await database.MediaItems.Where(item => request.LibraryIds.Contains(item.LibraryRootId)).ToListAsync(token);
         await CancelJobsAsync(request.LibraryIds, token);
-        var receipt = await DeleteAsync(userId, items, request.LibraryIds, exclude: false, token);
+        var receipt = await DeleteAsync(userId, items, request.LibraryIds, exclude: false, beforeDeleteInTransaction: null, token);
         foreach (var id in request.LibraryIds) scans.Release(id);
         return await CleanupAsync(receipt.Id, token);
     }
 
-    public async Task<LibraryMutationResult> RemoveAsync(Guid userId, Guid id, CancellationToken token)
+    public Task<LibraryMutationResult> RemoveAsync(Guid userId, Guid id, CancellationToken token) =>
+        RemoveAsync(userId, id, beforeDeleteInTransaction: null, token);
+
+    internal async Task<LibraryMutationResult> RemoveAsync(
+        Guid userId,
+        Guid id,
+        Func<CancellationToken, Task>? beforeDeleteInTransaction,
+        CancellationToken token)
     {
         using var lease = await mutations.EnterAsync(token);
         var target = await database.MediaItems.Include(item => item.LibraryRoot).SingleOrDefaultAsync(item => item.Id == id, token)
@@ -50,7 +57,7 @@ public sealed class LibraryMutationService(AureliaDbContext database, CatalogMut
             if (selected.Count == previous) break;
         }
         await CancelJobsAsync([target.LibraryRootId], token);
-        var receipt = await DeleteAsync(userId, items.Where(item => selected.Contains(item.Id)).ToList(), [], exclude: true, token);
+        var receipt = await DeleteAsync(userId, items.Where(item => selected.Contains(item.Id)).ToList(), [], exclude: true, beforeDeleteInTransaction, token);
         return await CleanupAsync(receipt.Id, token);
     }
 
@@ -67,7 +74,13 @@ public sealed class LibraryMutationService(AureliaDbContext database, CatalogMut
         await database.SaveChangesAsync(token);
     }
 
-    private async Task<LibraryMutation> DeleteAsync(Guid userId, List<MediaItem> items, IReadOnlyList<Guid> roots, bool exclude, CancellationToken token)
+    private async Task<LibraryMutation> DeleteAsync(
+        Guid userId,
+        List<MediaItem> items,
+        IReadOnlyList<Guid> roots,
+        bool exclude,
+        Func<CancellationToken, Task>? beforeDeleteInTransaction,
+        CancellationToken token)
     {
         var ids = items.Select(item => item.Id).ToArray();
         streams.RevokeMedia(ids);
@@ -77,6 +90,10 @@ public sealed class LibraryMutationService(AureliaDbContext database, CatalogMut
             .Concat(await images.MediaDraftFilesAsync(ids, token)).Distinct().ToArray();
         var receipt = new LibraryMutation { Id = Guid.NewGuid(), UserId = userId, RemovedItems = ids.Length, FilesJson = JsonSerializer.Serialize(files) };
         await using var transaction = await database.Database.BeginTransactionAsync(token);
+        if (beforeDeleteInTransaction is not null)
+        {
+            await beforeDeleteInTransaction(token);
+        }
         await database.MetadataJobs.IgnoreQueryFilters().Where(job => job.MediaItemId != null && ids.Contains(job.MediaItemId.Value)
             || roots.Count > 0 && job.LibraryRootId != null && roots.Contains(job.LibraryRootId.Value)).ExecuteDeleteAsync(token);
         foreach (var entry in database.ChangeTracker.Entries<MetadataJob>().Where(entry => entry.Entity.MediaItemId is { } media && ids.Contains(media)

@@ -10,7 +10,11 @@ namespace Aurelia.Server.Services;
 /// whose file still exists cannot be removed or merged away here, because the next scan would
 /// import it again; that stays the explicit "Remove from Library" action.
 /// </summary>
-public sealed class LibraryHealthService(AureliaDbContext database, LibraryMutationService mutations, TimeProvider clock)
+public sealed class LibraryHealthService(
+    AureliaDbContext database,
+    LibraryMutationService mutations,
+    TimeProvider clock,
+    WatchlistService? watchlist = null)
 {
     public async Task<IReadOnlyList<DuplicateGroup>> GetDuplicatesAsync(int offset, int limit, CancellationToken cancellationToken)
     {
@@ -116,15 +120,178 @@ public sealed class LibraryHealthService(AureliaDbContext database, LibraryMutat
     }
 
     /// <summary>
-    /// Moves every profile's favorites, progress, history and collection membership from a copy
-    /// whose file is missing to another copy of the same movie or episode, then removes the missing
-    /// entry the same way "Remove from Library" does.
+    /// Moves every profile's favorites, progress, history, scene notes, grants, age rules,
+    /// hidden continue-watching state, manual segments, watchlist entries and collection
+    /// membership from a copy whose file is missing to another copy of the same movie or episode,
+    /// then removes the missing entry in the same transaction.
     /// </summary>
     public async Task MergeAsync(Guid userId, Guid sourceId, Guid targetId, CancellationToken cancellationToken)
     {
         if (sourceId == targetId)
             throw new MetadataException("invalid_merge", "Choose two different copies.", StatusCodes.Status400BadRequest);
 
+        await ValidateMergeCandidatesAsync(sourceId, targetId, cancellationToken);
+
+        await mutations.RemoveAsync(userId, sourceId, async token =>
+        {
+            var (source, target) = await ValidateMergeCandidatesAsync(sourceId, targetId, token);
+
+            // Profile-owned records must be queried without the administrator's own access filter
+            // so another profile's data is never dropped when the missing copy is removed.
+            var sourceFavorites = await database.UserFavorites.IgnoreQueryFilters()
+                .Where(favorite => favorite.MediaItemId == sourceId).ToListAsync(token);
+            var targetFavorites = await database.UserFavorites.IgnoreQueryFilters()
+                .Where(favorite => favorite.MediaItemId == targetId).ToListAsync(token);
+            var sourceProgress = await database.PlaybackProgress.IgnoreQueryFilters()
+                .Where(progress => progress.MediaItemId == sourceId).ToListAsync(token);
+            var targetProgress = await database.PlaybackProgress.IgnoreQueryFilters()
+                .Where(progress => progress.MediaItemId == targetId).ToListAsync(token);
+            var sourceNotes = await database.SceneNotes.IgnoreQueryFilters()
+                .Where(note => note.MediaItemId == sourceId).ToListAsync(token);
+            var sourceGrants = await database.UserTitleGrants.IgnoreQueryFilters()
+                .Where(grant => grant.MediaItemId == sourceId).ToListAsync(token);
+            var targetGrantUsers = (await database.UserTitleGrants.IgnoreQueryFilters()
+                .Where(grant => grant.MediaItemId == targetId).Select(grant => grant.UserId).ToListAsync(token)).ToHashSet();
+            var sourceRules = await database.UserTitleRules.IgnoreQueryFilters()
+                .Where(rule => rule.MediaItemId == sourceId).ToListAsync(token);
+            var targetRuleUsers = (await database.UserTitleRules.IgnoreQueryFilters()
+                .Where(rule => rule.MediaItemId == targetId).Select(rule => rule.UserId).ToListAsync(token)).ToHashSet();
+            var sourceContinueWatching = await database.ContinueWatchingStates.IgnoreQueryFilters()
+                .Where(state => state.MediaItemId == sourceId).ToListAsync(token);
+            var targetContinueWatchingUsers = (await database.ContinueWatchingStates.IgnoreQueryFilters()
+                .Where(state => state.MediaItemId == targetId).Select(state => state.UserId).ToListAsync(token)).ToHashSet();
+            var sourceSegment = await database.MediaSegments.IgnoreQueryFilters()
+                .SingleOrDefaultAsync(segment => segment.MediaItemId == sourceId, token);
+            var targetSegment = await database.MediaSegments.IgnoreQueryFilters()
+                .SingleOrDefaultAsync(segment => segment.MediaItemId == targetId, token);
+
+            var now = clock.GetUtcNow();
+            foreach (var favorite in sourceFavorites.Where(favorite => targetFavorites.All(existing => existing.UserId != favorite.UserId)))
+                database.UserFavorites.Add(new UserFavorite { Id = Guid.NewGuid(), UserId = favorite.UserId, MediaItemId = target.Id, CreatedAt = favorite.CreatedAt });
+
+            foreach (var progress in sourceProgress)
+            {
+                var existing = targetProgress.FirstOrDefault(value => value.UserId == progress.UserId);
+                if (existing is null)
+                {
+                    database.PlaybackProgress.Add(new PlaybackProgress
+                    {
+                        Id = Guid.NewGuid(),
+                        UserId = progress.UserId,
+                        User = null!,
+                        MediaItemId = target.Id,
+                        MediaItem = target,
+                        PositionMilliseconds = progress.PositionMilliseconds,
+                        DurationMilliseconds = progress.DurationMilliseconds,
+                        IsCompleted = progress.IsCompleted,
+                        LastPlayedAt = progress.LastPlayedAt,
+                        UpdatedAt = now,
+                        Revision = 1,
+                    });
+                }
+                else if (progress.IsCompleted && !existing.IsCompleted)
+                {
+                    existing.IsCompleted = true;
+                    existing.PositionMilliseconds = 0;
+                    existing.UpdatedAt = now;
+                    existing.Revision = checked(existing.Revision + 1);
+                }
+            }
+
+            foreach (var member in source.CollectionMemberships.Where(member =>
+                target.CollectionMemberships.All(existing => existing.CollectionId != member.CollectionId || existing.SeasonNumber != member.SeasonNumber)))
+                database.MediaCollectionMembers.Add(new MediaCollectionMember
+                {
+                    Id = Guid.NewGuid(),
+                    CollectionId = member.CollectionId,
+                    MediaItemId = target.Id,
+                    SeasonNumber = member.SeasonNumber,
+                    SortOrder = member.SortOrder
+                });
+
+            foreach (var note in sourceNotes)
+            {
+                note.MediaItemId = target.Id;
+            }
+
+            var accessChangedUsers = new HashSet<Guid>();
+            foreach (var grant in sourceGrants.Where(grant => targetGrantUsers.Add(grant.UserId)))
+            {
+                database.UserTitleGrants.Add(new UserTitleGrant { UserId = grant.UserId, MediaItemId = target.Id });
+                accessChangedUsers.Add(grant.UserId);
+            }
+
+            foreach (var rule in sourceRules.Where(rule => targetRuleUsers.Add(rule.UserId)))
+            {
+                database.UserTitleRules.Add(new UserTitleRule { UserId = rule.UserId, MediaItemId = target.Id, Allowed = rule.Allowed });
+                accessChangedUsers.Add(rule.UserId);
+            }
+
+            foreach (var affectedUserId in accessChangedUsers)
+            {
+                database.SyncChanges.Add(new SyncChange
+                {
+                    Area = SyncChangeArea.Catalog,
+                    UserId = affectedUserId,
+                    CreatedAt = now,
+                });
+            }
+
+            foreach (var hidden in sourceContinueWatching.Where(state => targetContinueWatchingUsers.Add(state.UserId)))
+            {
+                database.ContinueWatchingStates.Add(new ContinueWatchingState
+                {
+                    UserId = hidden.UserId,
+                    MediaItemId = target.Id,
+                    IsHidden = hidden.IsHidden,
+                    Revision = 1,
+                });
+            }
+
+            if (sourceSegment is not null && (sourceSegment.IntroSource == MediaSegmentSource.Manual || sourceSegment.CreditsSource == MediaSegmentSource.Manual))
+            {
+                if (targetSegment is null)
+                {
+                    targetSegment = new MediaSegment
+                    {
+                        MediaItemId = target.Id,
+                        UpdatedAt = now,
+                    };
+                    database.MediaSegments.Add(targetSegment);
+                }
+                if (sourceSegment.IntroSource == MediaSegmentSource.Manual && targetSegment.IntroSource != MediaSegmentSource.Manual)
+                {
+                    targetSegment.IntroStartMilliseconds = sourceSegment.IntroStartMilliseconds;
+                    targetSegment.IntroEndMilliseconds = sourceSegment.IntroEndMilliseconds;
+                    targetSegment.IntroSource = MediaSegmentSource.Manual;
+                    targetSegment.IntroConfidence = sourceSegment.IntroConfidence;
+                    targetSegment.UpdatedAt = now;
+                }
+                if (sourceSegment.CreditsSource == MediaSegmentSource.Manual && targetSegment.CreditsSource != MediaSegmentSource.Manual)
+                {
+                    targetSegment.CreditsStartMilliseconds = sourceSegment.CreditsStartMilliseconds;
+                    targetSegment.CreditsSource = MediaSegmentSource.Manual;
+                    targetSegment.CreditsConfidence = sourceSegment.CreditsConfidence;
+                    targetSegment.UpdatedAt = now;
+                }
+            }
+
+            await database.WatchEvents.IgnoreQueryFilters().Where(watch => watch.MediaItemId == sourceId)
+                .ExecuteUpdateAsync(update => update.SetProperty(watch => watch.MediaItemId, targetId), token);
+            await database.SaveChangesAsync(token);
+        }, cancellationToken);
+
+        if (watchlist is not null)
+        {
+            await watchlist.ReplaceMediaIdAsync(sourceId, targetId, cancellationToken);
+        }
+    }
+
+    private async Task<(MediaItem Source, MediaItem Target)> ValidateMergeCandidatesAsync(
+        Guid sourceId,
+        Guid targetId,
+        CancellationToken cancellationToken)
+    {
         var source = await database.MediaItems
             .Include(item => item.CollectionMemberships)
             .SingleOrDefaultAsync(item => item.Id == sourceId, cancellationToken)
@@ -133,16 +300,6 @@ public sealed class LibraryHealthService(AureliaDbContext database, LibraryMutat
             .Include(item => item.CollectionMemberships)
             .SingleOrDefaultAsync(item => item.Id == targetId, cancellationToken)
             ?? throw new MetadataException("target_not_found", "The copy to keep was not found.", StatusCodes.Status404NotFound);
-        // Favorites, progress and history belong to profiles. The request's own profile filter
-        // would show only the administrator's, and the others would be deleted with the copy.
-        var sourceFavorites = await database.UserFavorites.IgnoreQueryFilters()
-            .Where(favorite => favorite.MediaItemId == sourceId).ToListAsync(cancellationToken);
-        var targetFavorites = await database.UserFavorites.IgnoreQueryFilters()
-            .Where(favorite => favorite.MediaItemId == targetId).ToListAsync(cancellationToken);
-        var sourceProgress = await database.PlaybackProgress.IgnoreQueryFilters()
-            .Where(progress => progress.MediaItemId == sourceId).ToListAsync(cancellationToken);
-        var targetProgress = await database.PlaybackProgress.IgnoreQueryFilters()
-            .Where(progress => progress.MediaItemId == targetId).ToListAsync(cancellationToken);
 
         if (source.Kind != target.Kind || source.Kind is not (MediaKind.Movie or MediaKind.Episode))
             throw new MetadataException("invalid_merge", "Only two copies of the same movie or episode can be merged.", StatusCodes.Status400BadRequest);
@@ -150,55 +307,7 @@ public sealed class LibraryHealthService(AureliaDbContext database, LibraryMutat
             throw new MetadataException("source_available",
                 "This copy's file still exists, so the next scan would add it again. Only a missing copy can be merged into another one.",
                 StatusCodes.Status409Conflict);
-
-        var now = clock.GetUtcNow();
-        foreach (var favorite in sourceFavorites.Where(favorite => targetFavorites.All(existing => existing.UserId != favorite.UserId)))
-            database.UserFavorites.Add(new UserFavorite { Id = Guid.NewGuid(), UserId = favorite.UserId, MediaItemId = target.Id, CreatedAt = favorite.CreatedAt });
-
-        foreach (var progress in sourceProgress)
-        {
-            var existing = targetProgress.FirstOrDefault(value => value.UserId == progress.UserId);
-            if (existing is null)
-            {
-                database.PlaybackProgress.Add(new PlaybackProgress
-                {
-                    Id = Guid.NewGuid(),
-                    UserId = progress.UserId,
-                    User = null!,
-                    MediaItemId = target.Id,
-                    MediaItem = target,
-                    PositionMilliseconds = progress.PositionMilliseconds,
-                    DurationMilliseconds = progress.DurationMilliseconds,
-                    IsCompleted = progress.IsCompleted,
-                    LastPlayedAt = progress.LastPlayedAt,
-                    UpdatedAt = now,
-                    Revision = 1,
-                });
-            }
-            else if (progress.IsCompleted && !existing.IsCompleted)
-            {
-                existing.IsCompleted = true;
-                existing.PositionMilliseconds = 0;
-                existing.UpdatedAt = now;
-                existing.Revision = checked(existing.Revision + 1);
-            }
-        }
-
-        foreach (var member in source.CollectionMemberships.Where(member =>
-            target.CollectionMemberships.All(existing => existing.CollectionId != member.CollectionId || existing.SeasonNumber != member.SeasonNumber)))
-            database.MediaCollectionMembers.Add(new MediaCollectionMember
-            {
-                Id = Guid.NewGuid(),
-                CollectionId = member.CollectionId,
-                MediaItemId = target.Id,
-                SeasonNumber = member.SeasonNumber,
-                SortOrder = member.SortOrder
-            });
-
-        await database.WatchEvents.IgnoreQueryFilters().Where(watch => watch.MediaItemId == sourceId)
-            .ExecuteUpdateAsync(update => update.SetProperty(watch => watch.MediaItemId, targetId), cancellationToken);
-        await database.SaveChangesAsync(cancellationToken);
-        await mutations.RemoveAsync(userId, sourceId, cancellationToken);
+        return (source, target);
     }
 
     /// <summary>Removes a title whose file is missing; a title with its file present needs "Remove from Library".</summary>
