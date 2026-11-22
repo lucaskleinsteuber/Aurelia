@@ -306,6 +306,7 @@ final class AppModel: ObservableObject {
   private var inspectionGeneration = UUID()
   private let administrationFetcher:
     (@MainActor (StoredServerProfile) async throws -> AdministrationSnapshot)?
+  private let backgroundHostingDisabler: (@MainActor () async -> Void)?
 
   struct AdministrationSnapshot: Sendable {
     var libraries: [LibrarySummary] = []
@@ -475,12 +476,14 @@ final class AppModel: ObservableObject {
     )? = nil,
     initialLibraryCapabilities: Set<String> = [],
     libraryStateClientFactory: (@MainActor (StoredServerProfile) -> any LibraryStateServing)? = nil,
-    reconnectCoordinator: ServerReconnectCoordinator = ServerReconnectCoordinator()
+    reconnectCoordinator: ServerReconnectCoordinator = ServerReconnectCoordinator(),
+    backgroundHostingDisabler: (@MainActor () async -> Void)? = nil
   ) {
     self.store = store ?? Self.defaultStore
     self.serverHost = serverHost
     self.syncController = syncController
     self.reconnectCoordinator = reconnectCoordinator
+    self.backgroundHostingDisabler = backgroundHostingDisabler
     self.profileSelectionOverride = profileSelectionEnabled
     self.profileUnlocker = profileUnlocker
     self.profileSessionEnder = profileSessionEnder
@@ -1060,6 +1063,11 @@ final class AppModel: ObservableObject {
     hostPollTask?.cancel()
     hostPollTask = nil
     await serverHost.stop()
+    if let backgroundHostingDisabler {
+      await backgroundHostingDisabler()
+    } else if !Self.isTestProcess {
+      await BackgroundHostingController.disableAll()
+    }
     endTerminationProtection()
     hostSnapshot = .stopped
     operatingMode = .client

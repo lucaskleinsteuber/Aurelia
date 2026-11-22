@@ -98,8 +98,16 @@ enum WindowClosePreference {
 @MainActor
 final class AureliaAppDelegate: NSObject, NSApplicationDelegate {
   private let termination = ApplicationTerminationCoordinator()
+  private var powerOffObserver: NSObjectProtocol?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    powerOffObserver = NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.willPowerOffNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.termination.markSystemPowerOff() }
+    }
     WishNotificationCenter.shared.installDelegateIfNeeded {
       AppModel.active?.openWishes()
     }
@@ -127,6 +135,7 @@ final class AureliaAppDelegate: NSObject, NSApplicationDelegate {
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     termination.request(
       shutdown: { await AppModel.active?.shutdown() },
-      terminate: { sender.terminate(nil) })
+      terminate: { sender.terminate(nil) },
+      reply: { sender.reply(toApplicationShouldTerminate: $0) })
   }
 }

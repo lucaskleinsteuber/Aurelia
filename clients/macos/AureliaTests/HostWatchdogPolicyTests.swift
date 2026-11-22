@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 
@@ -103,5 +104,59 @@ struct HostWatchdogPolicyTests {
           "AURELIA_HOST_PREFLIGHT_CONFIG": "/private/tmp/Aurelia/another-run/Host/preflight.json",
         ], helperBundleURL: helper)
     }
+  }
+
+  @Test func idleOrStoppedServerNeverKeepsMacAwake() {
+    #expect(
+      HostWatchdogPolicy.shouldPreventIdleSleep(
+        settingEnabled: true, isShuttingDown: false, isProcessRunning: true, isIdle: false))
+    #expect(
+      !HostWatchdogPolicy.shouldPreventIdleSleep(
+        settingEnabled: true, isShuttingDown: false, isProcessRunning: false, isIdle: true))
+    #expect(
+      !HostWatchdogPolicy.shouldPreventIdleSleep(
+        settingEnabled: true, isShuttingDown: false, isProcessRunning: true, isIdle: true))
+    #expect(
+      !HostWatchdogPolicy.shouldPreventIdleSleep(
+        settingEnabled: true, isShuttingDown: true, isProcessRunning: true, isIdle: false))
+    #expect(
+      !HostWatchdogPolicy.shouldPreventIdleSleep(
+        settingEnabled: false, isShuttingDown: false, isProcessRunning: true, isIdle: false))
+  }
+
+  @MainActor
+  @Test func systemLogoutReturnsTerminateLaterAndRepliesAfterShutdown() async {
+    let coordinator = ApplicationTerminationCoordinator()
+    var shutdownFinished = false
+    var replied: Bool?
+    var terminateCalls = 0
+    let reply = coordinator.request(
+      isSystemPowerEvent: true,
+      shutdown: {
+        try? await Task.sleep(for: .milliseconds(10))
+        shutdownFinished = true
+      },
+      terminate: { terminateCalls += 1 },
+      reply: { replied = $0 }
+    )
+    #expect(reply == .terminateLater)
+    for _ in 0..<200 where replied == nil {
+      try? await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(shutdownFinished)
+    #expect(replied == true)
+    #expect(terminateCalls == 0)
+  }
+
+  @MainActor
+  @Test func switchToClientModeDisablesBackgroundHosting() async {
+    var disabledBackgroundHosting = 0
+    let model = AppModel(
+      store: InMemoryServerProfileStore(),
+      backgroundHostingDisabler: { disabledBackgroundHosting += 1 }
+    )
+    await model.switchToClientMode()
+    #expect(disabledBackgroundHosting == 1)
+    #expect(model.operatingMode == .client)
   }
 }

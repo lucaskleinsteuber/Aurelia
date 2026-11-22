@@ -6,12 +6,34 @@ import OSLog
 import Security
 
 @main
+@MainActor
 final class ServerHostApplication: NSObject, NSApplicationDelegate {
   private static let logger = Logger(
     subsystem: "com.lucas.aurelia.media.server-host", category: "lifecycle")
   private var runtime: ServerHostRuntime?
   private var terminationAuthorized = false
+  private var systemPowerOffRequested = false
+  private var pendingTerminationReply = false
   private var workspaceObservers: [NSObjectProtocol] = []
+
+  private static let quitReasonKeyword: AEKeyword = 0x7768_793F  // 'why?' (kAEQuitReason)
+  private static let systemQuitReasons: Set<OSType> = [
+    0x6C67_6F74,  // 'lgot' (kAELogOut)
+    0x726C_676F,  // 'rlgo' (kAEReallyLogOut)
+    0x7273_7461,  // 'rsta' (kAERestart)
+    0x7368_7574,  // 'shut' (kAEShutDown)
+    0x7264_6C67,  // 'rdlg' (kAEShowRestartDialog)
+    0x7364_6C67,  // 'sdlg' (kAEShowShutdownDialog)
+  ]
+
+  private static func isSystemPowerAppleEvent(
+    _ event: NSAppleEventDescriptor? = NSAppleEventManager.shared().currentAppleEvent
+  ) -> Bool {
+    guard let reason = event?.attributeDescriptor(forKeyword: quitReasonKeyword) else {
+      return false
+    }
+    return systemQuitReasons.contains(reason.typeCodeValue)
+  }
 
   static func main() {
     // The app starts this helper in a second role to install an update it downloaded.
@@ -44,6 +66,14 @@ final class ServerHostApplication: NSObject, NSApplicationDelegate {
         center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) {
           [weak runtime] _ in runtime?.systemDidWake()
         },
+        center.addObserver(
+          forName: NSWorkspace.willPowerOffNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+          MainActor.assumeIsolated {
+            self?.systemPowerOffRequested = true
+            self?.runtime?.shutdown()
+          }
+        },
       ]
     } catch {
       let category = (error as? HostError)?.diagnosticCategory ?? "runtime-initialization"
@@ -55,16 +85,31 @@ final class ServerHostApplication: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    guard terminationAuthorized else { return .terminateCancel }
-    ProcessInfo.processInfo.enableSuddenTermination()
-    ProcessInfo.processInfo.enableAutomaticTermination(
-      "Aurelia Server Host completed shutdown")
-    return .terminateNow
+    if terminationAuthorized {
+      ProcessInfo.processInfo.enableSuddenTermination()
+      ProcessInfo.processInfo.enableAutomaticTermination(
+        "Aurelia Server Host completed shutdown")
+      return .terminateNow
+    }
+    if systemPowerOffRequested || Self.isSystemPowerAppleEvent() {
+      pendingTerminationReply = true
+      runtime?.shutdown()
+      return .terminateLater
+    }
+    return .terminateCancel
   }
 
   @MainActor private func finishTermination() {
     dispatchPrecondition(condition: .onQueue(.main))
     terminationAuthorized = true
+    if pendingTerminationReply {
+      pendingTerminationReply = false
+      ProcessInfo.processInfo.enableSuddenTermination()
+      ProcessInfo.processInfo.enableAutomaticTermination(
+        "Aurelia Server Host completed shutdown")
+      NSApplication.shared.reply(toApplicationShouldTerminate: true)
+      return
+    }
     NSApplication.shared.terminate(nil)
   }
 }
@@ -368,8 +413,6 @@ private final class ServerHostRuntime: @unchecked Sendable {
   private func startServer(lan: Bool) {
     guard !shuttingDown else { return }
     stopWatchdog()
-    // Released while the server was stopped for being unused.
-    updateSleepAssertion()
     readinessGeneration &+= 1
     let generation = readinessGeneration
     serverReadyGeneration = nil
@@ -436,10 +479,13 @@ private final class ServerHostRuntime: @unchecked Sendable {
       }
       process = child
       try child.run()
+      // Re-acquire sleep assertion once the server is running again (if enabled in settings).
+      updateSleepAssertion()
       waitForServer(lan: lan, bootstrapToken: bootstrapToken, generation: generation)
     } catch {
       closeServerLifeline()
       updateStatus(.failed, message: "The bundled Aurelia Server could not be started.")
+      updateSleepAssertion()
     }
   }
 
@@ -1057,7 +1103,12 @@ private final class ServerHostRuntime: @unchecked Sendable {
   private var operationURL: URL { dataDirectory.appendingPathComponent("host-operation.json") }
   private func updateSleepAssertion() {
     guard !isolatedBackground else { return }
-    let requested = (try? HostServiceSettings.load().preventIdleSleep) == true
+    let requested = HostWatchdogPolicy.shouldPreventIdleSleep(
+      settingEnabled: (try? HostServiceSettings.load().preventIdleSleep) == true,
+      isShuttingDown: shuttingDown,
+      isProcessRunning: process?.isRunning == true,
+      isIdle: status.state == .idle
+    )
     if requested && sleepAssertion == 0 {
       var assertion: IOPMAssertionID = 0
       if IOPMAssertionCreateWithName(

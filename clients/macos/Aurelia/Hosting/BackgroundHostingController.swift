@@ -45,6 +45,23 @@ enum BackgroundHostingController {
     }
     return false
   }
+  /// Stops and unregisters any background or login launch agent and clears saved background
+  /// hosting settings so switching to Client Mode does not relaunch a server on next login.
+  static func disableAll() async {
+    for startAtLogin in [false, true] {
+      let agent = SMAppService.agent(
+        plistName: AppEdition.agentName(startAtLogin: startAtLogin) + ".plist")
+      if agent.status != .notRegistered {
+        try? await agent.unregister()
+      }
+    }
+    var disabled = HostServiceSettings()
+    disabled.backgroundEnabled = false
+    disabled.startAtLogin = false
+    disabled.preventIdleSleep = false
+    disabled.controlSecret = ""
+    try? disabled.save()
+  }
   static func openPermissions() { SMAppService.openSystemSettingsLoginItems() }
   static func startRegisteredService() async throws {
     guard permitted else { throw NativeServerHostError.rejected }
