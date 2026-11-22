@@ -100,15 +100,30 @@ struct ConnectionReliabilityTests {
     let profile = syntheticProfile()
     let model = AppModel(store: FailingDisconnectStore(profile: profile), initialProfile: profile)
     guard model.operatingMode != .host else { return }
+    model.startRemoteDeviceService()
+    #expect(model.hasActiveRemoteDeviceTasks)
     await model.enterRest()
     #expect(model.isResting)
+    #expect(!model.hasActiveRemoteDeviceTasks)
     #expect(model.playback == nil)
     #expect(model.connectionStatus == nil)
     // Nothing a view might trigger meanwhile reaches the server.
     await model.refreshFromUI()
+    await model.refreshHome()
     await model.reloadWatchingProfiles()
+    model.startRemoteDeviceService()
+    #expect(!model.hasActiveRemoteDeviceTasks)
     #expect(model.errorMessage == nil)
     #expect(model.isResting)
+  }
+
+  @Test func systemSleepStopsRemoteDeviceTasks() async {
+    let profile = syntheticProfile()
+    let model = AppModel(store: FailingDisconnectStore(profile: profile), initialProfile: profile)
+    model.startRemoteDeviceService()
+    #expect(model.hasActiveRemoteDeviceTasks)
+    await model.systemWillSleep()
+    #expect(!model.hasActiveRemoteDeviceTasks)
   }
 
   @Test func aSignInKeptInTheLoginKeychainMovesToTheDataProtectionKeychain() throws {

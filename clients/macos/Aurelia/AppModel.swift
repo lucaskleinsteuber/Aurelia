@@ -199,6 +199,10 @@ final class AppModel: ObservableObject {
   private var remoteDeviceHeartbeatTask: Task<Void, Never>?
   private var remoteDeviceCommandTask: Task<Void, Never>?
   private var remoteDeviceStatusTask: Task<Void, Never>?
+  var hasActiveRemoteDeviceTasks: Bool {
+    remoteDeviceHeartbeatTask != nil || remoteDeviceCommandTask != nil
+      || remoteDeviceStatusTask != nil
+  }
   /// A seek sent to the remote player; status polls older than it would move the slider back.
   private var remoteSeekSentAt: Date?
 
@@ -412,6 +416,10 @@ final class AppModel: ObservableObject {
     scanStatusUnavailable = []
     syncStartTask?.cancel()
     syncStartTask = nil
+    stopRemoteDeviceTasks()
+  }
+
+  private func stopRemoteDeviceTasks() {
     remoteDeviceHeartbeatTask?.cancel()
     remoteDeviceHeartbeatTask = nil
     remoteDeviceCommandTask?.cancel()
@@ -892,6 +900,7 @@ final class AppModel: ObservableObject {
     guard !isResting, operatingMode != .host, profile != nil else { return }
     isResting = true
     if playback != nil { dismissPlayback() }
+    if watchParty != nil { await leaveWatchTogether() }
     connectionStatus = nil
     await systemWillSleep()
     PinnedSessionPool.shared.removeAll()
@@ -1891,7 +1900,7 @@ final class AppModel: ObservableObject {
     #endif
     // The library view can appear as soon as its saved profile is loaded.
     // Its task/activation must not supersede the initial coherent snapshot.
-    guard !isStarting, !isRecoveringLocalHost else { return }
+    guard !isResting, !isStarting, !isRecoveringLocalHost else { return }
     guard !requiresProfileSelection else { return }
     guard let profile else { return }
     let generation = connectionGeneration
@@ -2783,11 +2792,24 @@ final class AppModel: ObservableObject {
     reconnectTask?.cancel()
     reconnectTask = nil
     reconnectCoordinator.cancel()
+    serverWakeTask?.cancel()
+    serverWakeTask = nil
     hostPollTask?.cancel()
     hostPollTask = nil
+    homeRefreshTask?.cancel()
+    homeRefreshTask = nil
     scanPollTask?.cancel()
     scanPollTask = nil
     scanPollingRun = UUID()
+    syncStartTask?.cancel()
+    syncStartTask = nil
+    stopRemoteDeviceTasks()
+    browseWarmup?.cancel()
+    browseWarmup = nil
+    for task in detailPreparations.values { task.cancel() }
+    detailPreparations.removeAll()
+    for task in artworkPrefetch { task.cancel() }
+    artworkPrefetch.removeAll()
     await syncController.stop(runID: connectionGeneration)
   }
 
@@ -2801,6 +2823,11 @@ final class AppModel: ObservableObject {
     if operatingMode == .host { startHostPolling() }
     if !activeScans.isEmpty { startScanPolling() }
     await setApplicationActive(NSApplication.shared.isActive)
+    if !isResting, !requiresProfileSelection, profile != nil {
+      startRemoteDeviceService()
+      if let device = activeRemotePlayer { startRemoteStatusPolling(device: device) }
+      scheduleHomeRefresh()
+    }
     if operatingMode != .host, profile != nil { await refreshFromUI() }
   }
 
@@ -3920,6 +3947,8 @@ final class AppModel: ObservableObject {
 
   private func scheduleHomeRefresh() {
     homeRefreshTask?.cancel()
+    homeRefreshTask = nil
+    guard !isResting else { return }
     guard let value = home?.recommendationChangesAt,
       let delay = HomeRefreshPolicy.delay(until: value)
     else { return }
@@ -4767,10 +4796,12 @@ final class AppModel: ObservableObject {
 
   private func startRemoteStatusPolling(device: RemotePlayerDevice) {
     remoteDeviceStatusTask?.cancel()
+    remoteDeviceStatusTask = nil
+    guard !isResting, profile != nil else { return }
     remoteDeviceStatusTask = Task { [weak self] in
       while !Task.isCancelled {
-        try? await Task.sleep(nanoseconds: 2_500_000_000)
-        guard let self, let profile = self.profile else { return }
+        do { try await Task.sleep(nanoseconds: 2_500_000_000) } catch { return }
+        guard let self, !self.isResting, let profile = self.profile else { return }
         do {
           let status = try await APIClient(profile: profile).playerStatus(deviceId: device.deviceId)
           await MainActor.run {
@@ -4793,14 +4824,16 @@ final class AppModel: ObservableObject {
 
   func startRemoteDeviceService() {
     remoteDeviceHeartbeatTask?.cancel()
+    remoteDeviceHeartbeatTask = nil
     remoteDeviceCommandTask?.cancel()
-    guard profile != nil else { return }
+    remoteDeviceCommandTask = nil
+    guard profile != nil, !isResting, !requiresProfileSelection else { return }
     let deviceId = macDeviceId
     let deviceName = Host.current().localizedName ?? "Mac"
 
     remoteDeviceHeartbeatTask = Task { [weak self] in
       while !Task.isCancelled {
-        guard let self, let profile = self.profile else { return }
+        guard let self, !self.isResting, let profile = self.profile else { return }
         let isPlaying = self.playback != nil
         let mediaId = self.playback?.mediaId
         let title = self.playback?.title
@@ -4816,21 +4849,29 @@ final class AppModel: ObservableObject {
           isPaused: false
         )
         _ = try? await APIClient(profile: profile).sendPlayerHeartbeat(req)
-        try? await Task.sleep(nanoseconds: 15_000_000_000)
+        do { try await Task.sleep(nanoseconds: 15_000_000_000) } catch { return }
       }
     }
 
     remoteDeviceCommandTask = Task { [weak self] in
+      var retryDelaySeconds: UInt64 = 2
       while !Task.isCancelled {
-        guard let self, let profile = self.profile else { return }
+        guard let self, !self.isResting, let profile = self.profile else { return }
         do {
           let commands = try await APIClient(profile: profile).pollPlayerCommands(
             deviceId: deviceId, waitMs: 10000)
+          retryDelaySeconds = 2
           for cmd in commands {
             self.handleIncomingRemoteCommand(cmd)
           }
+        } catch is CancellationError {
+          return
         } catch {
-          try? await Task.sleep(nanoseconds: 2_000_000_000)
+          guard !self.isResting, !Task.isCancelled else { return }
+          do { try await Task.sleep(nanoseconds: retryDelaySeconds * 1_000_000_000) } catch {
+            return
+          }
+          retryDelaySeconds = min(retryDelaySeconds * 2, 30)
         }
       }
     }
