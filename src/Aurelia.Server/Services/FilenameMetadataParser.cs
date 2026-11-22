@@ -128,6 +128,8 @@ public static partial class FilenameMetadataParser
 
     public static int? SeasonNumber(string directoryName)
     {
+        // A show's "Specials" folder is its season 0, as Plex, Jellyfin and Kodi keep it (audit SRV-LIB-001).
+        if (SpecialsSeasonExpression().IsMatch(directoryName)) return 0;
         var match = SeasonExpression().Match(directoryName);
         return match.Success
             ? int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture)
@@ -275,6 +277,9 @@ public static partial class FilenameMetadataParser
 
     [GeneratedRegex(@"^(?:(?:Season|Staffel)[ ._-]*|S)(\d{1,2})\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SeasonExpression();
+
+    [GeneratedRegex(@"^(?:Season[ ._-]*)?Specials$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SpecialsSeasonExpression();
 
     [GeneratedRegex(@"^(?:E|Episode|Folge)[ ._-]*(\d{1,3})(?:\s*[-._ ]+\s*(.*))?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex LocalNamedEpisodeExpression();

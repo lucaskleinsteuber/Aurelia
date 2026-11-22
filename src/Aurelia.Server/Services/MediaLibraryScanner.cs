@@ -145,6 +145,12 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
         "officialteasers",
     ];
 
+    // Folders a file system or another system keeps at a drive's root, never media; ext4's
+    // lost+found is readable only by root and would otherwise block every import (audit SRV-LIB-002).
+    private static readonly HashSet<string> SystemFolderNames = new(
+        ["lost+found", "System Volume Information", "$RECYCLE.BIN", "RECYCLER"],
+        StringComparer.OrdinalIgnoreCase);
+
     private static readonly HashSet<string> PackageExtensions = new(
         [".app", ".bundle", ".framework", ".plugin", ".pkg", ".xcodeproj"],
         StringComparer.OrdinalIgnoreCase);
@@ -447,6 +453,26 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
             .FirstOrDefault();
     }
 
+    /// <summary>
+    /// True when the most specific rule for <paramref name="path"/> (itself, or a folder it lies in)
+    /// is Ignore.
+    /// </summary>
+    private static bool IsIgnored(string rootPath, string path, IReadOnlyList<ExistingImportAssignment> assignments)
+    {
+        if (!MediaPath.IsSameOrDescendant(MediaPath.Normalize(path), MediaPath.Normalize(rootPath))) return false;
+        var relative = NormalizeRelativePath(Path.GetRelativePath(rootPath, path));
+        var rule = assignments.Where(assignment =>
+            {
+                var source = NormalizeRelativePath(assignment.RelativePath);
+                return relative == source || (assignment.IsDirectory
+                    && (source.Length == 0 || relative.StartsWith(source + Path.DirectorySeparatorChar, StringComparison.Ordinal)));
+            })
+            .OrderByDescending(assignment => NormalizeRelativePath(assignment.RelativePath).Length)
+            .ThenBy(assignment => assignment.IsDirectory)
+            .FirstOrDefault();
+        return rule is { Kind: null };
+    }
+
     private static MediaScanDiscovery ApplyAssignments(
         string rootPath, IReadOnlyList<ScannedFile> files, MediaScanDiscovery discovery,
         List<ExistingImportAssignment> assignments,
@@ -579,6 +605,11 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
             .OrderBy(item => item.Kind == MediaKind.Series ? 0 : 1)
             .ThenBy(item => item.SourcePath, NaturalPathComparer).ToList();
         issues.RemoveAll(issue => issue.Path is not null && assignedPaths.Contains(MediaPath.Normalize(issue.Path)));
+        // An unreadable folder or file the owner chose to ignore, or one inside an ignored folder, no
+        // longer blocks the import (audit SRV-LIB-002).
+        issues.RemoveAll(issue => issue.Path is not null
+            && issue.Code is "unreadable_directory" or "unreadable_entry" or "unreadable_file"
+            && IsIgnored(rootPath, issue.Path, assignments));
         var unresolved = files.Where(file => !acceptedPaths.Contains(file.Path)
             && (FindAssignment(rootPath, file, assignments) is not { Kind: null })).ToList();
         issues.RemoveAll(issue => issue.Code == "classification_required" && issue.Path is not null
@@ -1277,7 +1308,8 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
             return true;
         }
 
-        return entry is DirectoryInfo && PackageExtensions.Contains(entry.Extension);
+        return entry is DirectoryInfo
+            && (PackageExtensions.Contains(entry.Extension) || SystemFolderNames.Contains(entry.Name));
     }
 
     private static string CombineComponents(string rootPath, IEnumerable<string> components)

@@ -51,7 +51,12 @@ TV Shows/
 
 Aurelia understands these episode names: `S01E02`, `S1 E2`, `1x02`, `Season 1 Episode 2`,
 `Staffel 1 Folge 2`, and inside a season folder also `E02`, `Episode 2`, `Folge 2` or just `02`.
-Season folders may be called `Season 1`, `Staffel 1` or `S1`.
+Season folders may be called `Season 1`, `Staffel 1` or `S1`. Specials go in `Specials` or
+`Season 0` (episodes `S00E01` and so on) and appear as the series' Specials.
+
+Folders a drive keeps for itself, such as `lost+found`, `System Volume Information` and
+`$RECYCLE.BIN`, are skipped. If another folder can't be read, the import preview names it; set it
+to Ignore there and the rest of the storage location can be imported.
 
 ## Intros and credits
 

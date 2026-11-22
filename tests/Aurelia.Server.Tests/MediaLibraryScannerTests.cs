@@ -847,6 +847,91 @@ public sealed class MediaLibraryScannerTests
         Assert.True(command.PasswordFromStandardInput);
     }
 
+    // Audit 2026-11-21 (SRV-LIB-001): a show's "Specials" folder is its season 0, not a show of its own.
+    [Theory]
+    [InlineData(LibraryKind.TvShows)]
+    [InlineData(LibraryKind.Automatic)]
+    public void SpecialsFolderBecomesSeasonZeroOfItsShow(LibraryKind kind)
+    {
+        var root = CreateDirectory();
+        try
+        {
+            Touch(root, "Paper Lighthouse (2020)/Season 01/Paper Lighthouse - S01E01 - Invented One.mkv");
+            Touch(root, "Paper Lighthouse (2020)/Season 01/Paper Lighthouse - S01E02 - Invented Two.mkv");
+            Touch(root, "Paper Lighthouse (2020)/Season 02/Paper Lighthouse - S02E01.mkv");
+            Touch(root, "Paper Lighthouse (2020)/Specials/Paper Lighthouse - S00E01 - Behind the Fog.mkv");
+
+            // No classification decision: the season folders alone must make it a show.
+            var result = scanner.Scan(root, kind, [], null, CancellationToken.None);
+
+            var series = Assert.Single(result.Items, item => item.Kind == MediaKind.Series);
+            Assert.StartsWith("Paper Lighthouse", series.DetectedTitle, StringComparison.Ordinal);
+            var episodes = result.Items.Where(item => item.Kind == MediaKind.Episode).ToList();
+            Assert.Equal(4, episodes.Count);
+            Assert.All(episodes, episode => Assert.Equal(series.SourcePath, episode.ParentSourcePath));
+            var special = Assert.Single(episodes, episode => episode.SeasonNumber == 0);
+            Assert.Equal(1, special.EpisodeNumber);
+            Assert.Equal([0, 1, 2], episodes.Select(episode => episode.SeasonNumber ?? -1).Distinct().Order().ToArray());
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
+    public void SeasonNumberRecognizesSpecialsButNotTitlesThatContainTheWord()
+    {
+        Assert.Equal(0, FilenameMetadataParser.SeasonNumber("Specials"));
+        Assert.Equal(0, FilenameMetadataParser.SeasonNumber("season specials"));
+        Assert.Equal(0, FilenameMetadataParser.SeasonNumber("Season 00"));
+        Assert.Null(FilenameMetadataParser.SeasonNumber("Specials of the Night (2019)"));
+        Assert.Null(FilenameMetadataParser.SeasonNumber("Special"));
+    }
+
+    // Audit 2026-11-21 (SRV-LIB-002): ext4's root-only lost+found, or an unreadable folder the owner
+    // set to Ignore, must not block the import of everything else.
+    [Fact]
+    public void SystemFoldersAreSkippedAndIgnoredUnreadableFoldersDoNotBlockTheImport()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var root = CreateDirectory();
+        var lostFound = Path.Combine(root, "lost+found");
+        var locked = Path.Combine(root, "Locked Away");
+        try
+        {
+            Touch(root, "Glass Harbor (2019)/Glass Harbor (2019).mkv");
+            Directory.CreateDirectory(lostFound);
+            Touch(root, "Locked Away/Locked Away (2008).mkv");
+            File.SetUnixFileMode(lostFound, UnixFileMode.None);
+            File.SetUnixFileMode(locked, UnixFileMode.None);
+
+            var plain = scanner.Scan(root, LibraryKind.Movies, [], null, CancellationToken.None);
+            var issue = Assert.Single(plain.Issues, item => item.Code == "unreadable_directory");
+            Assert.Equal(MediaPath.Normalize(locked), MediaPath.Normalize(issue.Path!));
+
+            ExistingImportAssignment Ignore(string path, bool directory) => new(path, directory, null, null, null, null, null, null);
+            var ignored = scanner.Scan(root, LibraryKind.Movies, [], null, CancellationToken.None,
+                assignments: [Ignore("Locked Away", directory: true)]);
+            Assert.DoesNotContain(ignored.Issues, item => item.Code.StartsWith("unreadable_", StringComparison.Ordinal));
+            Assert.Single(ignored.Items, item => item.Kind == MediaKind.Movie && item.DetectedTitle == "Glass Harbor");
+
+            // A rule for another folder, or a more specific rule that keeps the folder, still reports it.
+            var other = scanner.Scan(root, LibraryKind.Movies, [], null, CancellationToken.None,
+                assignments: [Ignore("Glass Harbor (2019)", directory: true)]);
+            Assert.Single(other.Issues, item => item.Code == "unreadable_directory");
+            var kept = scanner.Scan(root, LibraryKind.Movies, [], null, CancellationToken.None,
+                assignments: [Ignore("", directory: true), new("Locked Away", true, MediaKind.Movie, null, null, null, null, null)]);
+            Assert.Single(kept.Issues, item => item.Code == "unreadable_directory");
+        }
+        finally
+        {
+            if (Directory.Exists(lostFound)) File.SetUnixFileMode(lostFound, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            if (Directory.Exists(locked)) File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            DeleteFixture(root);
+        }
+    }
+
     private static string CreateDirectory(string? name = null)
     {
         var root = TestPaths.CreateDataDirectory();
