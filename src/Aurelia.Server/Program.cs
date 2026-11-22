@@ -16,6 +16,27 @@ using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 
 var commandLine = ServerCommandLine.Parse(args);
+if (commandLine.Command == "help")
+{
+    Console.WriteLine(ServerCommandLine.UsageText);
+    Environment.ExitCode = 0;
+    return;
+}
+
+if (commandLine.Command == "version")
+{
+    Console.WriteLine($"Aurelia Server {ServerProductVersion.Current}");
+    Environment.ExitCode = 0;
+    return;
+}
+
+if (commandLine.Error is not null)
+{
+    Console.Error.WriteLine(commandLine.Error);
+    Environment.ExitCode = 2;
+    return;
+}
+
 if (commandLine.Command == "library")
 {
     Environment.ExitCode = await LibraryCommandClient.RunAsync(commandLine, CancellationToken.None);
