@@ -39,6 +39,16 @@ through your router (for example the MyFRITZ!App) or keep it awake during set ho
 `sudo aurelia sleep server --awake 17:00-23:30`. See
 [power saving](LINUX_SERVER.md#saving-power).
 
+**The server computer freezes without a monitor.** If a Linux server with no screen attached
+stops answering completely (no ping, nothing in the log, power light still on), often while it
+converts video or finds intros but sometimes even when idle, its Intel graphics driver may be
+hanging. This was seen on an HP ProDesk 600 G4 Mini; the same video work runs fine once the
+driver is off. Aurelia does not need the driver unless it converts video with Intel Quick Sync
+or VA-API, and without it Aurelia uses the processor instead. Add `module_blacklist=i915` to
+`GRUB_CMDLINE_LINUX_DEFAULT` in `/etc/default/grub`, run `sudo update-grub` and restart; remove it
+again to undo. If such a computer does not start again after a freeze, unplug its power for
+30 seconds.
+
 **A drive is missing.** Titles on a disconnected drive stay with their details and progress and
 show as offline until it is back. On Linux, mount media drives permanently (for example through
 `/etc/fstab`) so they are there after a restart; [Aurelia Server on Linux](LINUX_SERVER.md)
