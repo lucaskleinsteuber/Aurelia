@@ -77,7 +77,8 @@ titles manages only those and cannot browse or scan storage locations.
 
 Everything about the server and its people, also without the server password: server
 settings, network access, power saving, updates, backups, paired devices and pairing codes,
-profiles and their access, and the scrub-preview and intro detection settings.
+profiles and their access (except changes that affect who manages the server or revoke an owner
+or administrator's access, listed below), and the scrub-preview and intro detection settings.
 
 ### Changes that also need the server password
 
@@ -88,7 +89,10 @@ owner, and lets the confirmed request run exactly once:
   (`DELETE /api/v1/media/{id}`), which administrators may also do;
 - restoring a backup;
 - changing the server password or another profile's password;
-- changing a profile's role, and removing an owner or administrator profile.
+- creating an owner or administrator profile, changing a profile's role, removing or disabling
+  an owner or administrator profile, replacing another owner or administrator's PIN, or revoking
+  libraries or titles from an owner or administrator profile (`PUT /api/v1/users/{id}/access`,
+  `PUT /api/v1/users/{id}/titles`, `PUT /api/v1/users/{id}/profile`).
 
 Removing a storage location (`DELETE /api/v1/libraries/{id}`) and removing a title whose file
 is missing from Library Health (`DELETE /api/v1/library/health/entries/{id}`) also take titles

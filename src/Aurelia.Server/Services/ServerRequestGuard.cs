@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using Aurelia.Contracts;
@@ -275,9 +276,10 @@ public sealed class ServerRequestGuard
 
     /// <summary>
     /// The other ways to change who manages the server (docs/SECURITY_MODEL.md): a new owner or
-    /// administrator, a changed role, or an owner or administrator switched off, cut off from the
-    /// libraries or given a new PIN by someone else. These need the Server Password like
-    /// <c>PUT /users/{id}/role</c>; a stolen owner PIN alone must not make a new owner (audit S-M1).
+    /// administrator, a changed role, or an owner or administrator switched off, given a new PIN
+    /// by someone else, or having libraries or titles revoked. These need the Server Password like
+    /// <c>PUT /users/{id}/role</c>; a stolen owner PIN alone must not make a new owner or cut off
+    /// an administrator (audit S-M1, SRV-SEC-003).
     /// </summary>
     internal static async Task<bool> ChangesWhoManagesAsync(HttpContext context, AureliaDbContext database)
     {
@@ -305,17 +307,90 @@ public sealed class ServerRequestGuard
 
         var targetId = Guid.Parse(segments[4]);
         var target = await database.Users.AsNoTracking().Where(user => user.Id == targetId)
-            .Select(user => new { user.Role }).SingleOrDefaultAsync(context.RequestAborted);
+            .Select(user => new { user.Role, user.AccessMode }).SingleOrDefaultAsync(context.RequestAborted);
         if (target is null) return false;
         var self = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value is { } actor
             && Guid.TryParse(actor, out var actorId) && actorId == targetId;
         bool SwitchedOff() => Values("isEnabled").Any(enabled => enabled.ValueKind == JsonValueKind.False);
         bool NewPin() => Values("pin").Any(pin => pin.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(pin.GetString()));
+        static ProfileAccessMode? ParseAccessMode(JsonElement value)
+        {
+            if (value.ValueKind == JsonValueKind.String
+                && value.GetString() is { } text
+                && !int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out _)
+                && Enum.TryParse<ProfileAccessMode>(text, ignoreCase: true, out var parsed)
+                && Enum.IsDefined(parsed))
+            {
+                return parsed;
+            }
+            if (value.ValueKind == JsonValueKind.Number
+                && value.TryGetInt32(out var numeric)
+                && Enum.IsDefined((ProfileAccessMode)numeric))
+            {
+                return (ProfileAccessMode)numeric;
+            }
+            return null;
+        }
+        async Task<bool> RevokesLibrariesAsync()
+        {
+            var libraryValues = Values("libraryIds").ToList();
+            if (libraryValues.Count == 0) return true;
+            var currentLibraries = target.AccessMode == ProfileAccessMode.LegacyLibraries
+                ? await database.UserLibraryGrants.IgnoreQueryFilters().AsNoTracking()
+                    .Where(grant => grant.UserId == targetId)
+                    .Select(grant => grant.LibraryRootId)
+                    .ToListAsync(context.RequestAborted)
+                : await database.LibraryRoots.IgnoreQueryFilters().AsNoTracking()
+                    .Select(library => library.Id)
+                    .ToListAsync(context.RequestAborted);
+            foreach (var value in libraryValues)
+            {
+                if (value.ValueKind != JsonValueKind.Array) return true;
+                var requested = new HashSet<Guid>();
+                foreach (var item in value.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.String && Guid.TryParse(item.GetString(), out var id))
+                        requested.Add(id);
+                }
+                if (requested.Count == 0 || currentLibraries.Any(id => !requested.Contains(id))) return true;
+            }
+            return false;
+        }
+        async Task<bool> RevokesTitlesAsync(string modeProperty, bool modeOptional)
+        {
+            var modeValues = Values(modeProperty)
+                .Where(value => !modeOptional || value.ValueKind != JsonValueKind.Null)
+                .ToList();
+            if (modeOptional && modeValues.Count == 0) return false;
+            if (modeValues.Count > 0 && modeValues.All(value => ParseAccessMode(value) == ProfileAccessMode.EntireLibrary))
+                return false;
+            if (target.AccessMode != ProfileAccessMode.SelectedTitles) return true;
+            var currentTitles = await database.UserTitleGrants.IgnoreQueryFilters().AsNoTracking()
+                .Where(grant => grant.UserId == targetId)
+                .Select(grant => grant.MediaItemId)
+                .ToListAsync(context.RequestAborted);
+            var titleValues = Values("titleIds").ToList();
+            if (titleValues.Count == 0) return true;
+            foreach (var value in titleValues)
+            {
+                if (value.ValueKind != JsonValueKind.Array) return true;
+                var requested = new HashSet<Guid>();
+                foreach (var item in value.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.String && Guid.TryParse(item.GetString(), out var id))
+                        requested.Add(id);
+                }
+                if (requested.Count == 0 || currentTitles.Any(id => !requested.Contains(id))) return true;
+            }
+            return false;
+        }
         return action switch
         {
             "profile" => Roles().Any(role => role != target.Role)
-                || (Elevated(target.Role) && (SwitchedOff() || (NewPin() && !self))),
-            "enabled" or "access" => Elevated(target.Role) && SwitchedOff(),
+                || (Elevated(target.Role) && (SwitchedOff() || (NewPin() && !self) || await RevokesTitlesAsync("accessMode", modeOptional: true))),
+            "enabled" => Elevated(target.Role) && SwitchedOff(),
+            "access" => Elevated(target.Role) && (SwitchedOff() || await RevokesLibrariesAsync()),
+            "titles" => Elevated(target.Role) && await RevokesTitlesAsync("mode", modeOptional: false),
             "pin" => Elevated(target.Role) && !self,
             _ => false,
         };
@@ -323,7 +398,7 @@ public sealed class ServerRequestGuard
 
     /// <summary>
     /// Requests that may change who manages the server, by address alone: creating a profile, and its
-    /// profile, enabled, access and PIN changes. Their content decides (<see cref="ChangesWhoManagesAsync"/>).
+    /// profile, enabled, access, titles and PIN changes. Their content decides (<see cref="ChangesWhoManagesAsync"/>).
     /// </summary>
     public static bool MayChangeWhoManages(string method, string? path)
     {
@@ -332,7 +407,7 @@ public sealed class ServerRequestGuard
         if (segments.Length < 4 || segments[1] != "api" || segments[2] != "v1" || segments[3] != "users") return false;
         if (segments.Length == 4) return HttpMethods.IsPost(method);
         return segments.Length == 6 && HttpMethods.IsPut(method) && Guid.TryParse(segments[4], out _)
-            && segments[5] is "profile" or "enabled" or "access" or "pin";
+            && segments[5] is "profile" or "enabled" or "access" or "titles" or "pin";
     }
 
     /// <summary>The request's JSON body, read once and left in place for the endpoint.</summary>
