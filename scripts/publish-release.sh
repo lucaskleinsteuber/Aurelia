@@ -146,11 +146,6 @@ else
     hdiutil verify -quiet "$dmg"
     files+=("$dmg")
   done
-  # The updater of 1.34 asks for the universal name; it gets the Apple silicon image, the only
-  # Macs that ran 1.34. Updaters from 2.0 on ask for their own architecture.
-  transition="$output/Aurelia-$tag-macOS-universal.dmg"
-  cp -c "$output/Aurelia-$tag-macOS-arm64.dmg" "$transition"
-  files+=("$transition")
   basenames=()
   for file in "${files[@]}"; do basenames+=("./${file##*/}"); done
   (cd "$output" && shasum -a 256 "${basenames[@]}" > SHA256SUMS)
@@ -175,7 +170,7 @@ else
   downloads="- **Mac with Apple silicon (M1 and newer):** Aurelia-$tag-macOS-arm64.dmg
 - **Mac with Intel processor:** Aurelia-$tag-macOS-x64.dmg
 
-Open the disk image and drag Aurelia to Applications. Aurelia-$tag-macOS-universal.dmg is the Apple silicon image under the name the updater of version 1.34 asks for."
+Open the disk image and drag Aurelia to Applications."
 fi
 
 # Readable notes (what is new, what was fixed) come from a Markdown file, by default

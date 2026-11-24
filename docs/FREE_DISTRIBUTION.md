@@ -151,9 +151,7 @@ recent releases instead of the latest one, so it also finds pre-releases.
 
 Every Mac release has one disk image per processor, `Aurelia-<version>-<build>-macOS-arm64.dmg`
 (Apple silicon) and `…-macOS-x64.dmg` (Intel), each with only its own server runtime, VLCKit and
-ffmpeg slice. The updater downloads the image named for the architecture it was built for. The
-updater of version 1.34 asks for `…-macOS-universal.dmg`; the first releases from 2.0.0 on also
-carry the Apple silicon image under that name, because 1.34 ran only on Apple silicon Macs.
+ffmpeg slice. The updater downloads the image named for the architecture it was built for.
 
 The update dialog shows the new version and the disk image's published download size.
 Release notes are available on GitHub. *Later*
