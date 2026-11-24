@@ -84,25 +84,28 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
   async function send(path, blob, { method = "POST", contentType = blob?.type || "application/octet-stream", signal, as = "profile", headers: extra } = {}) {
     onChange?.(path, method);
     let response;
+    let text;
     try {
       response = await fetchImpl(path, { method, body: blob, headers: { Accept: "application/json", "Content-Type": contentType, "X-Aurelia-Web": as, ...(extra ?? {}) },
         credentials: "same-origin", cache: "no-store", signal });
+      text = response.status === 204 ? "" : await response.text();
     } catch (error) {
       if (error?.name === "AbortError") throw error;
       throw new ApiError(0, "offline", "The server isn’t answering.");
     }
-    const text = response.status === 204 ? "" : await response.text();
     let value = null;
     try { value = text ? JSON.parse(text) : null; } catch { /* A plain answer has no details. */ }
     if (!response.ok) throw problem(response.status, value);
     return value;
   }
 
-  /** Reads a file from the server, such as a backup or a diagnostics report, as a Blob. */
-  async function receive(path, { signal } = {}) {
+  /** Reads a file from the server, such as a backup, report or profile photo, as a Blob. */
+  async function receive(path, { signal, as = "profile", headers: extra, cache = "no-store" } = {}) {
     let response;
     try {
-      response = await fetchImpl(path, { headers: { "X-Aurelia-Web": "profile" }, credentials: "same-origin", cache: "no-store", signal });
+      const options = { headers: { "X-Aurelia-Web": as, ...(extra ?? {}) }, credentials: "same-origin", signal };
+      if (cache) options.cache = cache;
+      response = await fetchImpl(path, options);
     } catch (error) {
       if (error?.name === "AbortError") throw error;
       throw new ApiError(0, "offline", "The server isn’t answering.");
@@ -112,7 +115,12 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
       try { value = JSON.parse(await response.text()); } catch { /* No details. */ }
       throw problem(response.status, value);
     }
-    return response.blob();
+    try {
+      return await response.blob();
+    } catch (error) {
+      if (error?.name === "AbortError") throw error;
+      throw new ApiError(0, "offline", "The server isn’t answering.");
+    }
   }
 
   /**
@@ -157,46 +165,17 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
       request(`/api/v1/web/profiles/${id(profileId)}/unlock`, { method: "POST", body: pin ? { pin } : {}, as: "device" }),
     endProfile: () => request("/api/v1/web/profile/end", { method: "POST", as: "profile" }),
     /** A profile's photo as a Blob. Images cannot send the credential header, so it is fetched. */
-    profilePhoto: async (profileId, revision) => {
-      let response;
-      try {
-        response = await fetchImpl(`/api/v1/profiles/${id(profileId)}/picture?rev=${encodeURIComponent(revision ?? 0)}`, {
-          headers: { Accept: "image/jpeg", "X-Aurelia-Web": "device" },
-          credentials: "same-origin",
-        });
-      } catch {
-        throw new ApiError(0, "offline", "The server isn’t answering.");
-      }
-      if (!response.ok) throw new ApiError(response.status, `http_${response.status}`, defaultMessage(response.status));
-      return response.blob();
-    },
+    profilePhoto: (profileId, revision, options = {}) =>
+      receive(`/api/v1/profiles/${id(profileId)}/picture?rev=${encodeURIComponent(revision ?? 0)}`, {
+        ...options,
+        as: "device",
+        cache: null,
+        headers: { Accept: "image/jpeg" },
+      }),
     renameProfile: (name) => request("/api/v1/profile/name", { method: "PUT", body: { name } }),
     setPicture: (builtin) => request("/api/v1/profile/picture", { method: "PUT", body: { builtin } }),
     /** An own photo; the server keeps a small square copy. */
-    uploadPhoto: async (file) => {
-      let response;
-      let text;
-      try {
-        response = await fetchImpl("/api/v1/profile/picture/photo", {
-          method: "PUT",
-          headers: { Accept: "application/json", "X-Aurelia-Web": "profile", "Content-Type": file.type || "application/octet-stream" },
-          body: file,
-          credentials: "same-origin",
-          cache: "no-store",
-        });
-        text = await response.text();
-      } catch {
-        throw new ApiError(0, "offline", "The server isn’t answering.");
-      }
-      let value = null;
-      try {
-        value = text ? JSON.parse(text) : null;
-      } catch {
-        value = null;
-      }
-      if (!response.ok) throw new ApiError(response.status, value?.code ?? `http_${response.status}`, value?.message ?? defaultMessage(response.status));
-      return value;
-    },
+    uploadPhoto: (file, options = {}) => send("/api/v1/profile/picture/photo", file, { ...options, method: "PUT" }),
     signOut: () => request("/api/v1/web/sign-out", { method: "POST", as: "device" }),
 
     home: () => request("/api/v1/home"),

@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { cardMeta, createMovieNight, remainingCards, runtimeLabel, screenOf, slowpokes, swipeChoice } from "../../src/Aurelia.Server/WebApp/js/movie-night.js";
+import { createMovieNightView } from "../../src/Aurelia.Server/WebApp/js/movie-night-view.js";
 import { parseRoute, routePath } from "../../src/Aurelia.Server/WebApp/js/logic.js";
+import { installDOM, button, flush } from "./dom-fixture.mjs";
 
 // Movie Night in the browser with an invented night and server; nothing is played.
 const ids = ["00000000-0000-4000-8000-0000000000a1", "00000000-0000-4000-8000-0000000000a2", "00000000-0000-4000-8000-0000000000a3"];
@@ -113,4 +115,55 @@ test("tonight's program changes one choice and keeps the others", async () => {
   assert.equal(flingDuration(0), 420);
   assert.equal(flingDuration(-1), 280);
   assert.equal(flingDuration(5), 180);
+});
+
+test("swipe view keeps at most one keydown listener across long-poll updates and cleans up on leave", async (t) => {
+  installDOM(t);
+  const keyListeners = new Set();
+  const pageListeners = new Set();
+  globalThis.document.addEventListener = (type, fn) => { if (type === "keydown") keyListeners.add(fn); };
+  globalThis.document.removeEventListener = (type, fn) => { if (type === "keydown") keyListeners.delete(fn); };
+  const priorAdd = globalThis.addEventListener;
+  const priorRemove = globalThis.removeEventListener;
+  globalThis.addEventListener = (type, fn) => { if (type === "aurelia:page") pageListeners.add(fn); };
+  globalThis.removeEventListener = (type, fn) => { if (type === "aurelia:page") pageListeners.delete(fn); };
+  t.after(() => { globalThis.addEventListener = priorAdd; globalThis.removeEventListener = priorRemove; });
+
+  let pollResolve = null;
+  let revision = 2;
+  const api = {
+    movieNights: async () => [],
+    createMovieNight: async () => night({ revision }),
+    leaveMovieNight: async () => null,
+    movieNight: (_id, _after, _deckVersion, _waitMs, { signal }) => new Promise((resolve, reject) => {
+      pollResolve = resolve;
+      signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+    }),
+  };
+
+  const view = createMovieNightView({
+    api,
+    artwork: () => globalThis.document.createElement("div"),
+    playTitle: () => {},
+    navigate: () => {},
+    deviceName: "Invented Browser",
+  });
+  const root = view.screen();
+  globalThis.document.body.append(root);
+  await flush();
+  button(root, "Start Movie Night").click();
+  await flush();
+  assert.equal(keyListeners.size, 1);
+
+  // Several long-poll updates redraw the swipe screen without pressing any keys.
+  for (let round = 0; round < 5; round++) {
+    revision += 1;
+    pollResolve(night({ revision, withDeck: false }));
+    await flush();
+    assert.equal(keyListeners.size, 1, `expected 1 keydown listener after poll update ${round + 1}`);
+  }
+
+  for (const fn of [...pageListeners]) fn();
+  assert.equal(keyListeners.size, 0, "navigating away removes the swipe keydown listener");
+  await view.leave();
 });

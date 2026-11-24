@@ -53,7 +53,7 @@ export function screenTimeSection(kit, loaded, { grant } = {}) {
     eveningFields("Weekend", "Friday and Saturday evening.", weekend),
     today);
   const element = h("div", { class: "screen-time-section" }, h("h3", {}, "Screen Time"),
-    field("Screen Time", enabled, "A bedtime and a daily limit. The next episode does not start, and a good-night screen shows instead."), details);
+    field("Enable screen time limits", enabled, "A bedtime and a daily limit. The next episode does not start, and a good-night screen shows instead."), details);
   const update = () => {
     details.hidden = !enabled.checked;
     overtimeField.hidden = ending.value !== "finishTitle";

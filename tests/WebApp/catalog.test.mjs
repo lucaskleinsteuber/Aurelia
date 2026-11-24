@@ -299,3 +299,46 @@ test("collection editor saves overview, sortMode, and reordered members includin
     { mediaId: "m1", seasonNumber: null },
   ]);
 });
+
+test("Add to Collection loads all collection pages beyond the first 100", async (t) => {
+  const requests = [];
+  const allBoxes = Array.from({ length: 120 }, (_, i) => ({ id: `box-${i + 1}`, name: `Box ${i + 1}`, isSmart: false, canEdit: true }));
+  const f = fixture(t, {
+    collections: async (params) => {
+      requests.push(params);
+      const offset = params.offset ?? 0;
+      const limit = params.limit ?? 100;
+      return allBoxes.slice(offset, offset + limit);
+    },
+  });
+  await f.view.openAddToCollectionDialog({ id: "film-1", title: "Invented Film", kind: "movie" });
+  assert.deepEqual(requests, [{ offset: 0, limit: 100 }, { offset: 100, limit: 100 }]);
+  assert.match(f.dialog.textContent, /Box 120/);
+});
+
+test("collection editor surfaces artwork removal errors instead of swallowing them", async (t) => {
+  const detail = {
+    id: "box-art",
+    name: "Poster Box",
+    overview: "",
+    sortMode: "custom",
+    canEdit: true,
+    isSmart: false,
+    isShared: false,
+    poster: { path: "/api/v1/artwork/poster-1" },
+    members: [],
+  };
+  const f = fixture(t, {
+    collection: async () => detail,
+    updateCollection: async (_id, body) => ({ ...detail, ...body }),
+    deleteCollectionArtwork: async () => { throw new Error("Artwork removal failed on server."); },
+  });
+  const page = await f.view.collection({ id: "box-art" });
+  button(page, "Edit…").click();
+  await flush();
+  button(f.dialog, "Automatic").click();
+  f.dialog.querySelector("form").dispatchEvent(new Event("submit", { cancelable: true }));
+  await flush();
+  assert.ok(f.dialog?.open, "dialog stays open when artwork removal fails");
+  assert.match(f.dialog.textContent, /Artwork removal failed on server\./);
+});

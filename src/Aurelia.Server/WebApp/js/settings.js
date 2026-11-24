@@ -8,7 +8,8 @@ import { ApiError } from "./api.js";
 import {
   MAXIMUM_PHOTO_BYTES, PHOTO_PICTURE, PICTURE_PALETTES, PICTURE_SYMBOLS, PLAYBACK_DEFAULTS, PLAYBACK_RATES,
   ageLimitSummary, loadManagementSections, managementPermissions, normalizeGeneralPreferences, parsePicture,
-  rateLabel, scrubPreviewUsageText, shownName, transcodingSummary, DIALOGUE_BOOST_CHOICES, VOLUME_LEVELING_CHOICES, INTRO_SKIPPING_CHOICES,
+  picturePaletteLabel, pictureSymbolLabel, rateLabel, scrubPreviewUsageText, shownName, transcodingSummary,
+  DIALOGUE_BOOST_CHOICES, VOLUME_LEVELING_CHOICES, INTRO_SKIPPING_CHOICES,
   TOP_BAR_SECTIONS, moveSection, POWER_IDLE_CHOICES, powerPayload, wakeOnAccessOffered, rememberWakeOnAccess,
   powerModesFor, appHostName, wakeCheck, SERVER_POLICY_FIELDS, serverPolicyDraft,
   performanceDuration, performanceRoute, performanceSummary
@@ -25,7 +26,7 @@ import { serverSegmentsSection, SEGMENTS_FEATURE } from "./segments-view.js";
 import { serverSpeechSection } from "./speech-view.js";
 import { supportsFileChecks } from "./file-checks.js";
 import { renderDrives, renderFileProblems, serverFileChecksSection } from "./file-checks-view.js";
-import { supportsSecurity } from "./security.js";
+import { deviceConfirmationMessage, supportsSecurity } from "./security.js";
 import { remoteUnlockPanel, securitySection, unlocked } from "./security-view.js";
 import { POWER_ACTIONS, powerNowActions, powerNowOptionsPath, supportsPowerNow } from "./power-now.js";
 import { confirmSheet, openSheet } from "./sheet.js";
@@ -121,9 +122,11 @@ export function createSettings(app) {
     const refresh = () => app.navigate(state.route, { replace: true, quiet: true });
 
     if (sections?.updates?.available && !updatesView) {
+      const profileId = state.profile?.id;
+      const readSignal = serverRead.signal;
       updatesView = createServerUpdates({
         api, initial: sections.updates,
-        isCurrent: () => !serverRead.signal.aborted && state.profile?.id === state.profile?.id,
+        isCurrent: () => !readSignal.aborted && profileId != null && state.profile?.id === profileId,
         onLocked: refresh,
         onSessionEnded: app.handleError,
       });
@@ -705,8 +708,8 @@ export function createSettings(app) {
           device.isCurrent || !permissions.owner ? null : h("div", { class: "settings-card-actions" },
             h("button", { type: "button", class: "secondary-button", onclick: () => confirmSheet({
               symbol: "lock", title: `Sign Out “${device.deviceName}”?`, confirm: "Sign Out",
-              message: "It needs a new code to use Aurelia again.",
-              work: () => api.approvedIfAsked(`/api/v1/auth/sessions/${device.id}`, { method: "DELETE" }),
+              message: deviceConfirmationMessage(device, "It needs a new code to use Aurelia again."),
+              work: () => api.approvedIfAsked(`/api/v1/auth/sessions/${encodeURIComponent(device.id)}`, { method: "DELETE" }),
             }).then((done) => { if (done) { app.toast(`${device.deviceName} is signed out.`); refresh(); } }, (error) => { if (!app.handleError(error)) app.toast(error.message); }) }, "Sign Out…"))))) : null,
 
       permissions.owner ? section("User Accounts", "lock", "Choose who can watch and what they can see.",
@@ -1028,9 +1031,11 @@ export function createSettings(app) {
   function updatesSections(sections, refresh) {
     const updates = sections?.updates;
     if (updates?.available && !updatesView) {
+      const profileId = state.profile?.id;
+      const readSignal = serverRead.signal;
       updatesView = createServerUpdates({
         api, initial: updates,
-        isCurrent: () => !serverRead.signal.aborted && state.profile?.id === state.profile?.id,
+        isCurrent: () => !readSignal.aborted && profileId != null && state.profile?.id === profileId,
         onLocked: refresh,
         onSessionEnded: app.handleError,
       });
@@ -1073,8 +1078,8 @@ export function createSettings(app) {
     const name = h("input", { class: "text-field", type: "text", maxlength: "40", value: shownName(profile), "aria-label": "Your Name" });
     const preview = h("span", { class: "picture-preview" });
     const message = h("p", { class: "muted small", role: "status" });
-    const symbols = h("div", { class: "picture-symbols" });
-    const palettes = h("div", { class: "picture-palettes" });
+    const symbols = h("div", { class: "picture-symbols", role: "group", "aria-label": "Profile Picture" });
+    const palettes = h("div", { class: "picture-palettes", role: "group", "aria-label": "Picture Color" });
     const paint = () => {
       clear(preview);
       if (photo) {
@@ -1086,14 +1091,14 @@ export function createSettings(app) {
       clear(symbols);
       for (const symbol of PICTURE_SYMBOLS) {
         const candidate = `${symbol}:${palette}`;
-        const chooser = h("button", { type: "button", class: `picture-choice ${key === candidate ? "selected" : ""}`, "aria-label": `Picture ${symbol}`, "aria-pressed": String(key === candidate),
+        const chooser = h("button", { type: "button", class: `picture-choice ${key === candidate ? "selected" : ""}`, "aria-label": pictureSymbolLabel(symbol), "aria-pressed": String(key === candidate),
           onclick: () => { key = candidate; photo = null; paint(); } },
         app.profilePicture({ id: profile.id, pictureKey: candidate }, "small"));
         symbols.append(chooser);
       }
       clear(palettes);
       for (const candidate of PICTURE_PALETTES) {
-        palettes.append(h("button", { type: "button", class: `palette-choice palette-${PICTURE_PALETTES.indexOf(candidate)} ${palette === candidate ? "selected" : ""}`, "aria-label": `Color ${candidate}`, "aria-pressed": String(palette === candidate),
+        palettes.append(h("button", { type: "button", class: `palette-choice palette-${PICTURE_PALETTES.indexOf(candidate)} ${palette === candidate ? "selected" : ""}`, "aria-label": picturePaletteLabel(candidate), "aria-pressed": String(palette === candidate),
           onclick: () => {
             palette = candidate;
             const builtin = parsePicture(key);

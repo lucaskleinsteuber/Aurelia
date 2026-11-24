@@ -40,6 +40,7 @@ export function openSheet({
   const close = () => {
     if (closed) return;
     closed = true;
+    globalThis.removeEventListener?.("aurelia:page", close);
     if (dialog.open) dialog.close();
     dialog.remove();
     onClose?.();
@@ -78,6 +79,7 @@ export function openSheet({
     if (event.key === "Enter" && event.target instanceof HTMLTextAreaElement) event.stopPropagation();
   });
   // A page that changes underneath closes the sheet with it (audit S19).
+  dialog.addEventListener("close", close, { once: true });
   globalThis.addEventListener?.("aurelia:page", close, { once: true });
 
   document.body.append(dialog);

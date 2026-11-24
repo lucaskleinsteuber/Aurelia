@@ -13,6 +13,14 @@ export function createMovieNightView({ api, artwork, playTitle, navigate, device
   // The cards on top last time, so the next one can come forward from the stack.
   let shownTop = null;
   let seenMembers = new Set();
+  let swipeKeys = null;
+
+  function clearSwipeKeys() {
+    if (!swipeKeys) return;
+    document.removeEventListener?.("keydown", swipeKeys);
+    globalThis.removeEventListener?.("aurelia:page", clearSwipeKeys);
+    swipeKeys = null;
+  }
 
   function ensureSession() {
     session ??= createMovieNight({ api, deviceName, onChange: () => refresh() });
@@ -36,6 +44,7 @@ export function createMovieNightView({ api, artwork, playTitle, navigate, device
   }
 
   function render() {
+    clearSwipeKeys();
     dirty = false;
     clear(root);
     const current = ensureSession();
@@ -138,13 +147,14 @@ export function createMovieNightView({ api, artwork, playTitle, navigate, device
     shownTop = cards[0]?.mediaId ?? null;
     const fling = (choice, velocity) => flyOut(top, choice, velocity, () => current.vote(cards[0].mediaId, choice === "like"));
     attachDrag(top, fling);
-    const keys = (event) => {
-      if (!root?.isConnected || !top.isConnected) return document.removeEventListener("keydown", keys);
+    swipeKeys = (event) => {
+      if (!root?.isConnected || !top?.isConnected) return clearSwipeKeys();
       if (event.target?.closest?.("input, select, textarea")) return;
       if (event.key === "ArrowRight") { event.preventDefault(); fling("like"); }
       else if (event.key === "ArrowLeft") { event.preventDefault(); fling("nope"); }
     };
-    document.addEventListener("keydown", keys);
+    document.addEventListener?.("keydown", swipeKeys);
+    globalThis.addEventListener?.("aurelia:page", clearSwipeKeys);
     const others = state.members.filter((member) => member.isVoting && !member.isYou);
     return h("section", { class: "mn-swipe" },
       stack,
@@ -308,6 +318,6 @@ export function createMovieNightView({ api, artwork, playTitle, navigate, device
   return {
     screen,
     homeStrip,
-    leave: () => session?.leave(),
+    leave: () => { clearSwipeKeys(); return session?.leave(); },
   };
 }

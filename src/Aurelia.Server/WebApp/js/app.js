@@ -1,7 +1,7 @@
 // Aurelia in a web browser: sign-in with a code approved on the Mac, profiles, the library
 // and the player. The server serves this page, so every address here is its own.
 
-import { h, icon, clear } from "./dom.js";
+import { h, icon, clear, openPopupMenu, closePopupMenu, createSidebarResizeHandle } from "./dom.js";
 import { createApi, ApiError } from "./api.js";
 import { createCatalogView } from "./catalog-view.js";
 import * as logic from "./logic.js";
@@ -805,7 +805,9 @@ async function signOut() {
   } catch {
     // The cookies are cleared by the server's answer; without one, the next start asks again.
   }
+  closePopupMenu();
   state.profile = null;
+  markTabProfile(false);
   showPairing();
 }
 
@@ -912,7 +914,10 @@ document.addEventListener("pointerover", (event) => {
   const id = link.getAttribute("href").slice("/title/".length).split(/[?#/]/)[0];
   if (!id || reads.has(`detail:${id}`)) return;
   prefetchTimer = setTimeout(() => {
-    prefetches.start(id, () => Promise.all([cached.detail(id).then((detail) => { warmBackdrop(detail); return detail; }), cached.playbackPlan(id).catch(() => null)]));
+    prefetches.start(id, () => cached.detail(id).then((detail) => {
+      warmBackdrop(detail);
+      return cached.playbackPlan(id).catch(() => null).then(() => detail);
+    }));
   }, event.pointerType === "touch" ? 0 : 90);
 }, { passive: true });
 
@@ -1001,9 +1006,12 @@ function shell(content) {
   const outside = (event) => { if (!menu.contains(event.target) && event.target !== profileButton) closeMenu(); };
   const keys = (event) => {
     if (event.key === "Escape") { event.preventDefault(); closeMenu(); profileButton.focus(); }
-    else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    else if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
       event.preventDefault();
       const entries = [...menu.querySelectorAll(".menu-item")];
+      if (!entries.length) return;
+      if (event.key === "Home") return entries[0].focus();
+      if (event.key === "End") return entries[entries.length - 1].focus();
       const at = entries.indexOf(document.activeElement);
       entries[(at + (event.key === "ArrowDown" ? 1 : entries.length - 1)) % entries.length]?.focus();
     }
@@ -1048,19 +1056,11 @@ function shell(content) {
   const show = h("button", { class: "sidebar-toggle sidebar-show", "aria-label": "Show Sidebar", title: "Show Sidebar",
     "aria-expanded": "false",
     onclick: () => (narrow() ? openDrawer() : setHidden(false)) }, icon("sidebar", { size: 16 }));
-  // Dragging the sidebar's edge sets its width, as on the Mac.
-  const handle = h("div", { class: "sidebar-resize", role: "separator", "aria-orientation": "vertical", "aria-label": "Sidebar Width" });
-  handle.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    handle.setPointerCapture(event.pointerId);
-    const move = (moved) => document.documentElement.style.setProperty("--sidebar", `${Math.min(300, Math.max(210, Math.round(moved.clientX)))}px`);
-    const end = () => {
-      handle.removeEventListener("pointermove", move);
-      saveSidebarLayout({ ...sidebarLayout(), width: parseInt(getComputedStyle(document.documentElement).getPropertyValue("--sidebar"), 10) || 236 });
-    };
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", end, { once: true });
-    handle.addEventListener("pointercancel", end, { once: true });
+  // Dragging or arrow-keying the sidebar's edge sets its width, as on the Mac.
+  const handle = createSidebarResizeHandle({
+    width: layout.width,
+    onPreview: (width) => document.documentElement.style.setProperty("--sidebar", `${width}px`),
+    onCommit: (width) => saveSidebarLayout({ ...sidebarLayout(), width }),
   });
   const sidebar = h("aside", { class: "sidebar", "aria-label": "Library" },
     h("div", { class: "sidebar-head" }, hide),
@@ -1072,7 +1072,7 @@ function shell(content) {
       h("div", { class: "menu-anchor", style: { flex: "1", minWidth: "0", display: "flex" } }, profileButton, menu),
       h("a", { class: `sidebar-gear${state.route.name === "settings" ? " selected" : ""}`, href: "/settings", "data-route": true, "aria-label": "Settings", title: "Settings", onclick: () => closeDrawer() }, icon("gear", { size: 17 }))),
     handle);
-  window.addEventListener("aurelia:page", () => closeDrawer(), { once: true });
+  window.addEventListener("aurelia:page", () => { closeDrawer(); closeMenu(); }, { once: true });
   frame.append(skipLink, sidebar, h("div", { class: "sidebar-backdrop", onclick: () => closeDrawer({ restoreFocus: true }) }), show, page);
   return frame;
 }
@@ -1161,7 +1161,15 @@ async function renderRoute({ quiet = false, restoreScroll = false, resetScroll =
     if (handleError(outcome.error)) return;
     // A quiet refresh that fails keeps the page as it was.
     if (quiet && root.querySelector("#page")) return;
-    content = emptyState("warning", "Couldn’t Load This Page", outcome.error.message, h("button", { class: "secondary-button", onclick: () => renderRoute() }, "Try Again"));
+    const problem = logic.routeErrorState(outcome.error);
+    content = emptyState(
+      problem.symbol,
+      problem.title,
+      problem.text,
+      problem.retryable
+        ? h("button", { class: "secondary-button", onclick: () => renderRoute() }, "Try Again")
+        : h("a", { class: "secondary-button", href: "/", "data-route": true }, "Back to Home"),
+    );
   }
   if (token !== state.renderToken || !content) {
     isRenderingRoute = false;
@@ -1366,17 +1374,17 @@ async function homeScreen() {
   if (recent.length) sections.push(rail("Recently Added", recent.map((item) => posterCard(item))));
   if (home.collections?.length) sections.push(rail("Collections", home.collections.map((collection) => collectionCard(collection)), "poster", "/collections"));
   if (!hero && sections.length === 0) {
-    const isOwner = logic.managementPermissions(state.profile).owner;
-    return isOwner
+    const empty = logic.homeEmptyState(state.profile);
+    return empty.kind === "owner"
       ? emptyState(
         "search",
-        "Nothing Here Yet",
-        "Your library has no titles yet. Add a storage location to start scanning your films and shows.",
+        empty.title,
+        empty.text,
         h("div", { class: "button-row" },
           h("a", { class: "primary-button", href: "/settings/library", "data-route": true }, "Add Storage Location…"),
           h("a", { class: "secondary-button", href: "/welcome", "data-route": true }, "Setup Checklist")),
       )
-      : emptyState("search", "Nothing Here Yet", "This profile has no titles yet. Ask the owner to add a storage location or share titles with this profile.");
+      : emptyState("search", empty.title, empty.text);
   }
   return h("div", { class: "home" }, hero ? heroBanner(hero) : null, h("div", { class: "sections" }, monthIsNew() ? monthlyWrappedLaunch({ compact: true }) : null, movieNight.homeStrip(), sections));
 }
@@ -1516,44 +1524,38 @@ function menuOption(label, selected, action, disabled = false) {
     h("span", { class: "check-mark" }, selected ? icon("check", { size: 15 }) : null), label);
 }
 
-/** A small menu under its button; it closes on any click or Escape. */
+/** A small menu under its button; it closes on any click or Escape and navigates with arrow keys. */
 function openMenu(anchor, items) {
-  document.querySelector(".popup-menu")?.remove();
-  const menu = h("div", { class: "popup-menu profile-menu", role: "menu" }, items);
-  const box = anchor.getBoundingClientRect();
-  menu.style.top = `${box.bottom + window.scrollY + 8}px`;
-  menu.style.left = `${Math.max(12, Math.min(box.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - 260))}px`;
-  document.body.append(menu);
-  const close = () => {
-    menu.remove();
-    document.removeEventListener("click", close);
-    document.removeEventListener("keydown", escape, true);
-  };
-  // Esc closes only this menu, also over the player (audit X9): it is heard first and taken.
-  const escape = (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      close();
-      anchor.focus();
-    }
-  };
-  setTimeout(() => {
-    document.addEventListener("click", close);
-    document.addEventListener("keydown", escape, true);
-  }, 0);
-  menu.querySelector("[aria-checked=true], button:not(:disabled)")?.focus();
+  return openPopupMenu(anchor, items);
 }
 
 // MARK: Title details (the Mac app's detail page)
 
 async function titleScreen(id) {
-  // Parties are asked for together with the title, not after it (audit L5).
-  const [detail, plan, watchlistSnapshot, parties] = await Promise.all([
-    cached.detail(id),
+  // Parties and watchlist are asked for alongside the title, while playback-plan waits until the
+  // title is known to exist for this profile so invisible/missing titles don't trigger a second 404.
+  const detailRead = cached.detail(id);
+  const watchlistRead = cached.watchlist().catch(() => null);
+  const partiesRead = watchPartiesNow();
+  let detail;
+  try {
+    detail = await detailRead;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      const problem = logic.routeErrorState(error, { kind: "title" });
+      return emptyState(
+        problem.symbol,
+        problem.title,
+        problem.text,
+        h("a", { class: "secondary-button", href: "/", "data-route": true }, "Back to Home"),
+      );
+    }
+    throw error;
+  }
+  const [plan, watchlistSnapshot, parties] = await Promise.all([
     cached.playbackPlan(id).catch(() => null),
-    cached.watchlist().catch(() => null),
-    watchPartiesNow(),
+    watchlistRead,
+    partiesRead,
   ]);
   if (watchlistSnapshot?.mediaIds) state.watchlistIds = new Set(watchlistSnapshot.mediaIds);
   const item = detail.item;
@@ -1580,7 +1582,7 @@ async function titleScreen(id) {
         }
         const items = devices.map((device) => {
           return h("button", { class: "menu-item", onclick: () => {
-            document.querySelector(".popup-menu")?.remove();
+            closePopupMenu();
             startRemotePlayback(device, target, plan);
           }}, icon("airplay", { size: 16 }), device.deviceName);
         });

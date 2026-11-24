@@ -63,6 +63,24 @@ export function securityDeviceLine(platform, ipAddress) {
   return [platform, ipAddress].filter((part) => part).join(" · ");
 }
 
+/** Identifying details for a device confirmation dialog when several devices share a name. */
+export function deviceConfirmationDetails(device, formatDate = (value) => (value ? new Date(value).toLocaleString() : "")) {
+  if (!device) return "";
+  const seen = device.lastSeenAt ? formatDate(device.lastSeenAt) : "";
+  const created = !seen && device.createdAt ? formatDate(device.createdAt) : "";
+  return [
+    device.userName,
+    securityDeviceLine(device.platform, device.ipAddress),
+    seen ? `Last used ${seen}` : created ? `Signed in ${created}` : null,
+  ].filter(Boolean).join(" · ");
+}
+
+/** Confirmation text for signing out or blocking a device, including identifying context when known. */
+export function deviceConfirmationMessage(device, suffix, formatDate) {
+  const details = deviceConfirmationDetails(device, formatDate);
+  return details ? `${details}. ${suffix}` : suffix;
+}
+
 /** The words for one log entry: what happened, and who, where and with what. */
 export function securityEventText(event) {
   return {

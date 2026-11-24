@@ -6,6 +6,7 @@
 import { h, icon, clear, saveBlob } from "./dom.js";
 import { confirmSheet } from "./sheet.js";
 import { codeCountdown, folderCrumbs, shownName, subtitleLanguages, SUBTITLE_LANGUAGE_CHOICES } from "./logic.js";
+import { deviceConfirmationMessage } from "./security.js";
 
 export function createAdminTools({ api, app, editors }) {
   const { editor, input, field, choice, button } = editors.kit;
@@ -86,7 +87,8 @@ export function createAdminTools({ api, app, editors }) {
         h("div", { class: "settings-card-main" }, h("div", { class: "settings-card-title" }, session.deviceName),
           h("div", { class: "muted small" }, `Last used ${new Date(session.lastSeenAt).toLocaleString()}`)),
         h("div", { class: "settings-card-actions" }, button("Sign Out", () => context.run(async () => {
-          if (!(await confirmSheet({ symbol: "lock", title: `Sign Out “${session.deviceName}”?`, confirm: "Sign Out", message: "It needs a new code to use Aurelia again." }))) return;
+          if (!(await confirmSheet({ symbol: "lock", title: `Sign Out “${session.deviceName}”?`, confirm: "Sign Out",
+            message: deviceConfirmationMessage(session, "It needs a new code to use Aurelia again.") }))) return;
           await api.revokeUserSession(session.id);
           app.toast(`${session.deviceName} is signed out.`);
           await load();

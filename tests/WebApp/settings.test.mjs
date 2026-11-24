@@ -521,3 +521,93 @@ test("welcome screen step count matches whether power control is available", asy
     assert.match(screen.textContent, expected);
   }
 });
+
+test("Settings updates isCurrent ignores stale update checks after a profile change", async (t) => {
+  const { createSettings } = await import("../../src/Aurelia.Server/WebApp/js/settings.js");
+  const { installDOM, flush, deferred, button } = await import("./dom-fixture.mjs");
+  installDOM(t);
+  const checkDeferred = deferred();
+  const state = {
+    profile: { id: "owner-1", role: "owner", accessMode: "entireLibrary" },
+    server: { version: "2.22.0", capabilities: [] },
+    route: { name: "settings", page: "updates" },
+  };
+  const api = {
+    metadataJobs: async () => [],
+    devices: async () => [],
+    libraries: async () => [],
+    serverStatus: async () => ({ state: "ok", version: "2.22.0", uptimeSeconds: 10, activeStreams: 0 }),
+    serverUpdates: async () => ({ available: true, installed: "2.22.0", state: "idle", updateAvailable: false, newest: "2.22.0", checkedAt: null, message: null }),
+    checkForUpdates: () => checkDeferred.promise,
+    serverUsers: async () => [],
+    serverPower: async () => ({ available: false }),
+    serverBackups: async () => [],
+  };
+  const settings = createSettings({
+    api,
+    state,
+    navigate: () => {},
+    toast: () => {},
+    handleError: () => false,
+    profilePicture: () => globalThis.document.createElement("span"),
+    switchProfile: () => {},
+    confirmSignOut: () => {},
+  });
+  t.after(() => settings.closeEditors());
+  const screen = await settings.settingsScreen({ name: "settings", page: "updates" });
+  button(screen, "Check for Updates").click();
+  // Switch profile without calling closeEditors() first; captured profileId must reject stale result.
+  state.profile = { id: "other-profile", role: "user" };
+  checkDeferred.resolve({ available: true, installed: "2.22.0", state: "idle", updateAvailable: true, newest: "9.9.9", checkedAt: "2026-11-24T00:00:00Z", message: null });
+  await flush();
+  assert.doesNotMatch(screen.textContent, /9\.9\.9/);
+});
+
+test("Name and Picture uses readable accessible names and Signed-In Devices encodes IDs with context", async (t) => {
+  const { createSettings } = await import("../../src/Aurelia.Server/WebApp/js/settings.js");
+  const { installDOM, flush, all, button } = await import("./dom-fixture.mjs");
+  installDOM(t);
+  const calls = [];
+  const state = {
+    profile: { id: "owner-1", role: "owner", username: "Owner", accessMode: "entireLibrary", pictureKey: "gamecontroller:blue" },
+    server: { version: "2.22.0", capabilities: ["profile-personalization-v1"] },
+    route: { name: "settings", page: "profiles" },
+  };
+  const api = {
+    metadataJobs: async () => [],
+    devices: async () => [{ id: "dev/1?a=b", deviceName: "Chrome on Mac", lastSeenAt: "2026-11-24T00:15:00Z", isCurrent: false }],
+    libraries: async () => [],
+    serverStatus: async () => ({ state: "ok", version: "2.22.0", uptimeSeconds: 10, activeStreams: 0 }),
+    serverUpdates: async () => ({ available: false }),
+    serverUsers: async () => [],
+    serverPower: async () => ({ available: false }),
+    serverBackups: async () => [],
+    approvedIfAsked: async (path, options) => { calls.push({ path, method: options.method }); },
+  };
+  const settings = createSettings({
+    api,
+    state,
+    navigate: () => {},
+    toast: () => {},
+    handleError: () => false,
+    profilePicture: () => globalThis.document.createElement("span"),
+    switchProfile: () => {},
+    confirmSignOut: () => {},
+  });
+  t.after(() => settings.closeEditors());
+  const screen = await settings.settingsScreen({ name: "settings", page: "profiles" });
+  const labels = all(screen).filter((node) => node.tagName === "BUTTON").map((node) => node.getAttribute("aria-label")).filter(Boolean);
+  assert.ok(labels.includes("Game Controller"));
+  assert.ok(labels.includes("Blue"));
+  assert.equal(labels.includes("Picture gamecontroller"), false);
+  assert.equal(labels.includes("Color blue"), false);
+
+  button(screen, "Sign Out…").click();
+  await flush();
+  const sheet = globalThis.document.body.children.at(-1);
+  assert.match(sheet.textContent, /Sign Out “Chrome on Mac”\?/);
+  assert.match(sheet.textContent, /Last used /);
+  button(sheet, "Sign Out").click();
+  await flush();
+  assert.deepEqual(calls, [{ path: "/api/v1/auth/sessions/dev%2F1%3Fa%3Db", method: "DELETE" }]);
+});

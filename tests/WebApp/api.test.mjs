@@ -346,3 +346,38 @@ test("collections v2, subtitles, history, statistics and health API endpoints us
   assert.equal(calls.at(-1).path, "/api/v1/devices/player/heartbeat");
   assert.equal(calls.at(-1).method, "POST");
 });
+
+test("uploadPhoto and profilePhoto honor onChange cache invalidation and server_moved detection", async () => {
+  const changes = [];
+  const moved = [];
+  const calls = [];
+  const blob = new Blob(["jpg"], { type: "image/jpeg" });
+  const api = createApi(async (path, options) => {
+    calls.push({ path, ...options });
+    if (path === "/api/v1/profile/picture/photo") return json(200, { id: "u1", pictureKey: "photo", pictureRevision: 2 });
+    return { status: 200, ok: true, blob: async () => blob };
+  }, {
+    onChange: (path, method) => changes.push([method, path]),
+    onMoved: (error) => moved.push(error),
+  });
+
+  const uploaded = await api.uploadPhoto(blob);
+  assert.equal(uploaded.pictureRevision, 2);
+  assert.deepEqual(changes, [["PUT", "/api/v1/profile/picture/photo"]]);
+  assert.equal(calls[0].headers["X-Aurelia-Web"], "profile");
+  assert.equal(calls[0].headers["Content-Type"], "image/jpeg");
+
+  const fetched = await api.profilePhoto("a/b", 2);
+  assert.equal(fetched, blob);
+  assert.equal(calls[1].path, "/api/v1/profiles/a%2Fb/picture?rev=2");
+  assert.equal(calls[1].headers["X-Aurelia-Web"], "device");
+  assert.equal(calls[1].headers.Accept, "image/jpeg");
+  assert.equal(calls[1].cache, undefined, "revisioned profile photos remain browser-cacheable");
+
+  const movedApi = createApi(async () => json(409, { code: "server_moved", message: "Moved.", movedTo: { name: "New", addresses: ["https://new.local"] } }), {
+    onMoved: (error) => moved.push(error),
+  });
+  await assert.rejects(movedApi.uploadPhoto(blob), (error) => error instanceof ApiError && error.code === "server_moved");
+  await assert.rejects(movedApi.profilePhoto("u1", 1), (error) => error instanceof ApiError && error.code === "server_moved");
+  assert.equal(moved.length, 2);
+});

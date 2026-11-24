@@ -32,3 +32,12 @@ test("palette color swatches keep their gradient backgrounds and increased-contr
   assert.match(css, /\.skip-link\s*\{/);
   assert.match(css, /@media\s*\(prefers-contrast:\s*more\)/);
 });
+
+test("path containers preserve repeated spaces and sidebar resize handle has a keyboard focus style", () => {
+  const css = readFileSync(new URL("../../src/Aurelia.Server/WebApp/app.css", import.meta.url), "utf8");
+  assert.match(css, /\.mono\s*\{[^}]*white-space:\s*pre-wrap/);
+  assert.match(css, /\.import-path\s*\{[^}]*white-space:\s*pre-wrap/);
+  assert.match(css, /\.health-file\s*\{[^}]*white-space:\s*pre-wrap/);
+  assert.match(css, /\.folder-entry\s*\{[^}]*white-space:\s*pre-wrap/);
+  assert.match(css, /\.sidebar-resize:focus-visible\s*\{/);
+});
