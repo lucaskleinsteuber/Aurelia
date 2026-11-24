@@ -29,7 +29,8 @@ public sealed class PlaybackService(
         Guid deviceSessionId,
         Guid mediaId,
         CancellationToken cancellationToken,
-        Guid? profileSessionId = null)
+        Guid? profileSessionId = null,
+        bool forDownload = false)
     {
         var now = DateTimeOffset.UtcNow;
         await PruneExpiredAsync(now, cancellationToken);
@@ -64,6 +65,11 @@ public sealed class PlaybackService(
                 "media_not_playable",
                 "This media item is a container and cannot be played directly.",
                 StatusCodes.Status409Conflict);
+        }
+
+        if (forDownload && screenTime is not null)
+        {
+            await screenTime.RequireDownloadsAllowedAsync(userId, cancellationToken);
         }
 
         // A children's profile's bedtime or daily limit may refuse a new title (docs/SCREEN_TIME.md).

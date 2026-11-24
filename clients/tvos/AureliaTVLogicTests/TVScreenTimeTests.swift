@@ -61,4 +61,27 @@ struct TVScreenTimeTests {
         """.utf8))
     #expect(profile.closedUntil == "2027-11-10T07:00:00Z")
   }
+
+  @Test func screenTimeRulesDecodeAllowOfflineDownloadsWithLegacyDefault() throws {
+    let legacyJSON = """
+      {"enabled":true,"lockScope":"playbackOnly","ending":"finishTitle","maxOvertimeMinutes":30,
+       "schoolNight":{"bedtime":"19:30","wakeTime":"07:00","dailyLimitMinutes":60},
+       "weekend":{"bedtime":"20:30","wakeTime":"08:00","dailyLimitMinutes":null}}
+      """
+    let legacy = try JSONDecoder().decode(TVScreenTimeRules.self, from: Data(legacyJSON.utf8))
+    #expect(!legacy.allowOfflineDownloads)
+
+    let allowedJSON = """
+      {"enabled":true,"lockScope":"playbackOnly","ending":"finishTitle","maxOvertimeMinutes":30,
+       "schoolNight":{"bedtime":"19:30","wakeTime":"07:00","dailyLimitMinutes":60},
+       "weekend":{"bedtime":"20:30","wakeTime":"08:00","dailyLimitMinutes":null},
+       "allowOfflineDownloads":true}
+      """
+    let allowed = try JSONDecoder().decode(TVScreenTimeRules.self, from: Data(allowedJSON.utf8))
+    #expect(allowed.allowOfflineDownloads)
+    let roundTripped = try JSONDecoder().decode(
+      TVScreenTimeRules.self, from: JSONEncoder().encode(allowed))
+    #expect(roundTripped == allowed)
+    #expect(roundTripped.allowOfflineDownloads)
+  }
 }

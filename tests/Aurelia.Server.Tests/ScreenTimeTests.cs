@@ -229,6 +229,68 @@ public sealed class ScreenTimeTests
         Assert.Equal(ScreenTimeState.Open, saved.Status!.State);
     }
 
+    // Audit SRV-SEC-008: offline downloads are disabled by default while screen time is active
+    // unless the owner opts in, while normal playback keeps working and existing downloads stay untouched.
+    [Fact]
+    public async Task OfflineDownloadsAreBlockedWhileScreenTimeIsActiveUnlessOwnerAllowsThem()
+    {
+        var clock = new SettableClock(At(9, 15, 0));
+        using var factory = Factory(clock);
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+        var (first, _) = await SeedTwoTitlesAsync(factory);
+        var child = await CreateChildAsync(client, owner.Token);
+
+        var initial = await SetRulesAsync(client, owner.Token, child, Rules);
+        Assert.False(initial.Rules.AllowOfflineDownloads);
+
+        var session = await UnlockAsync(client, child);
+
+        // Regular playback still works while screen time is open.
+        var playing = await PlaybackAsync(client, session, first);
+        Assert.Equal(ScreenTimeState.Open, playing.ScreenTime!.State);
+
+        // Offline download requests are refused with 403 screen_time_downloads_disabled.
+        using (var downloadTicket = await SendAsync(client, session, HttpMethod.Post, $"/api/v1/media/{first}/playback?purpose=download"))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, downloadTicket.StatusCode);
+            Assert.Equal(ScreenTimeCodes.DownloadsDisabled, (await ApiTestClient.ReadAsync<ApiProblem>(downloadTicket)).Code);
+        }
+        using (var downloadOptions = await SendAsync(client, session, HttpMethod.Get, $"/api/v1/media/{first}/download-options"))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, downloadOptions.StatusCode);
+            Assert.Equal(ScreenTimeCodes.DownloadsDisabled, (await ApiTestClient.ReadAsync<ApiProblem>(downloadOptions)).Code);
+        }
+        using (var hlsInit = await SendAsync(client, session, HttpMethod.Get, $"{playing.StreamPath}/hls/360p/init.mp4?purpose=download"))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, hlsInit.StatusCode);
+            Assert.Equal(ScreenTimeCodes.DownloadsDisabled, (await ApiTestClient.ReadAsync<ApiProblem>(hlsInit)).Code);
+        }
+        using (var hlsSegment = await SendAsync(client, session, HttpMethod.Get, $"{playing.StreamPath}/hls/360p/0.m4s?purpose=download"))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, hlsSegment.StatusCode);
+            Assert.Equal(ScreenTimeCodes.DownloadsDisabled, (await ApiTestClient.ReadAsync<ApiProblem>(hlsSegment)).Code);
+        }
+
+        // Owner enables offline downloads for this profile.
+        var allowed = await SetRulesAsync(client, owner.Token, child, Rules with { AllowOfflineDownloads = true });
+        Assert.True(allowed.Rules.AllowOfflineDownloads);
+        var reloaded = await ReadAsync<ProfileScreenTimeResponse>(await SendAsync(client, owner.Token, HttpMethod.Get, $"/api/v1/users/{child}/screen-time"));
+        Assert.True(reloaded.Rules.AllowOfflineDownloads);
+
+        using (var downloadTicket = await SendAsync(client, session, HttpMethod.Post, $"/api/v1/media/{first}/playback?purpose=download"))
+            Assert.Equal(HttpStatusCode.OK, downloadTicket.StatusCode);
+        using (var downloadOptions = await SendAsync(client, session, HttpMethod.Get, $"/api/v1/media/{first}/download-options"))
+            Assert.Equal(HttpStatusCode.OK, downloadOptions.StatusCode);
+
+        // When screen time is disabled, offline downloads are allowed even with AllowOfflineDownloads == false.
+        await SetRulesAsync(client, owner.Token, child, Rules with { Enabled = false, AllowOfflineDownloads = false });
+        using (var downloadTicket = await SendAsync(client, session, HttpMethod.Post, $"/api/v1/media/{first}/playback?purpose=download"))
+            Assert.Equal(HttpStatusCode.OK, downloadTicket.StatusCode);
+        using (var downloadOptions = await SendAsync(client, session, HttpMethod.Get, $"/api/v1/media/{first}/download-options"))
+            Assert.Equal(HttpStatusCode.OK, downloadOptions.StatusCode);
+    }
+
     // Only screen time follows the test clock; sessions and tickets keep the real time.
     private static AureliaServerFactory Factory(SettableClock clock) => new(configureServices: services =>
     {

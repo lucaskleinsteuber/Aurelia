@@ -13,6 +13,7 @@ export function screenTimeSection(kit, loaded, { grant } = {}) {
   const { input, field, choice, button } = kit;
   const rules = loaded?.rules ?? DEFAULT_SCREEN_TIME;
   const enabled = input("", { type: "checkbox", checked: Boolean(rules.enabled) });
+  const allowOfflineDownloads = input("", { type: "checkbox", checked: Boolean(rules.allowOfflineDownloads) });
   const scope = choice([["playbackOnly", "Playback only"], ["wholeProfile", "The whole profile"]], rules.lockScope ?? "playbackOnly");
   const ending = choice([["finishTitle", "Let the title finish"], ["stopNow", "Stop right away"]], rules.ending ?? "finishTitle");
   const overtime = input(String(rules.maxOvertimeMinutes ?? 30), { type: "number", min: 0, max: 180, step: 5, inputmode: "numeric" });
@@ -49,6 +50,8 @@ export function screenTimeSection(kit, loaded, { grant } = {}) {
   const details = h("div", { class: "screen-time-details" },
     field("When time is up, close", scope, "Playback only keeps browsing open. The whole profile closes until the wake time."),
     field("A title that is playing", ending), overtimeField,
+    field("Allow offline downloads", allowOfflineDownloads,
+      "Off by default so offline downloads cannot bypass bedtime or daily limits. Turning this off keeps existing downloads on devices."),
     eveningFields("School Nights", "Sunday to Thursday evening.", school),
     eveningFields("Weekend", "Friday and Saturday evening.", weekend),
     today);
@@ -66,6 +69,6 @@ export function screenTimeSection(kit, loaded, { grant } = {}) {
     element,
     /** The rules to save, or `{ error }`. */
     collect: () => rulesFromForm({ enabled: enabled.checked, lockScope: scope.value, ending: ending.value, overtime: overtime.value,
-      schoolNight: values(school), weekend: values(weekend) }),
+      schoolNight: values(school), weekend: values(weekend), allowOfflineDownloads: allowOfflineDownloads.checked }),
   };
 }

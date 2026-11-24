@@ -48,6 +48,7 @@ public sealed class ScreenTimeTextTests
     public void EditedRulesAreCheckedBeforeSaving()
     {
         Assert.Null(ScreenTimeText.Problem(ScreenTimeRules.Default));
+        Assert.False(ScreenTimeRules.Default.AllowOfflineDownloads);
         Assert.Equal("Enter the school-night bedtime like 19:30.",
             ScreenTimeText.Problem(ScreenTimeRules.Default with { SchoolNight = new("25:00", "07:00", null) }));
         Assert.Equal("The weekend daily limit is 5 to 1440 minutes.",

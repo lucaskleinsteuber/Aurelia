@@ -21,6 +21,7 @@ internal sealed class ScreenTimeEditor
         [(ScreenTimeEnding.FinishTitle, "Let the Title Finish"), (ScreenTimeEnding.StopNow, "Stop Right Away")];
 
     private readonly ToggleSwitch enabled = new() { OnContent = "", OffContent = "" };
+    private readonly ToggleSwitch allowOfflineDownloads = new() { OnContent = "", OffContent = "" };
     private readonly StackPanel details = new() { Spacing = 10 };
     private readonly StackPanel today = new() { Spacing = 8 };
     private readonly TextBox overtime = new() { Width = 80 };
@@ -36,6 +37,8 @@ internal sealed class ScreenTimeEditor
         var rules = loaded?.Rules ?? ScreenTimeRules.Default;
         enabled.IsChecked = rules.Enabled;
         AutomationProperties.SetName(enabled, "Screen Time");
+        allowOfflineDownloads.IsChecked = rules.AllowOfflineDownloads;
+        AutomationProperties.SetName(allowOfflineDownloads, "Allow offline downloads");
         scope = rules.LockScope;
         ending = rules.Ending;
         overtime.Text = rules.MaxOvertimeMinutes.ToString(CultureInfo.InvariantCulture);
@@ -46,6 +49,7 @@ internal sealed class ScreenTimeEditor
             Scopes, scope, value => scope = value).Also(r => r.Margin = new Thickness(0)));
         details.Children.Add(Choice("A title that is playing", null, Endings, ending, value => ending = value).Also(r => r.Margin = new Thickness(0)));
         details.Children.Add(Row("Finish within (minutes)", "A title that runs longer stops this many minutes past the time.", overtime).Also(r => r.Margin = new Thickness(0)));
+        details.Children.Add(Row("Allow offline downloads", "Off by default so offline downloads cannot bypass bedtime or daily limits. Existing downloads stay on devices.", allowOfflineDownloads).Also(r => r.Margin = new Thickness(0)));
         details.Children.Add(Evening("School Nights", "Sunday to Thursday evening.", school));
         details.Children.Add(Evening("Weekend", "Friday and Saturday evening.", weekend));
         details.Children.Add(today);
@@ -67,7 +71,7 @@ internal sealed class ScreenTimeEditor
         if (schoolProblem is not null) return (null, schoolProblem);
         var weekendRule = Rule(weekend, "weekend", out var weekendProblem);
         if (weekendProblem is not null) return (null, weekendProblem);
-        var rules = new ScreenTimeRules(enabled.IsChecked == true, scope, ending, over, schoolRule!, weekendRule!);
+        var rules = new ScreenTimeRules(enabled.IsChecked == true, scope, ending, over, schoolRule!, weekendRule!, allowOfflineDownloads.IsChecked == true);
         return ScreenTimeText.Problem(rules) is { } problem ? (null, problem) : (rules, null);
     }
 

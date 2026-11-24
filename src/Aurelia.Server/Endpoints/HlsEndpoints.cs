@@ -51,25 +51,30 @@ public static partial class HlsEndpoints
     }
 
     private static Task<IResult> InitAsync(HttpContext context, string ticket, string step, int? audio, string? purpose, PlaybackService playback,
-        LiveConversionService live, CatalogMutationGate mutations, HlsSessionManager sessions, CancellationToken cancellationToken) =>
-        ServeAsync(context, ticket, step, audio, purpose, playback, live, mutations, sessions,
+        LiveConversionService live, CatalogMutationGate mutations, HlsSessionManager sessions, ScreenTimeService screenTime, CancellationToken cancellationToken) =>
+        ServeAsync(context, ticket, step, audio, purpose, playback, live, mutations, sessions, screenTime,
             (session, token) => session.InitAsync(token), cancellationToken);
 
     private static Task<IResult> SegmentAsync(HttpContext context, string ticket, string step, int segment, int? audio, string? purpose,
         PlaybackService playback, LiveConversionService live, CatalogMutationGate mutations, HlsSessionManager sessions,
-        CancellationToken cancellationToken) =>
-        ServeAsync(context, ticket, step, audio, purpose, playback, live, mutations, sessions,
+        ScreenTimeService screenTime, CancellationToken cancellationToken) =>
+        ServeAsync(context, ticket, step, audio, purpose, playback, live, mutations, sessions, screenTime,
             (session, token) => segment >= 0 && segment < session.SegmentCount ? session.SegmentAsync(segment, token) : Task.FromResult<byte[]?>(null),
             cancellationToken, segment);
 
     private static async Task<IResult> ServeAsync(HttpContext context, string ticket, string step, int? audio, string? purpose,
         PlaybackService playback, LiveConversionService live, CatalogMutationGate mutations, HlsSessionManager sessions,
-        Func<HlsSession, CancellationToken, Task<byte[]?>> read, CancellationToken cancellationToken, int? segment = null)
+        ScreenTimeService screenTime, Func<HlsSession, CancellationToken, Task<byte[]?>> read, CancellationToken cancellationToken, int? segment = null)
     {
         if (!StepName().IsMatch(step)) return QualityNotFound();
         // "download": an app keeps this copy ("converted-downloads-v1"); it yields to anyone who watches.
         if (purpose is not (null or "" or "playback" or "download"))
             return Problem("invalid_purpose", "The purpose must be playback or download.", StatusCodes.Status400BadRequest);
+        if (purpose == "download")
+        {
+            try { await screenTime.RequireDownloadsAllowedAsync(context.User.RequireUserId(), cancellationToken); }
+            catch (PlaybackException exception) { return Problem(exception.Code, exception.Message, exception.StatusCode); }
+        }
         for (var attempt = 0; attempt < 2; attempt++)
         {
             var (opened, problem) = await OpenAsync(context, ticket, audio, playback, live, mutations, cancellationToken);

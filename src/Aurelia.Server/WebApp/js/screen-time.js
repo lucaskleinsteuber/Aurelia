@@ -12,6 +12,7 @@ export const DEFAULT_SCREEN_TIME = Object.freeze({
   enabled: false, lockScope: "playbackOnly", ending: "finishTitle", maxOvertimeMinutes: 30,
   schoolNight: Object.freeze({ bedtime: "19:30", wakeTime: "07:00", dailyLimitMinutes: null }),
   weekend: Object.freeze({ bedtime: "20:30", wakeTime: "08:00", dailyLimitMinutes: null }),
+  allowOfflineDownloads: false,
 });
 
 /** No new title may start: no Up Next, no suggestions, and the good-night screen at the end. */
@@ -93,7 +94,7 @@ function minutes(value) {
  * The rules from the editor's fields, or `{ error }` with the first problem. Each evening has
  * `bedtime` (may be empty), `wakeTime` and `limit` (minutes, may be empty).
  */
-export function rulesFromForm({ enabled, lockScope, ending, overtime, schoolNight, weekend }) {
+export function rulesFromForm({ enabled, lockScope, ending, overtime, schoolNight, weekend, allowOfflineDownloads = false }) {
   const day = (values, label) => {
     const bedtime = String(values.bedtime ?? "").trim();
     if (bedtime && !time(bedtime)) return { error: `Enter the ${label} bedtime like 19:30.` };
@@ -109,7 +110,8 @@ export function rulesFromForm({ enabled, lockScope, ending, overtime, schoolNigh
   const over = minutes(overtime) ?? 0;
   if (Number.isNaN(over) || over < 0 || over > 180) return { error: "A title may run over by 0 to 180 minutes." };
   return { rules: { enabled: Boolean(enabled), lockScope: lockScope === "wholeProfile" ? "wholeProfile" : "playbackOnly",
-    ending: ending === "stopNow" ? "stopNow" : "finishTitle", maxOvertimeMinutes: over, schoolNight: school.rule, weekend: free.rule } };
+    ending: ending === "stopNow" ? "stopNow" : "finishTitle", maxOvertimeMinutes: over, schoolNight: school.rule, weekend: free.rule,
+    allowOfflineDownloads: Boolean(allowOfflineDownloads) } };
 }
 
 /** Whether two rule sets say the same. */
@@ -120,5 +122,6 @@ export function sameRules(a, b) {
 function normalize(rules) {
   const day = (value) => ({ bedtime: value?.bedtime ?? null, wakeTime: value?.wakeTime ?? null, dailyLimitMinutes: value?.dailyLimitMinutes ?? null });
   return { enabled: Boolean(rules?.enabled), lockScope: rules?.lockScope ?? null, ending: rules?.ending ?? null,
-    maxOvertimeMinutes: rules?.maxOvertimeMinutes ?? null, schoolNight: day(rules?.schoolNight), weekend: day(rules?.weekend) };
+    maxOvertimeMinutes: rules?.maxOvertimeMinutes ?? null, schoolNight: day(rules?.schoolNight), weekend: day(rules?.weekend),
+    allowOfflineDownloads: Boolean(rules?.allowOfflineDownloads) };
 }

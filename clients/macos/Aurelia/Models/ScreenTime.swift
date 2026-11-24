@@ -70,11 +70,48 @@ struct ScreenTimeRules: Codable, Equatable, Sendable {
   var maxOvertimeMinutes: Int
   var schoolNight: ScreenTimeDayRule
   var weekend: ScreenTimeDayRule
+  var allowOfflineDownloads: Bool
+
+  init(
+    enabled: Bool,
+    lockScope: ScreenTimeLockScope,
+    ending: ScreenTimeEnding,
+    maxOvertimeMinutes: Int,
+    schoolNight: ScreenTimeDayRule,
+    weekend: ScreenTimeDayRule,
+    allowOfflineDownloads: Bool = false
+  ) {
+    self.enabled = enabled
+    self.lockScope = lockScope
+    self.ending = ending
+    self.maxOvertimeMinutes = maxOvertimeMinutes
+    self.schoolNight = schoolNight
+    self.weekend = weekend
+    self.allowOfflineDownloads = allowOfflineDownloads
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case enabled, lockScope, ending, maxOvertimeMinutes, schoolNight, weekend
+    case allowOfflineDownloads
+  }
+
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    enabled = try values.decode(Bool.self, forKey: .enabled)
+    lockScope = try values.decode(ScreenTimeLockScope.self, forKey: .lockScope)
+    ending = try values.decode(ScreenTimeEnding.self, forKey: .ending)
+    maxOvertimeMinutes = try values.decode(Int.self, forKey: .maxOvertimeMinutes)
+    schoolNight = try values.decode(ScreenTimeDayRule.self, forKey: .schoolNight)
+    weekend = try values.decode(ScreenTimeDayRule.self, forKey: .weekend)
+    allowOfflineDownloads =
+      try values.decodeIfPresent(Bool.self, forKey: .allowOfflineDownloads) ?? false
+  }
 
   static let `default` = ScreenTimeRules(
     enabled: false, lockScope: .playbackOnly, ending: .finishTitle, maxOvertimeMinutes: 30,
     schoolNight: .init(bedtime: "19:30", wakeTime: "07:00", dailyLimitMinutes: nil),
-    weekend: .init(bedtime: "20:30", wakeTime: "08:00", dailyLimitMinutes: nil))
+    weekend: .init(bedtime: "20:30", wakeTime: "08:00", dailyLimitMinutes: nil),
+    allowOfflineDownloads: false)
 }
 
 struct ScreenTimeToday: Codable, Equatable, Sendable {

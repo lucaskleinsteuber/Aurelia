@@ -67,9 +67,11 @@ public static partial class LiveConversionEndpoints
 
     /// <summary>The original's size and the smaller qualities a download can be converted to.</summary>
     private static async Task<IResult> DownloadOptionsAsync(
+        HttpContext context,
         Guid mediaId,
         AureliaDbContext database,
         LiveConversionService live,
+        ScreenTimeService screenTime,
         CancellationToken cancellationToken)
     {
         // The catalog's access rules filter this lookup, as for a playback ticket.
@@ -82,6 +84,7 @@ public static partial class LiveConversionEndpoints
             return Problem("media_not_playable", "This media item is a container and cannot be played directly.", StatusCodes.Status409Conflict);
         try
         {
+            await screenTime.RequireDownloadsAllowedAsync(context.User.RequireUserId(), cancellationToken);
             var file = MediaFileAccess.OpenRead(media);
             await using var stream = file.Stream;
             if (await live.ToolsAsync() is not { } tools)

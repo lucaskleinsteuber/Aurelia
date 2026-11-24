@@ -1213,7 +1213,9 @@ public static class ApiEndpointMappings
             context.User.RequireUserId(),
             context.User.RequireSessionId(),
             mediaId,
-            cancellationToken, context.User.RequireProfileSessionId()));
+            cancellationToken,
+            context.User.RequireProfileSessionId(),
+            forDownload: download));
     }
 
     private static Task<IResult> RevokePlaybackAsync(

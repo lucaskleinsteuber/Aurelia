@@ -39,6 +39,12 @@ struct ScreenTimeSection: View {
             Text("A title that runs longer stops after this many minutes past the time.")
               .font(.caption).foregroundStyle(.secondary)
           }
+          Toggle("Allow Offline Downloads", isOn: $rules.allowOfflineDownloads)
+            .accessibilityIdentifier("profile-editor-screen-time-downloads")
+          Text(
+            "Off by default so offline downloads cannot bypass bedtime or daily limits. Existing downloads stay on devices."
+          )
+          .font(.caption).foregroundStyle(.secondary)
           Divider()
           evening("School Nights", "Sunday to Thursday evening.", $rules.schoolNight)
           Divider()
