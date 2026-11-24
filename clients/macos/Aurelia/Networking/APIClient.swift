@@ -187,7 +187,7 @@ struct APIClient: Sendable {
     let body = try JSONEncoder().encode(
       SetupOwnerRequest(username: username, password: password, deviceName: deviceName))
     let (data, _, _) = try await request(
-      baseURL: URL(string: "http://127.0.0.1:43110")!,
+      baseURL: AppEdition.localBaseURL,
       path: "/api/v1/setup/owner",
       method: "POST",
       token: nil,
@@ -205,7 +205,7 @@ struct APIClient: Sendable {
     let body = try JSONEncoder().encode(
       LoginRequest(username: username, password: password, deviceName: deviceName))
     let (data, _, _) = try await request(
-      baseURL: URL(string: "http://127.0.0.1:43110")!,
+      baseURL: AppEdition.localBaseURL,
       path: "/api/v1/auth/login",
       method: "POST",
       token: nil,

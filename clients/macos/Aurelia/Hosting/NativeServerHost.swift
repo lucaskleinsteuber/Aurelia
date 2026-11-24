@@ -76,7 +76,9 @@ final class NativeServerHost {
   private var rendezvousURL: URL?
   private var isStarting = false
 
-  func start(serverName: String, lanPort: Int = 43_111, skipKickstart: Bool = false) async throws
+  func start(
+    serverName: String, lanPort: Int = AppEdition.defaultLanPort, skipKickstart: Bool = false
+  ) async throws
     -> NativeHostSnapshot
   {
     guard !NativePreflightIsolation.isRequested || NativePreflightIsolation.isActive else {
@@ -283,6 +285,110 @@ final class NativeServerHost {
     if let cleanup { try? FileManager.default.removeItem(at: cleanup) }
   }
 
+  func resetTestEditionServerData() async {
+    guard AppEdition.isTest else { return }
+    if let controlEndpoint {
+      if (try? await request(action: "reset-test-data", method: "POST", timeout: 15)) != nil {
+        await waitForCurrentHelperExit(controlEndpoint: controlEndpoint)
+        return
+      }
+      await stop()
+    } else if runningApplication != nil {
+      await stop()
+    }
+    if !NativePreflightIsolation.isActive, BackgroundHostingController.permitted,
+      let settings = try? HostServiceSettings.load(),
+      let directory = try? HostBootstrapLocation.directory()
+    {
+      let rendezvous = directory.appendingPathComponent(
+        HostServiceSettings.backgroundRendezvousName)
+      if (try? HostLaunchSecurity.validateConfigurationFile(
+        at: rendezvous.path, bootstrapDirectory: directory)) != nil,
+        let data = try? Data(contentsOf: rendezvous),
+        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let port = object["port"] as? Int, (1...65_535).contains(port),
+        (try? await request(
+          port: port, secret: settings.controlSecret, action: "reset-test-data", method: "POST",
+          timeout: 15)) != nil
+      {
+        for _ in 0..<50 {
+          if (try? await status(port: port, secret: settings.controlSecret)) == nil { break }
+          try? await Task.sleep(for: .milliseconds(100))
+        }
+        return
+      }
+    }
+    guard let secret = try? Self.randomSecret(),
+      let cache = try? HostBootstrapLocation.directory(),
+      let helperURL = try? helperApplicationURL()
+    else { return }
+    HostLaunchSecurity.pruneStaleHandoffFiles(in: cache)
+    let rendezvous = cache.appendingPathComponent("\(UUID().uuidString.lowercased()).json")
+    guard
+      let launchHandoff = try? HostLaunchHandoff(
+        secret: secret,
+        directory: cache,
+        rendezvous: rendezvous,
+        serverName: AppEdition.displayName,
+        lanPort: AppEdition.defaultLanPort,
+        environment: ProcessInfo.processInfo.environment,
+        resetTestData: true)
+    else { return }
+    defer {
+      launchHandoff.remove()
+      try? FileManager.default.removeItem(at: rendezvous)
+    }
+
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = false
+    configuration.createsNewApplicationInstance = true
+    guard
+      let application = try? await NSWorkspace.shared.openApplication(
+        at: helperURL, configuration: configuration)
+    else { return }
+    defer {
+      if !application.isTerminated { application.forceTerminate() }
+      clearLaunchState()
+    }
+
+    for _ in 0..<50 {
+      if application.isTerminated { return }
+      if (try? HostLaunchSecurity.validateConfigurationFile(
+        at: rendezvous.path, bootstrapDirectory: cache)) != nil,
+        let data = try? Data(contentsOf: rendezvous),
+        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let port = object["port"] as? Int, (1...65_535).contains(port)
+      {
+        try? FileManager.default.removeItem(at: rendezvous)
+        _ = try? await request(
+          port: port, secret: secret, action: "reset-test-data", method: "POST", timeout: 15)
+        for _ in 0..<50 {
+          if application.isTerminated { break }
+          try? await Task.sleep(for: .milliseconds(100))
+        }
+        return
+      }
+      try? await Task.sleep(for: .milliseconds(100))
+    }
+  }
+
+  private func waitForCurrentHelperExit(controlEndpoint: ControlEndpoint) async {
+    for _ in 0..<50 {
+      if let application = runningApplication {
+        if application.isTerminated { break }
+      } else if (try? await status(port: controlEndpoint.port, secret: controlEndpoint.secret))
+        == nil
+      {
+        break
+      }
+      try? await Task.sleep(for: .milliseconds(100))
+    }
+    if runningApplication?.isTerminated == false { runningApplication?.forceTerminate() }
+    let cleanup = rendezvousURL
+    clearLaunchState()
+    if let cleanup { try? FileManager.default.removeItem(at: cleanup) }
+  }
+
   private func status(port: Int, secret: String) async throws -> NativeHostSnapshot {
     let data = try await request(port: port, secret: secret, action: "status", method: "GET")
     do { return try JSONDecoder().decode(NativeHostSnapshot.self, from: data) } catch {
@@ -290,17 +396,20 @@ final class NativeServerHost {
     }
   }
 
-  private func request(action: String, method: String, body: Data? = nil) async throws -> Data {
+  private func request(
+    action: String, method: String, body: Data? = nil, timeout: TimeInterval = 3
+  ) async throws -> Data {
     guard let controlEndpoint else {
       throw NativeServerHostError.invalidResponse
     }
     return try await request(
       port: controlEndpoint.port, secret: controlEndpoint.secret, action: action, method: method,
-      body: body)
+      body: body, timeout: timeout)
   }
 
   private func request(
-    port: Int, secret: String, action: String, method: String, body: Data? = nil
+    port: Int, secret: String, action: String, method: String, body: Data? = nil,
+    timeout: TimeInterval = 3
   ) async throws -> Data {
     guard let url = URL(string: "http://127.0.0.1:\(port)/auth/\(action)") else {
       throw NativeServerHostError.invalidResponse
@@ -314,7 +423,7 @@ final class NativeServerHost {
     var request = URLRequest(url: url)
     request.httpMethod = method
     request.cachePolicy = .reloadIgnoringLocalCacheData
-    request.timeoutInterval = 3
+    request.timeoutInterval = timeout
     request.httpBody = body
     if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
     request.setValue(nonce, forHTTPHeaderField: HostControlAuth.nonceHeader)
@@ -410,7 +519,8 @@ final class HostLaunchHandoff {
     lanPort: Int,
     environment: [String: String],
     processID: Int32 = ProcessInfo.processInfo.processIdentifier,
-    allowDirectoryOverrides: Bool = NativeServerHost.allowsEnvironmentOverrides
+    allowDirectoryOverrides: Bool = NativeServerHost.allowsEnvironmentOverrides,
+    resetTestData: Bool = false
   ) throws {
     configurationURL = directory.appendingPathComponent("launch-\(processID).json")
     secretPipeURL = directory.appendingPathComponent("launch-\(processID).pipe")
@@ -442,7 +552,8 @@ final class HostLaunchHandoff {
       dataDirectory: allowDirectoryOverrides ? environment["AURELIA_DATA_DIR"] : nil,
       logDirectory: allowDirectoryOverrides ? environment["AURELIA_LOG_DIR"] : nil,
       serverName: serverName,
-      lanPort: lanPort)
+      lanPort: lanPort,
+      resetTestData: resetTestData ? true : nil)
     do {
       try JSONEncoder().encode(description).write(
         to: configurationURL, options: .atomic)

@@ -554,7 +554,7 @@ final class AppModel: ObservableObject {
     await PlaybackShutdownCoordinator.shared.shutdown()
     hostPollTask?.cancel()
     hostPollTask = nil
-    await serverHost.stop()
+    await serverHost.resetTestEditionServerData()
     for startAtLogin in [false, true] {
       try? await SMAppService.agent(
         plistName: AppEdition.agentName(startAtLogin: startAtLogin) + ".plist"
@@ -1171,7 +1171,7 @@ final class AppModel: ObservableObject {
         password: password,
         deviceName: AureliaDeviceName.current)
       guard connectionGeneration == generation, !Task.isCancelled else { return false }
-      let port = hostSnapshot.serverInfo?.lanHttpsPort ?? 43_111
+      let port = hostSnapshot.serverInfo?.lanHttpsPort ?? AppEdition.defaultLanPort
       try await finishLocalAuthentication(
         authentication, lanPort: port, restart: false, expectedGeneration: generation)
       return true
@@ -3499,6 +3499,10 @@ final class AppModel: ObservableObject {
       )
     }
     try ProfilePickerProtocol.validate(formatVersion: response.formatVersion)
+    WakeOnLan.remember(
+      serverId: device.serverId,
+      wakeOnLanAddresses: response.wakeOnLanAddresses,
+      hosting: response.hosting)
     guard isCurrent(generation), profileSelectionGeneration == selection,
       profile?.isViewingSession != true, !Task.isCancelled
     else { throw CancellationError() }

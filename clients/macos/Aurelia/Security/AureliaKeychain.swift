@@ -17,7 +17,7 @@ enum AureliaKeychain {
   static let usesDataProtection: Bool = {
     let probe: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: "com.lucas.aurelia.media.keychain-probe",
+      kSecAttrService as String: AppEdition.bundleIdentifier + ".keychain-probe",
       kSecAttrAccount as String: UUID().uuidString,
       kSecUseDataProtectionKeychain as String: true,
     ]

@@ -14,9 +14,13 @@ enum ServerDataMigrator {
   private static let databaseName = "aurelia.db"
   private static let stagingPrefix = ".Aurelia-Server-Migration-"
 
-  static func migrateBuild11IfNeeded(to destination: URL) throws {
-    guard destination.standardizedFileURL == defaultDestination else { return }
-    try migrateIfNeeded(from: legacySource, to: destination)
+  static func migrateBuild11IfNeeded(
+    to destination: URL,
+    isTest: Bool = AppEdition.isTest,
+    home: URL = FileManager.default.homeDirectoryForCurrentUser
+  ) throws {
+    guard !isTest, destination.standardizedFileURL == defaultDestination(in: home) else { return }
+    try migrateIfNeeded(from: legacySource(in: home), to: destination)
   }
 
   static func migrateIfNeeded(from source: URL, to destination: URL) throws {
@@ -110,14 +114,14 @@ enum ServerDataMigrator {
     }
   }
 
-  private static var defaultDestination: URL {
-    FileManager.default.homeDirectoryForCurrentUser
+  private static func defaultDestination(in home: URL) -> URL {
+    home
       .appendingPathComponent("Library/Application Support/Aurelia Server", isDirectory: true)
       .standardizedFileURL
   }
 
-  private static var legacySource: URL {
-    FileManager.default.homeDirectoryForCurrentUser
+  private static func legacySource(in home: URL) -> URL {
+    home
       .appendingPathComponent("Library/Application Support/Aurelia Home Server", isDirectory: true)
       .standardizedFileURL
   }

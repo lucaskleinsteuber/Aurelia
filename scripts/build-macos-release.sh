@@ -391,6 +391,12 @@ cp "$repository_root/clients/macos/Configuration/Aurelia.entitlements" "$release
 for entitlements in "$helper_entitlements" "$release_entitlements"; do
   /usr/libexec/PlistBuddy -c "Set :com.apple.security.application-groups:0 $app_group" "$entitlements"
 done
+if (( test_edition )); then
+  # Aurelia Test must never share the real app's Data Protection Keychain access groups.
+  /usr/libexec/PlistBuddy -c 'Delete :keychain-access-groups' "$release_entitlements"
+  /usr/libexec/PlistBuddy -c 'Add :keychain-access-groups array' "$release_entitlements"
+  /usr/libexec/PlistBuddy -c "Add :keychain-access-groups:0 string $team_identifier.$bundle_identifier" "$release_entitlements"
+fi
 codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
   --entitlements "$helper_entitlements" \
   "$candidate/Contents/Helpers/Aurelia Server Host.app"

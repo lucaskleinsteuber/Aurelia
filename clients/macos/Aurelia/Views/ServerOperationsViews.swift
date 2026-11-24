@@ -237,7 +237,7 @@ struct ServerNetworkEditor: View {
               parts.port = trial.lanHttpsPort
               if !trial.lanAccessEnabled {
                 parts.host = "127.0.0.1"
-                parts.port = 43110
+                parts.port = AppEdition.localPort
               }
               guard let address = parts.url else { throw APIClientError.invalidResponse }
               trialProfile = StoredServerProfile(

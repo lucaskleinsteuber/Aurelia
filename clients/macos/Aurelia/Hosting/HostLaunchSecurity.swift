@@ -49,6 +49,7 @@ struct HostLaunchDescription: Codable, Equatable {
   let logDirectory: String?
   let serverName: String
   let lanPort: Int
+  var resetTestData: Bool? = nil
 }
 
 struct ValidatedHostLaunchPaths: Equatable {

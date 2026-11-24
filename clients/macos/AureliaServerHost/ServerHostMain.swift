@@ -168,6 +168,7 @@ private struct ResolvedHostLaunch {
   let serverName: String
   let lanPort: Int
   var isolatedBackground = false
+  var resetTestData = false
 }
 
 private enum ChildServerReadiness: Equatable {
@@ -177,7 +178,7 @@ private enum ChildServerReadiness: Equatable {
 }
 
 private final class ServerHostRuntime: @unchecked Sendable {
-  private static let localPort = 43_110
+  private static let localPort = AppEdition.localPort
   private static let minimumFreeDiskBytes: Int64 = 16 * 1024 * 1024
   private static let maxActiveConnections = 16
   private static let connectionTimeoutSeconds: TimeInterval = 5
@@ -189,6 +190,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
   private let logDirectory: URL
   private let terminationHandler: @MainActor @Sendable () -> Void
   private let isolatedBackground: Bool
+  private let resetTestData: Bool
   private var listener: NWListener?
   private var activeConnections:
     [ObjectIdentifier: (connection: NWConnection, timer: DispatchSourceTimer)] = [:]
@@ -210,6 +212,9 @@ private final class ServerHostRuntime: @unchecked Sendable {
   private var preventIdleSleepEnabled = false
   private var hasPendingNetworkTrial = false
   private var shuttingDown = false
+  #if AURELIA_TEST_EDITION
+    private var resettingTestData = false
+  #endif
   private var watchdog = HostWatchdogPolicy()
   private var watchdogTimer: DispatchSourceTimer?
   private var watchdogRequest: Task<Void, Never>?
@@ -226,12 +231,14 @@ private final class ServerHostRuntime: @unchecked Sendable {
     terminationHandler: @escaping @MainActor @Sendable () -> Void
   ) throws {
     let launch = try Self.resolveLaunch(environment: environment)
-    do {
-      try ServerDataMigrator.migrateBuild11IfNeeded(to: launch.dataDirectory)
-    } catch ServerDataMigrationError.destinationUnavailable {
-      throw HostError.dataDirectoryUnavailable
-    } catch {
-      throw HostError.dataMigration
+    if !AppEdition.isTest && !launch.resetTestData {
+      do {
+        try ServerDataMigrator.migrateBuild11IfNeeded(to: launch.dataDirectory)
+      } catch ServerDataMigrationError.destinationUnavailable {
+        throw HostError.dataDirectoryUnavailable
+      } catch {
+        throw HostError.dataMigration
+      }
     }
     self.secret = launch.secret
     self.parentProcessID = launch.parentProcessID
@@ -240,8 +247,9 @@ private final class ServerHostRuntime: @unchecked Sendable {
     self.logDirectory = launch.logDirectory
     self.terminationHandler = terminationHandler
     self.isolatedBackground = launch.isolatedBackground
+    self.resetTestData = launch.resetTestData
 
-    if !FileManager.default.fileExists(atPath: settingsURL.path) {
+    if !launch.resetTestData, !FileManager.default.fileExists(atPath: settingsURL.path) {
       do {
         try saveSettings(
           HostSettings(
@@ -313,7 +321,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
       return ResolvedHostLaunch(
         secret: preflight.secret, parentProcessID: 0, rendezvousURL: preflight.rendezvousURL,
         dataDirectory: preflight.dataDirectory, logDirectory: preflight.logDirectory,
-        serverName: "Synthetic Watchdog", lanPort: 43_111, isolatedBackground: true)
+        serverName: "Synthetic Watchdog", lanPort: AppEdition.defaultLanPort,
+        isolatedBackground: true)
     }
     if ProcessInfo.processInfo.arguments.contains("--background") {
       let settings = try HostServiceSettings.load()
@@ -323,7 +332,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
         rendezvousURL: try HostBootstrapLocation.directory().appendingPathComponent(
           HostServiceSettings.backgroundRendezvousName),
         dataDirectory: defaultDataDirectory, logDirectory: defaultLogDirectory,
-        serverName: "Aurelia", lanPort: 43_111)
+        serverName: AppEdition.isTest ? "Aurelia Test" : "Aurelia",
+        lanPort: AppEdition.defaultLanPort)
     }
     let mainContents = Bundle.main.bundleURL
       .deletingLastPathComponent()
@@ -377,6 +387,11 @@ private final class ServerHostRuntime: @unchecked Sendable {
       do { secret = try HostLaunchSecurity.readSecretPipe(at: validated.pipeURL.path) } catch {
         throw HostError.missingControlSecret
       }
+      #if AURELIA_TEST_EDITION
+        let resetTestData = description.resetTestData == true
+      #else
+        let resetTestData = false
+      #endif
       return ResolvedHostLaunch(
         secret: secret,
         parentProcessID: description.parentProcessID,
@@ -386,7 +401,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
         logDirectory: description.logDirectory.map(URL.init(fileURLWithPath:))
           ?? defaultLogDirectory,
         serverName: description.serverName,
-        lanPort: description.lanPort)
+        lanPort: description.lanPort,
+        resetTestData: resetTestData)
     }
     throw foundTrustedParent ? HostError.missingLaunchConfiguration : HostError.missingTrustedParent
   }
@@ -413,12 +429,14 @@ private final class ServerHostRuntime: @unchecked Sendable {
 
   private static var defaultDataDirectory: URL {
     FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent("Library/Application Support/Aurelia Server", isDirectory: true)
+      .appendingPathComponent(
+        "Library/Application Support/\(AppEdition.serverDataFolderName)", isDirectory: true)
   }
 
   private static var defaultLogDirectory: URL {
     FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent("Library/Logs/Aurelia Server", isDirectory: true)
+      .appendingPathComponent(
+        "Library/Logs/\(AppEdition.serverDataFolderName)", isDirectory: true)
   }
 
   private func listenerChanged(_ listenerState: NWListener.State) {
@@ -430,6 +448,12 @@ private final class ServerHostRuntime: @unchecked Sendable {
       }
       do {
         try writeRendezvous(port: port.rawValue)
+        #if AURELIA_TEST_EDITION
+          if resetTestData {
+            updateStatus(.stopped)
+            return
+          }
+        #endif
         startServer(lan: false)
       } catch {
         updateStatus(.failed, message: "The local host control channel could not be prepared.")
@@ -896,6 +920,11 @@ private final class ServerHostRuntime: @unchecked Sendable {
     logSink = nil
     if shuttingDown {
       updateStatus(.stopped)
+      #if AURELIA_TEST_EDITION
+        if resettingTestData {
+          return
+        }
+      #endif
       DispatchQueue.main.async { [terminationHandler] in terminationHandler() }
       return
     }
@@ -957,7 +986,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
     if portConflict {
       let portMessage: String
       if wasLAN {
-        let lanPort = conflictPort ?? (try? loadSettings().lanHttpsPort) ?? 43_111
+        let lanPort =
+          conflictPort ?? (try? loadSettings().lanHttpsPort) ?? AppEdition.defaultLanPort
         portMessage =
           "LAN port \(lanPort) is already used by another program. Choose another port or quit the other program, then choose Restart."
       } else {
@@ -975,7 +1005,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
       updateStatus(
         .failed,
         message:
-          "Aurelia Server stopped repeatedly. Check available disk space and ~/Library/Logs/Aurelia Server/server.log, then choose Restart."
+          "Aurelia Server stopped repeatedly. Check available disk space and ~/Library/Logs/\(AppEdition.serverDataFolderName)/server.log, then choose Restart."
       )
       return
     }
@@ -1026,6 +1056,27 @@ private final class ServerHostRuntime: @unchecked Sendable {
       }
     }
   }
+
+  #if AURELIA_TEST_EDITION
+    private func finishShutdownAfterReset() {
+      parentTimer?.cancel()
+      parentTimer = nil
+      if sleepAssertion != 0 {
+        IOPMAssertionRelease(sleepAssertion)
+        sleepAssertion = 0
+      }
+      listener?.cancel()
+      listener = nil
+      for entry in activeConnections.values {
+        entry.timer.cancel()
+        entry.connection.cancel()
+      }
+      activeConnections.removeAll()
+      try? FileManager.default.removeItem(at: rendezvousURL)
+      updateStatus(.stopped)
+      DispatchQueue.main.async { [terminationHandler] in terminationHandler() }
+    }
+  #endif
 
   private func startParentMonitor() {
     let timer = DispatchSource.makeTimerSource(queue: queue)
@@ -1309,6 +1360,59 @@ private final class ServerHostRuntime: @unchecked Sendable {
       } catch {
         respond(connection, status: 400, body: Data(), proofNonce: responseNonce)
       }
+    #if AURELIA_TEST_EDITION
+      case ("POST", "reset-test-data"):
+        guard AppEdition.isTest, !resettingTestData else {
+          respond(connection, status: 409, body: Data(), proofNonce: responseNonce)
+          return
+        }
+        releaseConnection(connection)
+        resettingTestData = true
+        shuttingDown = true
+        stopWatchdog()
+        readinessGeneration &+= 1
+        serverReadyGeneration = nil
+        serverStoppingGeneration = nil
+        pendingRestartLAN = nil
+        pendingRestoreID = nil
+        pendingBackgroundHandoff = false
+        updateStatus(.stopping)
+        let child = process
+        if let child, child.isRunning {
+          child.terminate()
+        }
+        Task { [weak self] in
+          if let child, child.isRunning {
+            let deadline = ProcessInfo.processInfo.systemUptime + 5.0
+            while child.isRunning && ProcessInfo.processInfo.systemUptime < deadline {
+              try? await Task.sleep(for: .milliseconds(50))
+            }
+            if child.isRunning {
+              kill(child.processIdentifier, SIGKILL)
+              let killDeadline = ProcessInfo.processInfo.systemUptime + 1.0
+              while child.isRunning && ProcessInfo.processInfo.systemUptime < killDeadline {
+                try? await Task.sleep(for: .milliseconds(50))
+              }
+            }
+          }
+          guard let self else { return }
+          self.queue.async { [weak self] in
+            guard let self else { return }
+            self.process = nil
+            self.closeServerLifeline()
+            self.logSink?.close()
+            self.logSink = nil
+            TestEditionServerReset.removeServerFolders(
+              home: FileManager.default.homeDirectoryForCurrentUser,
+              isTest: AppEdition.isTest)
+            self.updateStatus(.stopped)
+            self.respond(connection, status: 204, body: Data(), proofNonce: responseNonce)
+            self.queue.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+              self?.finishShutdownAfterReset()
+            }
+          }
+        }
+    #endif
     case ("POST", "shutdown"):
       respond(connection, status: 202, body: Data(), proofNonce: responseNonce)
       queue.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.beginShutdown() }
@@ -1833,11 +1937,11 @@ private enum HostError: Error {
   var userMessage: String {
     switch self {
     case .dataDirectoryUnavailable:
-      "The Aurelia Server data folder (~/Library/Application Support/Aurelia Server) points to a drive or location that is currently unavailable. Reconnect the drive and try again."
+      "The Aurelia Server data folder (~/Library/Application Support/\(AppEdition.serverDataFolderName)) points to a drive or location that is currently unavailable. Reconnect the drive and try again."
     case .settingsStorage:
       "Aurelia Server could not write its settings folder. Check that the drive is connected, writable, and has free space."
     case .dataMigration:
-      "Aurelia Server could not prepare its data folder (~/Library/Application Support/Aurelia Server)."
+      "Aurelia Server could not prepare its data folder (~/Library/Application Support/\(AppEdition.serverDataFolderName))."
     case .missingServer:
       "The bundled Aurelia Server executable is missing. Reinstall Aurelia."
     default:

@@ -115,7 +115,7 @@ struct LocalSetupMoveClient: Sendable {
   }
 
   let bootstrapToken: String
-  private static let base = URL(string: "http://127.0.0.1:43110")!
+  private static let base = AppEdition.localBaseURL
 
   private final class NoRedirectDelegate: NSObject, URLSessionTaskDelegate, Sendable {
     func urlSession(

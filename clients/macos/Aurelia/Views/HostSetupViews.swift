@@ -114,7 +114,7 @@ struct NativeHostSetupView: View {
   @State private var passwordRepeat = ""
   @State private var showsPassword = false
   @State private var showsAdvancedSetup = false
-  @State private var lanPort = 43_111
+  @State private var lanPort = AppEdition.defaultLanPort
   @State private var showsMove = false
 
   var body: some View {
@@ -259,7 +259,7 @@ struct NativeHostSetupView: View {
           }
           GridRow {
             Text("HTTPS Port")
-            TextField("43111", value: $lanPort, format: .number)
+            TextField("\(AppEdition.defaultLanPort)", value: $lanPort, format: .number)
           }
         }
         .textFieldStyle(.roundedBorder)
