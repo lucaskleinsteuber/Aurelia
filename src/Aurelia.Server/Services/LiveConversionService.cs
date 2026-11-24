@@ -118,6 +118,9 @@ public sealed partial class LiveConversionService : IDisposable
     /// <summary>How fast each quality converts here; see <see cref="EncodingPace"/>.</summary>
     public EncodingPace Pace { get; } = new();
 
+    /// <summary>The configured video conversion limit from <c>Aurelia:MaximumVideoConversions</c>, or null for the automatic limit.</summary>
+    public int? ConfiguredVideoLimit => configuredVideoLimit;
+
     /// <summary>How many pictures may be encoded at once: one on the processor, three on a chip, or the owner's number.</summary>
     public static int VideoConversionLimit(FfmpegTools? tools, int? configured = null) =>
         configured ?? (tools?.EncodesOnChip == true ? MaximumChipConversions : MaximumVideoConversions);

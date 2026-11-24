@@ -67,7 +67,11 @@ public sealed partial class FfmpegCheckOutput
     public string Clean(string line)
     {
         var text = line;
-        if (!string.IsNullOrEmpty(inputPath)) text = text.Replace(inputPath, "the file", StringComparison.Ordinal);
+        if (!string.IsNullOrEmpty(inputPath))
+        {
+            text = text.Replace("file:" + inputPath, "the file", StringComparison.Ordinal);
+            text = text.Replace(inputPath, "the file", StringComparison.Ordinal);
+        }
         text = Address().Replace(text, string.Empty);
         // Anything else that looks like a path is cut as well: an explanation never names a folder.
         text = PathLike().Replace(text, "the file");

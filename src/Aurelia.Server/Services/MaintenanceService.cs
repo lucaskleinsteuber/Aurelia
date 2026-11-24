@@ -30,11 +30,12 @@ public sealed partial class MaintenanceService(
         }
     }
 
-    private async Task RunAsync(CancellationToken cancellationToken)
+    internal Task RunAsync(CancellationToken cancellationToken) => RunAsync(DateTimeOffset.UtcNow, cancellationToken);
+
+    internal async Task RunAsync(DateTimeOffset now, CancellationToken cancellationToken)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
-        var now = DateTimeOffset.UtcNow;
         await phases.RunAsync("scheduled backup", async () =>
             await scope.ServiceProvider.GetRequiredService<DatabaseBackupService>()
                 .CreateScheduledBackupIfDueAsync(now, cancellationToken), cancellationToken);
@@ -79,8 +80,72 @@ public sealed partial class MaintenanceService(
 
         await phases.RunAsync("scan history cleanup", () => PruneScanHistoryAsync(database, cancellationToken), cancellationToken);
         await phases.RunAsync("metadata history cleanup", () => PruneMetadataHistoryAsync(database, cancellationToken), cancellationToken);
+        await phases.RunAsync("watch history retention cleanup", () => PruneWatchHistoryAsync(database, now, cancellationToken), cancellationToken);
+        await phases.RunAsync("library state receipt cleanup", () => PruneLibraryStateMutationsAsync(database, now, cancellationToken), cancellationToken);
+        await phases.RunAsync("library operation cleanup", () => PruneLibraryMutationsAsync(database, now, cancellationToken), cancellationToken);
         await phases.RunAsync("database checkpoint", async () =>
             await database.Database.ExecuteSqlRawAsync("PRAGMA wal_checkpoint(PASSIVE);", cancellationToken), cancellationToken);
+    }
+
+    private static async Task PruneWatchHistoryAsync(
+        AureliaDbContext database,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var retentionCutoff = now.AddYears(-3);
+        var staleIds = await database.WatchEvents.IgnoreQueryFilters().AsNoTracking()
+            .Where(e => e.Timestamp < retentionCutoff)
+            .OrderBy(e => e.Timestamp)
+            .Select(e => e.Id)
+            .Take(500)
+            .ToListAsync(cancellationToken);
+        if (staleIds.Count > 0)
+        {
+            await database.WatchEvents.IgnoreQueryFilters()
+                .Where(e => staleIds.Contains(e.Id))
+                .ExecuteDeleteAsync(cancellationToken);
+        }
+    }
+
+    private static async Task PruneLibraryStateMutationsAsync(
+        AureliaDbContext database,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var cutoff = now.AddDays(-30);
+        var stale = await database.LibraryStateMutations.IgnoreQueryFilters().AsNoTracking()
+            .Where(mutation => mutation.CreatedAt < cutoff)
+            .OrderBy(mutation => mutation.CreatedAt)
+            .Select(mutation => new { mutation.UserId, mutation.ClientMutationId })
+            .Take(500)
+            .ToListAsync(cancellationToken);
+        if (stale.Count > 0)
+        {
+            var ids = stale.Select(entry => entry.ClientMutationId).ToList();
+            await database.LibraryStateMutations.IgnoreQueryFilters()
+                .Where(mutation => mutation.CreatedAt < cutoff && ids.Contains(mutation.ClientMutationId))
+                .ExecuteDeleteAsync(cancellationToken);
+        }
+    }
+
+    private static async Task PruneLibraryMutationsAsync(
+        AureliaDbContext database,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var cutoff = now.AddDays(-30);
+        var staleIds = await database.LibraryMutations.IgnoreQueryFilters().AsNoTracking()
+            .Where(mutation => mutation.State == "completed" && mutation.CreatedAt < cutoff)
+            .OrderBy(mutation => mutation.CreatedAt)
+            .Select(mutation => mutation.Id)
+            .Take(100)
+            .ToListAsync(cancellationToken);
+        if (staleIds.Count > 0)
+        {
+            await database.LibraryMutations.IgnoreQueryFilters()
+                .Where(mutation => staleIds.Contains(mutation.Id))
+                .ExecuteDeleteAsync(cancellationToken);
+        }
     }
 
     private static async Task PruneScanHistoryAsync(

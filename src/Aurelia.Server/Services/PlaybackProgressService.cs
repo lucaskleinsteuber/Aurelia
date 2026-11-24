@@ -239,19 +239,5 @@ public sealed class PlaybackProgressService(
                 IsCompleted = isCompleted
             });
         }
-
-        if (Random.Shared.Next(0, 50) == 0)
-        {
-            var retentionCutoff = now.AddYears(-3);
-            // Retention covers every profile's history, not only the one saving progress now.
-            var staleEvents = await database.WatchEvents.IgnoreQueryFilters()
-                .Where(e => e.Timestamp < retentionCutoff)
-                .Take(100)
-                .ToListAsync(cancellationToken);
-            if (staleEvents.Count > 0)
-            {
-                database.WatchEvents.RemoveRange(staleEvents);
-            }
-        }
     }
 }

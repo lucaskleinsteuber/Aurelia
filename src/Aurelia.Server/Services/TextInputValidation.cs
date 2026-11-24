@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text;
+
 namespace Aurelia.Server.Services;
 
 /// <summary>Shared input validation helpers for display names and page bounds.</summary>
@@ -18,6 +21,32 @@ public static class TextInputValidation
             {
                 return true;
             }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Returns true when the text contains at least one visible character (excluding whitespace,
+    /// control characters, Unicode format characters such as zero-width spaces, and unassigned
+    /// or combining-only code points).
+    /// </summary>
+    public static bool HasVisibleCharacter(string value)
+    {
+        foreach (var rune in value.EnumerateRunes())
+        {
+            if (Rune.IsWhiteSpace(rune)) continue;
+            var category = Rune.GetUnicodeCategory(rune);
+            if (category is UnicodeCategory.Control
+                or UnicodeCategory.Format
+                or UnicodeCategory.SpaceSeparator
+                or UnicodeCategory.LineSeparator
+                or UnicodeCategory.ParagraphSeparator
+                or UnicodeCategory.NonSpacingMark
+                or UnicodeCategory.OtherNotAssigned)
+            {
+                continue;
+            }
+            return true;
         }
         return false;
     }

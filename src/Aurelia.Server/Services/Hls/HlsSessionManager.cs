@@ -35,8 +35,8 @@ public sealed partial class HlsSessionManager(
 
     /// <summary>A new session for an open title file; it is not running until <see cref="AddAsync"/> keeps it.</summary>
     public HlsSession Create(HlsSessionKey key, FileStream file, IDisposable fileOwner, string sourcePath, string title, double durationSeconds,
-        StreamingStep step, ProbedVideo video, ProbedAudio? audio, HdrToneMapping toneMapping, FfmpegTools tools) =>
-        new(this, key, file, fileOwner, sourcePath, title, durationSeconds, step, video, audio, toneMapping, tools, live, converter, logger, this.clock);
+        StreamingStep step, ProbedVideo video, ProbedAudio? audio, HdrToneMapping toneMapping, FfmpegTools tools, string? container = null) =>
+        new(this, key, file, fileOwner, sourcePath, title, durationSeconds, step, video, audio, toneMapping, tools, live, converter, logger, this.clock, container);
 
     /// <summary>Keeps the session, or returns the one another request kept first and ends this one.</summary>
     /// <exception cref="HlsBusyException">Six sessions run already.</exception>

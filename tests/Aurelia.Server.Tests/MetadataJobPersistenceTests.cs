@@ -170,10 +170,13 @@ public sealed class MetadataJobPersistenceTests : IClassFixture<MetadataJobPersi
         var job = await fixture.Start(mode: MetadataJobMode.Incremental);
         await fixture.Run();
         await fixture.Wait(job.Id, value => value.NextAttemptAt.HasValue);
-        Assert.Equal("Title 1", await fixture.Read(database => database.MediaMetadata.Select(value => value.ProviderMediaId).SingleAsync()));
+        // Artwork is prefetched outside the database transaction, so a transient artwork timeout
+        // does not leave half-applied metadata committed before the retry.
+        Assert.Empty(await fixture.Read(database => database.MediaMetadata.ToListAsync()));
         fixture.Advance(30);
         var completed = await fixture.Wait(job.Id, value => value.State == MetadataJobState.Completed);
         Assert.Equal(1, completed.ItemsMatched);
+        Assert.Equal("Title 1", await fixture.Read(database => database.MediaMetadata.Select(value => value.ProviderMediaId).SingleAsync()));
         Assert.Equal(1, await fixture.Read(database => database.MediaCredits.CountAsync()));
         Assert.Equal(1, await fixture.Read(database => database.ArtworkAssets.CountAsync()));
         Assert.Equal(2, fixture.Provider.Searches["Title 1"]);

@@ -243,7 +243,7 @@ public sealed partial class SubtitleDownloadService(
             throw;
         }
         quota.Update(file.Remaining, file.ResetsAt);
-        var text = SidecarSubtitles.DecodeText(file.Content);
+        var text = SidecarSubtitles.DecodeText(file.Content, language);
         if (!text.Contains("-->", StringComparison.Ordinal))
             throw new MetadataException("subtitle_unreadable", "The downloaded file is not a subtitle.", StatusCodes.Status422UnprocessableEntity);
         var cleanRelease = release is null ? null : new string(release.Where(character => !char.IsControl(character)).Take(200).ToArray());

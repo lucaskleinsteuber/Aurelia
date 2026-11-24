@@ -599,20 +599,13 @@ public sealed partial class SegmentDetectionService : BackgroundService
         };
         if (length <= 0) return null;
 
-        activity = new Activity(info.Label, kind switch
+        var step = kind switch
         {
             SegmentKind.Intro => "Listening to the beginning",
             SegmentKind.LateIntro => "Listening further for a late intro",
             _ => "Listening to the ending",
-        });
-        IDisposable? slot = null;
-        while (slot is null)
-        {
-            await WaitWhilePlaybackBusyAsync(cancellationToken);
-            slot = await live.EnterAsync(encodesVideo: false, cancellationToken, background: true);
-        }
-        short[]? samples;
-        try
+        };
+        var samples = await RunInterruptibleReadAsync(info.Label, step, async token =>
         {
             OpenMediaFile file;
             try
@@ -625,12 +618,8 @@ public sealed partial class SegmentDetectionService : BackgroundService
             }
             await using var stream = file.Stream;
             if (file.Length != info.Length || file.LastModified != info.LastModified) return null;
-            samples = await reader.ReadAsync(tools, file, Path.GetFullPath(info.Media.SourcePath), track, start, length, cancellationToken);
-        }
-        finally
-        {
-            slot.Dispose();
-        }
+            return await reader.ReadAsync(tools, file, Path.GetFullPath(info.Media.SourcePath), track, start, length, token);
+        }, cancellationToken);
         if (samples is null || samples.Length < AudioFingerprint.SampleRate * 30) return null;
         return await FingerprintAsync(samples, start);
     }
@@ -639,16 +628,13 @@ public sealed partial class SegmentDetectionService : BackgroundService
     /// Pictures of the episode, two a second. Decoding them is the slowest part, so it
     /// stops as soon as someone starts watching and begins again once they are done.
     /// </summary>
-    private async Task<PictureWindow?> LoadPicturesAsync(FfmpegTools tools, EpisodeInfo info, double start, double length, CancellationToken cancellationToken)
+    private Task<PictureWindow?> LoadPicturesAsync(FfmpegTools tools, EpisodeInfo info, double start, double length, CancellationToken cancellationToken)
     {
-        if (info.Offline || info.VideoIndex is not { } video || info.Duration < MinimumEpisodeSeconds || length <= 0) return null;
+        if (info.Offline || info.VideoIndex is not { } video || info.Duration < MinimumEpisodeSeconds || length <= 0)
+            return Task.FromResult<PictureWindow?>(null);
         var step = start < info.Duration / 2 ? "Looking at the beginning's pictures" : "Looking at the ending's pictures";
-        while (true)
+        return RunInterruptibleReadAsync(info.Label, step, async token =>
         {
-            activity = new Activity(info.Label, step);
-            await WaitWhilePlaybackBusyAsync(cancellationToken);
-            using var slot = await live.EnterAsync(encodesVideo: false, cancellationToken, background: true);
-            if (slot is null) continue;
             OpenMediaFile file;
             try
             {
@@ -660,22 +646,43 @@ public sealed partial class SegmentDetectionService : BackgroundService
             }
             await using var stream = file.Stream;
             if (file.Length != info.Length || file.LastModified != info.LastModified) return null;
+            return await reader.ReadPicturesAsync(tools, file, Path.GetFullPath(info.Media.SourcePath), video, start, length, token);
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs an audio or picture analysis read under a background conversion slot while watching
+    /// for active playback; cancels immediately when someone starts watching and retries once playback ends.
+    /// </summary>
+    internal async Task<T?> RunInterruptibleReadAsync<T>(
+        string label,
+        string step,
+        Func<CancellationToken, Task<T?>> readAsync,
+        CancellationToken cancellationToken)
+        where T : class
+    {
+        while (true)
+        {
+            activity = new Activity(label, step);
+            await WaitWhilePlaybackBusyAsync(cancellationToken);
+            using var slot = await live.EnterAsync(encodesVideo: false, cancellationToken, background: true);
+            if (slot is null) continue;
             using var interrupt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var watcher = WatchForPlaybackAsync(interrupt);
-            PictureWindow? window = null;
+            T? result = null;
             try
             {
-                window = await reader.ReadPicturesAsync(tools, file, Path.GetFullPath(info.Media.SourcePath), video, start, length, interrupt.Token);
+                result = await readAsync(interrupt.Token);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                // Someone started watching; the pictures are read again later.
+                // Someone started watching; retry once playback ends.
             }
             var interrupted = interrupt.IsCancellationRequested;
             await interrupt.CancelAsync();
             await watcher;
             cancellationToken.ThrowIfCancellationRequested();
-            if (!interrupted) return window;
+            if (!interrupted) return result;
         }
     }
 

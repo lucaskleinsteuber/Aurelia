@@ -539,6 +539,9 @@ namespace Aurelia.Server.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Error")
                         .HasMaxLength(512)
                         .HasColumnType("TEXT");
@@ -559,6 +562,8 @@ namespace Aurelia.Server.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("State", "CreatedAt");
 
                     b.ToTable("LibraryMutations");
                 });
@@ -760,6 +765,9 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<long>("AccessRevision")
                         .HasColumnType("INTEGER");
 
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Fingerprint")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -770,6 +778,8 @@ namespace Aurelia.Server.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("UserId", "ClientMutationId");
+
+                    b.HasIndex("CreatedAt");
 
                     b.ToTable("LibraryStateMutations");
                 });
@@ -1760,8 +1770,8 @@ namespace Aurelia.Server.Data.Migrations
                         .IsRequired()
                         .HasColumnType("BLOB");
 
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("INTEGER");
 
                     b.HasKey("UserId");
 
@@ -1770,8 +1780,10 @@ namespace Aurelia.Server.Data.Migrations
 
             modelBuilder.Entity("Aurelia.Server.Data.SceneNote", b =>
                 {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
                     b.Property<long?>("EndMilliseconds")
@@ -1792,10 +1804,7 @@ namespace Aurelia.Server.Data.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
+                    b.HasKey("UserId", "Id");
 
                     b.HasIndex("MediaItemId");
 
@@ -2192,6 +2201,8 @@ namespace Aurelia.Server.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("MediaItemId");
+
+                    b.HasIndex("Timestamp");
 
                     b.HasIndex("UserId", "Timestamp");
 

@@ -256,7 +256,8 @@ public sealed class WishService(
             throw new AccountException("invalid_wish_kind", "Choose movie or series.", StatusCodes.Status400BadRequest);
 
         var title = (request.Title ?? string.Empty).Trim();
-        if (title.Length == 0 || title.Length > 512 || TextInputValidation.HasForbiddenControlCharacters(title))
+        if (title.Length == 0 || title.Length > 512 || TextInputValidation.HasForbiddenControlCharacters(title)
+            || !TextInputValidation.HasVisibleCharacter(title))
             throw new AccountException("invalid_wish_title", "Enter a title between 1 and 512 visible characters.", StatusCodes.Status400BadRequest);
 
         if (request.Year is < 1888 or > 2100)

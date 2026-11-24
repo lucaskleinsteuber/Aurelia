@@ -96,7 +96,7 @@ public static partial class LiveConversionEndpoints
                 var position = index - SubtitleDownloadService.DownloadedTrackBase;
                 if (position >= downloaded.Count || downloads.SubtitlePath(source.MediaId, downloaded[position].Id) is not { } path)
                     return Problem("invalid_subtitle_track", "The subtitle track was not found.", StatusCodes.Status404NotFound);
-                return await ReadSidecarAsync(context, path, cancellationToken);
+                return await ReadSidecarAsync(context, path, cancellationToken, downloaded[position].Language);
             }
 
             // Sidecar subtitle stream indices are mapped to 1000+
@@ -111,7 +111,7 @@ public static partial class LiveConversionEndpoints
                 if (!sidecar.Supported)
                     return Problem("subtitle_not_supported", "Bitmap subtitles are not supported in this browser.", StatusCodes.Status422UnprocessableEntity);
 
-                return await ReadSidecarAsync(context, sidecar.FilePath, cancellationToken);
+                return await ReadSidecarAsync(context, sidecar.FilePath, cancellationToken, sidecar.Language);
             }
 
             // Embedded subtitle stream
@@ -148,11 +148,11 @@ public static partial class LiveConversionEndpoints
         }
     }
 
-    private static async Task<IResult> ReadSidecarAsync(HttpContext context, string path, CancellationToken cancellationToken)
+    private static async Task<IResult> ReadSidecarAsync(HttpContext context, string path, CancellationToken cancellationToken, string? language = null)
     {
         try
         {
-            var content = await SidecarSubtitles.ReadAsWebVttAsync(path, cancellationToken);
+            var content = await SidecarSubtitles.ReadAsWebVttAsync(path, cancellationToken, language);
             context.Response.Headers.CacheControl = "private, no-store";
             context.Response.Headers.XContentTypeOptions = "nosniff";
             return Results.Bytes(content, "text/vtt; charset=utf-8");

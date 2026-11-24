@@ -39,4 +39,19 @@ public static class PrivateFilePermissions
         if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
         return new FileStream(path, options);
     }
+
+    /// <summary>Writes UTF-8 text to a private owner-only (0600) file without leaving a world-readable window.</summary>
+    public static void WritePrivateText(string path, string content)
+    {
+        if (File.Exists(path) && new FileInfo(path).LinkTarget is not null)
+            throw new IOException("Private server files cannot be symbolic links.");
+        var options = new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, Share = FileShare.Read };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        using (var stream = new FileStream(path, options))
+        using (var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+        {
+            writer.Write(content);
+        }
+        ProtectFile(path);
+    }
 }

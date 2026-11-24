@@ -32,7 +32,7 @@ public static class TranscodingStatus
             chosen?.Chip?.Decodes == true,
             tools?.Hardware is not null && live.Health.IsResting,
             live.RunningVideo,
-            LiveConversionService.VideoConversionLimit(tools),
+            LiveConversionService.VideoConversionLimit(tools, live.ConfiguredVideoLimit),
             running,
             hint);
     }

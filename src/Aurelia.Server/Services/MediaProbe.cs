@@ -58,7 +58,8 @@ public static class MediaProbe
 {
     private static readonly HashSet<string> DisallowedContainers = new(StringComparer.OrdinalIgnoreCase)
     {
-        "concat", "subfile", "lavfi", "sdp", "tty"
+        "concat", "subfile", "lavfi", "sdp", "tty",
+        "hls", "applehttp", "dash", "imf", "webm_dash_manifest", "ffmetadata", "image2", "image2pipe"
     };
 
     public static bool IsDisallowedContainer(string? formatName)
@@ -66,6 +67,26 @@ public static class MediaProbe
         if (string.IsNullOrWhiteSpace(formatName)) return false;
         var formats = formatName.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         return formats.Any(f => DisallowedContainers.Contains(f));
+    }
+
+    /// <summary>
+    /// Validates a probed container name list for use with ffmpeg's <c>-format_whitelist</c>,
+    /// rejecting disallowed playlist/meta/image demuxers and unsafe characters.
+    /// </summary>
+    public static string? SafeFormatWhitelist(string? formatName)
+    {
+        if (string.IsNullOrWhiteSpace(formatName)) return null;
+        var formats = formatName.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (formats.Length == 0) return null;
+        foreach (var format in formats)
+        {
+            if (DisallowedContainers.Contains(format) || format[0] == '-') return null;
+            foreach (var ch in format)
+            {
+                if (!(char.IsAsciiLetterOrDigit(ch) || ch is '_' or '-' or '+')) return null;
+            }
+        }
+        return string.Join(',', formats);
     }
 
     public static IReadOnlyList<string> Arguments(string input) =>

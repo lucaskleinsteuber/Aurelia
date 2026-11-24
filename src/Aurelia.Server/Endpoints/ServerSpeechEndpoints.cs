@@ -1,6 +1,8 @@
 using Aurelia.Contracts;
+using Aurelia.Server.Data;
 using Aurelia.Server.Services;
 using Aurelia.Server.Services.Speech;
+using Microsoft.EntityFrameworkCore;
 
 namespace Aurelia.Server.Endpoints;
 
@@ -39,8 +41,12 @@ public static class ServerSpeechEndpoints
         });
 
         var media = app.MapGroup("/api/v1/media/{mediaId:guid}/speech").RequireAuthorization("Administrator");
-        media.MapGet(string.Empty, (Guid mediaId, SpeechJobService jobs) =>
-            Results.Ok(new MediaSpeechResponse(jobs.Available, jobs.ModelReady, jobs.Status(mediaId))));
+        media.MapGet(string.Empty, async (Guid mediaId, AureliaDbContext database, SpeechJobService jobs, CancellationToken token) =>
+        {
+            if (!await database.MediaItems.AsNoTracking().AnyAsync(item => item.Id == mediaId, token))
+                return Results.Json(new ApiProblem("media_not_found", "The media item was not found."), statusCode: StatusCodes.Status404NotFound);
+            return Results.Ok(new MediaSpeechResponse(jobs.Available, jobs.ModelReady, jobs.Status(mediaId)));
+        });
         media.MapPost(string.Empty, async (Guid mediaId, StartSpeechJobRequest request, SpeechJobService jobs, CancellationToken token) =>
         {
             try

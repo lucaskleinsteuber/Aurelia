@@ -536,9 +536,9 @@ public sealed partial class FileCheckService : BackgroundService
     public static IReadOnlyList<string> Arguments(string input, FileCheckDepth depth, IReadOnlyList<string> chip)
     {
         ArgumentNullException.ThrowIfNull(chip);
-        List<string> arguments = ["-hide_banner", "-nostdin", "-nostats", "-v", "error", "-progress", "pipe:2", "-stats_period", "0.5"];
+        List<string> arguments = ["-hide_banner", "-nostdin", "-nostats", "-v", "error", "-protocol_whitelist", "file", "-progress", "pipe:2", "-stats_period", "0.5"];
         arguments.AddRange(chip);
-        arguments.AddRange(["-i", input]);
+        arguments.AddRange(["-i", "file:" + input]);
         arguments.AddRange(depth == FileCheckDepth.Decode
             ? ["-map", "0:v:0?", "-map", "0:a?", "-sn", "-dn"]
             : ["-map", "0:v?", "-map", "0:a?", "-map", "0:s?", "-c", "copy"]);
@@ -606,13 +606,23 @@ public sealed partial class FileCheckService : BackgroundService
         }
     }
 
+    internal static string SanitizeLine(string line, string checkedPath)
+    {
+        var sanitized = string.IsNullOrEmpty(checkedPath)
+            ? line
+            : line
+                .Replace("file:" + checkedPath, "the file", StringComparison.Ordinal)
+                .Replace(checkedPath, "the file", StringComparison.Ordinal);
+        return sanitized.Length > 1024 ? sanitized[..1024] : sanitized;
+    }
+
     private static async Task ReadLinesAsync(StreamReader reader, FfmpegCheckOutput output, string checkedPath)
     {
         try
         {
             while (await reader.ReadLineAsync() is { } line)
             {
-                output.Add(line.Length > 1024 ? line[..1024] : line.Replace(checkedPath, "the file", StringComparison.Ordinal));
+                output.Add(SanitizeLine(line, checkedPath));
             }
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException) { }

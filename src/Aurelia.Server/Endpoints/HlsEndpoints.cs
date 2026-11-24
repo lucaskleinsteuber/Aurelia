@@ -108,7 +108,8 @@ public static partial class HlsEndpoints
                         throw;
                     }
                     session = await sessions.AddAsync(sessions.Create(key, opened.Source.Stream, opened.Source.Stream, opened.Source.SourcePath,
-                        Path.GetFileName(opened.Source.SourcePath), opened.Duration, quality, opened.Video, opened.Audio, toneMapping, opened.Tools));
+                        Path.GetFileName(opened.Source.SourcePath), opened.Duration, quality, opened.Video, opened.Audio, toneMapping, opened.Tools,
+                        opened.Probe.Container));
                 }
                 var data = await read(session, cancellationToken);
                 if (data is null)

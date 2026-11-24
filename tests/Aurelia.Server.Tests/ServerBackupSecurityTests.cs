@@ -449,7 +449,11 @@ public sealed class ServerBackupSecurityTests
             var original = new byte[] { 1, 2, 3, 4 };
             using (var input = new MemoryStream(original)) await full.UploadAsync(id, input, 4, CancellationToken.None);
             using (var second = new MemoryStream(new byte[] { 5, 6, 7, 8 }))
-                await Assert.ThrowsAsync<IOException>(() => full.UploadAsync(id, second, 4, CancellationToken.None));
+            {
+                var duplicate = await Assert.ThrowsAsync<AccountException>(() => full.UploadAsync(id, second, 4, CancellationToken.None));
+                Assert.Equal(409, duplicate.StatusCode);
+                Assert.Equal("backup_upload_exists", duplicate.Code);
+            }
             Assert.Equal(original, await File.ReadAllBytesAsync(full.TransferPath(id)));
             var failed = Guid.NewGuid();
             using (var incomplete = new MemoryStream(new byte[] { 1 }))

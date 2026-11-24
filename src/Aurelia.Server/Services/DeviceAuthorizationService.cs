@@ -31,7 +31,8 @@ public sealed class DeviceAuthorizationService(
         guard.Admit("start", address);
         RequireEnabled();
         var name = (deviceName ?? string.Empty).Trim().Normalize(NormalizationForm.FormKC);
-        if (name.Length is < 1 or > 128 || TextInputValidation.HasForbiddenControlCharacters(name))
+        if (name.Length is < 1 or > 128 || TextInputValidation.HasForbiddenControlCharacters(name)
+            || !TextInputValidation.HasVisibleCharacter(name))
             throw new AccountException("invalid_device_name", "The device name must contain 1 to 128 visible characters.", 400);
         using var lease = await guard.EnterAsync(token);
         var now = clock.GetUtcNow();

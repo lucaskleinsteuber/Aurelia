@@ -88,7 +88,7 @@ public sealed class LibraryMutationService(AureliaDbContext database, CatalogMut
             .Select(asset => new { asset.RelativeFilePath, asset.OriginalFilePath }).ToArrayAsync(token);
         var files = assets.SelectMany(asset => new[] { asset.RelativeFilePath, asset.OriginalFilePath }).OfType<string>()
             .Concat(await images.MediaDraftFilesAsync(ids, token)).Distinct().ToArray();
-        var receipt = new LibraryMutation { Id = Guid.NewGuid(), UserId = userId, RemovedItems = ids.Length, FilesJson = JsonSerializer.Serialize(files) };
+        var receipt = new LibraryMutation { Id = Guid.NewGuid(), UserId = userId, RemovedItems = ids.Length, FilesJson = JsonSerializer.Serialize(files), CreatedAt = DateTimeOffset.UtcNow };
         await using var transaction = await database.Database.BeginTransactionAsync(token);
         if (beforeDeleteInTransaction is not null)
         {
@@ -177,7 +177,7 @@ public sealed class LibraryMutationService(AureliaDbContext database, CatalogMut
 
     internal Guid TrackArtworkCleanup(Guid userId, IReadOnlyList<string> files)
     {
-        var receipt = new LibraryMutation { Id = Guid.NewGuid(), UserId = userId, FilesJson = JsonSerializer.Serialize(files) };
+        var receipt = new LibraryMutation { Id = Guid.NewGuid(), UserId = userId, FilesJson = JsonSerializer.Serialize(files), CreatedAt = DateTimeOffset.UtcNow };
         database.LibraryMutations.Add(receipt);
         return receipt.Id;
     }

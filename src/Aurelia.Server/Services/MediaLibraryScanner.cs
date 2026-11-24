@@ -1016,7 +1016,7 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
                 continue;
             }
 
-            var identity = FilenameMetadataParser.Episode(file.Path, season);
+            var identity = FilenameMetadataParser.Episode(file.Path, season, seriesItem.DetectedTitle);
             if (!identity.Season.HasValue || !identity.Episode.HasValue)
             {
                 if (!allowImplicitEpisodes)

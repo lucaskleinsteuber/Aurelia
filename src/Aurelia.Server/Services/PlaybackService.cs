@@ -29,8 +29,7 @@ public sealed class PlaybackService(
         Guid deviceSessionId,
         Guid mediaId,
         CancellationToken cancellationToken,
-        Guid? profileSessionId = null,
-        bool download = false)
+        Guid? profileSessionId = null)
     {
         var now = DateTimeOffset.UtcNow;
         await PruneExpiredAsync(now, cancellationToken);

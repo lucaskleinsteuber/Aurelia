@@ -167,7 +167,8 @@ public sealed class ProfileService(AureliaDbContext database, IPasswordHasher<Se
     {
         var name = (request.Username ?? "").Trim().Normalize(NormalizationForm.FormKC);
         // Only the owner signs in with a name (set up elsewhere); a profile name just has to be visible.
-        if (name.Length is < 1 or > 64 || TextInputValidation.HasForbiddenControlCharacters(name))
+        if (name.Length is < 1 or > 64 || TextInputValidation.HasForbiddenControlCharacters(name)
+            || !TextInputValidation.HasVisibleCharacter(name))
             throw new AccountException("invalid_username", "The profile name must contain 1 to 64 visible characters.", 400);
         if (!Enum.IsDefined(request.Role)) throw new AccountException("invalid_role", "Choose a valid profile role.", 400);
         var protection = request.PinProtectionEnabled ?? (request.Role != UserRole.User || request.Pin is not null);
@@ -477,7 +478,8 @@ public sealed class ProfileService(AureliaDbContext database, IPasswordHasher<Se
     private static string ValidName(string name)
     {
         var clean = (name ?? "").Trim().Normalize(NormalizationForm.FormKC);
-        if (clean.Length is < 1 or > 40 || TextInputValidation.HasForbiddenControlCharacters(clean))
+        if (clean.Length is < 1 or > 40 || TextInputValidation.HasForbiddenControlCharacters(clean)
+            || !TextInputValidation.HasVisibleCharacter(clean))
             throw new AccountException("invalid_profile_name", "The name must contain 1 to 40 visible characters.", 400);
         return clean;
     }

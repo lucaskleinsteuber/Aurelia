@@ -72,12 +72,13 @@ public sealed partial class WatchHistoryService(AureliaDbContext database, TimeP
         // One removal at a time: two requests for the same entries would both read them, and the later one fail.
         using var lease = mutations is null ? null : await mutations.EnterAsync(cancellationToken);
         var item = await database.WatchEvents
-            .SingleOrDefaultAsync(e => e.Id == eventId && e.UserId == userId, cancellationToken);
-        if (item is not null)
-        {
-            database.WatchEvents.Remove(item);
-            await database.SaveChangesAsync(cancellationToken);
-        }
+            .SingleOrDefaultAsync(e => e.Id == eventId && e.UserId == userId, cancellationToken)
+            ?? throw new AccountException(
+                "history_item_not_found",
+                "The watch history item was not found.",
+                StatusCodes.Status404NotFound);
+        database.WatchEvents.Remove(item);
+        await database.SaveChangesAsync(cancellationToken);
     }
 
     public async Task ClearHistoryAsync(

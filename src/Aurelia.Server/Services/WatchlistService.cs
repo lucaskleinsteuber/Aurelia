@@ -185,6 +185,28 @@ public sealed class WatchlistService(
         }
     }
 
+    /// <summary>Removes the deleted profile's persisted watchlist file, if present.</summary>
+    public async Task DeleteUserAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var gate = GateForUser(userId);
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var path = WatchlistFilePath(userId);
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     private async Task<List<StoredWatchlistEntry>> ReadEntriesAsync(Guid userId, CancellationToken cancellationToken)
     {
         var gate = GateForUser(userId);

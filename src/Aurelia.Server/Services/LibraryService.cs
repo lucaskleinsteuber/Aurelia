@@ -453,45 +453,6 @@ public sealed class LibraryService(
             cancellationToken);
     }
 
-    public async Task RemoveAsync(Guid libraryId, CancellationToken cancellationToken)
-    {
-        var library = await RequireLibraryAsync(libraryId, cancellationToken);
-        var hasActiveScan = await database.LibraryScans.AnyAsync(
-            scan => scan.LibraryRootId == libraryId
-                && (scan.State == LibraryScanState.Queued
-                    || scan.State == LibraryScanState.Running
-                    || scan.State == LibraryScanState.WaitingForStorage),
-            cancellationToken);
-        if (hasActiveScan)
-        {
-            throw new LibraryException(
-                "library_scan_active",
-                "The library cannot be removed while a scan is active.",
-                StatusCodes.Status409Conflict);
-        }
-
-        // Capture title-grant recipients before ExecuteDelete cascades UserTitleGrants.
-        var titleGrantUsers = await database.UserTitleGrants.IgnoreQueryFilters()
-            .Where(grant => grant.MediaItem.LibraryRootId == libraryId)
-            .Select(grant => grant.UserId)
-            .Distinct()
-            .ToListAsync(cancellationToken);
-
-        await database.MediaItems
-            .Where(item => item.LibraryRootId == libraryId && item.ParentId != null)
-            .ExecuteDeleteAsync(cancellationToken);
-        await database.MediaItems
-            .Where(item => item.LibraryRootId == libraryId)
-            .ExecuteDeleteAsync(cancellationToken);
-        foreach (var userId in titleGrantUsers)
-        {
-            database.SyncChanges.Add(new SyncChange { Area = SyncChangeArea.Libraries, UserId = userId, CreatedAt = DateTimeOffset.UtcNow });
-            database.SyncChanges.Add(new SyncChange { Area = SyncChangeArea.Catalog, UserId = userId, CreatedAt = DateTimeOffset.UtcNow });
-        }
-        database.LibraryRoots.Remove(library);
-        await database.SaveChangesAsync(cancellationToken);
-    }
-
     public async Task<LibraryScanSummary> StartScanAsync(
         Guid libraryId,
         CancellationToken cancellationToken)

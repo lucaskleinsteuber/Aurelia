@@ -12,8 +12,12 @@ public static class ServerManagementEndpoints
     {
         var server = app.MapGroup("/api/v1/server").RequireAuthorization("Owner");
         server.MapGet("/settings", (ServerConfigurationStore configuration) => configuration.Read());
-        server.MapGet("/capabilities", (NativeHostOperations operations) =>
-            new ServerManagementCapabilities(operations.Available, true, false, LinuxPackage.Platform, LinuxPackage.IsInstalled));
+        server.MapGet("/capabilities", async (NativeHostOperations operations, LiveConversionService live) =>
+        {
+            var tools = await live.ToolsAsync();
+            var transcoding = tools is not null && live.ChooseEncoder(tools) is not null;
+            return new ServerManagementCapabilities(operations.Available, true, transcoding, LinuxPackage.Platform, LinuxPackage.IsInstalled);
+        });
         server.MapGet("/operations/current", (NativeHostOperations operations, CancellationToken token) => operations.StatusAsync(token));
         server.MapGet("/hosting", (NativeHostOperations operations, CancellationToken token) => operations.HostingStatusAsync(token));
         // The Mac host restarts its server itself; the Linux package's systemd service restarts on request.

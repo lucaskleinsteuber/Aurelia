@@ -37,9 +37,10 @@ public interface ISpeechRecognizer
 /// priority, reading one stretch of sound as WAV from its standard input and writing the words
 /// with their times to its standard output. Nothing is written to disk.
 /// </summary>
-public sealed partial class WhisperRecognizer(ILogger<WhisperRecognizer> logger) : ISpeechRecognizer
+public sealed partial class WhisperRecognizer(ILogger<WhisperRecognizer> logger, ServerRuntimeOptions? runtime = null) : ISpeechRecognizer
 {
     private readonly Lazy<string?> program = new(() => Locate(null));
+    private readonly string? quietDirectory = runtime is null ? null : Path.Combine(runtime.DataDirectory, "Converter");
 
     public bool Available => Program is not null;
 
@@ -87,22 +88,7 @@ public sealed partial class WhisperRecognizer(ILogger<WhisperRecognizer> logger)
         CancellationToken cancellationToken)
     {
         if (Program is not { } path) throw new InvalidOperationException("whisper.cpp is not installed.");
-        var start = new ProcessStartInfo(path)
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8,
-        };
-        foreach (var argument in Arguments(modelPath, language, Threads())) start.ArgumentList.Add(argument);
-        if (!OperatingSystem.IsWindows())
-        {
-            start.Environment.Clear();
-            start.Environment["PATH"] = "/usr/bin:/bin";
-        }
+        var start = BuildStartInfo(path, modelPath, language, Threads(), quietDirectory);
         using var process = Process.Start(start) ?? throw new InvalidOperationException("whisper.cpp did not start.");
         BackgroundPriority.ApplyToProcess(process, idle: true);
         using var stop = cancellationToken.Register(() =>
@@ -187,6 +173,54 @@ public sealed partial class WhisperRecognizer(ILogger<WhisperRecognizer> logger)
                 ProcessPause.Resume(process);
                 onPausedChanged?.Invoke(false);
             }
+        }
+    }
+
+    /// <summary>Builds the isolated process configuration for whisper-cli, matching ffmpeg's read-only converter directory.</summary>
+    internal static ProcessStartInfo BuildStartInfo(string program, string modelPath, string language, int threads, string? quietDirectory)
+    {
+        var start = new ProcessStartInfo(program)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+        };
+        foreach (var argument in Arguments(modelPath, language, threads)) start.ArgumentList.Add(argument);
+        if (!string.IsNullOrEmpty(quietDirectory))
+        {
+            EnsureQuietDirectory(quietDirectory);
+            if (Directory.Exists(quietDirectory)) start.WorkingDirectory = quietDirectory;
+        }
+        if (!OperatingSystem.IsWindows())
+        {
+            start.Environment.Clear();
+            start.Environment["PATH"] = "/usr/bin:/bin";
+            if (!string.IsNullOrEmpty(quietDirectory))
+            {
+                start.Environment["HOME"] = quietDirectory;
+                start.Environment["TMPDIR"] = quietDirectory;
+            }
+        }
+        return start;
+    }
+
+    private static void EnsureQuietDirectory(string directory)
+    {
+        try
+        {
+            if (Directory.Exists(directory) && new DirectoryInfo(directory).LinkTarget is not null)
+                return;
+            if (!Directory.Exists(directory))
+                Directory.CreateDirectory(directory);
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
         }
     }
 

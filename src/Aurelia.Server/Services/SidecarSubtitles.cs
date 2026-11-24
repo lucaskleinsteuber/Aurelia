@@ -318,7 +318,7 @@ public static partial class SidecarSubtitles
         return false;
     }
 
-    public static async Task<byte[]> ReadAsWebVttAsync(string filePath, CancellationToken cancellationToken)
+    public static async Task<byte[]> ReadAsWebVttAsync(string filePath, CancellationToken cancellationToken, string? language = null)
     {
         if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
             throw new FileNotFoundException("Subtitle file not found.", filePath);
@@ -331,8 +331,10 @@ public static partial class SidecarSubtitles
 
         var ticks = fileInfo.LastWriteTimeUtc.Ticks;
         var length = fileInfo.Length;
+        var effectiveLanguage = language ?? InferTrailingLanguage(filePath);
+        var cacheKey = effectiveLanguage is null ? filePath : $"{filePath}\0{effectiveLanguage}";
 
-        if (MemoryCache.TryGet(filePath, ticks, length, out var cached))
+        if (MemoryCache.TryGet(cacheKey, ticks, length, out var cached))
         {
             return cached;
         }
@@ -352,7 +354,7 @@ public static partial class SidecarSubtitles
             }
         }
 
-        var text = DecodeText(rawBytes);
+        var text = DecodeText(rawBytes, effectiveLanguage);
         var ext = Path.GetExtension(filePath).ToLowerInvariant();
 
         string vtt;
@@ -370,11 +372,11 @@ public static partial class SidecarSubtitles
         }
 
         var resultBytes = Encoding.UTF8.GetBytes(vtt);
-        MemoryCache.Set(filePath, ticks, length, resultBytes);
+        MemoryCache.Set(cacheKey, ticks, length, resultBytes);
         return resultBytes;
     }
 
-    public static string DecodeText(byte[] bytes)
+    public static string DecodeText(byte[] bytes, string? language = null)
     {
         if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
             return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
@@ -393,18 +395,67 @@ public static partial class SidecarSubtitles
         }
         catch (DecoderFallbackException)
         {
-            // Fallback to Windows-1252 (or ISO-8859-1)
+            // Fallback to a language-matched legacy Windows code page (e.g. CP1251 Cyrillic,
+            // CP1250 Central European), an unlabeled Cyrillic heuristic, or Windows-1252.
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            var codePage = CodePageForLanguage(language)
+                ?? (LooksLikeCyrillicWindows1251(bytes) ? 1251 : 1252);
             try
             {
-                var win1252 = Encoding.GetEncoding(1252);
-                return win1252.GetString(bytes);
+                return Encoding.GetEncoding(codePage).GetString(bytes);
             }
             catch
             {
                 return Encoding.Latin1.GetString(bytes);
             }
         }
+    }
+
+    private static int? CodePageForLanguage(string? language)
+    {
+        if (string.IsNullOrWhiteSpace(language)) return null;
+        var primary = language.Trim().Split(['-', '_'], StringSplitOptions.RemoveEmptyEntries)[0].ToLowerInvariant();
+        return primary switch
+        {
+            "ru" or "uk" or "bg" or "be" or "mk" or "sr" => 1251,
+            "pl" or "cs" or "sk" or "hu" or "ro" or "hr" or "sl" or "bs" or "sq" => 1250,
+            "el" => 1253,
+            "tr" or "az" => 1254,
+            "he" or "iw" => 1255,
+            "ar" or "fa" or "ur" => 1256,
+            "lt" or "lv" or "et" => 1257,
+            "vi" => 1258,
+            "th" => 874,
+            "ja" => 932,
+            "zh" => 936,
+            "ko" => 949,
+            _ => null,
+        };
+    }
+
+    private static bool LooksLikeCyrillicWindows1251(byte[] bytes)
+    {
+        var cyrillicLike = 0;
+        var asciiLetters = 0;
+        foreach (var b in bytes)
+        {
+            if (b is >= 0xC0 or 0xA8 or 0xB8) cyrillicLike++;
+            else if (b is (>= (byte)'A' and <= (byte)'Z') or (>= (byte)'a' and <= (byte)'z')) asciiLetters++;
+        }
+        return cyrillicLike >= 16 && cyrillicLike > asciiLetters * 3;
+    }
+
+    private static string? InferTrailingLanguage(string filePath)
+    {
+        var stem = Path.GetFileNameWithoutExtension(filePath);
+        var parts = stem.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = parts.Length - 1; i >= 1 && i >= parts.Length - 3; i--)
+        {
+            var token = parts[i].ToLowerInvariant();
+            if (token is "forced" or "force" or "sdh" or "cc" or "default" or "def") continue;
+            return TryParseLanguage(token, out var lang) ? lang : null;
+        }
+        return null;
     }
 
     public static string NormalizeWebVtt(string input)

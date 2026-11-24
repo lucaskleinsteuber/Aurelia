@@ -51,7 +51,7 @@ public sealed class ServerSleepSignal(ServerRuntimeOptions runtime, ActiveStream
             // One request leads to one sleep: after waking, the server stays up until the next timer.
             requestedAt = null;
             PrivateFilePermissions.CreatePrivateDirectory(runtime.DataDirectory);
-            File.WriteAllText(ReadyPath, now.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture));
+            PrivateFilePermissions.WritePrivateText(ReadyPath, now.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture));
             return true;
         }
     }

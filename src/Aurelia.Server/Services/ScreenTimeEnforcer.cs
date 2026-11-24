@@ -18,6 +18,7 @@ public sealed partial class ScreenTimeEnforcer(IServiceScopeFactory scopes, Time
     public static readonly TimeSpan IdleAfter = TimeSpan.FromMinutes(2);
 
     private DateTimeOffset lastPrune;
+    private string? lastFailure;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -26,12 +27,28 @@ public sealed partial class ScreenTimeEnforcer(IServiceScopeFactory scopes, Time
         {
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
-                try { await EnforceAsync(stoppingToken); }
-                catch (Exception exception) when (exception is not OperationCanceledException)
-                { CheckFailed(logger, exception); }
+                await RunTickAsync(stoppingToken);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+    }
+
+    internal async Task RunTickAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            await EnforceAsync(stoppingToken);
+            lastFailure = null;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            var key = exception.GetType().FullName;
+            if (!string.Equals(lastFailure, key, StringComparison.Ordinal))
+            {
+                lastFailure = key;
+                CheckFailed(logger, exception);
+            }
+        }
     }
 
     public async Task EnforceAsync(CancellationToken token)
@@ -46,18 +63,21 @@ public sealed partial class ScreenTimeEnforcer(IServiceScopeFactory scopes, Time
         foreach (var userId in users)
         {
             if (await screenTime.StatusAsync(userId, token) is not { State: ScreenTimeState.Closed } status) continue;
-            var extraEnd = await database.PlaybackTickets.IgnoreQueryFilters().AsNoTracking()
-                .Where(ticket => ticket.UserId == userId && ticket.RevokedAt == null && ticket.ScreenTimeExtraEndsAt != null)
-                .Select(ticket => ticket.ScreenTimeExtraEndsAt).ToListAsync(token);
-            var extra = extraEnd.Where(end => end > now).Max();
+            var extra = await database.PlaybackTickets.IgnoreQueryFilters().AsNoTracking()
+                .Where(ticket => ticket.UserId == userId && ticket.RevokedAt == null && ticket.ScreenTimeExtraEndsAt != null && ticket.ScreenTimeExtraEndsAt > now)
+                .OrderByDescending(ticket => ticket.ScreenTimeExtraEndsAt)
+                .Select(ticket => ticket.ScreenTimeExtraEndsAt)
+                .FirstOrDefaultAsync(token);
             var mustEnd = extra ?? status.TitleEndsBy ?? now;
             var playing = streams.HasPlayback(userId);
             if (now >= mustEnd && playing) streams.RevokeUser(userId);
             if (status.LockScope != ScreenTimeLockScope.WholeProfile || status.OneMoreTitleAvailable || extra is not null) continue;
             var lastReport = await database.PlaybackProgress.IgnoreQueryFilters().AsNoTracking()
-                .Where(progress => progress.UserId == userId).Select(progress => (DateTimeOffset?)progress.UpdatedAt)
-                .ToListAsync(token);
-            var watching = playing || lastReport.Max() is { } last && now - last < IdleAfter;
+                .Where(progress => progress.UserId == userId)
+                .OrderByDescending(progress => progress.UpdatedAt)
+                .Select(progress => (DateTimeOffset?)progress.UpdatedAt)
+                .FirstOrDefaultAsync(token);
+            var watching = playing || lastReport is { } last && now - last < IdleAfter;
             if (now >= mustEnd || !watching) sessions.RevokeUser(userId);
         }
         if (now - lastPrune > TimeSpan.FromHours(6))

@@ -210,7 +210,7 @@ public static partial class LiveConversionEndpoints
             return Problem("conversion_busy", "The server is converting as many titles as it can. Try again shortly.", StatusCodes.Status429TooManyRequests);
         }
 
-        var options = new LiveStreamOptions(startSeconds, picture, chosen?.Kind, sound, copyAudio.Value, toneMapping, chosen?.Chip);
+        var options = new LiveStreamOptions(startSeconds, picture, chosen?.Kind, sound, copyAudio.Value, toneMapping, chosen?.Chip, Container: probe.Container);
         var process = live.Start(tools.Ffmpeg, LiveConversionPlanner.Arguments(LiveConversionService.InputPath(file, source.SourcePath), options));
         var errors = LiveConversionService.ReadTailAsync(process.StandardError);
         var output = process.StandardOutput.BaseStream;

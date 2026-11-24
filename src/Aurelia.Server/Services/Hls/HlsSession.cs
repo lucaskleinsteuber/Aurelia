@@ -113,7 +113,8 @@ public sealed partial class HlsSession : IAsyncDisposable
         LiveConversionService live,
         IHlsConverter converter,
         ILogger logger,
-        TimeProvider clock)
+        TimeProvider clock,
+        string? container = null)
     {
         this.manager = manager;
         Key = key;
@@ -126,6 +127,7 @@ public sealed partial class HlsSession : IAsyncDisposable
         Video = video;
         Audio = audio;
         ToneMapping = toneMapping;
+        Container = container;
         this.tools = tools;
         this.live = live;
         this.converter = converter;
@@ -143,6 +145,7 @@ public sealed partial class HlsSession : IAsyncDisposable
     public ProbedVideo Video { get; }
     public ProbedAudio? Audio { get; }
     public HdrToneMapping ToneMapping { get; }
+    public string? Container { get; }
     public string Ffmpeg => tools.Ffmpeg;
     public int SegmentCount => HlsPlaylists.SegmentCount(DurationSeconds);
     public SegmentStore Store => store;
@@ -311,7 +314,7 @@ public sealed partial class HlsSession : IAsyncDisposable
                         throw new HlsSessionEndedException();
                     }
                     var options = new LiveStreamOptions(index * HlsPlaylists.SegmentSeconds, Video, encoder.Value.Kind, Audio, CopyAudio: false,
-                        ToneMapping, encoder.Value.Chip, Step, HlsPlaylists.SegmentSeconds, live.Pace.Preset(encoder.Value.Kind, Step.Id));
+                        ToneMapping, encoder.Value.Chip, Step, HlsPlaylists.SegmentSeconds, live.Pace.Preset(encoder.Value.Kind, Step.Id), Container);
                     store.BeginProducing(index);
                     lock (store)
                     {

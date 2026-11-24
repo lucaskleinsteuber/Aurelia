@@ -45,8 +45,7 @@ public sealed partial class PowerNowService(
         }
         PrivateFilePermissions.CreatePrivateDirectory(runtime.DataDirectory);
         var path = Path.Combine(runtime.DataDirectory, FileName);
-        File.WriteAllText(path, action + "\n");
-        PrivateFilePermissions.ProtectFile(path);
+        PrivateFilePermissions.WritePrivateText(path, action + "\n");
         Stopping(logger, action);
         return new PowerNowResponse(action, action switch
         {

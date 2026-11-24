@@ -87,7 +87,7 @@ public sealed partial class ServerWorkSignal(
                 return;
             }
             PrivateFilePermissions.CreatePrivateDirectory(runtime.DataDirectory);
-            File.WriteAllText(WorkPath, state + "\n");
+            PrivateFilePermissions.WritePrivateText(WorkPath, state + "\n");
             Volatile.Write(ref written, state);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
