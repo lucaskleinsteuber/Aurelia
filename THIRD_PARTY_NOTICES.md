@@ -26,6 +26,18 @@ Lesser General Public License version 2.1 or later; the license text is beside t
 `COPYING.LGPLv2.1`. The Linux server and the Docker image use the distribution's own ffmpeg, which
 Aurelia does not distribute. Source and license information: <https://ffmpeg.org/legal.html>
 
+## Speech recognition
+
+The Mac app's server includes `whisper-cli` from **whisper.cpp 1.8.3** (with `ggml` and
+`stb_vorbis` from its examples) for speech-to-subtitle generation and subtitle syncing, in
+`Contents/Resources/Server/whisper`. It is built from the pinned official source
+(<https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.8.3.tar.gz>, SHA-256
+`870ba21409cdf66697dc4db15ebdb13bc67037d76c7cc63756c81471d8f1731a`) by
+`scripts/build-whisper-macos.sh`, is licensed under the MIT License, and carries its complete
+license text beside the binary at `Contents/Resources/Server/whisper/LICENSE`. The Linux server
+and the Docker image use the distribution's own `whisper.cpp` package, which Aurelia does not
+distribute. Source and license information: <https://github.com/ggml-org/whisper.cpp>
+
 ## Server and Linux app
 
 The server includes .NET and ASP.NET Core, Entity Framework Core, Microsoft.Data.Sqlite,
@@ -37,10 +49,11 @@ Mac app under `Contents/Resources/ThirdPartyNotices`, in the Linux packages unde
 Skia's third-party notices.
 
 The checked-in Haukcode.Mdns license comes from upstream commit
-`db212fc8e272e29212fe2147810757ca5b437ca4` (the 1.0.18 package revision).
-SQLitePCLRaw's license and notice come from the 2.1.12 tag, commit
-`ca835d21508bff43121c65081035840ac5006c4c`. Its upstream notice covers optional
-providers too; inclusion does not imply Aurelia uses SQLCipher or those providers.
+`db212fc8e272e29212fe2147810757ca5b437ca4` (the 1.0.18 package revision, verified unchanged for
+the bundled 1.0.22 package). SQLitePCLRaw's license and notice come from the 2.1.12 tag, commit
+`ca835d21508bff43121c65081035840ac5006c4c` (verified unchanged for the bundled 2.1.13 packages).
+Its upstream notice covers optional providers too; inclusion does not imply Aurelia uses SQLCipher
+or those providers.
 
 ## Services
 

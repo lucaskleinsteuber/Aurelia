@@ -1,7 +1,8 @@
 #!/bin/bash
 # Called by publish-release.sh --linux-app. Publishes the verified Linux desktop packages for x64
 # (deb, rpm, Arch, Flatpak) and arm64 (deb, rpm, Arch)
-# with an independent linux-app-<version>-<build> tag, never as the Mac "latest" release.
+# with an independent linux-app-<version>-<build> tag, never as GitHub's "latest" release
+# (which is the newest stable server).
 # Uploads stay in a draft until GitHub reports every asset uploaded and the downloaded bytes
 # match the local SHA-256 values. No source, version, or Git history is changed by this script.
 set -euo pipefail
@@ -27,7 +28,7 @@ cd "$repository_root"
 [ -z "$(git status --porcelain --untracked-files=normal)" ] \
   || { echo "Commit all source changes before publishing." >&2; exit 1; }
 head=$(git rev-parse HEAD)
-git fetch --quiet origin main
+git fetch --quiet --tags origin main
 git merge-base --is-ancestor "$head" origin/main \
   || { echo "Push this source commit to origin/main before publishing." >&2; exit 1; }
 [ "$(cat "$output/SOURCE_COMMIT")" = "$head" ] && [ "$(cat "$output/SOURCE_CLEAN")" = true ] \
@@ -37,9 +38,27 @@ repository=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 tag_hash=$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}" | tail -1 | cut -f1)
 [ -z "$tag_hash" ] || [ "$tag_hash" = "$head" ] \
   || { echo "The published tag $tag points at another commit." >&2; exit 1; }
+# Never reuse or decrease the Linux app's build number compared to published tags (audit REL-REPO-009).
+max_published_build=$(git ls-remote --tags origin \
+  | awk -v current="$tag" '
+      $2 ~ /^refs\/tags\// && $2 !~ /\^\{\}$/ {
+        t = substr($2, 11)
+        if (t == current) next
+        if (t ~ /^linux-app-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$/) {
+          b = t; sub(/^.*-/, "", b)
+          if (b + 0 > max) max = b + 0
+        }
+      }
+      END { print max + 0 }')
+if [ "$build" -le "$max_published_build" ]; then
+  echo "Linux Desktop build $build must be higher than the newest published build ($max_published_build)." >&2
+  exit 1
+fi
 
 checksums="$output/SHA256SUMS"
-(cd "$output" && shasum -a 256 $(for file in "${files[@]}"; do printf './%s ' "${file##*/}"; done) > "${checksums##*/}")
+basenames=()
+for file in "${files[@]}"; do basenames+=("./${file##*/}"); done
+(cd "$output" && shasum -a 256 "${basenames[@]}" > "${checksums##*/}")
 files+=("$checksums")
 # The app installs nothing whose SHA256SUMS lacks the owner's minisign signature
 # (docs/LINUX_UPDATE_SIGNING.md). The secret key stays on this Mac and never goes to GitHub.

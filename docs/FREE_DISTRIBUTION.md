@@ -65,6 +65,13 @@ AURELIA_SIGNING_IDENTITY=<matching-Apple-Development-SHA-1> \
 zsh scripts/build-macos-release.sh
 ```
 
+Setting `AURELIA_TEST_EDITION=1` builds **Aurelia Test** (a side-by-side test edition with its own
+bundle identifier, App Group, Keychain entry and launch agents, no self-updates, and Reset App Data
+in Settings), which automatically uses `profileless-development`. When `AURELIA_SIGNING_IDENTITY`
+is unset in `profileless-development` mode, `build-macos-release.sh` selects the first valid
+*Apple Development* identity in the Keychain matching `AURELIA_TEAM_ID`; set
+`AURELIA_SIGNING_IDENTITY` explicitly if you have multiple identities or want to pin one.
+
 Find available identities with `security find-identity -v -p codesigning`. The
 identity must belong to the existing signing team; no profile is selected or
 embedded in this mode. The script checks the actual signing team and certificate
@@ -154,11 +161,14 @@ dismisses the offer; *Skip This Version* remembers that version on this Mac and 
 its automatic offers, including another build of the same version. Future versions are
 still offered. A manual check also offers skipped versions, so they can still be installed.
 
-The app downloads the release's disk image and `SHA256SUMS` and checks the image against its
-checksum. Disk images stream directly to a private download folder while SHA-256 is calculated;
+The app downloads the release's `SHA256SUMS` and `SHA256SUMS.minisig`, verifies the minisign
+legacy signature against the owner's embedded public key with CryptoKit (see
+[LINUX_UPDATE_SIGNING.md](LINUX_UPDATE_SIGNING.md)), and only then downloads the disk image and
+checks it against its checksum in `SHA256SUMS`. Without a valid signature nothing is installed.
+Disk images stream directly to a private download folder while SHA-256 is calculated;
 they are not buffered in memory. Files are downloaded through their API asset address on
 `api.github.com` or the public GitHub download URL. Release descriptions and checksum lists
-are limited to 2 MiB and 1 MiB, and images to 2 GiB. Downloads have an overall time limit, reject
+are limited to 3 MiB and 1 MiB, and images to 2 GiB. Downloads have an overall time limit, reject
 HTML and oversized or incomplete responses, and remove partial files after failures. Consumed images
 and their empty managed UUID folders are also removed after installation failures, including the
 diagnostic no-relaunch path. Cleanup preserves unexpected files and rejects linked download folders.

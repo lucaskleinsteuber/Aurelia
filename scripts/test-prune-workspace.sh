@@ -29,7 +29,12 @@ old_tree() { find "$1" -exec touch -t 200001010000 {} +; }
 exists() { [ -e "$1" ] || { echo "Missing protected fixture: $1" >&2; exit 1; }; }
 absent() { [ ! -e "$1" ] || { echo "Stale fixture retained: $1" >&2; exit 1; }; }
 
-for build in 1 2 3; do mkdir -p "$workspace/Build/Build $build"; done
+for build in 1 2 3; do
+  mkdir -p "$workspace/Build/Build $build" "$workspace/Build/Build $build x64" \
+    "$workspace/Build/Build $build Test" "$workspace/Build/Build $build Test x64"
+done
+mkdir -p "$workspace/Releases/Aurelia-2.0.0-1-macOS-arm64" "$workspace/Releases/Aurelia-2.0.0-2-macOS-arm64"
+old_tree "$workspace/Releases/Aurelia-2.0.0-1-macOS-arm64"
 for platform in tvOS Linux LinuxApp; do
   mkdir -p "$workspace/Build/$platform/old" "$workspace/Build/$platform/new"
   old_tree "$workspace/Build/$platform/old"
@@ -72,6 +77,13 @@ PRUNE_TEST_PROCESS=installed prune
 absent "$workspace/Build/Build 1"
 absent "$workspace/Build/Build 2"
 exists "$workspace/Build/Build 3"
+for suffix in " x64" " Test" " Test x64"; do
+  absent "$workspace/Build/Build 1$suffix"
+  absent "$workspace/Build/Build 2$suffix"
+  exists "$workspace/Build/Build 3$suffix"
+done
+absent "$workspace/Releases/Aurelia-2.0.0-1-macOS-arm64"
+exists "$workspace/Releases/Aurelia-2.0.0-2-macOS-arm64"
 for platform in tvOS Linux LinuxApp; do
   absent "$workspace/Build/$platform/old"
   exists "$workspace/Build/$platform/new"

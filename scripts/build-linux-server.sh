@@ -24,6 +24,12 @@ repository=${repository%.git}
 [[ "$origin" == *github.com* && "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || repository=""
 rm -rf "$output"
 mkdir -p "$output"
+source_commit=$(git -C "$repository_root" rev-parse HEAD)
+if [ -z "$(git -C "$repository_root" status --porcelain --untracked-files=normal)" ]; then
+  source_clean=true
+else
+  source_clean=false
+fi
 
 for arch in x64 arm64; do
   runtime="linux-$arch"
@@ -53,5 +59,11 @@ done
 
 rm -rf "$output/stage"
 (cd "$output" && shasum -a 256 ./*.tar.gz > SHA256SUMS)
+if [ "$(git -C "$repository_root" rev-parse HEAD)" != "$source_commit" ] \
+  || [ -n "$(git -C "$repository_root" status --porcelain --untracked-files=normal)" ]; then
+  source_clean=false
+fi
+printf '%s\n' "$source_commit" > "$output/SOURCE_COMMIT"
+printf '%s\n' "$source_clean" > "$output/SOURCE_CLEAN"
 echo "Linux server $version ($build) downloads are in $output"
 [ -n "$repository" ] || echo "warning: origin is not a GitHub repository, so these packages cannot update themselves" >&2
