@@ -4,6 +4,7 @@ import CryptoKit
 enum APIClientError: LocalizedError, Equatable {
   case invalidAddress
   case insecureAddress
+  case lanAccessDisabled
   case invalidResponse
   case supersededSnapshot
   case serverIdentityMismatch
@@ -52,6 +53,8 @@ enum APIClientError: LocalizedError, Equatable {
       "Enter a valid server address."
     case .insecureAddress:
       "Aurelia requires an HTTPS server address."
+    case .lanAccessDisabled:
+      "Local network access is turned off on this server. Enable LAN access in the server's settings to connect from another device."
     case .invalidResponse:
       "The server returned an invalid response."
     case .supersededSnapshot:
@@ -126,12 +129,22 @@ struct APIClient: Sendable {
       trustMode: .inspect,
       timeout: timeout)
     let info = try decode(ServerInfoResponse.self, from: data)
-    guard let fingerprint = delegate.capturedFingerprint,
-      fingerprint.caseInsensitiveCompare(info.publicKeyFingerprint ?? "") == .orderedSame,
-      info.lanAccessEnabled || baseURL.host == "127.0.0.1" || baseURL.host == "localhost"
-        || baseURL.host == "::1"
+    return try validateInspection(
+      baseURL: baseURL, info: info, capturedFingerprint: delegate.capturedFingerprint)
+  }
+
+  static func validateInspection(
+    baseURL: URL, info: ServerInfoResponse, capturedFingerprint: String?
+  ) throws -> InspectedServer {
+    guard let fingerprint = capturedFingerprint,
+      fingerprint.caseInsensitiveCompare(info.publicKeyFingerprint ?? "") == .orderedSame
     else {
       throw APIClientError.serverIdentityMismatch
+    }
+    let host = baseURL.host?.lowercased()
+    guard info.lanAccessEnabled || host == "127.0.0.1" || host == "localhost" || host == "::1"
+    else {
+      throw APIClientError.lanAccessDisabled
     }
     return InspectedServer(
       baseURL: baseURL,
@@ -245,15 +258,6 @@ struct APIClient: Sendable {
   }
   func disconnectPairedDevice() async throws {
     _ = try await perform(path: "/api/v1/device", method: "DELETE")
-  }
-  func changeProfilePIN(current: String, new: String) async throws {
-    struct Payload: Encodable {
-      let currentPin: String
-      let newPin: String
-    }
-    _ = try await perform(
-      path: "/api/v1/profile/pin", method: "PUT",
-      body: JSONEncoder().encode(Payload(currentPin: current, newPin: new)))
   }
   func resetProfilePIN(id: UUID, pin: String) async throws {
     struct Payload: Encodable { let pin: String }
@@ -2720,6 +2724,42 @@ struct APIClient: Sendable {
     }
   #endif
 
+  /// Resolves `path` against `baseURL` and refuses any path that changes scheme, host, or port,
+  /// adds credentials, or downgrades an authenticated/pinned request away from HTTPS.
+  static func validatedRequestURL(baseURL: URL, path: String, requiresHTTPS: Bool = true) throws
+    -> URL
+  {
+    guard let baseHost = baseURL.host, !baseHost.isEmpty,
+      let baseScheme = baseURL.scheme?.lowercased(),
+      let url = URL(string: path, relativeTo: baseURL)?.absoluteURL,
+      let resolvedScheme = url.scheme?.lowercased(),
+      let resolvedHost = url.host
+    else {
+      throw APIClientError.invalidAddress
+    }
+    guard resolvedHost.caseInsensitiveCompare(baseHost) == .orderedSame,
+      url.port == baseURL.port,
+      url.user == nil,
+      url.password == nil
+    else {
+      throw APIClientError.invalidAddress
+    }
+    guard resolvedScheme == baseScheme else {
+      throw resolvedScheme == "http"
+        ? APIClientError.insecureAddress : APIClientError.invalidAddress
+    }
+    if resolvedScheme == "https" {
+      return url
+    }
+    let normalizedHost = resolvedHost.lowercased()
+    let isLoopback =
+      normalizedHost == "127.0.0.1" || normalizedHost == "localhost" || normalizedHost == "::1"
+    if !requiresHTTPS && resolvedScheme == "http" && isLoopback {
+      return url
+    }
+    throw APIClientError.insecureAddress
+  }
+
   private static func request(
     baseURL: URL,
     path: String,
@@ -2731,9 +2771,13 @@ struct APIClient: Sendable {
     timeout: TimeInterval = 15,
     allowedStatuses: Set<Int> = []
   ) async throws -> (Data, HTTPURLResponse, TLSTrustDelegate) {
-    guard let host = baseURL.host,
-      let url = URL(string: path, relativeTo: baseURL)?.absoluteURL
-    else {
+    let requiresHTTPS: Bool
+    switch trustMode {
+    case .pinned: requiresHTTPS = true
+    case .inspect: requiresHTTPS = token != nil
+    }
+    let url = try validatedRequestURL(baseURL: baseURL, path: path, requiresHTTPS: requiresHTTPS)
+    guard let host = url.host else {
       throw APIClientError.invalidAddress
     }
     let delegate: TLSTrustDelegate

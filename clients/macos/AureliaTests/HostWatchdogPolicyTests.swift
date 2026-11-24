@@ -212,4 +212,89 @@ struct HostWatchdogPolicyTests {
     HostStartupErrorRecord.clear(in: dir)
     #expect(HostStartupErrorRecord.readRecent(from: dir) == nil)
   }
+
+  @Test func staleLaunchHandoffFilesArePrunedWhileActiveAndBackgroundFilesStay() throws {
+    let fileManager = FileManager.default
+    let dir = fileManager.temporaryDirectory
+      .appendingPathComponent("AureliaHandoffPruneTests-\(UUID().uuidString)", isDirectory: true)
+    try fileManager.createDirectory(
+      at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    defer { try? fileManager.removeItem(at: dir) }
+
+    let deadJSON = dir.appendingPathComponent("launch-40001.json")
+    let deadPipe = dir.appendingPathComponent("launch-40001.pipe")
+    let aliveJSON = dir.appendingPathComponent("launch-40002.json")
+    let ownJSON = dir.appendingPathComponent("launch-40003.json")
+    let staleRendezvous = dir.appendingPathComponent("\(UUID().uuidString.lowercased()).json")
+    let freshRendezvous = dir.appendingPathComponent("\(UUID().uuidString.lowercased()).json")
+    let backgroundSettings = dir.appendingPathComponent("background-settings.json")
+    let backgroundRendezvous = dir.appendingPathComponent(
+      HostServiceSettings.backgroundRendezvousName)
+
+    for file in [
+      deadJSON, aliveJSON, ownJSON, staleRendezvous, freshRendezvous, backgroundSettings,
+      backgroundRendezvous,
+    ] {
+      try Data("{}".utf8).write(to: file)
+    }
+    #expect(mkfifo(deadPipe.path, S_IRUSR | S_IWUSR) == 0)
+    let now = Date()
+    try fileManager.setAttributes(
+      [.modificationDate: now.addingTimeInterval(-7_200)], ofItemAtPath: staleRendezvous.path)
+    try fileManager.setAttributes(
+      [.modificationDate: now.addingTimeInterval(-60)], ofItemAtPath: freshRendezvous.path)
+
+    HostLaunchSecurity.pruneStaleHandoffFiles(
+      in: dir, currentProcessID: 40_003, now: now, staleRendezvousAge: 3_600,
+      processIsAlive: { pid in pid == 40_002 })
+
+    #expect(!fileManager.fileExists(atPath: deadJSON.path))
+    #expect(!fileManager.fileExists(atPath: deadPipe.path))
+    #expect(!fileManager.fileExists(atPath: staleRendezvous.path))
+    #expect(fileManager.fileExists(atPath: aliveJSON.path))
+    #expect(fileManager.fileExists(atPath: ownJSON.path))
+    #expect(fileManager.fileExists(atPath: freshRendezvous.path))
+    #expect(fileManager.fileExists(atPath: backgroundSettings.path))
+    #expect(fileManager.fileExists(atPath: backgroundRendezvous.path))
+  }
+
+  @Test func releaseModeIgnoresHelperPathAndDirectoryEnvironmentOverrides() throws {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory
+      .appendingPathComponent("AureliaOverrideGuardTests-\(UUID().uuidString)", isDirectory: true)
+    let appBundle = root.appendingPathComponent("Aurelia.app", isDirectory: true)
+    let bundledHelper = appBundle.appendingPathComponent(
+      "Contents/Helpers/Aurelia Server Host.app", isDirectory: true)
+    try fileManager.createDirectory(at: bundledHelper, withIntermediateDirectories: true)
+    defer { try? fileManager.removeItem(at: root) }
+
+    let customHelper = "/private/tmp/CustomHelper.app"
+    let environment = [
+      "AURELIA_HELPER_PATH": customHelper,
+      "AURELIA_DATA_DIR": "/private/tmp/CustomData",
+      "AURELIA_LOG_DIR": "/private/tmp/CustomLogs",
+    ]
+    let guardedURL = try NativeServerHost.resolvedHelperApplicationURL(
+      bundleURL: appBundle, environment: environment, allowEnvironmentOverrides: false)
+    #expect(guardedURL.standardizedFileURL == bundledHelper.standardizedFileURL)
+
+    let allowedURL = try NativeServerHost.resolvedHelperApplicationURL(
+      bundleURL: appBundle, environment: environment, allowEnvironmentOverrides: true)
+    #expect(allowedURL.path == customHelper)
+
+    let handoff = try HostLaunchHandoff(
+      secret: String(repeating: "K", count: 43),
+      directory: root,
+      rendezvous: root.appendingPathComponent("rendezvous.json"),
+      serverName: "Test Server",
+      lanPort: 43_111,
+      environment: environment,
+      processID: 42_100,
+      allowDirectoryOverrides: false)
+    defer { handoff.remove() }
+    let description = try JSONDecoder().decode(
+      HostLaunchDescription.self, from: Data(contentsOf: handoff.configurationURL))
+    #expect(description.dataDirectory == nil)
+    #expect(description.logDirectory == nil)
+  }
 }

@@ -7,7 +7,7 @@ source "$repository_root/scripts/workspace-paths.sh"
 /bin/sh "$repository_root/scripts/prune-workspace.sh" || true
 run_root="$HOME/Library/Caches/Aurelia/TestRuns/handoff-$(uuidgen)"
 mkdir -p "$run_root"
-trap 'rm -rf -- "$run_root"' EXIT
+trap 'chmod -R u+w "$run_root" 2>/dev/null || true; rm -rf -- "$run_root"' EXIT
 python3 - "$run_root" <<'PY'
 import pathlib,plistlib,sys,json
 root=pathlib.Path(sys.argv[1]);shared=root/'Shared/Updates';shared.mkdir(parents=True)
@@ -52,6 +52,55 @@ import Foundation
     Task { @MainActor in
       do {
         let root = URL(fileURLWithPath: ROOT)
+        let fakeApp = URL(fileURLWithPath: APP)
+        // Exercise the real UpdateInstaller.hasPendingRequest guards before claiming.
+        guard !UpdateInstaller.hasPendingRequest(
+          arguments: ["--background"], environment: [:], appURL: fakeApp,
+          requiredAppPath: fakeApp.path, updatesRoot: root)
+        else { exit(11) }
+        guard !UpdateInstaller.hasPendingRequest(
+          arguments: [], environment: ["AURELIA_HOST_BOOTSTRAP_DIR": "/tmp"], appURL: fakeApp,
+          requiredAppPath: fakeApp.path, updatesRoot: root)
+        else { exit(12) }
+        guard !UpdateInstaller.hasPendingRequest(
+          arguments: [], environment: [:], appURL: fakeApp,
+          requiredAppPath: "/Applications/Aurelia.app", updatesRoot: root)
+        else { exit(13) }
+        guard UpdateInstaller.hasPendingRequest(
+          arguments: [], environment: [:], appURL: fakeApp,
+          requiredAppPath: fakeApp.path, updatesRoot: root)
+        else { exit(14) }
+
+        // Exercise UpdateInstaller.runPendingWorker pre-acceptance status fallback on a read-only
+        // destination without launching or touching any real application.
+        let fm = FileManager.default
+        let roRoot = root.deletingLastPathComponent().appendingPathComponent("ReadOnlyCheck")
+        let roApps = roRoot.appendingPathComponent("Apps", isDirectory: true)
+        let roUpdates = roRoot.appendingPathComponent("Updates", isDirectory: true)
+        let roDir = roUpdates.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fm.createDirectory(at: roApps, withIntermediateDirectories: true)
+        try fm.createDirectory(at: roDir, withIntermediateDirectories: true)
+        let roApp = roApps.appendingPathComponent("Aurelia.app", isDirectory: true)
+        try fm.createDirectory(at: roApp, withIntermediateDirectories: true)
+        let roImage = roDir.appendingPathComponent("Aurelia-1.27.2-126-macOS-universal.dmg")
+        try Data("invented bytes".utf8).write(to: roImage)
+        let roReq = try MacUpdateInstallRequest.prepare(
+          image: roImage, build: 126, appPID: getpid(), root: roUpdates)
+        try roReq.save(in: roUpdates)
+        try fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: roApps.path)
+        defer { try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: roApps.path) }
+        var relaunched = false
+        let workerResult = UpdateInstaller.runPendingWorker(
+          appURL: roApp, requiredAppPath: roApp.path, updatesRoot: roUpdates,
+          relaunch: { _ in relaunched = true })
+        try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: roApps.path)
+        guard case .completed = workerResult, !relaunched,
+          let roStatus = MacUpdateInstallRequest.status(in: roUpdates),
+          roStatus.id == roReq.id, roStatus.phase == "failed",
+          roStatus.message == UpdateInstallation.Failure.notWritable.message,
+          !fm.fileExists(atPath: roDir.path)
+        else { exit(15) }
+
         guard let request = try MacUpdateInstallRequest.claim(in: root) else { exit(2) }
         try request.writeStatus("accepted", in: root)
         try JSONEncoder().encode(CommandLine.arguments.contains("--not-needed-for-handoff")).write(to: root.appendingPathComponent("arguments-arrived.json"))
@@ -61,17 +110,24 @@ import Foundation
     }
   }
 }
-'''.replace('ROOT',quote(shared)))
+'''.replace('ROOT',quote(shared)).replace('APP',quote(root/'Sender.app')))
 PY
 for name in Sender Receiver; do
-  xcrun swiftc -warnings-as-errors -swift-version 6 \
-    "$repository_root/clients/macos/UpdateHandoff/MacUpdateInstallRequest.swift" \
-    "$repository_root/clients/macos/UpdateHandoff/AppEdition.swift" "$run_root/$name.swift" \
-    -o "$run_root/$name.app/Contents/MacOS/$name"
-  if [[ "$name" == Sender ]]; then
-    codesign --force --sign - --entitlements "$run_root/sender.entitlements" "$run_root/$name.app"
-  else
+  if [[ "$name" == Receiver ]]; then
+    xcrun swiftc -warnings-as-errors -swift-version 6 \
+      "$repository_root/clients/macos/UpdateHandoff/MacUpdateInstallRequest.swift" \
+      "$repository_root/clients/macos/UpdateHandoff/AppEdition.swift" \
+      "$repository_root/clients/macos/AureliaServerHost/UpdateInstallation.swift" \
+      "$repository_root/clients/macos/AureliaServerHost/UpdateInstaller.swift" \
+      "$run_root/$name.swift" \
+      -o "$run_root/$name.app/Contents/MacOS/$name"
     codesign --force --sign - "$run_root/$name.app"
+  else
+    xcrun swiftc -warnings-as-errors -swift-version 6 \
+      "$repository_root/clients/macos/UpdateHandoff/MacUpdateInstallRequest.swift" \
+      "$repository_root/clients/macos/UpdateHandoff/AppEdition.swift" "$run_root/$name.swift" \
+      -o "$run_root/$name.app/Contents/MacOS/$name"
+    codesign --force --sign - --entitlements "$run_root/sender.entitlements" "$run_root/$name.app"
   fi
 done
 "$run_root/Sender.app/Contents/MacOS/Sender"

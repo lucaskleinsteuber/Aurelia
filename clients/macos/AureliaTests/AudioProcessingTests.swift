@@ -74,4 +74,26 @@ struct AudioProcessingTests {
         "equalizer"
       ])
   }
+
+  @Test func unknownDialogueBoostOrVolumeLevelingFallsBackWithoutResettingOtherSettings() throws {
+    var customized = PlaybackPreferences.defaultValue
+    customized.defaultPlaybackRate = 1.5
+    customized.seekInterval = 25
+    customized.cinemaMode = true
+    customized.defaultAudioLanguage = "de"
+    customized.dialogueBoost = .strong
+    customized.volumeLeveling = .sleep
+    var dictionary =
+      try JSONSerialization.jsonObject(with: JSONEncoder().encode(customized)) as! [String: Any]
+    dictionary["dialogueBoost"] = "future_boost"
+    dictionary["volumeLeveling"] = "night"
+    let decoded = try JSONDecoder().decode(
+      PlaybackPreferences.self, from: JSONSerialization.data(withJSONObject: dictionary))
+    #expect(decoded.dialogueBoost == .off)
+    #expect(decoded.volumeLeveling == .off)
+    #expect(decoded.defaultPlaybackRate == 1.5)
+    #expect(decoded.seekInterval == 25)
+    #expect(decoded.cinemaMode == true)
+    #expect(decoded.defaultAudioLanguage == "de")
+  }
 }

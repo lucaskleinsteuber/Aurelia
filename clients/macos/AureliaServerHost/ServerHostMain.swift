@@ -207,6 +207,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
   private var restoreLifeline: Pipe?
   private var pendingBackgroundHandoff = false
   private var sleepAssertion: IOPMAssertionID = 0
+  private var preventIdleSleepEnabled = false
+  private var hasPendingNetworkTrial = false
   private var shuttingDown = false
   private var watchdog = HostWatchdogPolicy()
   private var watchdogTimer: DispatchSourceTimer?
@@ -268,8 +270,10 @@ private final class ServerHostRuntime: @unchecked Sendable {
     listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
     listener.stateUpdateHandler = { [weak self] state in self?.listenerChanged(state) }
     listener.start(queue: queue)
+    hasPendingNetworkTrial =
+      (try? readOperation())?["state"] as? String == "awaitingConfirmation"
     startParentMonitor()
-    updateSleepAssertion()
+    updateSleepAssertion(reloadSettings: true)
   }
 
   func shutdown() {
@@ -1028,8 +1032,9 @@ private final class ServerHostRuntime: @unchecked Sendable {
     timer.schedule(deadline: .now() + 1, repeating: 1)
     timer.setEventHandler { [weak self] in
       guard let self else { return }
-      self.rollbackExpiredNetworkChange()
-      self.updateSleepAssertion()
+      if self.hasPendingNetworkTrial {
+        self.rollbackExpiredNetworkChange()
+      }
       if self.parentProcessID > 1 && kill(self.parentProcessID, 0) != 0 && errno == ESRCH {
         self.beginShutdown()
       }
@@ -1179,10 +1184,13 @@ private final class ServerHostRuntime: @unchecked Sendable {
         if state == "completed" {
           try? FileManager.default.removeItem(at: HostServiceRequest.location())
         }
+        updateSleepAssertion(reloadSettings: true)
         respond(connection, status: 204, body: Data(), proofNonce: responseNonce)
       } catch { respond(connection, status: 500, body: Data(), proofNonce: responseNonce) }
     case ("GET", "hosting-status"):
       let settings = (try? HostServiceSettings.load()) ?? HostServiceSettings()
+      preventIdleSleepEnabled = settings.preventIdleSleep
+      updateSleepAssertion()
       let operation = try? readOperation()
       let state =
         operation?["kind"] as? String == "hosting"
@@ -1220,6 +1228,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
         respond(connection, status: 409, body: Data(), proofNonce: responseNonce)
         return
       }
+      hasPendingNetworkTrial = true
       respond(connection, status: 202, body: Data(), proofNonce: responseNonce)
       queue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
         guard let self else { return }
@@ -1241,6 +1250,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
         operation["confirmBefore"] = NSNull()
         operation["previousSettings"] = NSNull()
         try writeOperation(operation)
+        hasPendingNetworkTrial = false
         respond(connection, status: 204, body: Data(), proofNonce: responseNonce)
       } catch { respond(connection, status: 500, body: Data(), proofNonce: responseNonce) }
     case ("POST", "restore-prepared"):
@@ -1361,10 +1371,13 @@ private final class ServerHostRuntime: @unchecked Sendable {
   }
 
   private var operationURL: URL { dataDirectory.appendingPathComponent("host-operation.json") }
-  private func updateSleepAssertion() {
+  private func updateSleepAssertion(reloadSettings: Bool = false) {
     guard !isolatedBackground else { return }
+    if reloadSettings {
+      preventIdleSleepEnabled = (try? HostServiceSettings.load().preventIdleSleep) == true
+    }
     let requested = HostWatchdogPolicy.shouldPreventIdleSleep(
-      settingEnabled: (try? HostServiceSettings.load().preventIdleSleep) == true,
+      settingEnabled: preventIdleSleepEnabled,
       isShuttingDown: shuttingDown,
       isProcessRunning: process?.isRunning == true,
       isIdle: status.state == .idle
@@ -1451,8 +1464,12 @@ private final class ServerHostRuntime: @unchecked Sendable {
   }
   private func rollbackExpiredNetworkChange() {
     guard var operation = try? readOperation(),
-      operation["state"] as? String == "awaitingConfirmation",
-      let deadline = operation["confirmBefore"] as? String,
+      operation["state"] as? String == "awaitingConfirmation"
+    else {
+      hasPendingNetworkTrial = false
+      return
+    }
+    guard let deadline = operation["confirmBefore"] as? String,
       Self.operationDate(deadline).map({ $0 <= Date() }) == true,
       let previous = operation["previousSettings"] as? [String: Any]
     else { return }
@@ -1465,6 +1482,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
       operation["confirmBefore"] = NSNull()
       operation["previousSettings"] = NSNull()
       try writeOperation(operation)
+      hasPendingNetworkTrial = false
       restart(lan: (try loadSettings()).lanAccessEnabled)
     } catch {
       updateStatus(.failed, message: "The previous network settings could not be restored.")
@@ -1502,9 +1520,11 @@ private final class ServerHostRuntime: @unchecked Sendable {
   }
 
   private func serverExecutableURL() throws -> URL {
-    if let override = ProcessInfo.processInfo.environment["AURELIA_SERVER_EXECUTABLE"] {
-      return URL(fileURLWithPath: override)
-    }
+    #if DEBUG
+      if let override = ProcessInfo.processInfo.environment["AURELIA_SERVER_EXECUTABLE"] {
+        return URL(fileURLWithPath: override)
+      }
+    #endif
     #if arch(arm64)
       let runtime = "osx-arm64"
     #else

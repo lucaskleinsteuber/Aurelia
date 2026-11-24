@@ -91,6 +91,7 @@ protocol SystemMediaPlaybackControlling: AnyObject {
   var currentTimeMilliseconds: Int64 { get }
   var durationMilliseconds: Int64 { get }
   var playbackRate: Double { get }
+  var seekIntervalSeconds: Int { get }
   var canPlay: Bool { get }
   var canPause: Bool { get }
   var canSeek: Bool { get }
@@ -104,7 +105,13 @@ protocol SystemMediaPlaybackControlling: AnyObject {
   @discardableResult func togglePlayback() -> Bool
 }
 
-extension PlaybackController: SystemMediaPlaybackControlling {}
+extension SystemMediaPlaybackControlling {
+  var seekIntervalSeconds: Int { 10 }
+}
+
+extension PlaybackController: SystemMediaPlaybackControlling {
+  var seekIntervalSeconds: Int { PlaybackPreferencesStore.shared.preferences.seekInterval }
+}
 
 @MainActor
 protocol SystemMediaPlaybackTransport: AnyObject {
@@ -114,7 +121,12 @@ protocol SystemMediaPlaybackTransport: AnyObject {
   ) -> UUID
   func removeHandler(_ token: UUID)
   func setEnabled(_ enabled: Bool, for command: SystemMediaCommand)
+  func setSkipInterval(_ seconds: Int)
   func publish(_ info: SystemMediaNowPlayingInfo?, artwork: NSImage?)
+}
+
+extension SystemMediaPlaybackTransport {
+  func setSkipInterval(_ seconds: Int) {}
 }
 
 /// Owns native media commands only while a player is registered. The injected
@@ -127,11 +139,20 @@ final class SystemMediaPlaybackCoordinator {
     transport: NativeSystemMediaPlaybackTransport())
 
   private let transport: any SystemMediaPlaybackTransport
+  private let now: @MainActor () -> TimeInterval
   private let commandGate = SystemMediaCommandGate()
   private weak var controller: (any SystemMediaPlaybackControlling)?
   private var generation = UUID()
   private var tokens: [UUID] = []
   private var observation: AnyCancellable?
+  private var preferencesObservation: AnyCancellable?
+  private var pendingUpdateTask: Task<Void, Never>?
+  private var lastEnabled: [SystemMediaCommand: Bool] = [:]
+  private var lastSkipInterval: Int?
+  private var lastPublishedInfo: SystemMediaNowPlayingInfo?
+  private var lastPublishedArtwork: NSImage?
+  private var lastPublishedAt: TimeInterval?
+  private var hasPublishedState = false
   private var artworkProvider: ArtworkProvider?
   private var artworkTask: Task<Void, Never>?
   private var artworkIdentity: ArtworkIdentity?
@@ -142,12 +163,17 @@ final class SystemMediaPlaybackCoordinator {
     let artwork: ArtworkSummary?
   }
 
-  init(transport: any SystemMediaPlaybackTransport) {
+  init(
+    transport: any SystemMediaPlaybackTransport,
+    now: @escaping @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+  ) {
     self.transport = transport
+    self.now = now
   }
 
   deinit {
     commandGate.clear()
+    pendingUpdateTask?.cancel()
     artworkTask?.cancel()
   }
 
@@ -182,14 +208,25 @@ final class SystemMediaPlaybackCoordinator {
       }
     }
     observation = controller.objectWillChange.sink { [weak self, weak controller] in
-      // Published properties notify before changing. Read the resulting state
-      // after the controller finishes its main-actor mutation.
-      Task { @MainActor [weak self, weak controller] in
+      // Published properties notify before changing. Coalesce bursts into one
+      // main-actor turn after the controller finishes mutating its state.
+      guard let self, self.pendingUpdateTask == nil else { return }
+      self.pendingUpdateTask = Task { @MainActor [weak self, weak controller] in
+        guard let self else { return }
+        self.pendingUpdateTask = nil
         guard let controller else { return }
-        self?.update(controller)
+        self.update(controller)
       }
     }
-    update(controller)
+    preferencesObservation = PlaybackPreferencesStore.shared.$preferences
+      .map(\.seekInterval)
+      .removeDuplicates()
+      .dropFirst()
+      .sink { [weak self, weak controller] _ in
+        guard let self, let controller else { return }
+        self.update(controller)
+      }
+    sync(controller, forcePublish: true)
   }
 
   func unregister(_ controller: any SystemMediaPlaybackControlling) {
@@ -199,6 +236,10 @@ final class SystemMediaPlaybackCoordinator {
   }
 
   func update(_ controller: any SystemMediaPlaybackControlling) {
+    sync(controller, forcePublish: false)
+  }
+
+  private func sync(_ controller: any SystemMediaPlaybackControlling, forcePublish: Bool) {
     guard self.controller === controller else { return }
     let active = controller.canPlay || controller.canPause || controller.isPlaying
     let enabled: [SystemMediaCommand: Bool] = [
@@ -211,29 +252,75 @@ final class SystemMediaPlaybackCoordinator {
       .nextEpisode: active && controller.canPlayNext,
       .previousEpisode: active && controller.canPlayPrevious,
     ]
-    commandGate.update(owner: controller, generation: generation, enabled: enabled)
-    for command in SystemMediaCommand.allCases {
-      transport.setEnabled(enabled[command] == true, for: command)
+    if !hasPublishedState || enabled != lastEnabled {
+      commandGate.update(owner: controller, generation: generation, enabled: enabled)
+      for command in SystemMediaCommand.allCases {
+        let value = enabled[command] == true
+        if !hasPublishedState || lastEnabled[command] != value {
+          transport.setEnabled(value, for: command)
+        }
+      }
+      lastEnabled = enabled
+    }
+    let skipInterval = min(max(controller.seekIntervalSeconds, 5), 60)
+    if lastSkipInterval != skipInterval {
+      transport.setSkipInterval(skipInterval)
+      lastSkipInterval = skipInterval
     }
     guard active else {
       clearArtwork()
-      transport.publish(nil, artwork: nil)
+      if !hasPublishedState || lastPublishedInfo != nil || lastPublishedArtwork != nil {
+        transport.publish(nil, artwork: nil)
+      }
+      hasPublishedState = true
+      lastPublishedInfo = nil
+      lastPublishedArtwork = nil
+      lastPublishedAt = nil
       return
     }
     updateArtwork(for: controller)
     let rate =
       controller.playbackRate.isFinite && controller.playbackRate > 0
       ? controller.playbackRate : 1
-    transport.publish(
-      SystemMediaNowPlayingInfo(
-        title: controller.presentation.title,
-        subtitle: controller.presentation.subtitle,
-        elapsedSeconds: Double(max(0, controller.currentTimeMilliseconds)) / 1_000,
-        durationSeconds: Double(max(0, controller.durationMilliseconds)) / 1_000,
-        playbackRate: controller.isPlaying ? rate : 0,
-        defaultPlaybackRate: rate,
-        state: controller.isPlaying
-          ? .playing : .paused), artwork: artworkImage)
+    let info = SystemMediaNowPlayingInfo(
+      title: controller.presentation.title,
+      subtitle: controller.presentation.subtitle,
+      elapsedSeconds: Double(max(0, controller.currentTimeMilliseconds)) / 1_000,
+      durationSeconds: Double(max(0, controller.durationMilliseconds)) / 1_000,
+      playbackRate: controller.isPlaying ? rate : 0,
+      defaultPlaybackRate: rate,
+      state: controller.isPlaying ? .playing : .paused)
+    let currentTime = now()
+    if shouldPublish(info: info, artwork: artworkImage, at: currentTime, force: forcePublish) {
+      transport.publish(info, artwork: artworkImage)
+      lastPublishedInfo = info
+      lastPublishedArtwork = artworkImage
+      lastPublishedAt = currentTime
+      hasPublishedState = true
+    }
+  }
+
+  private func shouldPublish(
+    info: SystemMediaNowPlayingInfo, artwork: NSImage?, at currentTime: TimeInterval, force: Bool
+  ) -> Bool {
+    guard !force, hasPublishedState, let previous = lastPublishedInfo else { return true }
+    if lastPublishedArtwork !== artwork { return true }
+    if info.title != previous.title || info.subtitle != previous.subtitle
+      || info.durationSeconds != previous.durationSeconds
+      || info.playbackRate != previous.playbackRate
+      || info.defaultPlaybackRate != previous.defaultPlaybackRate
+      || info.state != previous.state
+    {
+      return true
+    }
+    if info.state == .playing {
+      // macOS extrapolates elapsed playback time using playbackRate; only re-publish when
+      // a seek or clock jump moves playback away from the expected timeline.
+      let elapsedSincePublish = max(0, currentTime - (lastPublishedAt ?? currentTime))
+      let expectedElapsed = previous.elapsedSeconds + elapsedSincePublish * previous.playbackRate
+      return abs(info.elapsedSeconds - expectedElapsed) >= 1.5
+    }
+    return abs(info.elapsedSeconds - previous.elapsedSeconds) >= 0.01
   }
 
   private func perform(_ command: SystemMediaCommand, generation: UUID) -> SystemMediaCommandResult
@@ -253,7 +340,7 @@ final class SystemMediaPlaybackCoordinator {
       guard controller.canSeek, controller.canPlay || controller.canPause || controller.isPlaying,
         let target = Self.skipTarget(
           position: controller.currentTimeMilliseconds, duration: controller.durationMilliseconds,
-          forward: command == .skipForward)
+          forward: command == .skipForward, intervalSeconds: controller.seekIntervalSeconds)
       else { return .unavailable }
       controller.seek(to: target)
       accepted = true
@@ -268,15 +355,18 @@ final class SystemMediaPlaybackCoordinator {
       else { return .unavailable }
       accepted = controller.playNextFromSystemMedia()
     }
-    update(controller)
+    sync(controller, forcePublish: true)
     return accepted ? .success : .unavailable
   }
 
-  static func skipTarget(position: Int64, duration: Int64, forward: Bool) -> Int64? {
+  static func skipTarget(
+    position: Int64, duration: Int64, forward: Bool, intervalSeconds: Int = 10
+  ) -> Int64? {
     guard duration > 0 else { return nil }
+    let step = Int64(min(max(intervalSeconds, 5), 60)) * 1_000
     let position = min(max(position, 0), duration)
-    if forward { return position + min(10_000, duration - position) }
-    return max(0, position - 10_000)
+    if forward { return position + min(step, duration - position) }
+    return max(0, position - step)
   }
 
   private func updateArtwork(for controller: any SystemMediaPlaybackControlling) {
@@ -316,6 +406,16 @@ final class SystemMediaPlaybackCoordinator {
     commandGate.clear()
     observation?.cancel()
     observation = nil
+    preferencesObservation?.cancel()
+    preferencesObservation = nil
+    pendingUpdateTask?.cancel()
+    pendingUpdateTask = nil
+    lastEnabled.removeAll()
+    lastSkipInterval = nil
+    lastPublishedInfo = nil
+    lastPublishedArtwork = nil
+    lastPublishedAt = nil
+    hasPublishedState = false
     clearArtwork()
     artworkProvider = nil
     for token in tokens { transport.removeHandler(token) }
@@ -362,10 +462,19 @@ private final class NativeSystemMediaPlaybackTransport: SystemMediaPlaybackTrans
   private var targets: [UUID: (MPRemoteCommand, Any)] = [:]
   private var sourceArtwork: NSImage?
   private var mediaArtwork: MPMediaItemArtwork?
+  private var currentSkipInterval: Int?
 
   init() {
-    commands.skipBackwardCommand.preferredIntervals = [10]
-    commands.skipForwardCommand.preferredIntervals = [10]
+    setSkipInterval(PlaybackPreferencesStore.shared.preferences.seekInterval)
+  }
+
+  func setSkipInterval(_ seconds: Int) {
+    let clamped = min(max(seconds, 5), 60)
+    guard currentSkipInterval != clamped else { return }
+    currentSkipInterval = clamped
+    let interval = NSNumber(value: clamped)
+    commands.skipBackwardCommand.preferredIntervals = [interval]
+    commands.skipForwardCommand.preferredIntervals = [interval]
   }
 
   func addHandler(

@@ -137,6 +137,7 @@ final class NativeServerHost {
     do { cache = try HostBootstrapLocation.directory() } catch {
       throw NativeServerHostError.couldNotLaunch
     }
+    HostLaunchSecurity.pruneStaleHandoffFiles(in: cache)
     HostStartupErrorRecord.clear(in: cache)
     let rendezvous = cache.appendingPathComponent("\(UUID().uuidString.lowercased()).json")
     let helperURL = try helperApplicationURL()
@@ -336,16 +337,31 @@ final class NativeServerHost {
     return data
   }
 
-  private func helperApplicationURL() throws -> URL {
-    if let override = ProcessInfo.processInfo.environment["AURELIA_HELPER_PATH"] {
+  nonisolated static var allowsEnvironmentOverrides: Bool {
+    #if DEBUG
+      return true
+    #else
+      return NativePreflightIsolation.isActive
+    #endif
+  }
+
+  nonisolated static func resolvedHelperApplicationURL(
+    bundleURL: URL = Bundle.main.bundleURL,
+    environment: [String: String] = ProcessInfo.processInfo.environment,
+    allowEnvironmentOverrides: Bool = allowsEnvironmentOverrides
+  ) throws -> URL {
+    if allowEnvironmentOverrides, let override = environment["AURELIA_HELPER_PATH"] {
       return URL(fileURLWithPath: override)
     }
-    let url = Bundle.main.bundleURL
-      .appendingPathComponent("Contents/Helpers/Aurelia Server Host.app")
+    let url = bundleURL.appendingPathComponent("Contents/Helpers/Aurelia Server Host.app")
     guard FileManager.default.fileExists(atPath: url.path) else {
       throw NativeServerHostError.helperMissing
     }
     return url
+  }
+
+  private func helperApplicationURL() throws -> URL {
+    try Self.resolvedHelperApplicationURL()
   }
 
   private func clearLaunchState() {
@@ -393,7 +409,8 @@ final class HostLaunchHandoff {
     serverName: String,
     lanPort: Int,
     environment: [String: String],
-    processID: Int32 = ProcessInfo.processInfo.processIdentifier
+    processID: Int32 = ProcessInfo.processInfo.processIdentifier,
+    allowDirectoryOverrides: Bool = NativeServerHost.allowsEnvironmentOverrides
   ) throws {
     configurationURL = directory.appendingPathComponent("launch-\(processID).json")
     secretPipeURL = directory.appendingPathComponent("launch-\(processID).pipe")
@@ -422,8 +439,8 @@ final class HostLaunchHandoff {
       parentProcessID: processID,
       rendezvousPath: rendezvous.path,
       secretPipePath: secretPipeURL.path,
-      dataDirectory: environment["AURELIA_DATA_DIR"],
-      logDirectory: environment["AURELIA_LOG_DIR"],
+      dataDirectory: allowDirectoryOverrides ? environment["AURELIA_DATA_DIR"] : nil,
+      logDirectory: allowDirectoryOverrides ? environment["AURELIA_LOG_DIR"] : nil,
       serverName: serverName,
       lanPort: lanPort)
     do {

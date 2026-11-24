@@ -522,6 +522,71 @@ struct SystemMediaPlaybackCoordinatorTests {
     }
   }
 
+  @Test func playbackTicksDoNotRepublishNowPlayingWhileSeekAndStateChangesDo() async {
+    @MainActor final class Clock {
+      var now: TimeInterval = 100
+    }
+    let clock = Clock()
+    let transport = FakeSystemMediaTransport()
+    let coordinator = SystemMediaPlaybackCoordinator(transport: transport, now: { clock.now })
+    let controller = FakeSystemMediaController(title: "Smooth Playback")
+    controller.isPlaying = true
+    controller.currentTimeMilliseconds = 10_000
+    controller.durationMilliseconds = 120_000
+    coordinator.register(controller)
+    defer { coordinator.unregister(controller) }
+
+    let initialPublications = transport.publicationCount
+    let initialEnabledWrites = transport.setEnabledCount
+
+    // Ten normal 250 ms playback ticks matching wall-clock elapsed time should not republish.
+    for _ in 0..<10 {
+      clock.now += 0.25
+      controller.objectWillChange.send()
+      controller.currentTimeMilliseconds += 250
+      for _ in 0..<4 { await Task.yield() }
+    }
+    #expect(transport.publicationCount == initialPublications)
+    #expect(transport.setEnabledCount == initialEnabledWrites)
+
+    // A seek jumps away from the extrapolated timeline and publishes immediately.
+    controller.objectWillChange.send()
+    controller.currentTimeMilliseconds = 65_000
+    for _ in 0..<8 { await Task.yield() }
+    #expect(transport.publicationCount == initialPublications + 1)
+    #expect(transport.info?.elapsedSeconds == 65)
+
+    // A rate change publishes immediately.
+    controller.objectWillChange.send()
+    controller.playbackRate = 1.5
+    for _ in 0..<8 { await Task.yield() }
+    #expect(transport.publicationCount == initialPublications + 2)
+    #expect(transport.info?.playbackRate == 1.5)
+  }
+
+  @Test func skipCommandsFollowConfiguredSeekInterval() {
+    let transport = FakeSystemMediaTransport()
+    let coordinator = SystemMediaPlaybackCoordinator(transport: transport)
+    let controller = FakeSystemMediaController(title: "Custom Seek")
+    controller.seekIntervalSeconds = 15
+    controller.currentTimeMilliseconds = 20_000
+    controller.durationMilliseconds = 120_000
+    coordinator.register(controller)
+    defer { coordinator.unregister(controller) }
+
+    #expect(transport.skipInterval == 15)
+    #expect(transport.send(.skipForward) == .success)
+    #expect(controller.currentTimeMilliseconds == 35_000)
+    #expect(transport.send(.skipBackward) == .success)
+    #expect(controller.currentTimeMilliseconds == 20_000)
+
+    controller.seekIntervalSeconds = 30
+    coordinator.update(controller)
+    #expect(transport.skipInterval == 30)
+    #expect(transport.send(.skipForward) == .success)
+    #expect(controller.currentTimeMilliseconds == 50_000)
+  }
+
   private func inventedArtwork() -> ArtworkSummary {
     let id = UUID()
     return ArtworkSummary(
@@ -549,6 +614,8 @@ private final class FakeSystemMediaTransport: SystemMediaPlaybackTransport {
   var handlers: [UUID: Handler] = [:]
   var removedTokens: [UUID] = []
   var enabled: [SystemMediaCommand: Bool] = [:]
+  var setEnabledCount = 0
+  var skipInterval: Int?
   var info: SystemMediaNowPlayingInfo?
   var artwork: NSImage?
   var publicationCount = 0
@@ -568,7 +635,12 @@ private final class FakeSystemMediaTransport: SystemMediaPlaybackTransport {
   }
 
   func setEnabled(_ enabled: Bool, for command: SystemMediaCommand) {
+    setEnabledCount += 1
     self.enabled[command] = enabled
+  }
+
+  func setSkipInterval(_ seconds: Int) {
+    skipInterval = seconds
   }
 
   func publish(_ info: SystemMediaNowPlayingInfo?, artwork: NSImage?) {
@@ -594,6 +666,7 @@ private final class FakeSystemMediaController: SystemMediaPlaybackControlling {
   var currentTimeMilliseconds: Int64 = 0
   var durationMilliseconds: Int64 = 120_000
   var playbackRate: Double = 1
+  var seekIntervalSeconds = 10
   var canPlay = true
   var canPause = true
   var canSeek = true

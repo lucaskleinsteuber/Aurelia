@@ -285,6 +285,14 @@ extension PlaybackPreferences {
   /// Settings saved before a newer option existed keep their values; the new option starts off.
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
+    let decodedVolumeLeveling: VolumeLeveling? =
+      if container.contains(.volumeLeveling),
+        (try? container.decodeNil(forKey: .volumeLeveling)) != true
+      {
+        (try? container.decode(VolumeLeveling.self, forKey: .volumeLeveling)) ?? .off
+      } else {
+        nil
+      }
     self.init(
       automaticResume: try container.decode(Bool.self, forKey: .automaticResume),
       defaultPlaybackRate: try container.decode(Double.self, forKey: .defaultPlaybackRate),
@@ -304,9 +312,9 @@ extension PlaybackPreferences {
         String.self, forKey: .defaultAudioLanguage) ?? "original",
       defaultSubtitleLanguage: try container.decodeIfPresent(
         String.self, forKey: .defaultSubtitleLanguage) ?? "off",
-      dialogueBoost: try container.decodeIfPresent(DialogueBoost.self, forKey: .dialogueBoost)
+      dialogueBoost: (try? container.decodeIfPresent(DialogueBoost.self, forKey: .dialogueBoost))
         ?? .off,
-      volumeLeveling: try container.decodeIfPresent(VolumeLeveling.self, forKey: .volumeLeveling),
+      volumeLeveling: decodedVolumeLeveling,
       fillsScreen: try container.decodeIfPresent(Bool.self, forKey: .fillsScreen) ?? false,
       cinemaMode: try container.decodeIfPresent(Bool.self, forKey: .cinemaMode) ?? false,
       cinemaAds: try container.decodeIfPresent(Bool.self, forKey: .cinemaAds) ?? true,

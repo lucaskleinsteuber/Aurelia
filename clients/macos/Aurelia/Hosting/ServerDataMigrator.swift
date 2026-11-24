@@ -12,6 +12,7 @@ enum ServerDataMigrationError: Error, Equatable {
 enum ServerDataMigrator {
   private static let legacyDatabaseName = "aurelia-home.db"
   private static let databaseName = "aurelia.db"
+  private static let stagingPrefix = ".Aurelia-Server-Migration-"
 
   static func migrateBuild11IfNeeded(to destination: URL) throws {
     guard destination.standardizedFileURL == defaultDestination else { return }
@@ -21,6 +22,8 @@ enum ServerDataMigrator {
   static func migrateIfNeeded(from source: URL, to destination: URL) throws {
     let fileManager = FileManager.default
     let canonicalDestination = destination.standardizedFileURL
+    cleanupAbandonedStagingDirectories(
+      in: canonicalDestination.deletingLastPathComponent(), fileManager: fileManager)
 
     var destinationLinkMetadata = stat()
     if lstat(canonicalDestination.path, &destinationLinkMetadata) == 0,
@@ -38,13 +41,13 @@ enum ServerDataMigrator {
       throw ServerDataMigrationError.destinationUnavailable
     }
 
+    // Only migrate when the destination does not yet exist; an existing (even manually emptied)
+    // destination must never silently re-import legacy Build 11 data.
     if fileManager.fileExists(atPath: canonicalDestination.path) {
       guard isOwnedDirectory(canonicalDestination) else {
         throw ServerDataMigrationError.activationFailed
       }
-      guard try fileManager.contentsOfDirectory(atPath: canonicalDestination.path).isEmpty else {
-        return
-      }
+      return
     }
 
     let source = source.standardizedFileURL
@@ -59,7 +62,7 @@ enum ServerDataMigrator {
     else { throw ServerDataMigrationError.invalidSource }
 
     let staging = canonicalDestination.deletingLastPathComponent()
-      .appendingPathComponent(".Aurelia-Server-Migration-\(UUID().uuidString)", isDirectory: true)
+      .appendingPathComponent("\(stagingPrefix)\(UUID().uuidString)", isDirectory: true)
     do {
       try fileManager.createDirectory(
         at: staging,
@@ -83,13 +86,27 @@ enum ServerDataMigrator {
         destination: migratedDatabase)
       try validate(database: migratedDatabase)
       try applyPrivatePermissions(to: staging)
-      if fileManager.fileExists(atPath: canonicalDestination.path) {
-        try fileManager.removeItem(at: canonicalDestination)
-      }
       try fileManager.moveItem(at: staging, to: canonicalDestination)
     } catch {
       try? fileManager.removeItem(at: staging)
       throw error
+    }
+  }
+
+  private static func cleanupAbandonedStagingDirectories(
+    in parent: URL, fileManager: FileManager
+  ) {
+    guard
+      let entries = try? fileManager.contentsOfDirectory(
+        at: parent, includingPropertiesForKeys: nil, options: [])
+    else { return }
+    for entry in entries {
+      let name = entry.lastPathComponent
+      guard name.hasPrefix(stagingPrefix),
+        UUID(uuidString: String(name.dropFirst(stagingPrefix.count))) != nil,
+        isOwnedDirectory(entry)
+      else { continue }
+      try? fileManager.removeItem(at: entry)
     }
   }
 

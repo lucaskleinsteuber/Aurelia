@@ -203,6 +203,12 @@ struct AppUpdateLogicTests {
     let hostNote = AppUpdateLogic.installRestartNote(
       downloadBytes: 95_000_000, isHostingLocally: true)
     #expect(hostNote.localizedCaseInsensitiveContains("server on this Mac will stop"))
+
+    let testNotice = AppUpdateLogic.unavailableCheckNotice(isTestEdition: true)
+    #expect(testNotice.title.contains("Aurelia Test"))
+    #expect(testNotice.message.contains("Aurelia Test"))
+    let localNotice = AppUpdateLogic.unavailableCheckNotice(isTestEdition: false)
+    #expect(localNotice.message.localizedCaseInsensitiveContains("build it again to update"))
   }
 
   @Test func theAppGroupFollowsTheSigningTeamWrittenByTheBuild() {
@@ -551,6 +557,17 @@ struct AppUpdateLogicTests {
     let file = UpdateSigningFixture.minisignSignature
     let key = UpdateSigningFixture.minisignPublicKey
     #expect(AppUpdateSignature.verify(sums, signatureFile: file, publicKey: key))
+    #expect(
+      AppUpdateSignature.verifiedTrustedComment(sums, signatureFile: file, publicKey: key)
+        == "Aurelia for Mac 1.13.0 (100)")
+    #expect(
+      AppUpdateSignature.verify(
+        sums, signatureFile: file, publicKey: key,
+        expectedComment: AppUpdateSignature.expectedTrustedComment(version: "1.13.0", build: 100)))
+    #expect(
+      !AppUpdateSignature.verify(
+        sums, signatureFile: file, publicKey: key,
+        expectedComment: AppUpdateSignature.expectedTrustedComment(version: "1.13.0", build: 101)))
     #expect(!AppUpdateSignature.verify(sums + Data("x".utf8), signatureFile: file, publicKey: key))
     #expect(
       !AppUpdateSignature.verify(
@@ -561,6 +578,71 @@ struct AppUpdateLogicTests {
     // The owner's key reads as a key; a test signature is never valid for it.
     #expect(AppUpdateSignature.readPublicKey(AppUpdateSignature.publicKey) != nil)
     #expect(!AppUpdateSignature.verify(sums, signatureFile: file))
+  }
+
+  @Test func validSignatureWithMismatchedTrustedCommentIsRejectedBeforeDownload() async throws {
+    let folder = try testFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let release = try AppUpdateLogic.validatedRelease(
+      fromLatest: releaseData(), repository: "owner/repo")
+    // Cryptographically valid signature for the exact SHA256SUMS bytes, but signed for another build.
+    let mismatchedCommentSignature = UpdateSigningFixture.signature(
+      for: checksums(), comment: "Aurelia for Mac 1.13.0 (99)")
+    let transport = StubUpdateTransport(steps: [
+      .body(checksums()), .body(mismatchedCommentSignature),
+    ])
+    do {
+      _ = try await AppUpdateClient(
+        transport: transport, signingKey: UpdateSigningFixture.publicKey
+      )
+      .download(release, repository: "owner/repo", currentBuild: 99, folder: folder)
+      Issue.record("A signature whose trusted comment does not match the release must be rejected.")
+    } catch let error as AppUpdateError {
+      #expect(error == .badSignature)
+    }
+    #expect(await transport.requests.count == 2)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path).isEmpty)
+  }
+
+  @Test func orphanedDownloadFoldersArePrunedWhileFreshPendingAndSymlinksStay() throws {
+    let fm = FileManager.default
+    let folder = try testFolder()
+    defer { try? fm.removeItem(at: folder) }
+    let now = Date()
+
+    let oldOrphan = folder.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let freshDownload = folder.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let activePendingDir = folder.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let nonUUIDDir = folder.appendingPathComponent("KeepMe", isDirectory: true)
+    let externalTarget = folder.appendingPathComponent("ExternalTarget", isDirectory: true)
+    let linkedUUID = folder.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    for dir in [oldOrphan, freshDownload, activePendingDir, nonUUIDDir, externalTarget] {
+      try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+    }
+    try Data("partial".utf8).write(to: oldOrphan.appendingPathComponent("partial.dmg"))
+    try Data("keep".utf8).write(to: externalTarget.appendingPathComponent("sentinel.txt"))
+    try fm.createSymbolicLink(at: linkedUUID, withDestinationURL: externalTarget)
+
+    let pendingJSON = try JSONSerialization.data(withJSONObject: [
+      "directory": activePendingDir.lastPathComponent,
+      "createdAt": now.addingTimeInterval(-30).timeIntervalSinceReferenceDate,
+    ])
+    try pendingJSON.write(to: folder.appendingPathComponent("PendingInstall.json"))
+
+    let twoHoursAgo = now.addingTimeInterval(-7_200)
+    let fiveMinutesAgo = now.addingTimeInterval(-300)
+    try fm.setAttributes([.modificationDate: twoHoursAgo], ofItemAtPath: oldOrphan.path)
+    try fm.setAttributes([.modificationDate: twoHoursAgo], ofItemAtPath: activePendingDir.path)
+    try fm.setAttributes([.modificationDate: twoHoursAgo], ofItemAtPath: nonUUIDDir.path)
+    try fm.setAttributes([.modificationDate: fiveMinutesAgo], ofItemAtPath: freshDownload.path)
+
+    AppUpdateClient.pruneOrphanedDownloads(in: folder, maxAge: 3_600, now: now)
+
+    #expect(!fm.fileExists(atPath: oldOrphan.path))
+    #expect(fm.fileExists(atPath: freshDownload.path))
+    #expect(fm.fileExists(atPath: activePendingDir.path))
+    #expect(fm.fileExists(atPath: nonUUIDDir.path))
+    #expect(fm.fileExists(atPath: externalTarget.appendingPathComponent("sentinel.txt").path))
   }
 
   @Test func anUnsignedOrWronglySignedReleaseIsNeverDownloaded() async throws {
@@ -778,8 +860,12 @@ struct AppUpdateLogicTests {
     return try! JSONSerialization.data(withJSONObject: release)
   }
 
-  private func signature(for message: Data? = nil) -> Data {
-    UpdateSigningFixture.signature(for: message ?? checksums())
+  private func signature(
+    for message: Data? = nil, version: String = "1.13.0", build: Int = 100
+  ) -> Data {
+    UpdateSigningFixture.signature(
+      for: message ?? checksums(),
+      comment: AppUpdateSignature.expectedTrustedComment(version: version, build: build))
   }
 
   private func checksums() -> Data {
@@ -1002,7 +1088,8 @@ struct AppUpdateFakeGitHubHarnessTests {
       if host == "api.github.com" && path.hasSuffix("/assets/109") {
         return .respond(
           status: 200, headers: ["Content-Type": "application/octet-stream"],
-          body: UpdateSigningFixture.signature(for: Data(sumsText.utf8)))
+          body: UpdateSigningFixture.signature(
+            for: Data(sumsText.utf8), comment: "Aurelia for Mac 1.19.0 (109)"))
       }
       if host == "api.github.com" && path.hasSuffix("/assets/102") {
         return .respond(
@@ -1108,7 +1195,8 @@ struct AppUpdateFakeGitHubHarnessTests {
       if host == "api.github.com" && path.hasSuffix("/assets/209") {
         return .respond(
           status: 200, headers: ["Content-Type": "application/octet-stream"],
-          body: UpdateSigningFixture.signature(for: Data(sumsText.utf8)))
+          body: UpdateSigningFixture.signature(
+            for: Data(sumsText.utf8), comment: "Aurelia for Mac 1.19.0 (109)"))
       }
       if host == "api.github.com" && path.hasSuffix("/assets/202") {
         return .respond(
@@ -1185,7 +1273,8 @@ struct AppUpdateFakeGitHubHarnessTests {
       if host == "api.github.com" && path.hasSuffix("/assets/309") {
         return .respond(
           status: 200, headers: ["Content-Type": "application/octet-stream"],
-          body: UpdateSigningFixture.signature(for: Data(sumsText.utf8)))
+          body: UpdateSigningFixture.signature(
+            for: Data(sumsText.utf8), comment: "Aurelia for Mac 1.19.0 (109)"))
       }
       if host == "api.github.com" && path.hasSuffix("/assets/302") {
         return .respond(
@@ -1408,7 +1497,8 @@ struct AppUpdateFakeGitHubHarnessTests {
       if host == "api.github.com" && path.hasSuffix("/assets/509") {
         return .respond(
           status: 200, headers: ["Content-Type": "application/octet-stream"],
-          body: UpdateSigningFixture.signature(for: Data(sumsText.utf8)))
+          body: UpdateSigningFixture.signature(
+            for: Data(sumsText.utf8), comment: "Aurelia for Mac 1.20.0 (110)"))
       }
       if host == "api.github.com" && path.hasSuffix("/releases/assets/502") {
         return .respond(

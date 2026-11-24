@@ -33,7 +33,8 @@ if [ "$diagnostic_result" -ne 1 ] || [ -e "$diagnostic_directory" ]; then
   echo "Diagnostic update failure did not exit safely and clean its UUID download." >&2
   exit 1
 fi
-echo "Passed diagnostic failure exit cleanup; 24 total installer scenarios, no apps launched or installed."
+"$run_root/installer-diagnostic" --verify-entry-points "$run_root"
+echo "Passed diagnostic failure exit cleanup and entry-point guards; 30 total installer scenarios, no apps launched or installed."
 xcrun swiftc -warnings-as-errors -swift-version 6 \
   "$repository_root/clients/macos/UpdateHandoff/MacUpdateInstallRequest.swift" \
   "$repository_root/clients/macos/UpdateHandoff/AppEdition.swift" \

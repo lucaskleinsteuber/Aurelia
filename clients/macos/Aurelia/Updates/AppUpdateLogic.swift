@@ -328,6 +328,20 @@ enum AppUpdateLogic {
       "\(base) Your server on this Mac will stop for about a minute while the update installs, so anyone watching will be interrupted."
   }
 
+  /// Explains why automatic update checks are unavailable in Test Edition or local builds.
+  static func unavailableCheckNotice(isTestEdition: Bool) -> (title: String, message: String) {
+    if isTestEdition {
+      return (
+        "Updates Are Disabled in Aurelia Test",
+        "Aurelia Test does not update itself so it cannot replace the regular Aurelia app. Build or install a newer test copy to update it."
+      )
+    }
+    return (
+      "Automatic Updates Aren't Available",
+      "This copy of Aurelia was built locally without a GitHub release feed. Build it again to update."
+    )
+  }
+
   static func release(in data: Data, beta: Bool, repository: String? = nil) throws -> AppRelease {
     beta
       ? try newestRelease(fromList: data, repository: repository)

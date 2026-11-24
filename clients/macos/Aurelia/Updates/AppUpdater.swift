@@ -18,6 +18,21 @@ final class AppUpdater: ObservableObject {
     case failed(String)
   }
 
+  struct InstallHooks {
+    var updatesDirectory: @MainActor () throws -> URL = { try AppUpdater.updatesDirectory() }
+    var launchHelper: @MainActor (URL) async throws -> Void = { helper in
+      let configuration = NSWorkspace.OpenConfiguration()
+      configuration.activates = true
+      configuration.createsNewApplicationInstance = true
+      _ = try await NSWorkspace.shared.openApplication(at: helper, configuration: configuration)
+    }
+    var terminateApp: @MainActor () -> Void = { NSApp.terminate(nil) }
+    var showUpdatesPage: (@MainActor () -> Bool)? = nil
+    var presentAlert: (@MainActor (String, String) -> Void)? = nil
+    var acknowledgementTimeoutSeconds: TimeInterval = 30
+    var lateAcknowledgementTimeoutSeconds: TimeInterval = 15
+  }
+
   static let shared = AppUpdater()
   private static let logger = Logger(subsystem: "com.lucas.aurelia.media", category: "updates")
 
@@ -33,27 +48,44 @@ final class AppUpdater: ObservableObject {
   let bundlePath: String
   private let client: AppUpdateClient
   private let defaults: UserDefaults
+  private let installHooks: InstallHooks
 
   init(
     bundle: Bundle = .main,
-    client: AppUpdateClient = AppUpdateClient(), defaults: UserDefaults = .standard
+    client: AppUpdateClient = AppUpdateClient(),
+    defaults: UserDefaults = .standard,
+    bundlePath: String? = nil,
+    repositoryOverride: String? = nil,
+    currentVersion: String? = nil,
+    currentBuild: Int? = nil,
+    updatesStatusRoot: URL? = nil,
+    installHooks: InstallHooks = InstallHooks()
   ) {
     self.client = client
     self.defaults = defaults
-    bundlePath = bundle.bundleURL.standardizedFileURL.path
-    let configured = bundle.object(forInfoDictionaryKey: "AureliaUpdateRepository") as? String
+    self.installHooks = installHooks
+    self.bundlePath = bundlePath ?? bundle.bundleURL.standardizedFileURL.path
+    let configured =
+      repositoryOverride
+      ?? (bundle.object(forInfoDictionaryKey: "AureliaUpdateRepository") as? String)
     // Aurelia Test never updates itself: an update would install the real app.
     repository =
       AppEdition.isTest ? nil : configured.flatMap { AppUpdateLogic.isRepository($0) ? $0 : nil }
     AppUpdateSource.retirePublicTest(in: defaults)
-    currentVersion =
-      bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
-    currentBuild = Int(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
-    if let root = MacUpdateInstallRequest.updatesDirectory(),
-      let outcome = MacUpdateInstallRequest.status(in: root), outcome.phase == "failed",
-      outcome.build > currentBuild
-    {
-      state = .failed(outcome.message ?? "The previous update could not be completed. Try again.")
+    self.currentVersion =
+      currentVersion
+      ?? (bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "?"
+    self.currentBuild =
+      currentBuild
+      ?? Int(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
+    if let root = updatesStatusRoot ?? MacUpdateInstallRequest.updatesDirectory() {
+      AppUpdateClient.pruneOrphanedDownloads(in: root)
+      if let outcome = MacUpdateInstallRequest.status(in: root), outcome.phase == "failed",
+        outcome.build > self.currentBuild
+      {
+        state = .failed(
+          outcome.message ?? "The previous update could not be completed. Try again.")
+      }
     }
   }
 
@@ -85,6 +117,7 @@ final class AppUpdater: ObservableObject {
   /// falls back to a dialog.
   @discardableResult
   func showUpdatesPage() -> Bool {
+    if let override = installHooks.showUpdatesPage { return override() }
     guard let model = AppModel.active, model.offlineMode == nil else { return false }
     NSApp.activate()
     NSApp.windows.first { $0.canBecomeMain && $0.isVisible }?.makeKeyAndOrderFront(nil)
@@ -108,10 +141,8 @@ final class AppUpdater: ObservableObject {
     guard userInitiated || AppUpdatePreferences.checksAutomatically(in: defaults) else { return }
     guard let repository else {
       if userInitiated, !onPage {
-        alert(
-          "Updates Need a Release Build",
-          "This copy of Aurelia was not built for publishing, so it can't look for updates on GitHub."
-        )
+        let notice = AppUpdateLogic.unavailableCheckNotice(isTestEdition: AppEdition.isTest)
+        alert(notice.title, notice.message)
       }
       return
     }
@@ -206,14 +237,14 @@ final class AppUpdater: ObservableObject {
     var pendingRequest: MacUpdateInstallRequest?
     var updatesFolder: URL?
     do {
-      let folder = try Self.updatesDirectory()
+      let folder = try installHooks.updatesDirectory()
       updatesFolder = folder
       let size = release.downloadBytes
       let destination = try await client.download(
         release, repository: repository, currentBuild: currentBuild, folder: folder,
-        progress: { received, expected in
-          Task { @MainActor in
-            AppUpdater.shared.reportDownload(received: received, expected: expected ?? size)
+        progress: { [weak self] received, expected in
+          Task { @MainActor [weak self] in
+            self?.reportDownload(received: received, expected: expected ?? size)
           }
         })
       downloadedImage = destination
@@ -221,26 +252,25 @@ final class AppUpdater: ObservableObject {
 
       state = .installing
       AppUpdateDockProgress.show(nil)
-      let helper = Bundle.main.bundleURL
+      let helper = URL(fileURLWithPath: bundlePath)
         .appendingPathComponent("Contents/Helpers/Aurelia Server Host.app")
-      let configuration = NSWorkspace.OpenConfiguration()
-      configuration.activates = true
-      configuration.createsNewApplicationInstance = true
       let request = try MacUpdateInstallRequest.prepare(
         image: destination, build: release.build, appPID: getpid(), root: folder)
       try request.save(in: folder)
       pendingRequest = request
-      _ = try await NSWorkspace.shared.openApplication(at: helper, configuration: configuration)
+      try await installHooks.launchHelper(helper)
       // NSWorkspace ignores arguments from a sandboxed caller. Do not quit until
       // the same-team helper has acknowledged this exact validated request.
       do {
-        try await request.waitForAcknowledgement(in: folder)
+        try await request.waitForAcknowledgement(
+          in: folder, timeoutSeconds: installHooks.acknowledgementTimeoutSeconds)
       } catch MacUpdateInstallRequest.Failure.acknowledgementTimedOut {
         // Atomically withdraw the pending file before giving up. If withdrawal fails, the helper
         // already claimed the request right at the deadline — keep waiting for its status rather
         // than deleting the downloaded image out from under it.
         if !request.withdraw(in: folder) {
-          try await request.waitForAcknowledgement(in: folder, timeoutSeconds: 15)
+          try await request.waitForAcknowledgement(
+            in: folder, timeoutSeconds: installHooks.lateAcknowledgementTimeoutSeconds)
         } else {
           pendingRequest = nil
           throw MacUpdateInstallRequest.Failure.acknowledgementTimedOut
@@ -248,7 +278,7 @@ final class AppUpdater: ObservableObject {
       }
       Self.logger.notice("Installing Aurelia \(release.version, privacy: .public); quitting.")
       AppModel.active?.isPreparingApplicationUpdate = true
-      NSApp.terminate(nil)
+      installHooks.terminateApp()
     } catch {
       var helperClaimedRequest = false
       if let pendingRequest, let root = updatesFolder ?? MacUpdateInstallRequest.updatesDirectory()
@@ -299,10 +329,15 @@ final class AppUpdater: ObservableObject {
       try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
       try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
     } catch { throw AppUpdateError.classify(error) }
+    AppUpdateClient.pruneOrphanedDownloads(in: folder, fileManager: fileManager)
     return folder
   }
 
   private func alert(_ title: String, _ message: String) {
+    if let presentAlert = installHooks.presentAlert {
+      presentAlert(title, message)
+      return
+    }
     let alert = NSAlert()
     alert.messageText = title
     alert.informativeText = message

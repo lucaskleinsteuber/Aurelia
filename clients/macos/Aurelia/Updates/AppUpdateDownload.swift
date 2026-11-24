@@ -401,6 +401,55 @@ struct AppUpdateClient: Sendable {
     try await latestRelease(repository: repository, ifNoneMatch: ifNoneMatch).release
   }
 
+  private struct PendingInstallReference: Decodable {
+    let directory: UUID
+    let createdAt: Date?
+  }
+
+  /// Removes orphaned UUID download folders left behind by an earlier crash or force-quit once
+  /// they are at least `maxAge` old and not referenced by a non-expired pending install request.
+  static func pruneOrphanedDownloads(
+    in folder: URL, maxAge: TimeInterval = 3_600, now: Date = Date(),
+    fileManager: FileManager = .default
+  ) {
+    var protectedDirectory: UUID?
+    let pendingPath = folder.appendingPathComponent("PendingInstall.json")
+    if let pendingValues = try? pendingPath.resourceValues(forKeys: [
+      .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey,
+    ]),
+      pendingValues.isRegularFile == true, pendingValues.isSymbolicLink != true,
+      let size = pendingValues.fileSize, size > 0, size <= 4_096,
+      let data = try? Data(contentsOf: pendingPath),
+      let ref = try? JSONDecoder().decode(PendingInstallReference.self, from: data)
+    {
+      if let createdAt = ref.createdAt {
+        if now.timeIntervalSince(createdAt) < maxAge {
+          protectedDirectory = ref.directory
+        }
+      } else {
+        protectedDirectory = ref.directory
+      }
+    }
+    let keys: [URLResourceKey] = [
+      .isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey,
+    ]
+    guard
+      let entries = try? fileManager.contentsOfDirectory(
+        at: folder, includingPropertiesForKeys: keys, options: [])
+    else { return }
+    for entry in entries {
+      guard let uuid = UUID(uuidString: entry.lastPathComponent),
+        uuid != protectedDirectory,
+        let values = try? entry.resourceValues(forKeys: Set(keys)),
+        values.isDirectory == true,
+        values.isSymbolicLink != true,
+        let modified = values.contentModificationDate,
+        now.timeIntervalSince(modified) >= maxAge
+      else { continue }
+      try? fileManager.removeItem(at: entry)
+    }
+  }
+
   func download(
     _ release: AppRelease, repository: String, currentBuild: Int, folder: URL,
     progress: AppUpdateProgressHandler? = nil
@@ -418,6 +467,7 @@ struct AppUpdateClient: Sendable {
     guard AppUpdateLogic.isAnyAssetURL(signatureURL, repository: repository) else {
       throw AppUpdateError.invalidRelease
     }
+    Self.pruneOrphanedDownloads(in: folder)
     let directory = folder.appendingPathComponent(UUID().uuidString, isDirectory: true)
     var complete = false
     defer { if !complete { try? FileManager.default.removeItem(at: directory) } }
@@ -426,10 +476,12 @@ struct AppUpdateClient: Sendable {
         at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
       let sums = try await transfer(release.checksumsURL, maximumBytes: 1_024 * 1_024)
       let signature = try await transfer(signatureURL, maximumBytes: 64 * 1_024)
+      let expectedComment = AppUpdateSignature.expectedTrustedComment(
+        version: release.version, build: release.build)
       guard
         AppUpdateSignature.verify(
           sums.data, signatureFile: String(decoding: signature.data, as: UTF8.self),
-          publicKey: signingKey)
+          publicKey: signingKey, expectedComment: expectedComment)
       else { throw AppUpdateError.badSignature }
       guard
         let expected = AppUpdateLogic.checksum(

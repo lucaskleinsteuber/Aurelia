@@ -682,6 +682,38 @@ struct AureliaTests {
   }
 
   @Test
+  func build11ServerDataMigrationCleansAbandonedStagingAndSkipsExistingEmptyDestination() throws {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory
+      .appendingPathComponent(
+        "AureliaMigrationStagingTests-\(UUID().uuidString)", isDirectory: true)
+    let legacy = root.appendingPathComponent("Aurelia Home Server", isDirectory: true)
+    let destination = root.appendingPathComponent("Aurelia Server", isDirectory: true)
+    let abandonedStaging = root.appendingPathComponent(
+      ".Aurelia-Server-Migration-\(UUID().uuidString)", isDirectory: true)
+    let unrelatedSibling = root.appendingPathComponent("Unrelated", isDirectory: true)
+    try fileManager.createDirectory(at: legacy, withIntermediateDirectories: true)
+    try fileManager.createDirectory(
+      at: destination, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    try fileManager.createDirectory(
+      at: abandonedStaging, withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700])
+    try fileManager.createDirectory(at: unrelatedSibling, withIntermediateDirectories: true)
+    defer { try? fileManager.removeItem(at: root) }
+
+    try Data("old-data".utf8).write(to: legacy.appendingPathComponent("aurelia-home.db"))
+    try Data("leftover".utf8).write(to: abandonedStaging.appendingPathComponent("partial.db"))
+
+    try ServerDataMigrator.migrateIfNeeded(from: legacy, to: destination)
+
+    // Abandoned migration staging is cleaned up, unrelated folders stay untouched.
+    #expect(!fileManager.fileExists(atPath: abandonedStaging.path))
+    #expect(fileManager.fileExists(atPath: unrelatedSibling.path))
+    // An existing (even empty) destination must not silently re-import legacy Build 11 data.
+    #expect(try fileManager.contentsOfDirectory(atPath: destination.path).isEmpty)
+  }
+
+  @Test
   func serverProfileRoundTripsThroughInMemoryStore() throws {
     let store = InMemoryServerProfileStore()
     let profile = StoredServerProfile(
@@ -1156,4 +1188,320 @@ private actor SyncUpdateProbe {
 private actor ArtworkFetchCounter {
   private(set) var value = 0
   func increment() { value += 1 }
+}
+
+@MainActor
+struct AppUpdaterInstallFlowTests {
+  private final class FakeUpdaterTransport: AppUpdateTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var steps: [Data]
+    private var calls = 0
+    private let emitProgress: Bool
+
+    init(steps: [Data], emitProgress: Bool = false) {
+      self.steps = steps
+      self.emitProgress = emitProgress
+    }
+
+    var callCount: Int { lock.withLock { calls } }
+
+    func transfer(_ request: URLRequest, maximumBytes: Int64, destination: URL?) async throws
+      -> AppUpdateTransfer
+    {
+      try await transfer(
+        request, maximumBytes: maximumBytes, destination: destination, progress: nil)
+    }
+
+    func transfer(
+      _ request: URLRequest, maximumBytes: Int64, destination: URL?,
+      progress: AppUpdateProgressHandler?
+    ) async throws -> AppUpdateTransfer {
+      let data: Data = try lock.withLock {
+        calls += 1
+        guard !steps.isEmpty else { throw AppUpdateError.invalidResponse }
+        return steps.removeFirst()
+      }
+      let response = HTTPURLResponse(
+        url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+        headerFields: ["Content-Length": String(data.count)])!
+      var accumulator = try AppUpdateTransferAccumulator(
+        response: response, maximumBytes: maximumBytes,
+        write: destination.map { url in { try $0.write(to: url, options: .withoutOverwriting) } })
+      try accumulator.consume(data)
+      if destination != nil, emitProgress {
+        progress?(Int64(data.count), Int64(data.count))
+        try? await Task.sleep(for: .milliseconds(25))
+      }
+      return try accumulator.finish()
+    }
+  }
+
+  private func makeFixtureRelease(
+    version: String = "2.30.0", build: Int = 200, imageBytes: Data = Data("synthetic-dmg".utf8)
+  ) throws -> (release: AppRelease, steps: [Data]) {
+    let arch = AppUpdateLogic.architecture
+    let tag = "\(version)-\(build)"
+    let imageName = "Aurelia-\(tag)-macOS-\(arch).dmg"
+    let json = Data(
+      """
+      {
+        "tag_name": "\(tag)",
+        "draft": false,
+        "assets": [
+          {"name": "\(imageName)", "url": "https://api.github.com/repos/owner/repo/releases/assets/1", "size": \(imageBytes.count)},
+          {"name": "SHA256SUMS", "url": "https://api.github.com/repos/owner/repo/releases/assets/2"},
+          {"name": "SHA256SUMS.minisig", "url": "https://api.github.com/repos/owner/repo/releases/assets/3"}
+        ]
+      }
+      """.utf8)
+    let release = try AppUpdateLogic.validatedRelease(fromLatest: json, repository: "owner/repo")
+    let digest = try makeDigest(imageBytes)
+    let sums = Data("\(digest)  \(imageName)\n".utf8)
+    let sig = UpdateSigningFixture.signature(
+      for: sums, comment: AppUpdateSignature.expectedTrustedComment(version: version, build: build))
+    return (release, [sums, sig, imageBytes])
+  }
+
+  private func makeDigest(_ data: Data) throws -> String {
+    let response = HTTPURLResponse(
+      url: URL(string: "https://api.github.com/repos/owner/repo/releases/assets/1")!,
+      statusCode: 200, httpVersion: "HTTP/1.1",
+      headerFields: ["Content-Length": String(data.count)])!
+    var accumulator = try AppUpdateTransferAccumulator(
+      response: response, maximumBytes: Int64(max(1, data.count)), write: { _ in })
+    try accumulator.consume(data)
+    return try accumulator.finish().sha256
+  }
+
+  private func makeFolder() throws -> URL {
+    let folder = FileManager.default.temporaryDirectory
+      .appendingPathComponent("AureliaUpdaterFlow-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    return folder
+  }
+
+  @Test func appUpdaterRefusesInstallOutsideApplicationsOrWhenTranslocated() async throws {
+    let folder = try makeFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let (release, steps) = try makeFixtureRelease()
+
+    for path in [
+      "/Users/alice/Downloads/Aurelia.app",
+      "/private/var/folders/xx/T/AppTranslocation/ABC/d/Aurelia.app",
+    ] {
+      let transport = FakeUpdaterTransport(steps: steps)
+      var launched = 0
+      var terminated = 0
+      var shownAlerts: [(String, String)] = []
+      let hooks = AppUpdater.InstallHooks(
+        updatesDirectory: { folder },
+        launchHelper: { _ in launched += 1 },
+        terminateApp: { terminated += 1 },
+        showUpdatesPage: { false },
+        presentAlert: { shownAlerts.append(($0, $1)) })
+      let suite = "Aurelia.UpdaterLoc.\(UUID().uuidString)"
+      let defaults = try #require(UserDefaults(suiteName: suite))
+      defer { defaults.removePersistentDomain(forName: suite) }
+
+      let updater = AppUpdater(
+        client: AppUpdateClient(transport: transport, signingKey: UpdateSigningFixture.publicKey),
+        defaults: defaults,
+        bundlePath: path,
+        repositoryOverride: "owner/repo",
+        currentVersion: "2.29.0",
+        currentBuild: 199,
+        updatesStatusRoot: folder,
+        installHooks: hooks)
+      await updater.install(release)
+
+      #expect(transport.callCount == 0)
+      #expect(launched == 0)
+      #expect(terminated == 0)
+      #expect(updater.installingRelease == nil)
+      #expect(shownAlerts.count == 1)
+      if case .failed(let message) = updater.state {
+        #expect(message == AppUpdateLogic.installLocationIssue(bundlePath: path)?.message)
+      } else {
+        Issue.record("Expected .failed state for \(path)")
+      }
+    }
+  }
+
+  @Test func appUpdaterInstallTimeoutWithdrawsPendingRequestAndCleansDownload() async throws {
+    let folder = try makeFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let (release, steps) = try makeFixtureRelease()
+    let transport = FakeUpdaterTransport(steps: steps)
+    var terminated = 0
+    let hooks = AppUpdater.InstallHooks(
+      updatesDirectory: { folder },
+      launchHelper: { _ in },
+      terminateApp: { terminated += 1 },
+      showUpdatesPage: { true },
+      presentAlert: { _, _ in },
+      acknowledgementTimeoutSeconds: 0.15,
+      lateAcknowledgementTimeoutSeconds: 0.15)
+    let suite = "Aurelia.UpdaterTimeout.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    let updater = AppUpdater(
+      client: AppUpdateClient(transport: transport, signingKey: UpdateSigningFixture.publicKey),
+      defaults: defaults,
+      bundlePath: "/Applications/Aurelia.app",
+      repositoryOverride: "owner/repo",
+      currentVersion: "2.29.0",
+      currentBuild: 199,
+      updatesStatusRoot: folder,
+      installHooks: hooks)
+    await updater.install(release)
+
+    #expect(terminated == 0)
+    #expect(updater.installingRelease == nil)
+    #expect(updater.progress == nil)
+    if case .failed(let message) = updater.state {
+      #expect(message.localizedCaseInsensitiveContains("did not acknowledge"))
+    } else {
+      Issue.record("Expected .failed after acknowledgement timeout")
+    }
+    let remaining = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+    #expect(remaining.isEmpty)
+  }
+
+  @Test func appUpdaterInstallLateAcknowledgementAfterClaimSucceedsWithoutDeletingImage()
+    async throws
+  {
+    let folder = try makeFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let (release, steps) = try makeFixtureRelease()
+    let transport = FakeUpdaterTransport(steps: steps)
+    var terminated = 0
+    var claimedRequest: MacUpdateInstallRequest?
+    let hooks = AppUpdater.InstallHooks(
+      updatesDirectory: { folder },
+      launchHelper: { _ in
+        // Simulate a helper that claims PendingInstall.json immediately, but writes "accepted"
+        // slightly after the first timeout expires (the late-acknowledgement race).
+        claimedRequest = try MacUpdateInstallRequest.claim(in: folder)
+        let claimed = claimedRequest
+        Task.detached {
+          try? await Task.sleep(for: .milliseconds(250))
+          if let claimed {
+            try? claimed.writeStatus("accepted", in: folder)
+          }
+        }
+      },
+      terminateApp: { terminated += 1 },
+      showUpdatesPage: { true },
+      presentAlert: { _, _ in },
+      acknowledgementTimeoutSeconds: 0.12,
+      lateAcknowledgementTimeoutSeconds: 2.0)
+    let suite = "Aurelia.UpdaterLateAck.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    let updater = AppUpdater(
+      client: AppUpdateClient(transport: transport, signingKey: UpdateSigningFixture.publicKey),
+      defaults: defaults,
+      bundlePath: "/Applications/Aurelia.app",
+      repositoryOverride: "owner/repo",
+      currentVersion: "2.29.0",
+      currentBuild: 199,
+      updatesStatusRoot: folder,
+      installHooks: hooks)
+    await updater.install(release)
+
+    #expect(terminated == 1)
+    let claimed = try #require(claimedRequest)
+    let downloadedImage = try claimed.image(in: folder)
+    #expect(FileManager.default.fileExists(atPath: downloadedImage.path))
+  }
+
+  @Test func appUpdaterInstallSurfacesPreAcceptanceHelperRejectionAndStaysOpen() async throws {
+    let folder = try makeFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let (release, steps) = try makeFixtureRelease()
+    let transport = FakeUpdaterTransport(steps: steps)
+    var terminated = 0
+    let rejectionText =
+      "Aurelia doesn't have permission to update itself in Applications."
+    let hooks = AppUpdater.InstallHooks(
+      updatesDirectory: { folder },
+      launchHelper: { _ in
+        if let claimed = try MacUpdateInstallRequest.claim(in: folder) {
+          try claimed.writeStatus("failed", message: rejectionText, in: folder)
+        }
+      },
+      terminateApp: { terminated += 1 },
+      showUpdatesPage: { true },
+      presentAlert: { _, _ in },
+      acknowledgementTimeoutSeconds: 1.0,
+      lateAcknowledgementTimeoutSeconds: 1.0)
+    let suite = "Aurelia.UpdaterReject.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    let updater = AppUpdater(
+      client: AppUpdateClient(transport: transport, signingKey: UpdateSigningFixture.publicKey),
+      defaults: defaults,
+      bundlePath: "/Applications/Aurelia.app",
+      repositoryOverride: "owner/repo",
+      currentVersion: "2.29.0",
+      currentBuild: 199,
+      updatesStatusRoot: folder,
+      installHooks: hooks)
+    await updater.install(release)
+
+    #expect(terminated == 0)
+    #expect(updater.installingRelease == nil)
+    #expect(updater.state == .failed(rejectionText))
+  }
+
+  @Test func appUpdaterInstallRecoversFromStalePendingFileAndReportsProgressOnSelf() async throws {
+    let folder = try makeFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    // Plant an expired PendingInstall.json left behind by an earlier crash.
+    let stalePending = MacUpdateInstallRequest(
+      id: UUID(), directory: UUID(), imageName: "Aurelia-2.28.0-198-macOS-arm64.dmg",
+      build: 198, appPID: 123, createdAt: Date().addingTimeInterval(-600))
+    try JSONEncoder().encode(stalePending).write(
+      to: folder.appendingPathComponent(MacUpdateInstallRequest.pendingName))
+
+    let (release, steps) = try makeFixtureRelease()
+    let transport = FakeUpdaterTransport(steps: steps, emitProgress: true)
+    var terminated = 0
+    var observedProgressOnInstance = false
+    let hooks = AppUpdater.InstallHooks(
+      updatesDirectory: { folder },
+      launchHelper: { _ in
+        if let claimed = try MacUpdateInstallRequest.claim(in: folder) {
+          try claimed.writeStatus("accepted", in: folder)
+        }
+      },
+      terminateApp: { terminated += 1 },
+      showUpdatesPage: { true },
+      presentAlert: { _, _ in },
+      acknowledgementTimeoutSeconds: 1.0,
+      lateAcknowledgementTimeoutSeconds: 1.0)
+    let suite = "Aurelia.UpdaterStale.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    let updater = AppUpdater(
+      client: AppUpdateClient(transport: transport, signingKey: UpdateSigningFixture.publicKey),
+      defaults: defaults,
+      bundlePath: "/Applications/Aurelia.app",
+      repositoryOverride: "owner/repo",
+      currentVersion: "2.29.0",
+      currentBuild: 199,
+      updatesStatusRoot: folder,
+      installHooks: hooks)
+    let sharedProgressBefore = AppUpdater.shared.progress
+    await updater.install(release)
+    observedProgressOnInstance = (updater.progress?.received ?? 0) > 0
+
+    #expect(terminated == 1)
+    #expect(observedProgressOnInstance)
+    #expect(AppUpdater.shared.progress == sharedProgressBefore)
+  }
 }

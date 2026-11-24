@@ -137,11 +137,20 @@ enum HostBootstrapLocation {
     }
 
     let directory = container.appendingPathComponent(
-      "Library/Caches/Aurelia/Host", isDirectory: true)
-    try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-    try fileManager.setAttributes(
-      [.posixPermissions: 0o700], ofItemAtPath: directory.path)
-    return directory.standardizedFileURL
+      "Library/Caches/Aurelia/Host", isDirectory: true
+    ).standardizedFileURL
+    var metadata = stat()
+    let alreadyPrepared =
+      lstat(directory.path, &metadata) == 0
+      && (metadata.st_mode & S_IFMT) == S_IFDIR
+      && metadata.st_uid == getuid()
+      && (metadata.st_mode & 0o777) == 0o700
+    if !alreadyPrepared {
+      try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+      try fileManager.setAttributes(
+        [.posixPermissions: 0o700], ofItemAtPath: directory.path)
+    }
+    return directory
   }
 }
 
@@ -244,6 +253,55 @@ enum HostLaunchSecurity {
       let secret = String(bytes: bytes.prefix(count), encoding: .utf8)
     else { throw HostLaunchSecurityError.invalidSecretPipe }
     return secret
+  }
+
+  /// Removes orphaned per-launch handoff files (`launch-<pid>.json`, `launch-<pid>.pipe`) whose
+  /// owning process is no longer running, plus abandoned per-launch `<uuid>.json` rendezvous files
+  /// older than `staleRendezvousAge`, while preserving active and persistent background-service files.
+  static func pruneStaleHandoffFiles(
+    in directory: URL,
+    currentProcessID: Int32 = ProcessInfo.processInfo.processIdentifier,
+    now: Date = Date(),
+    staleRendezvousAge: TimeInterval = 3_600,
+    owner: uid_t = getuid(),
+    processIsAlive: (Int32) -> Bool = { pid in
+      pid > 0 && (kill(pid, 0) == 0 || errno != ESRCH)
+    }
+  ) {
+    let fileManager = FileManager.default
+    guard
+      let entries = try? fileManager.contentsOfDirectory(
+        at: directory, includingPropertiesForKeys: [.contentModificationDateKey], options: [])
+    else { return }
+    for entry in entries {
+      let name = entry.lastPathComponent
+      var metadata = stat()
+      guard lstat(entry.path, &metadata) == 0, metadata.st_uid == owner else { continue }
+      let fileType = metadata.st_mode & S_IFMT
+      if name.hasPrefix("launch-") {
+        if name.hasSuffix(".json"), fileType == S_IFREG,
+          let pid = Int32(name.dropFirst("launch-".count).dropLast(".json".count)),
+          pid != currentProcessID, !processIsAlive(pid)
+        {
+          try? fileManager.removeItem(at: entry)
+        } else if name.hasSuffix(".pipe"), fileType == S_IFIFO,
+          let pid = Int32(name.dropFirst("launch-".count).dropLast(".pipe".count)),
+          pid != currentProcessID, !processIsAlive(pid)
+        {
+          unlink(entry.path)
+        }
+      } else if name.hasSuffix(".json"), fileType == S_IFREG,
+        UUID(uuidString: String(name.dropLast(".json".count))) != nil
+      {
+        let modified =
+          (try? entry.resourceValues(forKeys: [.contentModificationDateKey]))?
+          .contentModificationDate
+          ?? Date(timeIntervalSince1970: TimeInterval(metadata.st_mtimespec.tv_sec))
+        if now.timeIntervalSince(modified) >= staleRendezvousAge {
+          try? fileManager.removeItem(at: entry)
+        }
+      }
+    }
   }
 }
 

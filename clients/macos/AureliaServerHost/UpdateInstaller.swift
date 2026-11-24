@@ -19,12 +19,22 @@ enum UpdateInstaller {
     { runPendingWorker() }
   }
 
-  static func runPendingWorker() -> WorkerResult {
-    let app = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent()
+  static func enclosingAppURL(helperBundleURL: URL = Bundle.main.bundleURL) -> URL {
+    helperBundleURL.deletingLastPathComponent().deletingLastPathComponent()
       .deletingLastPathComponent().standardizedFileURL
-    guard app.path == "/Applications/Aurelia.app",
-      let root = MacUpdateInstallRequest.updatesDirectory(),
-      let outcome = runPendingOutcome(app: app, root: root, presentsFailure: false)
+  }
+
+  static func runPendingWorker(
+    appURL: URL = enclosingAppURL(),
+    requiredAppPath: String = "/Applications/Aurelia.app",
+    updatesRoot: URL? = MacUpdateInstallRequest.updatesDirectory(),
+    relaunch: (URL) -> Void = { open($0) }
+  ) -> WorkerResult {
+    let app = appURL.standardizedFileURL
+    guard app.path == requiredAppPath,
+      let root = updatesRoot,
+      let outcome = runPendingOutcome(
+        app: app, root: root, presentsFailure: false, relaunch: relaunch)
     else { return .completed }
     // Only surface a post-acceptance failure alert from the helper (when the app is already
     // quitting). Pre-acceptance rejections are read directly by the still-open app from status.
@@ -46,7 +56,10 @@ enum UpdateInstaller {
 
   static func hasPendingRequest(
     arguments: [String] = CommandLine.arguments,
-    environment: [String: String] = ProcessInfo.processInfo.environment
+    environment: [String: String] = ProcessInfo.processInfo.environment,
+    appURL: URL = enclosingAppURL(),
+    requiredAppPath: String = "/Applications/Aurelia.app",
+    updatesRoot: URL? = MacUpdateInstallRequest.updatesDirectory()
   ) -> Bool {
     // A normal host or login-agent start must never be hijacked by a pending/stale update file.
     if arguments.contains("--background")
@@ -56,17 +69,14 @@ enum UpdateInstaller {
     {
       return false
     }
-    let app = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent()
-      .deletingLastPathComponent().standardizedFileURL
-    guard app.path == "/Applications/Aurelia.app",
-      let root = MacUpdateInstallRequest.updatesDirectory()
+    guard appURL.standardizedFileURL.path == requiredAppPath,
+      let root = updatesRoot
     else { return false }
     return MacUpdateInstallRequest.hasFreshPendingRequest(in: root)
   }
 
   static func runPendingIfRequested() -> Bool {
-    let app = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent()
-      .deletingLastPathComponent().standardizedFileURL
+    let app = enclosingAppURL()
     // Synthetic host tests and other copies never inspect the installed app's requests.
     guard app.path == "/Applications/Aurelia.app",
       let root = MacUpdateInstallRequest.updatesDirectory()
@@ -81,12 +91,15 @@ enum UpdateInstaller {
 
   /// The complete production transaction can be exercised against signed invented apps.
   /// Production entry points always derive their installed location and App Group above.
-  static func runPending(app: URL, root: URL, presentsFailure: Bool = true) -> Bool {
-    runPendingOutcome(app: app, root: root, presentsFailure: presentsFailure) != nil
+  static func runPending(
+    app: URL, root: URL, presentsFailure: Bool = true, relaunch: (URL) -> Void = { open($0) }
+  ) -> Bool {
+    runPendingOutcome(app: app, root: root, presentsFailure: presentsFailure, relaunch: relaunch)
+      != nil
   }
 
   private static func runPendingOutcome(
-    app: URL, root: URL, presentsFailure: Bool
+    app: URL, root: URL, presentsFailure: Bool, relaunch: (URL) -> Void
   ) -> PendingOutcome? {
     var request: MacUpdateInstallRequest?
     var accepted = false
@@ -105,7 +118,7 @@ enum UpdateInstaller {
       try? claimed.writeStatus("installed", in: root)
       logger.notice(
         "Installed build \(claimed.build, privacy: .public) through the App Group handoff.")
-      open(app)
+      relaunch(app)
       return PendingOutcome(requestID: claimed.id, accepted: true)
     } catch {
       if !accepted, let resolvedImage {
@@ -118,7 +131,7 @@ enum UpdateInstaller {
       logger.error("App Group update failed: \(message, privacy: .public)")
       if presentsFailure, accepted {
         report(message)
-        open(app)
+        relaunch(app)
       }
       return request.map { PendingOutcome(requestID: $0.id, accepted: accepted) }
     }
