@@ -186,7 +186,6 @@ if [ "${1:-}" = --now ]; then
     exit 0
   fi
   save_power "Asked from an app"
-  exit 0
 fi
 
 # Aurelia stopped earlier and is waiting for a device. If stopping is no longer wanted, it starts
@@ -204,11 +203,55 @@ if [ "$MODE" = off ]; then
   exit 0
 fi
 
-# Someone signed in over SSH is working on the computer: never put it to sleep under them.
-if [ "$MODE" != stop ] && ss -Htn state established '( sport = :22 )' | grep -q .; then
-  echo "$now" > "$state/last-active"
-  say "awake: signed in over SSH"
-  exit 0
+# Prints "ssh" when someone is signed in over SSH (any configured sshd port, or a remote logind
+# session such as Tailscale SSH), "console" for an active local TTY session, or nothing otherwise.
+interactive_session_kind() {
+  local ports="" port filter=""
+  if command -v sshd >/dev/null 2>&1; then
+    ports=$(sshd -T 2>/dev/null | awk '$1 == "port" && $2 ~ /^[0-9]+$/ { print $2 }' || true)
+  fi
+  [ -n "$ports" ] || ports=22
+  for port in $ports; do
+    filter="${filter:+$filter or }sport = :$port"
+  done
+  if ss -Htn state established "( $filter )" 2>/dev/null | grep -q .; then
+    echo ssh
+    return 0
+  fi
+  if command -v loginctl >/dev/null 2>&1; then
+    local session_id state type class remote
+    while read -r session_id _rest; do
+      [ -n "$session_id" ] || continue
+      class=$(loginctl show-session "$session_id" -p Class --value 2>/dev/null || true)
+      state=$(loginctl show-session "$session_id" -p State --value 2>/dev/null || true)
+      [ "$class" = user ] && [ "$state" = active ] || continue
+      remote=$(loginctl show-session "$session_id" -p Remote --value 2>/dev/null || true)
+      if [ "$remote" = yes ]; then
+        echo ssh
+        return 0
+      fi
+      type=$(loginctl show-session "$session_id" -p Type --value 2>/dev/null || true)
+      if [ "$type" = tty ]; then
+        echo console
+        return 0
+      fi
+    done < <(loginctl list-sessions --no-legend 2>/dev/null || true)
+  fi
+  return 1
+}
+
+# Someone signed in over SSH or a local console is working on the computer: never put it to sleep under them.
+if [ "$MODE" != stop ]; then
+  session_kind=$(interactive_session_kind || true)
+  if [ "$session_kind" = ssh ]; then
+    echo "$now" > "$state/last-active"
+    say "awake: signed in over SSH"
+    exit 0
+  elif [ "$session_kind" = console ]; then
+    echo "$now" > "$state/last-active"
+    say "awake: signed in on console"
+    exit 0
+  fi
 fi
 
 # An update is being checked or installed: sleeping now could leave a half-replaced program.
@@ -253,7 +296,17 @@ if [[ "$used" =~ ^[0-9]+$ ]]; then
 elif ss -Htn state established '( sport = :43111 )' | grep -q .; then
   busy=true
 fi
-if [ "$work" != analysis ] && awk '{ exit !($1 > 0.5) }' /proc/loadavg; then busy=true; fi
+# Background analysis (intro, credits, file checks, previews) should not keep the computer awake on
+# its own, but unrelated work by other users (backups, builds) still counts while analysis runs.
+if [ "$work" != analysis ]; then
+  if awk '{ exit !($1 > 0.5) }' /proc/loadavg; then busy=true; fi
+else
+  aurelia_uid=$(id -u aurelia 2>/dev/null || true)
+  if [ -n "$aurelia_uid" ] \
+    && ps -eo uid=,pcpu= 2>/dev/null | awk -v a="$aurelia_uid" '$1 != a { sum += $2 } END { exit !(sum > 50.0) }'; then
+    busy=true
+  fi
+fi
 if update_running; then busy=true; fi
 if $busy; then
   echo "$now" > "$state/last-active"

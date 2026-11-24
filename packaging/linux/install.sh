@@ -35,6 +35,8 @@ if [ "${1:-}" = --uninstall ]; then
   [ "${2:-}" = --remove-data ] && remove_data=true
   systemctl disable --now aurelia aurelia-autosleep.timer aurelia-start.socket aurelia-update-request.path \
     aurelia-update-check.timer aurelia-power-request.path 2>/dev/null || true
+  systemctl stop aurelia-autosleep.service aurelia-update-request.service aurelia-update-check.service \
+    aurelia-power-request.service aurelia-start.service 2>/dev/null || true
   systemctl disable aurelia-wake-on-lan.service 2>/dev/null || true
   rm -f "$unit" "$command_path" /etc/aurelia-autosleep.conf /etc/systemd/system/aurelia-autosleep.service \
     /etc/systemd/system/aurelia-autosleep.timer /etc/systemd/system/aurelia-wake-on-lan.service \
@@ -42,7 +44,7 @@ if [ "${1:-}" = --uninstall ]; then
     /etc/systemd/system/aurelia-update-request.path /etc/systemd/system/aurelia-update-request.service \
     /etc/systemd/system/aurelia-update-check.timer /etc/systemd/system/aurelia-update-check.service \
     /etc/systemd/system/aurelia-power-request.path /etc/systemd/system/aurelia-power-request.service \
-    /etc/aurelia/github-token
+    /etc/aurelia/github-token /etc/aurelia/update-channel /etc/aurelia/test-update-source
   rmdir /etc/aurelia 2>/dev/null || true
   systemctl daemon-reload
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then

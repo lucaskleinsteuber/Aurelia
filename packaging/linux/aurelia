@@ -26,6 +26,10 @@ wait_until_ready() {
 # Power saving may have stopped Aurelia Server; connecting to its local port starts it again.
 ensure_running() {
   systemctl is-active --quiet aurelia && return 0
+  if ! systemctl is-active --quiet aurelia-start.socket; then
+    echo "Aurelia Server is stopped. Start it with: sudo aurelia start" >&2
+    return 1
+  fi
   (exec 3<>/dev/tcp/127.0.0.1/43110) 2>/dev/null || true
   wait_until_ready
 }
@@ -44,11 +48,9 @@ update_api=${AURELIA_UPDATE_API:-https://api.github.com}
 update_repository=${AURELIA_UPDATE_REPOSITORY:-$(cat "$install_root/REPOSITORY" 2>/dev/null || true)}
 update_token=""
 # The owner's minisign key, the same that signs Aurelia for Linux (docs/LINUX_UPDATE_SIGNING.md).
-# A release's SHA256SUMS must carry its signature, so a changed GitHub release installs nothing.
-# Builds before first_signed_build were published without one. Tests with a stand-in for GitHub
-# sign with their own key.
+# Every release's SHA256SUMS must carry its signature, old builds included, so a changed GitHub
+# release installs nothing. Tests with a stand-in for GitHub sign with their own key.
 signing_public_key=RWT0nYptHNjXQSXnVurY9XXdPF2Ssq5sUlSP+WoBwjA5GPXWnugBc7lE
-first_signed_build=153
 [ -n "${AURELIA_UPDATE_API:-}" ] && signing_public_key=${AURELIA_UPDATE_SIGNING_KEY:-$signing_public_key}
 
 # Succeeds when $2 is a minisign signature of $1 made with signing_public_key, checked with
@@ -227,8 +229,12 @@ case "$command" in
     kind=""
     while [ $# -gt 0 ]; do
       case "$1" in
-        --name) name=${2:-}; shift 2 ;;
-        --power) power=${2:-}; shift 2 ;;
+        --name)
+          [ $# -ge 2 ] || { echo "--name needs a value." >&2; exit 2; }
+          name=$2; shift 2 ;;
+        --power)
+          [ $# -ge 2 ] || { echo "--power needs a value." >&2; exit 2; }
+          power=$2; shift 2 ;;
         --browser) way=browser; kind=new; shift ;;
         --terminal) way=terminal; kind=new; shift ;;
         --move) kind=move; shift ;;
@@ -351,21 +357,27 @@ case "$command" in
       on|server|shutdown)
         while [ $# -gt 0 ]; do
           case "$1" in
-            --idle) IDLE_MINUTES=${2:-}; shift 2 ;;
+            --idle)
+              [ $# -ge 2 ] || { echo "--idle needs a number of minutes from 5 to 1440." >&2; exit 2; }
+              IDLE_MINUTES=$2; shift 2 ;;
             --wake-on-access)
-              case "${2:-}" in on|off) WAKE_ON_ACCESS=$2 ;; *) echo "--wake-on-access needs on or off." >&2; exit 2 ;; esac
+              [ $# -ge 2 ] || { echo "--wake-on-access needs on or off." >&2; exit 2; }
+              case "$2" in on|off) WAKE_ON_ACCESS=$2 ;; *) echo "--wake-on-access needs on or off." >&2; exit 2 ;; esac
               shift 2 ;;
             --after-sleep-timer)
-              case "${2:-}" in on|off) AFTER_SLEEP_TIMER=$2 ;; *) echo "--after-sleep-timer needs on or off." >&2; exit 2 ;; esac
+              [ $# -ge 2 ] || { echo "--after-sleep-timer needs on or off." >&2; exit 2; }
+              case "$2" in on|off) AFTER_SLEEP_TIMER=$2 ;; *) echo "--after-sleep-timer needs on or off." >&2; exit 2 ;; esac
               shift 2 ;;
             --awake)
-              if [ "${2:-}" = off ]; then AWAKE_FROM="" AWAKE_UNTIL=""; else AWAKE_FROM=${2%%-*} AWAKE_UNTIL=${2##*-}; fi
+              [ $# -ge 2 ] || { echo "--awake needs HH:MM-HH:MM, for example 17:00-23:30, or off." >&2; exit 2; }
+              if [ "$2" = off ]; then AWAKE_FROM="" AWAKE_UNTIL=""; else AWAKE_FROM=${2%%-*} AWAKE_UNTIL=${2##*-}; fi
               shift 2 ;;
             *) echo "Unknown option: $1" >&2; exit 2 ;;
           esac
         done
-        [[ "$IDLE_MINUTES" =~ ^[0-9]+$ ]] && (( IDLE_MINUTES >= 5 && IDLE_MINUTES <= 1440 )) \
+        [[ "$IDLE_MINUTES" =~ ^[0-9]{1,5}$ ]] && (( 10#$IDLE_MINUTES >= 5 && 10#$IDLE_MINUTES <= 1440 )) \
           || { echo "--idle needs a number of minutes from 5 to 1440." >&2; exit 2; }
+        IDLE_MINUTES=$(( 10#$IDLE_MINUTES ))
         if [ -n "$AWAKE_FROM$AWAKE_UNTIL" ]; then
           for time in "$AWAKE_FROM" "$AWAKE_UNTIL"; do
             [[ "$time" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || { echo "--awake needs HH:MM-HH:MM, for example 17:00-23:30, or off." >&2; exit 2; }
@@ -431,6 +443,7 @@ case "$command" in
           [ "$MODE" != stop ] && [ "$WAKE_ON_ACCESS" = on ] && echo "Wakes when a device connects directly: on"
           scratch=$(mktemp -d)
           [ -r /run/aurelia-autosleep/last-active ] && cp /run/aurelia-autosleep/last-active "$scratch/"
+          [ -r /run/aurelia-autosleep/woke ] && cp /run/aurelia-autosleep/woke "$scratch/"
           echo "Right now: $(AURELIA_AUTOSLEEP_DRY_RUN=1 AURELIA_AUTOSLEEP_STATE="$scratch" "$install_root/aurelia-autosleep" 2>/dev/null || echo "unknown")"
           rm -rf "$scratch"
         else
@@ -633,7 +646,13 @@ case "$command" in
     installed_build=$(sed -n 's/.*(\([0-9][0-9]*\)).*/\1/p' <<<"$installed")
     echo "Installed: Aurelia Server $installed"
     echo "Newest:    Aurelia Server $version ($build)"
-    if [ -n "$installed_build" ] && [ "$build" -le "$installed_build" ]; then
+    if [ -z "$installed_build" ]; then
+      unreadable="Cannot read the installed build from $install_root/VERSION; refusing to update without downgrade protection. Reinstall a signed package by hand."
+      echo "$unreadable" >&2
+      write_update_status failed "$unreadable"
+      exit 1
+    fi
+    if [ "$build" -le "$installed_build" ]; then
       if [ "$build" -eq "$installed_build" ]; then
         echo "Aurelia Server is up to date."
       else
@@ -660,21 +679,19 @@ case "$command" in
     echo "Downloading $name..."
     status=$(github_fetch "$sums_url" "$work/SHA256SUMS" application/octet-stream)
     [ "$status" = 200 ] || github_failed "$status" SHA256SUMS
-    if [ "$build" -ge "$first_signed_build" ]; then
-      unsigned="The release is not signed by the owner of Aurelia; nothing was installed."
-      if [ -z "$signature_url" ]; then
-        echo "$unsigned" >&2
-        write_update_status failed "$unsigned"
-        exit 1
-      fi
-      status=$(github_fetch "$signature_url" "$work/SHA256SUMS.minisig" application/octet-stream)
-      [ "$status" = 200 ] || github_failed "$status" SHA256SUMS.minisig
-      mkdir "$work/signature"
-      if ! signature_valid "$work/SHA256SUMS" "$work/SHA256SUMS.minisig" "$work/signature"; then
-        echo "$unsigned" >&2
-        write_update_status failed "$unsigned"
-        exit 1
-      fi
+    unsigned="The release is not signed by the owner of Aurelia; nothing was installed."
+    if [ -z "$signature_url" ]; then
+      echo "$unsigned" >&2
+      write_update_status failed "$unsigned"
+      exit 1
+    fi
+    status=$(github_fetch "$signature_url" "$work/SHA256SUMS.minisig" application/octet-stream)
+    [ "$status" = 200 ] || github_failed "$status" SHA256SUMS.minisig
+    mkdir "$work/signature"
+    if ! signature_valid "$work/SHA256SUMS" "$work/SHA256SUMS.minisig" "$work/signature"; then
+      echo "$unsigned" >&2
+      write_update_status failed "$unsigned"
+      exit 1
     fi
     status=$(github_fetch "$url" "$work/$name" application/octet-stream)
     [ "$status" = 200 ] || github_failed "$status" "$name"

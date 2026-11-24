@@ -212,9 +212,7 @@ release=$media/release
 arch=$(cat "$package/ARCHITECTURE")
 installed_build=$(sed -n 's/.*(\([0-9][0-9]*\)).*/\1/p' /opt/aurelia/VERSION)
 next_build=$((installed_build + 1))
-# The stand-in release is signed with a throwaway key, at a build that needs a signature.
-first_signed_build=$(sed -n 's/^first_signed_build=//p' /usr/local/bin/aurelia)
-[ "$next_build" -ge "$first_signed_build" ] || next_build=$first_signed_build
+# Every server release must carry a signature (audit LNX-PKG-002); sign the stand-in with a throwaway key.
 . "$(dirname -- "$0")/synthetic-signing.sh"
 mkdir -p "$release/key"
 signing_key=$(synthetic_signing_key "$release/key")
