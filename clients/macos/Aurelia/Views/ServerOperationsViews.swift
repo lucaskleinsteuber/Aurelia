@@ -121,9 +121,9 @@ struct ServerNetworkEditor: View {
       description: "Which networks may reach the server and how it shows up in your home network."
     ) {
       VStack(alignment: .leading, spacing: 12) {
-        LabeledContent("Active name", value: configuration.active.serverName)
-        LabeledContent("Connected address", value: model.profile?.baseURL.absoluteString ?? "—")
-        TextField("Server name", text: $draft.value.serverName)
+        LabeledContent("Active Name", value: configuration.active.serverName)
+        LabeledContent("Connected Address", value: model.profile?.baseURL.absoluteString ?? "—")
+        TextField("Server Name", text: $draft.value.serverName)
         Toggle("Allow Devices on Your Network or VPN", isOn: $draft.value.lanAccessEnabled)
           .disabled(!model.isLocalHost && configuration.active.lanAccessEnabled)
         caption(
@@ -319,10 +319,18 @@ struct ServerHostingEditor: View {
         .pickerStyle(.radioGroup)
         .accessibilityIdentifier("server-hosting-mode")
         Divider()
-        ServerSwitchRow("Start automatically when you log in", isOn: $settings.startAtLogin)
-          .disabled(!settings.backgroundEnabled)
         ServerSwitchRow(
-          "Keep this Mac awake while the server runs", isOn: $settings.preventIdleSleep)
+          "Start Automatically When You Log In",
+          detail:
+            "Starts the background server automatically when you sign in to this Mac so other devices can connect without opening Aurelia.",
+          isOn: $settings.startAtLogin
+        )
+        .disabled(!settings.backgroundEnabled)
+        ServerSwitchRow(
+          "Keep This Mac Awake While the Server Runs",
+          detail:
+            "Prevents automatic Mac sleep while the server is running so remote devices stay connected. On battery power this uses more energy.",
+          isOn: $settings.preventIdleSleep)
         if let activeHosting, activeHosting.state == "awaitingPermission" {
           Text("Waiting for permission on the server Mac.").foregroundStyle(.orange)
         }
@@ -459,7 +467,7 @@ struct ServerLibraryJobsEditor: View {
     ) {
       VStack(alignment: .leading, spacing: 12) {
         Toggle(
-          "Notice new and removed files automatically", isOn: $draft.value.monitoringEnabled)
+          "Notice New and Removed Files Automatically", isOn: $draft.value.monitoringEnabled)
         Stepper(
           "Full check every \(Self.interval(draft.value.reconciliationMinutes))",
           value: $draft.value.reconciliationMinutes, in: 15...10080, step: 15)
@@ -518,7 +526,7 @@ struct ServerLibraryJobsEditor: View {
           ForEach(jobs.scans.prefix(12)) { scan in
             HStack {
               Text(
-                "Scan · \(ReadableState.text(scan.state.rawValue)) · \(scan.filesDiscovered) files"
+                "Scan · \(ReadableState.text(scan.state.rawValue)) · \(AureliaCountText.format(scan.filesDiscovered, singular: "file"))"
               ).font(.caption)
               Spacer()
               if [.queued, .running, .waitingForStorage].contains(scan.state) {

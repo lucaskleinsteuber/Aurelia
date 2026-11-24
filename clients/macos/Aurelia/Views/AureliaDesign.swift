@@ -1,5 +1,62 @@
 import AppKit
 import SwiftUI
+import SystemConfiguration
+
+/// Cached device name without DNS/mDNS resolution (`Host.current()` blocks on slow networks).
+enum AureliaDeviceName {
+  static let current: String = resolve()
+
+  static func resolve(
+    computerName: String? = SCDynamicStoreCopyComputerName(nil, nil) as String?,
+    hostName: String = ProcessInfo.processInfo.hostName
+  ) -> String {
+    if let computerName {
+      let trimmed = computerName.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty { return trimmed }
+    }
+    let fallback = hostName.replacingOccurrences(of: ".local", with: "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    return fallback.isEmpty ? "Mac" : fallback
+  }
+}
+
+/// Consistent singular/plural count phrasing across library, editor, and server views.
+enum AureliaCountText {
+  static func format(_ count: Int, singular: String, plural: String? = nil) -> String {
+    "\(count) \(count == 1 ? singular : (plural ?? "\(singular)s"))"
+  }
+}
+
+/// Keeps sheets inside smaller screens (e.g. 1280x800) so bottom Save/Cancel bars stay reachable.
+enum AureliaSheetLayout {
+  static func clampedHeight(
+    ideal: CGFloat, minimum: CGFloat, visibleScreenHeight: CGFloat?
+  ) -> CGFloat {
+    guard let visibleScreenHeight, visibleScreenHeight > 0 else { return ideal }
+    let budget = floor(visibleScreenHeight * 0.86)
+    return max(min(minimum, budget), min(ideal, budget))
+  }
+
+  @MainActor
+  static var currentVisibleScreenHeight: CGFloat? {
+    (NSApp?.keyWindow?.screen ?? NSScreen.main)?.visibleFrame.height
+  }
+}
+
+extension View {
+  func aureliaSheetFrame(
+    minWidth: CGFloat, idealWidth: CGFloat, minHeight: CGFloat, idealHeight: CGFloat
+  ) -> some View {
+    let screenHeight = AureliaSheetLayout.currentVisibleScreenHeight
+    let resolvedHeight = AureliaSheetLayout.clampedHeight(
+      ideal: idealHeight, minimum: minHeight, visibleScreenHeight: screenHeight)
+    let resolvedMinHeight = min(minHeight, resolvedHeight)
+    return frame(
+      minWidth: minWidth, idealWidth: idealWidth,
+      minHeight: resolvedMinHeight, idealHeight: resolvedHeight,
+      maxHeight: max(resolvedHeight, idealHeight))
+  }
+}
 
 enum AureliaDesign {
   static let canvasRGB = (red: UInt8(32), green: UInt8(35), blue: UInt8(38))
@@ -17,6 +74,10 @@ enum AureliaDesign {
   static let compactRadius: CGFloat = 12
   static let heroRadius: CGFloat = 24
   static let sidebarWidth: CGFloat = 236
+  static let sidebarMinWidth: CGFloat = 210
+  static let sidebarMaxWidth: CGFloat = 300
+  static let settingsMaxContentWidth: CGFloat = 820
+  static let settingsDetailTextMaxWidth: CGFloat = 620
   /// Canvas tint over the sidebar's blur; keeps labels legible above bright artwork.
   static let sidebarTint: Double = 0.66
   static let minimumControlSize: CGFloat = 44
@@ -38,6 +99,47 @@ enum AureliaDesign {
   static let hover = Color(nsColor: .labelColor).opacity(0.08)
   static let selection = Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
   static let subduedText = Color(nsColor: .secondaryLabelColor)
+
+  static func hairline(for contrast: ColorSchemeContrast) -> Color {
+    contrast == .increased ? Color.white.opacity(0.46) : hairline
+  }
+
+  static func cardStroke(for contrast: ColorSchemeContrast, hovering: Bool = false) -> Color {
+    if contrast == .increased {
+      return Color.white.opacity(hovering ? 0.85 : 0.48)
+    }
+    return hovering ? Color.white.opacity(0.32) : hairline
+  }
+
+  static func controlBorder(for contrast: ColorSchemeContrast, selected: Bool = false) -> Color {
+    if contrast == .increased {
+      return Color.white.opacity(selected ? 0.88 : 0.54)
+    }
+    return selected ? Color.white.opacity(0.28) : hairline
+  }
+
+  static func strokeWidth(for contrast: ColorSchemeContrast, hovering: Bool = false) -> CGFloat {
+    if contrast == .increased {
+      return hovering ? 2 : 1.5
+    }
+    return 1
+  }
+
+  static func mutedText(for contrast: ColorSchemeContrast) -> Color {
+    contrast == .increased ? Color.white.opacity(0.88) : subduedText
+  }
+
+  static func subtleText(for contrast: ColorSchemeContrast) -> Color {
+    contrast == .increased ? Color.white.opacity(0.82) : Color.white.opacity(0.64)
+  }
+
+  static func disabledOpacity(for contrast: ColorSchemeContrast) -> Double {
+    contrast == .increased ? 0.62 : 0.45
+  }
+
+  static func clampedSidebarWidth(_ width: CGFloat) -> CGFloat {
+    min(max(width, sidebarMinWidth), sidebarMaxWidth)
+  }
 
   static let responsiveSpring = AureliaMotion.quick
 }
@@ -93,23 +195,31 @@ struct AureliaPressableButtonStyle: ButtonStyle {
 /// stay softly visible. Reduce Transparency falls back to the opaque canvas.
 struct AureliaSidebarBackground: View {
   @Environment(\.aureliaReduceTransparency) private var reduceTransparency
+  @Environment(\.aureliaContrast) private var contrast
 
   var body: some View {
-    if reduceTransparency {
-      AureliaDesign.canvas
-    } else {
-      ZStack {
-        Rectangle().fill(.ultraThinMaterial)
-        AureliaDesign.canvas.opacity(AureliaDesign.sidebarTint)
-        // Bright hero artwork sits at the top, so the tint deepens there.
-        LinearGradient(
-          stops: [
-            .init(color: AureliaDesign.canvas.opacity(0.5), location: 0),
-            .init(color: AureliaDesign.canvas.opacity(0.0), location: 0.6),
-          ],
-          startPoint: .top, endPoint: .bottom)
+    Group {
+      if reduceTransparency {
+        AureliaDesign.canvas
+      } else {
+        ZStack {
+          Rectangle().fill(.ultraThinMaterial)
+          AureliaDesign.canvas.opacity(AureliaDesign.sidebarTint)
+          // Bright hero artwork sits at the top, so the tint deepens there.
+          LinearGradient(
+            stops: [
+              .init(color: AureliaDesign.canvas.opacity(0.5), location: 0),
+              .init(color: AureliaDesign.canvas.opacity(0.0), location: 0.6),
+            ],
+            startPoint: .top, endPoint: .bottom)
+        }
+        .environment(\.colorScheme, .dark)
       }
-      .environment(\.colorScheme, .dark)
+    }
+    .overlay(alignment: .trailing) {
+      if contrast == .increased {
+        AureliaDesign.hairline(for: contrast).frame(width: 1)
+      }
     }
   }
 }
@@ -267,15 +377,35 @@ struct AureliaWindowChrome: NSViewRepresentable {
   final class WindowChromeView: NSView {
     private var configuredFixtureSize = false
     private let controls = AureliaWindowControls()
+    private var accessibilityObserver: NSObjectProtocol?
+
+    isolated deinit {
+      if let accessibilityObserver {
+        NSWorkspace.shared.notificationCenter.removeObserver(accessibilityObserver)
+      }
+    }
+
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func viewDidMoveToWindow() {
       super.viewDidMoveToWindow()
+      installAccessibilityObserverIfNeeded()
       apply()
     }
 
     func apply() {
       DispatchQueue.main.async { [weak self] in
         self?.applyAttachedWindow()
+      }
+    }
+
+    private func installAccessibilityObserverIfNeeded() {
+      guard accessibilityObserver == nil else { return }
+      accessibilityObserver = NSWorkspace.shared.notificationCenter.addObserver(
+        forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        MainActor.assumeIsolated { self?.applyAttachedWindow() }
       }
     }
 
@@ -288,6 +418,14 @@ struct AureliaWindowChrome: NSViewRepresentable {
       window.toolbar?.isVisible = false
       window.isMovableByWindowBackground = true
       window.backgroundColor = NSColor(AureliaDesign.canvas)
+      let increaseContrast =
+        NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        || AureliaAccessibilityFixture.enabled
+      if let appearance = AureliaWindowAppearance.resolved(increaseContrast: increaseContrast),
+        window.appearance?.name != appearance.name
+      {
+        window.appearance = appearance
+      }
       controls.attach(to: window)
       window.contentView?.needsLayout = true
       #if DEBUG
@@ -331,6 +469,7 @@ extension View {
 
 struct AureliaSurface<Content: View>: View {
   @Environment(\.aureliaReduceTransparency) private var reduceTransparency
+  @Environment(\.aureliaContrast) private var contrast
   let material: Bool
   let radius: CGFloat
   let padding: CGFloat
@@ -361,8 +500,50 @@ struct AureliaSurface<Content: View>: View {
       .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
       .overlay {
         RoundedRectangle(cornerRadius: radius, style: .continuous)
-          .stroke(AureliaDesign.hairline, lineWidth: 1)
+          .strokeBorder(
+            AureliaDesign.hairline(for: contrast),
+            lineWidth: AureliaDesign.strokeWidth(for: contrast))
       }
+  }
+}
+
+/// Shared glass chrome with consistent Reduce Transparency fallback and High Contrast border.
+struct AureliaGlassBackground<S: InsettableShape>: ViewModifier {
+  @Environment(\.aureliaReduceTransparency) private var reduceTransparency
+  @Environment(\.aureliaContrast) private var contrast
+  let shape: S
+  let material: Material
+  let opaqueFill: Color
+  let selected: Bool
+
+  func body(content: Content) -> some View {
+    content
+      .background {
+        if reduceTransparency {
+          shape.fill(opaqueFill)
+        } else {
+          shape.fill(material)
+        }
+      }
+      .clipShape(shape)
+      .overlay {
+        shape.strokeBorder(
+          AureliaDesign.controlBorder(for: contrast, selected: selected),
+          lineWidth: AureliaDesign.strokeWidth(for: contrast))
+      }
+  }
+}
+
+extension View {
+  func aureliaGlass<S: InsettableShape>(
+    in shape: S,
+    material: Material = .ultraThinMaterial,
+    opaqueFill: Color = AureliaDesign.raisedSurface,
+    selected: Bool = false
+  ) -> some View {
+    modifier(
+      AureliaGlassBackground(
+        shape: shape, material: material, opaqueFill: opaqueFill, selected: selected))
   }
 }
 
@@ -374,6 +555,163 @@ struct CinemaMaterialCard<Content: View>: View {
 
   var body: some View {
     AureliaSurface(material: false) { content }
+  }
+}
+
+/// Readable count pill beside page and section headings (replaces dim 10 pt tertiary numerals).
+struct AureliaCountBadge: View {
+  @Environment(\.aureliaContrast) private var contrast
+  let count: Int
+
+  var body: some View {
+    Text(String(count))
+      .font(.footnote.weight(.semibold))
+      .monospacedDigit()
+      .foregroundStyle(contrast == .increased ? Color.white : Color.white.opacity(0.82))
+      .padding(.horizontal, 8)
+      .padding(.vertical, 2)
+      .background(
+        Color.white.opacity(contrast == .increased ? 0.22 : 0.11),
+        in: Capsule()
+      )
+      .overlay {
+        if contrast == .increased {
+          Capsule().strokeBorder(Color.white.opacity(0.55), lineWidth: 1)
+        }
+      }
+  }
+}
+
+/// Consistent header for every top-level sidebar destination (34 pt bold title + optional count).
+struct AureliaPageHeader<Trailing: View>: View {
+  let title: String
+  var subtitle: String? = nil
+  var count: Int? = nil
+  var titleIdentifier: String? = nil
+  @ViewBuilder let trailing: () -> Trailing
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(alignment: .center, spacing: 10) {
+        headerTitle
+        if let count {
+          AureliaCountBadge(count: count)
+        }
+        Spacer(minLength: 12)
+        trailing()
+      }
+      if let subtitle {
+        Text(subtitle)
+          .font(.callout)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var headerTitle: some View {
+    let text = Text(title)
+      .font(AureliaDesign.pageTitle)
+      .tracking(-0.35)
+      .accessibilityAddTraits(.isHeader)
+    if let titleIdentifier {
+      text.accessibilityIdentifier(titleIdentifier)
+    } else {
+      text
+    }
+  }
+}
+
+extension AureliaPageHeader where Trailing == EmptyView {
+  init(
+    title: String,
+    subtitle: String? = nil,
+    count: Int? = nil,
+    titleIdentifier: String? = nil
+  ) {
+    self.init(
+      title: title, subtitle: subtitle, count: count, titleIdentifier: titleIdentifier,
+      trailing: { EmptyView() })
+  }
+}
+
+/// Unified empty and error state so placement, spacing, and button styling match across pages.
+struct AureliaUnavailableAction {
+  let title: String
+  var prominent = true
+  var identifier: String? = nil
+  var shortcut: KeyboardShortcut? = nil
+  let action: () -> Void
+}
+
+struct AureliaUnavailableView: View {
+  let title: String
+  let systemImage: String
+  var message: String? = nil
+  var primaryAction: AureliaUnavailableAction? = nil
+  var secondaryAction: AureliaUnavailableAction? = nil
+  var minHeight: CGFloat = 320
+
+  var body: some View {
+    VStack(spacing: 16) {
+      Image(systemName: systemImage)
+        .font(.system(size: 44, weight: .light))
+        .symbolRenderingMode(.hierarchical)
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+      VStack(spacing: 6) {
+        Text(title)
+          .font(.title2.weight(.semibold))
+          .multilineTextAlignment(.center)
+        if let message, !message.isEmpty {
+          Text(message)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: 460)
+        }
+      }
+      if primaryAction != nil || secondaryAction != nil {
+        HStack(spacing: 12) {
+          if let secondaryAction {
+            actionButton(secondaryAction)
+          }
+          if let primaryAction {
+            actionButton(primaryAction)
+          }
+        }
+        .padding(.top, 4)
+      }
+    }
+    .padding(32)
+    .frame(maxWidth: .infinity, minHeight: minHeight)
+    .accessibilityElement(children: .contain)
+  }
+
+  @ViewBuilder
+  private func actionButton(_ spec: AureliaUnavailableAction) -> some View {
+    let base = Button(spec.title, action: spec.action)
+    let styled = Group {
+      if spec.prominent {
+        base.buttonStyle(AureliaPrimaryActionButtonStyle(compact: true))
+      } else {
+        base.buttonStyle(.bordered)
+      }
+    }
+    let withShortcut = Group {
+      if let shortcut = spec.shortcut {
+        styled.keyboardShortcut(shortcut)
+      } else {
+        styled
+      }
+    }
+    if let identifier = spec.identifier {
+      withShortcut.accessibilityIdentifier(identifier)
+    } else {
+      withShortcut
+    }
   }
 }
 
@@ -395,13 +733,11 @@ struct AureliaSectionHeading: View {
   }
 
   var body: some View {
-    HStack(alignment: .firstTextBaseline, spacing: 8) {
+    HStack(alignment: .center, spacing: 8) {
       Text(title)
         .font(AureliaDesign.sectionTitle)
       if let count {
-        Text(String(count))
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.tertiary)
+        AureliaCountBadge(count: count)
       }
       Spacer(minLength: 12)
       trailing
@@ -427,14 +763,40 @@ struct AureliaSettingToggleStyle: ToggleStyle {
   }
 }
 
-/// A labeled value or menu in Settings: the label on the left, the control on the right.
+/// A labeled value or menu in Settings: the label on the left, the control flush to the right edge
+/// so menus and switches share one clean trailing column.
 struct AureliaSettingLabeledContentStyle: LabeledContentStyle {
   func makeBody(configuration: Configuration) -> some View {
     HStack(alignment: .firstTextBaseline, spacing: 16) {
       configuration.label
         .frame(maxWidth: .infinity, alignment: .leading)
       configuration.content
+        .multilineTextAlignment(.trailing)
     }
+  }
+}
+
+/// Right-aligned pop-up menu for Settings rows so every picker ends on the same trailing edge as
+/// the switches above and below it.
+struct AureliaSettingPicker<SelectionValue: Hashable, Content: View>: View {
+  let title: String
+  @Binding var selection: SelectionValue
+  @ViewBuilder let content: () -> Content
+
+  init(
+    _ title: String,
+    selection: Binding<SelectionValue>,
+    @ViewBuilder content: @escaping () -> Content
+  ) {
+    self.title = title
+    _selection = selection
+    self.content = content
+  }
+
+  var body: some View {
+    Picker(title, selection: $selection, content: content)
+      .labelsHidden()
+      .fixedSize()
   }
 }
 
@@ -444,9 +806,16 @@ extension View {
     toggleStyle(AureliaSettingToggleStyle())
       .labeledContentStyle(AureliaSettingLabeledContentStyle())
   }
+
+  /// Keeps settings explanation lines within a comfortable reading measure on wide windows.
+  func aureliaSettingsDescriptionWidth() -> some View {
+    frame(maxWidth: AureliaDesign.settingsDetailTextMaxWidth, alignment: .leading)
+      .fixedSize(horizontal: false, vertical: true)
+  }
 }
 
 struct AureliaSettingsSection<Content: View>: View {
+  @Environment(\.aureliaContrast) private var contrast
   let title: String
   let symbol: String?
   let description: String?
@@ -471,7 +840,7 @@ struct AureliaSettingsSection<Content: View>: View {
           if let symbol {
             Image(systemName: symbol)
               .font(.system(size: 16, weight: .semibold))
-              .foregroundStyle(.secondary)
+              .foregroundStyle(AureliaDesign.mutedText(for: contrast))
               .frame(width: 22)
           }
           Text(title)
@@ -480,8 +849,8 @@ struct AureliaSettingsSection<Content: View>: View {
         if let description {
           Text(description)
             .font(.callout)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            .foregroundStyle(AureliaDesign.mutedText(for: contrast))
+            .aureliaSettingsDescriptionWidth()
         }
         content
       }
@@ -491,6 +860,7 @@ struct AureliaSettingsSection<Content: View>: View {
 }
 
 struct AureliaDangerZoneSection<Content: View>: View {
+  @Environment(\.aureliaContrast) private var contrast
   let title: String
   let description: String?
   let content: Content
@@ -520,8 +890,8 @@ struct AureliaDangerZoneSection<Content: View>: View {
       if let description {
         Text(description)
           .font(.callout)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
+          .foregroundStyle(AureliaDesign.mutedText(for: contrast))
+          .aureliaSettingsDescriptionWidth()
       }
       content
     }
@@ -533,44 +903,73 @@ struct AureliaDangerZoneSection<Content: View>: View {
     )
     .overlay(
       RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
-        .stroke(Color.red.opacity(0.35), lineWidth: 1)
+        .strokeBorder(
+          Color.red.opacity(contrast == .increased ? 0.85 : 0.35),
+          lineWidth: AureliaDesign.strokeWidth(for: contrast))
     )
   }
 }
 
+/// Shared search field used across Library, Movies, TV Shows, People, Wishes, and Settings.
 struct AureliaSearchField: View {
+  @Environment(\.aureliaContrast) private var contrast
   let prompt: String
   @Binding var text: String
+  var focus: FocusState<Bool>.Binding? = nil
+  var identifier: String? = nil
+  var compact = false
+  var onSubmit: (() -> Void)? = nil
 
   var body: some View {
     HStack(spacing: 9) {
       Image(systemName: "magnifyingglass")
-        .foregroundStyle(.secondary)
-      TextField(prompt, text: $text)
-        .textFieldStyle(.plain)
+        .foregroundStyle(AureliaDesign.mutedText(for: contrast))
+      field
       if !text.isEmpty {
         Button {
           text = ""
         } label: {
           Image(systemName: "xmark.circle.fill")
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(AureliaDesign.subtleText(for: contrast))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Clear Search")
       }
     }
-    .padding(.horizontal, 12)
-    .frame(height: 38)
-    .background(AureliaDesign.raisedSurface, in: RoundedRectangle(cornerRadius: 10))
+    .padding(.horizontal, compact ? 12 : 14)
+    .frame(height: compact ? 34 : 38)
+    .background(Color.white.opacity(contrast == .increased ? 0.14 : 0.08), in: Capsule())
+    .clipShape(Capsule())
     .overlay {
-      RoundedRectangle(cornerRadius: 10)
-        .stroke(AureliaDesign.hairline, lineWidth: 1)
+      Capsule()
+        .strokeBorder(
+          AureliaDesign.hairline(for: contrast),
+          lineWidth: AureliaDesign.strokeWidth(for: contrast))
+    }
+  }
+
+  @ViewBuilder
+  private var field: some View {
+    let base = TextField(prompt, text: $text)
+      .textFieldStyle(.plain)
+      .onSubmit { onSubmit?() }
+    let withFocus = Group {
+      if let focus {
+        base.focused(focus)
+      } else {
+        base
+      }
+    }
+    if let identifier {
+      withFocus.accessibilityIdentifier(identifier)
+    } else {
+      withFocus
     }
   }
 }
 
 struct AureliaIconControl: View {
-  @Environment(\.aureliaReduceTransparency) private var reduceTransparency
+  @Environment(\.aureliaContrast) private var contrast
   @Environment(\.isEnabled) private var isEnabled
   let symbol: String
   let label: String
@@ -582,19 +981,10 @@ struct AureliaIconControl: View {
       Image(systemName: symbol)
         .font(.system(size: 15, weight: .semibold))
         .frame(width: AureliaDesign.minimumControlSize, height: AureliaDesign.minimumControlSize)
-        .background {
-          if reduceTransparency {
-            Circle().fill(AureliaDesign.raisedSurface)
-          } else {
-            Circle().fill(.ultraThinMaterial)
-          }
-        }
-        .overlay {
-          Circle().stroke(selected ? .white.opacity(0.24) : AureliaDesign.hairline, lineWidth: 1)
-        }
-        .opacity(isEnabled ? 1 : 0.45)
+        .aureliaGlass(in: Circle(), selected: selected)
+        .opacity(isEnabled ? 1 : AureliaDesign.disabledOpacity(for: contrast))
     }
-    .buttonStyle(.plain)
+    .buttonStyle(AureliaPressableButtonStyle())
     .accessibilityLabel(label)
   }
 }
@@ -602,7 +992,6 @@ struct AureliaIconControl: View {
 /// A round glass menu button. `.button` with a plain style draws the full circle and keeps the
 /// whole 44 pt circle clickable; the borderless style shrinks custom labels to the bare glyph.
 struct AureliaIconMenu<Content: View>: View {
-  @Environment(\.aureliaReduceTransparency) private var reduceTransparency
   let symbol: String
   let label: String
   @ViewBuilder let content: () -> Content
@@ -612,14 +1001,7 @@ struct AureliaIconMenu<Content: View>: View {
       Image(systemName: symbol)
         .font(.system(size: 15, weight: .semibold))
         .frame(width: AureliaDesign.minimumControlSize, height: AureliaDesign.minimumControlSize)
-        .background {
-          if reduceTransparency {
-            Circle().fill(AureliaDesign.raisedSurface)
-          } else {
-            Circle().fill(.ultraThinMaterial)
-          }
-        }
-        .overlay { Circle().stroke(AureliaDesign.hairline, lineWidth: 1) }
+        .aureliaGlass(in: Circle())
         .contentShape(Circle())
     }
     .menuStyle(.button)
@@ -636,14 +1018,53 @@ struct AureliaPrimaryActionButtonStyle: ButtonStyle {
   var compact = false
   @Environment(\.isEnabled) private var isEnabled
   @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @Environment(\.aureliaContrast) private var contrast
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .font(compact ? .callout.weight(.semibold) : nil)
-      .foregroundStyle(.black.opacity(isEnabled ? 0.94 : 0.42))
+      .foregroundStyle(.black.opacity(isEnabled ? 0.94 : (contrast == .increased ? 0.65 : 0.42)))
       .padding(.horizontal, compact ? 12 : 18)
-      .frame(minHeight: compact ? 28 : AureliaDesign.minimumControlSize)
-      .background(.white.opacity(isEnabled ? 0.96 : 0.38), in: Capsule())
+      .frame(minHeight: compact ? 32 : AureliaDesign.minimumControlSize)
+      .background(
+        .white.opacity(isEnabled ? 0.96 : (contrast == .increased ? 0.56 : 0.38)), in: Capsule()
+      )
+      .overlay {
+        if contrast == .increased {
+          Capsule().strokeBorder(.white.opacity(isEnabled ? 1 : 0.72), lineWidth: 1.5)
+        }
+      }
+      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
+      .animation(reduceMotion ? nil : AureliaMotion.press, value: configuration.isPressed)
+  }
+}
+
+/// Matching secondary capsule button so toolbar and action-bar buttons share one height and shape.
+struct AureliaSecondaryActionButtonStyle: ButtonStyle {
+  var compact = false
+  @Environment(\.isEnabled) private var isEnabled
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @Environment(\.aureliaContrast) private var contrast
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .font(compact ? .callout.weight(.medium) : nil)
+      .foregroundStyle(
+        .white.opacity(isEnabled ? 0.92 : AureliaDesign.disabledOpacity(for: contrast))
+      )
+      .padding(.horizontal, compact ? 12 : 16)
+      .frame(minHeight: compact ? 32 : AureliaDesign.minimumControlSize)
+      .background(
+        Color.white.opacity(
+          configuration.isPressed ? 0.18 : (contrast == .increased ? 0.16 : 0.10)),
+        in: Capsule()
+      )
+      .clipShape(Capsule())
+      .overlay {
+        Capsule().strokeBorder(
+          AureliaDesign.controlBorder(for: contrast),
+          lineWidth: AureliaDesign.strokeWidth(for: contrast))
+      }
       .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
       .animation(reduceMotion ? nil : AureliaMotion.press, value: configuration.isPressed)
   }
@@ -809,6 +1230,7 @@ struct MediaPosterCard: View {
   var width: CGFloat = 154
   @State private var hovering = false
   @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @Environment(\.aureliaContrast) private var contrast
 
   var body: some View {
     VStack(alignment: .leading, spacing: 9) {
@@ -838,7 +1260,9 @@ struct MediaPosterCard: View {
       }
       .overlay {
         RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
-          .stroke(hovering ? .white.opacity(0.35) : AureliaDesign.hairline, lineWidth: 1)
+          .strokeBorder(
+            AureliaDesign.cardStroke(for: contrast, hovering: hovering),
+            lineWidth: AureliaDesign.strokeWidth(for: contrast, hovering: hovering))
       }
       .shadow(color: .black.opacity(hovering ? 0.42 : 0), radius: 18, y: 10)
 
@@ -849,7 +1273,7 @@ struct MediaPosterCard: View {
         .frame(width: width, alignment: .leading)
       Text(secondaryLine)
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(AureliaDesign.mutedText(for: contrast))
         .lineLimit(1)
         .frame(width: width, alignment: .leading)
     }
@@ -913,6 +1337,7 @@ struct LandscapeMediaCard: View {
   var eyebrow: String?
   @State private var hovering = false
   @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @Environment(\.aureliaContrast) private var contrast
 
   var body: some View {
     ZStack(alignment: .bottomLeading) {
@@ -928,7 +1353,7 @@ struct LandscapeMediaCard: View {
           Text(eyebrow.uppercased())
             .font(.caption2.weight(.bold))
             .tracking(1)
-            .foregroundStyle(.white.opacity(0.7))
+            .foregroundStyle(.white.opacity(contrast == .increased ? 0.92 : 0.7))
         }
         Text(item.title)
           .font(.headline)
@@ -936,7 +1361,7 @@ struct LandscapeMediaCard: View {
           .lineLimit(1)
         Text(item.year.map(String.init) ?? item.kind.displayName)
           .font(.caption)
-          .foregroundStyle(.white.opacity(0.68))
+          .foregroundStyle(.white.opacity(contrast == .increased ? 0.9 : 0.68))
       }
       .padding(16)
       VStack(alignment: .trailing, spacing: 6) {
@@ -971,7 +1396,9 @@ struct LandscapeMediaCard: View {
     .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous))
     .overlay {
       RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
-        .stroke(hovering ? .white.opacity(0.25) : AureliaDesign.hairline, lineWidth: 1)
+        .strokeBorder(
+          AureliaDesign.cardStroke(for: contrast, hovering: hovering),
+          lineWidth: AureliaDesign.strokeWidth(for: contrast, hovering: hovering))
     }
     .shadow(color: .black.opacity(hovering ? 0.34 : 0), radius: 14, y: 8)
     .scaleEffect(hovering && !reduceMotion ? 1.012 : 1)
@@ -981,6 +1408,7 @@ struct LandscapeMediaCard: View {
 }
 
 struct AvailabilityBadge: View {
+  @Environment(\.aureliaContrast) private var contrast
   let availability: MediaAvailability
   var libraryAvailability: LibraryAvailability? = nil
 
@@ -991,10 +1419,16 @@ struct AvailabilityBadge: View {
       Label(message, systemImage: "exclamationmark.triangle.fill")
         .font(.caption.weight(.medium))
         .foregroundStyle(.orange)
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
-        .background(.black.opacity(0.56), in: Capsule())
-        .overlay { Capsule().stroke(.orange.opacity(0.28), lineWidth: 1) }
+        .background(.black.opacity(contrast == .increased ? 0.82 : 0.56), in: Capsule())
+        .overlay {
+          Capsule().strokeBorder(
+            .orange.opacity(contrast == .increased ? 0.85 : 0.28),
+            lineWidth: AureliaDesign.strokeWidth(for: contrast))
+        }
     }
   }
 }
@@ -1094,11 +1528,11 @@ struct ErrorBanner: View {
       }
     }
     .padding(inline ? 12 : 14)
-    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius))
-    .overlay {
-      RoundedRectangle(cornerRadius: AureliaDesign.compactRadius)
-        .stroke(AureliaDesign.hairline, lineWidth: 1)
-    }
+    .aureliaGlass(
+      in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous),
+      material: .regularMaterial,
+      opaqueFill: AureliaDesign.surface
+    )
     .accessibilityElement(children: .contain)
     if inline {
       banner.frame(maxWidth: .infinity, alignment: .leading)

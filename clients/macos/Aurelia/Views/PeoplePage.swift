@@ -23,17 +23,20 @@ struct PeoplePage: View {
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 24) {
-        HStack(alignment: .firstTextBaseline, spacing: 14) {
-          AureliaSectionHeading(title: "People", count: hasLoaded ? total : nil)
-          Spacer()
-        }
-        searchField
+      VStack(alignment: .leading, spacing: AureliaDesign.sectionSpacing) {
+        AureliaPageHeader(title: "People", count: hasLoaded ? total : nil)
+        AureliaSearchField(
+          prompt: "Find a Person",
+          text: $query,
+          focus: $searchFocused,
+          identifier: "people-search-field"
+        )
+        .frame(maxWidth: 520)
         content
       }
       .padding(AureliaDesign.pagePadding)
-      .padding(.top, 22)
       .padding(.bottom, 48)
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
     .scrollClipDisabled()
     .aureliaOverlayScrollbars()
@@ -53,32 +56,6 @@ struct PeoplePage: View {
     .accessibilityIdentifier("people-page")
   }
 
-  private var searchField: some View {
-    HStack(spacing: 9) {
-      Image(systemName: "magnifyingglass")
-        .foregroundStyle(.secondary)
-      TextField("Find a Person", text: $query)
-        .textFieldStyle(.plain)
-        .focused($searchFocused)
-        .accessibilityIdentifier("people-search-field")
-      if !query.isEmpty {
-        Button {
-          query = ""
-        } label: {
-          Image(systemName: "xmark.circle.fill")
-            .foregroundStyle(.tertiary)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Clear Search")
-      }
-    }
-    .padding(.horizontal, 12)
-    .frame(maxWidth: 420, minHeight: 34)
-    .background(
-      AureliaDesign.raisedSurface,
-      in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius, style: .continuous))
-  }
-
   @ViewBuilder
   private var content: some View {
     if !hasLoaded && errorMessage == nil {
@@ -86,25 +63,21 @@ struct PeoplePage: View {
         .frame(maxWidth: .infinity, minHeight: 260)
         .accessibilityLabel("Loading People")
     } else if let errorMessage, people.isEmpty {
-      ContentUnavailableView {
-        Label("Couldn’t Load People", systemImage: "exclamationmark.triangle")
-      } description: {
-        Text(errorMessage)
-      } actions: {
-        Button("Try Again") { Task { await load(reset: true) } }
-      }
-      .frame(maxWidth: .infinity, minHeight: 260)
+      AureliaUnavailableView(
+        title: "Couldn’t Load People",
+        systemImage: "exclamationmark.triangle",
+        message: errorMessage,
+        primaryAction: AureliaUnavailableAction(title: "Try Again") {
+          Task { await load(reset: true) }
+        })
     } else if people.isEmpty {
-      ContentUnavailableView(
-        query.isEmpty ? "No People Yet" : "No One Found",
+      AureliaUnavailableView(
+        title: query.isEmpty ? "No People Yet" : "No One Found",
         systemImage: "person.2",
-        description: Text(
-          query.isEmpty
-            ? "People appear here once TMDB has identified the titles in your library."
-            : "No one in your library matches “\(query.trimmingCharacters(in: .whitespacesAndNewlines))”."
-        )
+        message: query.isEmpty
+          ? "People appear here once TMDB has identified the titles in your library."
+          : "No one in your library matches “\(query.trimmingCharacters(in: .whitespacesAndNewlines))”."
       )
-      .frame(maxWidth: .infinity, minHeight: 260)
     } else {
       LazyVGrid(
         columns: [GridItem(.adaptive(minimum: 132, maximum: 150), spacing: 18, alignment: .top)],

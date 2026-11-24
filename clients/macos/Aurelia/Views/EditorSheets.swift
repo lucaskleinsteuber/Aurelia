@@ -50,12 +50,26 @@ struct MetadataMatchSheet: View {
           }
         }
         if searchController.candidates.isEmpty {
-          ContentUnavailableView(
-            searchController.isSearching ? "Searching…" : "Compare Matches",
-            systemImage: "rectangle.and.text.magnifyingglass",
-            description: Text("Type a title to find matches, then choose the correct result.")
-          )
-          .frame(maxHeight: .infinity)
+          if let message = searchController.errorMessage {
+            AureliaUnavailableView(
+              title: "Couldn't Find Matches",
+              systemImage: "exclamationmark.triangle",
+              message: message,
+              primaryAction: AureliaUnavailableAction(title: "Try Again") {
+                searchRequest = UUID()
+              },
+              minHeight: 240
+            )
+            .frame(maxHeight: .infinity)
+          } else {
+            AureliaUnavailableView(
+              title: searchController.isSearching ? "Searching…" : "Compare Matches",
+              systemImage: "rectangle.and.text.magnifyingglass",
+              message: "Type a title to find matches, then choose the correct result.",
+              minHeight: 240
+            )
+            .frame(maxHeight: .infinity)
+          }
         } else {
           List(searchController.candidates) { candidate in
             HStack(alignment: .top, spacing: 14) {
@@ -83,9 +97,8 @@ struct MetadataMatchSheet: View {
           .listStyle(.inset)
         }
         if let errorMessage { Text(errorMessage).foregroundStyle(.orange).font(.callout) }
-        if let message = searchController.errorMessage {
-          Text(message).foregroundStyle(.orange).font(.callout)
-          Button("Try Again") { searchRequest = UUID() }
+        if !searchController.candidates.isEmpty, let message = searchController.errorMessage {
+          ErrorBanner(message: message, retry: { searchRequest = UUID() }, inline: true)
         }
       }
       .padding(24)
@@ -106,7 +119,7 @@ struct MetadataMatchSheet: View {
         Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
       }.padding(16)
     }
-    .frame(width: 720, height: 640)
+    .aureliaSheetFrame(minWidth: 560, idealWidth: 720, minHeight: 440, idealHeight: 640)
     .background(AureliaBackdrop())
     .onChange(of: query) { searchController.invalidate() }
     .task(id: query + searchRequest.uuidString) {
@@ -165,7 +178,7 @@ private struct CollectionMemberDraft: Identifiable, Equatable {
     case .movie: return "Movie"
     case .series: return "TV Show"
     case .episode: return "Episode"
-    default: return kind.rawValue.capitalized
+    default: return kind.displayName
     }
   }
 }
@@ -263,8 +276,13 @@ struct CollectionEditorSheet: View {
 
       ScrollView {
         VStack(alignment: .leading, spacing: 14) {
-          TextField("Collection Name", text: $name)
-            .textFieldStyle(.roundedBorder)
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Name")
+              .font(.caption.weight(.semibold))
+              .foregroundStyle(.secondary)
+            TextField("Collection Name", text: $name)
+              .textFieldStyle(.roundedBorder)
+          }
 
           VStack(alignment: .leading, spacing: 4) {
             Text("Description")
@@ -337,7 +355,7 @@ struct CollectionEditorSheet: View {
       }
       .padding(16)
     }
-    .frame(width: 780, height: 760)
+    .aureliaSheetFrame(minWidth: 600, idealWidth: 780, minHeight: 480, idealHeight: 760)
     .background(AureliaBackdrop())
     .onAppear {
       applyPreselection()
@@ -604,7 +622,7 @@ struct CollectionEditorSheet: View {
                   Text(season.number == 0 ? "Specials (Season 0)" : "Season \(season.number)")
                     .font(.callout.weight(.medium))
                   Spacer()
-                  Text("\(season.episodes.count) episodes")
+                  Text(AureliaCountText.format(season.episodes.count, singular: "episode"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 }
@@ -967,7 +985,7 @@ struct MetadataReviewQueueSheet: View {
         }
       }
     }
-    .frame(width: 720, height: 640)
+    .aureliaSheetFrame(minWidth: 560, idealWidth: 720, minHeight: 440, idealHeight: 640)
     .task { await load() }
     .sheet(item: $manualReview) { review in
       MetadataMatchSheet(mediaId: review.mediaId, title: review.title) {

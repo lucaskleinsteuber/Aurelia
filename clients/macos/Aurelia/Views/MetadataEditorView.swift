@@ -91,6 +91,7 @@ import UniformTypeIdentifiers
 struct MetadataEditorSheet: View {
   @EnvironmentObject private var model: AppModel
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.aureliaContrast) private var contrast
   @StateObject private var draft = MetadataDraft()
   let metadata: MediaMetadataSummary
   let onSaved: () async -> Void
@@ -165,7 +166,11 @@ struct MetadataEditorSheet: View {
       }.padding(16)
     }
     .frame(
-      minWidth: 760, idealWidth: 940, maxWidth: .infinity, minHeight: 610, idealHeight: 720,
+      minWidth: 720, idealWidth: 940, maxWidth: .infinity,
+      minHeight: 520,
+      idealHeight: AureliaSheetLayout.clampedHeight(
+        ideal: 720, minimum: 520, visibleScreenHeight: AureliaSheetLayout.currentVisibleScreenHeight
+      ),
       maxHeight: .infinity
     )
     .background(AureliaDesign.canvas)
@@ -509,8 +514,12 @@ struct MetadataEditorSheet: View {
       .font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
   }
   private func automatic(_ field: String) -> some View {
-    Button("Use Automatic Value") { draft.automatic(field) }.font(.caption).buttonStyle(.borderless)
-      .disabled(!draft.overrides.contains(field))
+    let isOverridden = draft.overrides.contains(field)
+    return Button("Use Automatic Value") { draft.automatic(field) }
+      .font(.caption)
+      .buttonStyle(.borderless)
+      .foregroundStyle(isOverridden ? Color.accentColor : AureliaDesign.subtleText(for: contrast))
+      .disabled(!isOverridden)
   }
   private func artworkControl(
     _ title: String, field: String, selection: EditorArtwork?, width: CGFloat, height: CGFloat

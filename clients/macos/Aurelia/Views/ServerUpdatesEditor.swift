@@ -78,13 +78,18 @@ struct ServerUpdatesEditor: View {
         }
       } else {
         AureliaSettingsSection("Server Updates", symbol: "arrow.down.circle") {
-          Text(
-            message
-              ?? (status == nil && !loaded
+          if let message {
+            ErrorBanner(
+              message: message, retry: { Task { await load() } }, retryDisabled: working,
+              inline: true)
+          } else {
+            Text(
+              status == nil && !loaded
                 ? "Checking server update support…"
-                : "This server is updated outside this page. A server hosted by this Mac is updated with the Mac app.")
-          )
-          .foregroundStyle(.secondary)
+                : "This server is updated outside this page. A server hosted by this Mac is updated with the Mac app."
+            )
+            .foregroundStyle(.secondary)
+          }
         }
       }
     }

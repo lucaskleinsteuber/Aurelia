@@ -1696,16 +1696,32 @@ private struct PlayerControlLabel<Content: View>: View {
   }
 }
 
-extension View {
-  func playerMaterial<S: Shape>(reduceTransparency: Bool, shape: S) -> some View {
-    background {
-      if reduceTransparency {
-        shape.fill(Color(red: 0.11, green: 0.12, blue: 0.14).opacity(0.98))
-      } else {
-        shape.fill(.ultraThinMaterial)
+private struct PlayerMaterialModifier<S: InsettableShape>: ViewModifier {
+  @Environment(\.aureliaContrast) private var contrast
+  let reduceTransparency: Bool
+  let shape: S
+
+  func body(content: Content) -> some View {
+    content
+      .background {
+        if reduceTransparency {
+          shape.fill(Color(red: 0.11, green: 0.12, blue: 0.14).opacity(0.98))
+        } else {
+          shape.fill(.ultraThinMaterial)
+        }
       }
-    }
-    .overlay { shape.stroke(.white.opacity(0.12), lineWidth: 1) }
+      .clipShape(shape)
+      .overlay {
+        shape.strokeBorder(
+          .white.opacity(contrast == .increased ? 0.56 : 0.12),
+          lineWidth: contrast == .increased ? 1.5 : 1)
+      }
+  }
+}
+
+extension View {
+  func playerMaterial<S: InsettableShape>(reduceTransparency: Bool, shape: S) -> some View {
+    modifier(PlayerMaterialModifier(reduceTransparency: reduceTransparency, shape: shape))
   }
 }
 

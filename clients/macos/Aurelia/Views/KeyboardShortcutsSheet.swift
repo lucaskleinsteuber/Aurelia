@@ -1,29 +1,72 @@
 import SwiftUI
 
+/// Single source of truth for the Keyboard Shortcuts sheet so documented shortcuts match the
+/// commands wired into the app.
+enum AureliaKeyboardShortcuts {
+  struct Entry: Identifiable, Equatable, Sendable {
+    let label: String
+    let keys: [String]
+    var id: String { "\(label)-\(keys.joined(separator: "+"))" }
+  }
+
+  struct Section: Identifiable, Equatable, Sendable {
+    let title: String
+    let entries: [Entry]
+    var id: String { title }
+  }
+
+  static let sections: [Section] = [
+    Section(
+      title: "Playback",
+      entries: [
+        Entry(label: "Play or Pause", keys: ["Space", "K"]),
+        Entry(label: "Seek Back / Forward", keys: ["←", "→"]),
+        Entry(label: "Previous Episode", keys: ["P", "⇧⌘←"]),
+        Entry(label: "Next Episode", keys: ["N", "⇧⌘→"]),
+        Entry(label: "Skip Intro", keys: ["S", "Return"]),
+        Entry(label: "Mute or Unmute", keys: ["M"]),
+        Entry(label: "Toggle Full Screen", keys: ["F"]),
+        Entry(label: "Fill Screen or Show Whole Picture", keys: ["Z"]),
+        Entry(label: "Exit Full Screen or Close", keys: ["Esc"]),
+      ]),
+    Section(
+      title: "Navigation & Commands",
+      entries: [
+        Entry(label: "Search Library", keys: ["⌘F"]),
+        Entry(label: "Go Back", keys: ["⌘["]),
+        Entry(label: "Show or Hide Sidebar", keys: ["⌃⌘S"]),
+        Entry(label: "Settings…", keys: ["⌘,"]),
+        Entry(label: "Add Media…", keys: ["⌘O"]),
+        Entry(label: "Keyboard Shortcuts", keys: ["?", "⌘/"]),
+        Entry(label: "Dismiss Dialog", keys: ["Esc"]),
+      ]),
+    Section(
+      title: "Editors & Stories",
+      entries: [
+        Entry(label: "Save Power Settings", keys: ["⌘S"]),
+        Entry(label: "Undo / Redo Artwork Crop", keys: ["⌘Z", "⇧⌘Z"]),
+        Entry(label: "Previous / Next in Wrapped or Movie Night", keys: ["←", "→"]),
+        Entry(label: "Pause or Resume Wrapped", keys: ["Space"]),
+      ]),
+  ]
+}
+
 struct KeyboardShortcutsSheet: View {
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.aureliaContrast) private var contrast
 
   var body: some View {
     VStack(spacing: 0) {
       header
+      Divider()
       ScrollView {
         VStack(alignment: .leading, spacing: 20) {
-          section(title: "Playback") {
-            shortcutRow("Play or Pause", keys: ["Space", "K"])
-            shortcutRow("Seek Back / Forward", keys: ["←", "→"])
-            shortcutRow("Previous Episode", keys: ["P", "⇧⌘←"])
-            shortcutRow("Next Episode", keys: ["N", "⇧⌘→"])
-            shortcutRow("Skip Intro", keys: ["S", "Return"])
-            shortcutRow("Mute or Unmute", keys: ["M"])
-            shortcutRow("Toggle Full Screen", keys: ["F"])
-            shortcutRow("Fill Screen or Show Whole Picture", keys: ["Z"])
-            shortcutRow("Exit Full Screen or Close", keys: ["Esc"])
-          }
-
-          section(title: "Navigation & Commands") {
-            shortcutRow("Add Media…", keys: ["⌘O"])
-            shortcutRow("Keyboard Shortcuts", keys: ["?", "⌘/"])
-            shortcutRow("Dismiss Dialog", keys: ["Esc"])
+          ForEach(AureliaKeyboardShortcuts.sections) { group in
+            section(title: group.title) {
+              ForEach(group.entries) { entry in
+                shortcutRow(entry.label, keys: entry.keys)
+              }
+            }
           }
         }
         .padding(AureliaDesign.pagePadding)
@@ -36,7 +79,7 @@ struct KeyboardShortcutsSheet: View {
       .padding(.horizontal, AureliaDesign.pagePadding)
       .padding(.vertical, 14)
     }
-    .frame(width: 500, height: 460)
+    .aureliaSheetFrame(minWidth: 460, idealWidth: 520, minHeight: 400, idealHeight: 560)
     .background(AureliaBackdrop())
   }
 
@@ -49,9 +92,9 @@ struct KeyboardShortcutsSheet: View {
       VStack(alignment: .leading, spacing: 2) {
         Text("Keyboard Shortcuts")
           .font(.title2.weight(.bold))
-        Text("Controls for playback and navigation")
+        Text("Controls for playback, navigation, editors, and stories")
           .font(.subheadline)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(AureliaDesign.mutedText(for: contrast))
       }
       Spacer()
     }
@@ -67,7 +110,7 @@ struct KeyboardShortcutsSheet: View {
       Text(title)
         .font(.caption.weight(.bold))
         .tracking(1.0)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(AureliaDesign.mutedText(for: contrast))
       VStack(spacing: 6) {
         content()
       }
@@ -75,7 +118,9 @@ struct KeyboardShortcutsSheet: View {
       .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
       .overlay {
         RoundedRectangle(cornerRadius: 12)
-          .stroke(Color.white.opacity(0.08), lineWidth: 1)
+          .strokeBorder(
+            AureliaDesign.hairline(for: contrast),
+            lineWidth: AureliaDesign.strokeWidth(for: contrast))
       }
     }
   }
@@ -91,10 +136,15 @@ struct KeyboardShortcutsSheet: View {
             .font(.system(size: 12, weight: .semibold, design: .rounded))
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
+            .background(
+              Color.white.opacity(contrast == .increased ? 0.22 : 0.12),
+              in: RoundedRectangle(cornerRadius: 5)
+            )
             .overlay {
               RoundedRectangle(cornerRadius: 5)
-                .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                .strokeBorder(
+                  Color.white.opacity(contrast == .increased ? 0.65 : 0.15),
+                  lineWidth: contrast == .increased ? 1 : 0.5)
             }
         }
       }

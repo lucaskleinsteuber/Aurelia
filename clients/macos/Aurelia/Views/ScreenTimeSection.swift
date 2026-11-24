@@ -22,13 +22,13 @@ struct ScreenTimeSection: View {
         )
         .font(.caption).foregroundStyle(.secondary)
         if rules.enabled {
-          Picker("When time is up, close", selection: $rules.lockScope) {
+          Picker("When Time Is Up, Close", selection: $rules.lockScope) {
             ForEach(ScreenTimeLockScope.allCases, id: \.self) { Text($0.title).tag($0) }
           }
           .accessibilityIdentifier("profile-editor-screen-time-scope")
           Text("Playback only keeps browsing open. The whole profile closes until the wake time.")
             .font(.caption).foregroundStyle(.secondary)
-          Picker("A title that is playing", selection: $rules.ending) {
+          Picker("When a Title Is Playing", selection: $rules.ending) {
             ForEach(ScreenTimeEnding.allCases, id: \.self) { Text($0.title).tag($0) }
           }
           .accessibilityIdentifier("profile-editor-screen-time-ending")
@@ -75,11 +75,11 @@ struct ScreenTimeSection: View {
         }
         Spacer(minLength: 20)
         DatePicker(
-          "Wake time", selection: Self.time(rule.wakeTime), displayedComponents: .hourAndMinute)
+          "Wake Time", selection: Self.time(rule.wakeTime), displayedComponents: .hourAndMinute)
       }
       HStack(spacing: 12) {
         Toggle(
-          "Daily limit",
+          "Daily Limit",
           isOn: Binding(
             get: { rule.wrappedValue.dailyLimitMinutes != nil },
             set: {

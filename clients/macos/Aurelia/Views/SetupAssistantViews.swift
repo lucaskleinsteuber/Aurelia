@@ -19,6 +19,7 @@ struct SetupIntroductionView: View {
   @State private var devices: SetupDevices = []
   @State private var showsHelp = false
   @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @Environment(\.aureliaContrast) private var contrast
 
   var body: some View {
     ScrollView {
@@ -275,7 +276,11 @@ struct SetupIntroductionView: View {
       )
       .overlay {
         RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
-          .stroke(primary ? Color.white.opacity(0.18) : AureliaDesign.hairline, lineWidth: 1)
+          .stroke(
+            primary
+              ? AureliaDesign.cardStroke(for: contrast, hovering: true)
+              : AureliaDesign.hairline(for: contrast),
+            lineWidth: AureliaDesign.strokeWidth(for: contrast))
       }
       .contentShape(Rectangle())
     }
@@ -283,25 +288,45 @@ struct SetupIntroductionView: View {
   }
 }
 
-/// The guided setup's progress above each setup screen: finished steps get a check, the current
-/// one is highlighted. "Skip Assistant" keeps the setup screens but drops the guidance and tour.
+/// The guided setup's progress above each setup screen: finished steps (and the reached final step)
+/// get a check, the current one is highlighted. "Skip Assistant" keeps the setup screens but drops
+/// the guidance and tour, and is omitted on the final completion screen.
 struct SetupStepBar: View {
   let steps: [SetupStep]
   let current: SetupStep
   let skip: () -> Void
+  @Environment(\.aureliaContrast) private var contrast
+
+  static func isFinalStep(steps: [SetupStep], current: SetupStep) -> Bool {
+    guard let last = steps.last else { return false }
+    return current == last
+  }
+
+  static func showsSkipAssistant(steps: [SetupStep], current: SetupStep) -> Bool {
+    !isFinalStep(steps: steps, current: current)
+  }
+
+  static func isStepDone(position: Int, currentIndex: Int, stepCount: Int) -> Bool {
+    position < currentIndex || (position == currentIndex && currentIndex == stepCount - 1)
+  }
 
   var body: some View {
     let index = steps.firstIndex(of: current) ?? 0
+    let showsSkip = Self.showsSkipAssistant(steps: steps, current: current)
     HStack(spacing: 10) {
       ForEach(Array(steps.enumerated()), id: \.element) { position, step in
+        let done = Self.isStepDone(position: position, currentIndex: index, stepCount: steps.count)
         if position > 0 {
-          Rectangle().fill(.white.opacity(0.25)).frame(width: 18, height: 1)
+          Rectangle()
+            .fill(.white.opacity(contrast == .increased ? 0.5 : 0.25))
+            .frame(width: 18, height: 1)
         }
         HStack(spacing: 6) {
           ZStack {
             Circle().fill(
-              position <= index ? Color.accentColor : Color.white.opacity(0.2))
-            if position < index {
+              position <= index
+                ? Color.accentColor : Color.white.opacity(contrast == .increased ? 0.34 : 0.2))
+            if done {
               Image(systemName: "checkmark").font(.system(size: 9, weight: .bold))
             } else {
               Text("\(position + 1)").font(.system(size: 11, weight: .semibold))
@@ -311,23 +336,24 @@ struct SetupStepBar: View {
           .frame(width: 20, height: 20)
           Text(step.title)
             .font(.system(size: 12, weight: position == index ? .semibold : .regular))
-            .opacity(position == index ? 1 : 0.7)
+            .opacity(position == index ? 1 : (contrast == .increased ? 0.9 : 0.7))
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-          "\(step.title), step \(position + 1) of \(steps.count)\(position < index ? ", done" : "")"
+          "\(step.title), step \(position + 1) of \(steps.count)\(done ? ", done" : "")"
         )
       }
-      Button("Skip Assistant", action: skip)
-        .buttonStyle(.link)
-        .font(.system(size: 12))
-        .padding(.leading, 8)
-        .accessibilityIdentifier("setup-skip-assistant")
+      if showsSkip {
+        Button("Skip Assistant", action: skip)
+          .buttonStyle(.link)
+          .font(.system(size: 12))
+          .padding(.leading, 8)
+          .accessibilityIdentifier("setup-skip-assistant")
+      }
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 8)
-    .background(.ultraThinMaterial, in: Capsule())
-    .overlay { Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 1) }
+    .aureliaGlass(in: Capsule())
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("setup-step-bar")
   }
@@ -338,6 +364,7 @@ struct SetupStepBar: View {
 struct SetupFinishView: View {
   @EnvironmentObject private var model: AppModel
   @ObservedObject var guide: SetupGuide
+  @Environment(\.aureliaContrast) private var contrast
   @State private var showsPeople: Bool
   @State private var added: [UserSummary] = []
   @State private var name = ""
@@ -360,17 +387,19 @@ struct SetupFinishView: View {
   }
 
   var body: some View {
-    ScrollView {
-      VStack(spacing: 24) {
-        if showsPeople { people } else { allSet }
+    GeometryReader { geometry in
+      ScrollView {
+        VStack(spacing: 24) {
+          if showsPeople { people } else { allSet }
+        }
+        .frame(maxWidth: 640)
+        .padding(.horizontal, 40)
+        .padding(.top, 70)
+        .padding(.bottom, 40)
+        .frame(maxWidth: .infinity, minHeight: geometry.size.height)
       }
-      .frame(maxWidth: 640)
-      .padding(.horizontal, 40)
-      .padding(.top, 70)
-      .padding(.bottom, 40)
-      .frame(maxWidth: .infinity)
+      .scrollIndicators(.hidden)
     }
-    .scrollIndicators(.hidden)
     .background(AureliaBackdrop())
     .overlay(alignment: .top) {
       if guide.isGuiding {
@@ -456,6 +485,12 @@ struct SetupFinishView: View {
       .background(
         AureliaDesign.surface, in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
       )
+      .overlay {
+        RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
+          .strokeBorder(
+            AureliaDesign.hairline(for: contrast),
+            lineWidth: AureliaDesign.strokeWidth(for: contrast))
+      }
       .onChange(of: isChild) { _, child in if child { canManage = false } }
       .onChange(of: canManage) { _, manage in if manage { isChild = false } }
       VStack(spacing: 10) {
@@ -600,7 +635,14 @@ struct SetupFinishView: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(18)
       .background(
-        AureliaDesign.surface, in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
+        AureliaDesign.surface, in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
+      )
+      .overlay {
+        RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
+          .strokeBorder(
+            AureliaDesign.hairline(for: contrast),
+            lineWidth: AureliaDesign.strokeWidth(for: contrast))
+      }
       if !guide.devices.isEmpty {
         Text("CONNECT YOUR OTHER DEVICES")
           .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -685,6 +727,12 @@ struct SetupFinishView: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(16)
     .background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
+    .overlay {
+      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
+        .strokeBorder(
+          AureliaDesign.hairline(for: contrast), lineWidth: AureliaDesign.strokeWidth(for: contrast)
+        )
+    }
     .accessibilityElement(children: .combine)
   }
 }

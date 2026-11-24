@@ -178,13 +178,13 @@ struct ServerEssentialsEditor: View {
     AureliaSettingsSection("Devices & Backups", symbol: "externaldrive.badge.checkmark") {
       VStack(alignment: .leading, spacing: 14) {
         ServerSwitchRow(
-          "Allow new devices to connect",
+          "Allow New Devices to Connect",
           detail:
             "Turn this off once your TVs, Macs and other devices are set up. Devices that are already connected keep working.",
           isOn: $pairingEnabled, identifier: "server-pairing-enabled")
         Divider()
         ServerSwitchRow(
-          "Back up automatically",
+          "Back Up Automatically",
           detail:
             "Aurelia regularly saves a checked copy of its library database. Your videos are never copied.",
           isOn: $automaticBackups, identifier: "server-automatic-backups")
@@ -379,14 +379,14 @@ struct ServerDetailsBox: View {
           "Uptime",
           value: Duration.seconds(status.uptimeSeconds).formatted(
             .time(pattern: .hourMinuteSecond)))
-        LabeledContent("Active stream requests", value: "\(status.activeStreams)")
+        LabeledContent("Active Stream Requests", value: "\(status.activeStreams)")
         LabeledContent(
           "Database",
           value: ByteCountFormatter.string(fromByteCount: status.databaseBytes, countStyle: .file))
         if let expires = status.certificateExpiresAt {
-          LabeledContent("TLS certificate expires", value: ServerDateText.display(expires))
+          LabeledContent("TLS Certificate Expires", value: ServerDateText.display(expires))
         }
-        LabeledContent("Host addresses", value: status.networkAddresses.joined(separator: ", "))
+        LabeledContent("Host Addresses", value: status.networkAddresses.joined(separator: ", "))
       }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
     }
   }
@@ -465,7 +465,8 @@ struct ServerHealthCard: View {
     if health.scrubPreviewTitleCount == 0 { return "None" }
     let bytes = ByteCountFormatter.string(
       fromByteCount: health.scrubPreviewBytes, countStyle: .file)
-    return "\(health.scrubPreviewTitleCount) titles (\(bytes))"
+    return
+      "\(AureliaCountText.format(health.scrubPreviewTitleCount, singular: "title")) (\(bytes))"
   }
 
   private var scanSummary: String {
@@ -486,7 +487,7 @@ struct ServerHealthCard: View {
     if backup.totalBackups == 0 { return backup.enabled ? "Scheduled" : "Disabled" }
     let bytes = ByteCountFormatter.string(
       fromByteCount: backup.totalBackupBytes, countStyle: .file)
-    return "\(backup.totalBackups) backups (\(bytes))"
+    return "\(AureliaCountText.format(backup.totalBackups, singular: "backup")) (\(bytes))"
   }
 
   private func metric(_ title: String, _ value: String) -> some View {

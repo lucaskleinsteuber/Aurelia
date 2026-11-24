@@ -108,7 +108,7 @@ struct OperatingModeView: View {
 
 struct NativeHostSetupView: View {
   @EnvironmentObject private var model: AppModel
-  @State private var serverName = "Aurelia on \(Host.current().localizedName ?? "This Mac")"
+  @State private var serverName = "Aurelia on \(AureliaDeviceName.current)"
   @State private var username = NSUserName().count >= 3 ? NSUserName() : "owner"
   @State private var password = ""
   @State private var passwordRepeat = ""

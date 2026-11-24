@@ -381,4 +381,37 @@ struct GeneralPreferencesTests {
     #expect(SidebarReorder.moving(.library, to: 1, in: items) == items)
     #expect(SidebarReorder.moving(.library, to: 9, in: items) == items)
   }
+
+  @Test func legacySidebarVisibilityKeysMigrateOnceAndModernKeyWins() throws {
+    let suite = "aurelia.sidebar-migration.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    defaults.set(false, forKey: "AureliaShowMoviesInSidebar")
+    defaults.set(false, forKey: "AureliaShowSeriesInSidebar")
+    defaults.set(false, forKey: "AureliaShowWatchlistInSidebar")
+    defaults.set(false, forKey: "AureliaShowCollectionsInSidebar")
+    // Modern key already explicitly enabled for Collections must not be overwritten.
+    defaults.set(true, forKey: "AureliaSidebarShow_\(LibraryDestination.collections.rawValue)")
+
+    #expect(SidebarPreferences.isVisible(.movies, defaults: defaults) == false)
+    #expect(SidebarPreferences.isVisible(.tvShows, defaults: defaults) == false)
+    #expect(SidebarPreferences.isVisible(.watchlist, defaults: defaults) == false)
+    #expect(SidebarPreferences.isVisible(.collections, defaults: defaults) == true)
+
+    // Legacy keys are cleaned up after migration.
+    #expect(defaults.object(forKey: "AureliaShowMoviesInSidebar") == nil)
+    #expect(defaults.object(forKey: "AureliaShowSeriesInSidebar") == nil)
+    #expect(defaults.object(forKey: "AureliaShowWatchlistInSidebar") == nil)
+    #expect(defaults.object(forKey: "AureliaShowCollectionsInSidebar") == nil)
+
+    SidebarPreferences.resetToDefaults(defaults: defaults)
+    #expect(SidebarPreferences.isVisible(.movies, defaults: defaults) == true)
+  }
+
+  @Test func sidebarWidthClampsToSupportedBounds() {
+    #expect(AureliaDesign.clampedSidebarWidth(120) == AureliaDesign.sidebarMinWidth)
+    #expect(AureliaDesign.clampedSidebarWidth(250) == 250)
+    #expect(AureliaDesign.clampedSidebarWidth(480) == AureliaDesign.sidebarMaxWidth)
+  }
 }

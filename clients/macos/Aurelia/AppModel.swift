@@ -1122,7 +1122,7 @@ final class AppModel: ObservableObject {
       let authentication = try await APIClient.setupOwner(
         username: username,
         password: password,
-        deviceName: Host.current().localizedName ?? "Server Mac",
+        deviceName: AureliaDeviceName.current,
         bootstrapToken: bootstrapToken)
       guard connectionGeneration == generation, !Task.isCancelled else { return false }
       try await finishLocalAuthentication(
@@ -1169,7 +1169,7 @@ final class AppModel: ObservableObject {
       let authentication = try await APIClient.loginLocally(
         username: username,
         password: password,
-        deviceName: Host.current().localizedName ?? "Server Mac")
+        deviceName: AureliaDeviceName.current)
       guard connectionGeneration == generation, !Task.isCancelled else { return false }
       let port = hostSnapshot.serverInfo?.lanHttpsPort ?? 43_111
       try await finishLocalAuthentication(
@@ -1859,7 +1859,7 @@ final class AppModel: ObservableObject {
       let paired = try await APIClient.pair(
         inspected: inspectedServer,
         code: normalizedCode,
-        deviceName: Host.current().localizedName ?? "Mac")
+        deviceName: AureliaDeviceName.current)
       guard connectionGeneration == generation, inspectionGeneration == inspection,
         !Task.isCancelled
       else { return false }
@@ -4030,7 +4030,7 @@ final class AppModel: ObservableObject {
       serverInfo: nil)
     do {
       hostSnapshot = try await serverHost.start(
-        serverName: "Aurelia on \(Host.current().localizedName ?? "This Mac")",
+        serverName: "Aurelia on \(AureliaDeviceName.current)",
         skipKickstart: skipKickstart)
       beginTerminationProtection()
       // A live helper may still be starting Kestrel or running a database migration after an
@@ -5029,7 +5029,7 @@ final class AppModel: ObservableObject {
     remoteDeviceCommandTask = nil
     guard profile != nil, !isResting, !requiresProfileSelection else { return }
     let deviceId = macDeviceId
-    let deviceName = Host.current().localizedName ?? "Mac"
+    let deviceName = AureliaDeviceName.current
 
     remoteDeviceHeartbeatTask = Task { [weak self] in
       while !Task.isCancelled {

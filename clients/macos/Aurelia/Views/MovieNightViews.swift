@@ -84,6 +84,20 @@ struct MovieNightHomeStrip: View {
   }
 }
 
+/// Explicit intro display state so dismissing or clearing an error never traps Movie Night in a
+/// spinner with no running request.
+enum MovieNightIntroState: Equatable {
+  case starting
+  case failed(String)
+
+  static func resolve(isStarting: Bool, errorText: String?) -> Self {
+    if isStarting { return .starting }
+    let detail = errorText?.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let detail, !detail.isEmpty { return .failed(detail) }
+    return .failed("Couldn't reach the server to start Movie Night.")
+  }
+}
+
 /// Movie Night over the whole window: the lobby, the stack of posters to swipe with the
 /// trackpad, the arrow keys or the buttons, and the ticket for the match. Closing (✕ or Escape)
 /// leaves the night.
@@ -92,10 +106,11 @@ struct MovieNightView: View {
   @StateObject private var session: MovieNightSession
   let joining: MovieNightSummary?
   @State private var started = false
+  @State private var isStarting = true
 
   init(api: any MovieNightAPI, joining: MovieNightSummary?) {
     _session = StateObject(
-      wrappedValue: MovieNightSession(api: api, deviceName: Host.current().localizedName ?? "Mac"))
+      wrappedValue: MovieNightSession(api: api, deviceName: AureliaDeviceName.current))
     self.joining = joining
   }
 
@@ -108,7 +123,7 @@ struct MovieNightView: View {
       .ignoresSafeArea()
       ScrollView {
         VStack(alignment: .leading, spacing: 22) {
-          if let error = session.errorText {
+          if session.screen != .intro, let error = session.errorText {
             ErrorBanner(
               message: error, retry: { session.errorText = nil }, retryLabel: "Dismiss",
               inline: true
@@ -129,10 +144,7 @@ struct MovieNightView: View {
       }
       .scrollIndicators(.hidden)
       Button {
-        Task {
-          await session.leave()
-          model.closeMovieNight()
-        }
+        closeMovieNight()
       } label: {
         Image(systemName: "xmark")
           .font(.system(size: 15, weight: .bold))
@@ -149,22 +161,45 @@ struct MovieNightView: View {
     .task {
       guard !started else { return }
       started = true
-      if let joining { await session.join(joining) } else { await session.start() }
+      await startOrJoin()
     }
     .onDisappear { Task { await session.leave() } }
+  }
+
+  private func closeMovieNight() {
+    Task {
+      await session.leave()
+      model.closeMovieNight()
+    }
+  }
+
+  private func startOrJoin() async {
+    isStarting = true
+    session.errorText = nil
+    defer { isStarting = false }
+    if let joining { await session.join(joining) } else { await session.start() }
   }
 
   @ViewBuilder
   private var content: some View {
     switch session.screen {
     case .intro:
-      if session.errorText == nil {
-        AureliaDelayedProgress().frame(maxWidth: .infinity).padding(.top, 200)
-      } else {
-        Button("Try Again") {
-          Task { if let joining { await session.join(joining) } else { await session.start() } }
-        }
-        .buttonStyle(AureliaPrimaryActionButtonStyle())
+      switch MovieNightIntroState.resolve(isStarting: isStarting, errorText: session.errorText) {
+      case .starting:
+        AureliaDelayedProgress().frame(maxWidth: .infinity, minHeight: 360)
+          .accessibilityLabel("Starting Movie Night")
+      case .failed(let message):
+        AureliaUnavailableView(
+          title: "Movie Night Couldn't Start",
+          systemImage: "film.stack",
+          message: message,
+          primaryAction: AureliaUnavailableAction(title: "Try Again") {
+            Task { await startOrJoin() }
+          },
+          secondaryAction: AureliaUnavailableAction(title: "Close", prominent: false) {
+            closeMovieNight()
+          },
+          minHeight: 360)
       }
     case .lobby: lobby
     case .swipe: MovieNightStack(session: session)

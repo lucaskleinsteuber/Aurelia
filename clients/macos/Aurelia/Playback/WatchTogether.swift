@@ -103,7 +103,7 @@ final class WatchTogetherSession: ObservableObject {
   private var reportedReady = false
   /// Set while this Mac opens the party's new title, so closing the old player keeps the party.
   private(set) var isChangingTitle = false
-  private let deviceName = Host.current().localizedName ?? "Mac"
+  private let deviceName = AureliaDeviceName.current
 
   init(client: APIClient) {
     self.client = client

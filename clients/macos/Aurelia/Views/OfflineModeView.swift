@@ -133,6 +133,7 @@ private struct OfflineProfileChooser: View {
       }
       .buttonStyle(AureliaCardButtonStyle())
       .help("Choose another profile")
+      .accessibilityLabel("Choose Another Profile")
       VStack(spacing: 6) {
         Text(card.name).font(.title2.weight(.semibold))
         Text("Enter your PIN").font(.callout).foregroundStyle(.secondary)
@@ -141,6 +142,7 @@ private struct OfflineProfileChooser: View {
         SecureField("PIN", text: $pin)
           .textFieldStyle(.plain).font(.system(size: 20, weight: .medium, design: .rounded))
           .multilineTextAlignment(.center)
+          .focusEffectDisabled()
           .focused($pinFocused)
           .onSubmit { submit(card) }
           .onChange(of: pin) { _, value in
@@ -163,8 +165,7 @@ private struct OfflineProfileChooser: View {
       }
       .padding(.leading, 20).padding(.trailing, 8)
       .frame(width: 280, height: 52)
-      .background(Capsule().fill(.ultraThinMaterial))
-      .overlay { Capsule().strokeBorder(.white.opacity(0.16)) }
+      .aureliaGlass(in: Capsule())
       TimelineView(.periodic(from: .now, by: 1)) { context in
         if let until = model.offlinePINLockedUntil(for: card), until > context.date {
           Text(
@@ -324,7 +325,7 @@ private struct OfflineLibraryView: View {
     }
     .padding(.horizontal, 20)
     .padding(.vertical, 10)
-    .background(.ultraThinMaterial, in: Capsule())
+    .aureliaGlass(in: Capsule())
     .padding(.top, 12)
     .padding(.horizontal, 80)
   }
@@ -427,6 +428,7 @@ private struct OfflinePosterCard: View {
   let title: OfflineTitle
   @State private var hovering = false
   @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @Environment(\.aureliaContrast) private var contrast
 
   var body: some View {
     VStack(alignment: .leading, spacing: 9) {
@@ -442,7 +444,9 @@ private struct OfflinePosterCard: View {
       .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous))
       .overlay {
         RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
-          .stroke(hovering ? .white.opacity(0.35) : AureliaDesign.hairline, lineWidth: 1)
+          .stroke(
+            AureliaDesign.cardStroke(for: contrast, hovering: hovering),
+            lineWidth: AureliaDesign.strokeWidth(for: contrast, hovering: hovering))
       }
       Text(title.title).font(.headline).lineLimit(1).frame(width: 154, alignment: .leading)
       Text(title.year.map(String.init) ?? "Movie").font(.caption).foregroundStyle(.secondary)
@@ -461,6 +465,7 @@ private struct OfflineLandscapeCard: View {
   let title: OfflineTitle
   @State private var hovering = false
   @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @Environment(\.aureliaContrast) private var contrast
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -478,7 +483,9 @@ private struct OfflineLandscapeCard: View {
       .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous))
       .overlay {
         RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
-          .stroke(hovering ? .white.opacity(0.35) : AureliaDesign.hairline, lineWidth: 1)
+          .stroke(
+            AureliaDesign.cardStroke(for: contrast, hovering: hovering),
+            lineWidth: AureliaDesign.strokeWidth(for: contrast, hovering: hovering))
       }
       if let label = title.episodeLabel {
         Text(label).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
