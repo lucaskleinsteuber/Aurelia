@@ -118,6 +118,31 @@ import Testing
     #expect(policy.permitsHide(closed, preparing: false, error: false))
   }
 
+  @Test func pausedPlaybackPreventsAutoHideUntilResumed() {
+    var policy = PlayerControlsPolicy()
+    let token = policy.invalidate()
+    #expect(!policy.permitsHide(token, preparing: false, error: false, playing: false))
+    #expect(policy.permitsHide(token, preparing: false, error: false, playing: true))
+  }
+
+  @Test func timelineSeekPolicyCommitsKeyboardAndAccessibilityAdjustmentsImmediately() {
+    #expect(
+      PlayerTimelineSeekPolicy.valueChanged(to: 45_200, isScrubbing: true, duration: 120_000)
+        == .updateScrub(45_200))
+    #expect(
+      PlayerTimelineSeekPolicy.valueChanged(to: 45_200, isScrubbing: false, duration: 120_000)
+        == .seekImmediately(45_200))
+    #expect(
+      PlayerTimelineSeekPolicy.valueChanged(to: 999_999, isScrubbing: false, duration: 120_000)
+        == .seekImmediately(120_000))
+    #expect(
+      PlayerTimelineSeekPolicy.adjustableTarget(
+        current: 30_000, duration: 120_000, seekIntervalSeconds: 10, increment: true) == 40_000)
+    #expect(
+      PlayerTimelineSeekPolicy.adjustableTarget(
+        current: 5_000, duration: 120_000, seekIntervalSeconds: 10, increment: false) == 0)
+  }
+
   @Test func unchangedScreenPositionAndInvalidEventsAreNotPointerMovement() {
     var pointer = PlayerPointerActivity(position: CGPoint(x: 720, y: 350))
     for _ in 0..<20 {

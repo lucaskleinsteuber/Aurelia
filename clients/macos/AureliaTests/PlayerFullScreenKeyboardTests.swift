@@ -32,6 +32,34 @@ import Testing
     #expect(decision("m", transitioning: true) == .passThrough)
   }
 
+  @Test func playbackAndMuteShortcutsUseLayoutIndependentCharacters() {
+    #expect(
+      PlayerKeyboardShortcutPolicy.action(
+        keyCode: 40, characters: "k", isRepeat: false, showsSkipIntro: false) == .togglePlayback)
+    #expect(
+      PlayerKeyboardShortcutPolicy.action(
+        keyCode: 0, characters: "K", isRepeat: false, showsSkipIntro: false) == .togglePlayback)
+    #expect(
+      PlayerKeyboardShortcutPolicy.action(
+        keyCode: 49, characters: " ", isRepeat: false, showsSkipIntro: false) == .togglePlayback)
+    #expect(
+      PlayerKeyboardShortcutPolicy.action(
+        keyCode: 40, characters: "k", isRepeat: true, showsSkipIntro: false) == .consume)
+    // Mute follows the typed character rather than the physical ANSI M key code.
+    #expect(
+      PlayerKeyboardShortcutPolicy.action(
+        keyCode: 12, characters: "m", isRepeat: false, showsSkipIntro: false) == .toggleMute)
+    #expect(
+      PlayerKeyboardShortcutPolicy.action(
+        keyCode: 12, characters: "M", isRepeat: false, showsSkipIntro: false) == .toggleMute)
+    #expect(
+      PlayerKeyboardShortcutPolicy.action(
+        keyCode: 46, characters: "w", isRepeat: false, showsSkipIntro: false) == nil)
+    #expect(
+      PlayerKeyboardShortcutPolicy.action(
+        keyCode: 46, characters: "m", isRepeat: true, showsSkipIntro: false) == .consume)
+  }
+
   @Test func buttonAndShortcutShareTheWindowTransitionAndRetireTogether() {
     let window = NSWindow(
       contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),

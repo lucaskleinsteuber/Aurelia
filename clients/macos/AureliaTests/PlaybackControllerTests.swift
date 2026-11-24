@@ -65,6 +65,139 @@ final class PlaybackControllerTests: XCTestCase {
     XCTAssertEqual(client.updates.last?.position, 45_000)
   }
 
+  func testRaisingVolumeUnmutesEngineAndSurvivesEngineUpdate() async {
+    let engine = FakePlaybackEngine()
+    let controller = resumingController(engine: engine)
+    await controller.start()
+
+    controller.toggleMute()
+    XCTAssertTrue(controller.isMuted)
+    XCTAssertTrue(engine.isMuted)
+
+    controller.setVolume(0.45)
+    XCTAssertFalse(controller.isMuted)
+    XCTAssertFalse(engine.isMuted)
+    XCTAssertEqual(engine.volume, 0.45, accuracy: 0.001)
+
+    engine.onUpdate?()
+    XCTAssertFalse(controller.isMuted)
+    XCTAssertFalse(engine.isMuted)
+    await controller.shutdown(saveProgress: false)
+  }
+
+  func testConfigurationErrorStopsTerminallyWithExactMessageWithoutRecovery() async {
+    let mediaID = UUID()
+    let source = PlaybackSourceResponse(
+      id: UUID(), mediaId: mediaID, streamPath: "/api/v1/streams/test-ticket",
+      contentType: "video/mp4", contentLength: 4_096, expiresAt: "2099-01-01T12:00:00Z",
+      progress: PlaybackProgressResponse(
+        mediaId: mediaID, positionMilliseconds: 0, durationMilliseconds: 120_000,
+        isCompleted: false, lastPlayedAt: nil, updatedAt: nil))
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let expectedMessage =
+      "Dialogue Boost or Volume Leveling is unavailable in this VLC installation. Turn it off in Playback settings."
+    engine.configurationErrorOnLoad = expectedMessage
+    let relay = FakePlaybackRelay()
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(mediaId: mediaID, title: "Pilot", subtitle: nil),
+      engine: engine,
+      relayFactory: { _, _ in relay })
+
+    await controller.start()
+
+    XCTAssertFalse(controller.canPlay)
+    XCTAssertEqual(controller.errorMessage, expectedMessage)
+    XCTAssertNil(controller.recoveryMessage)
+    XCTAssertEqual(engine.playCalls, 0)
+    XCTAssertTrue(relay.didStop)
+    XCTAssertFalse(controller.isPlaying)
+    XCTAssertFalse(controller.isPreparing)
+    XCTAssertNil(controller.previewSourceURL)
+    await controller.shutdown(saveProgress: false)
+  }
+
+  func testSystemSleepPausesPlaybackAndFlushesProgress() async {
+    let mediaID = UUID()
+    let source = PlaybackSourceResponse(
+      id: UUID(), mediaId: mediaID, streamPath: "/api/v1/streams/test-ticket",
+      contentType: "video/mp4", contentLength: 4_096, expiresAt: "2099-01-01T12:00:00Z",
+      progress: PlaybackProgressResponse(
+        mediaId: mediaID, positionMilliseconds: 0, durationMilliseconds: 120_000,
+        isCompleted: false, lastPlayedAt: nil, updatedAt: nil))
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let relay = FakePlaybackRelay()
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(mediaId: mediaID, title: "Pilot", subtitle: nil),
+      engine: engine,
+      relayFactory: { _, _ in relay })
+
+    PlaybackShutdownCoordinator.shared.register(controller)
+    defer { PlaybackShutdownCoordinator.shared.unregister(controller) }
+
+    await controller.start()
+    XCTAssertTrue(controller.isPlaying)
+    engine.currentTimeMilliseconds = 48_000
+    engine.onUpdate?()
+
+    await PlaybackShutdownCoordinator.shared.pauseForSystemSleep(flushTimeout: 1)
+
+    XCTAssertFalse(controller.isPlaying)
+    XCTAssertFalse(engine.isPlaying)
+    XCTAssertGreaterThanOrEqual(engine.pauseCalls, 1)
+    XCTAssertEqual(client.updates.last?.position, 48_000)
+    await controller.shutdown(saveProgress: false)
+  }
+
+  func testForcedSubtitleSurvivesRememberedOff() {
+    let enAudio = PlaybackTrack(id: 1, title: "English - [eng]")
+    let deAudio = PlaybackTrack(id: 2, title: "German - [deu]")
+    let untaggedAudio = PlaybackTrack(id: 3, title: "Track 1")
+
+    let enFull = PlaybackTrack(id: 10, title: "English - [eng]")
+    let enForced = PlaybackTrack(id: 11, title: "English Forced - [eng]")
+    let deForced = PlaybackTrack(id: 12, title: "German Forced - [deu]")
+    let untaggedForced = PlaybackTrack(id: 13, title: "Forced")
+
+    // File's forced default stays active for the matching audio language.
+    XCTAssertEqual(
+      PlaybackLanguage.forcedSubtitleTrackWhenOff(
+        subtitleTracks: [enFull, enForced], currentSubtitleID: enForced.id,
+        audioTracks: [enAudio], currentAudioID: enAudio.id)?.id,
+      enForced.id)
+    // Switching from a full default to Off still keeps forced subtitles for the active audio language.
+    XCTAssertEqual(
+      PlaybackLanguage.forcedSubtitleTrackWhenOff(
+        subtitleTracks: [enFull, enForced], currentSubtitleID: enFull.id,
+        audioTracks: [enAudio], currentAudioID: enAudio.id)?.id,
+      enForced.id)
+    // When audio changes language, pick the matching forced subtitle track.
+    XCTAssertEqual(
+      PlaybackLanguage.forcedSubtitleTrackWhenOff(
+        subtitleTracks: [enForced, deForced], currentSubtitleID: enForced.id,
+        audioTracks: [enAudio, deAudio], currentAudioID: deAudio.id)?.id,
+      deForced.id)
+    // Do not force another language's forced track onto English audio.
+    XCTAssertNil(
+      PlaybackLanguage.forcedSubtitleTrackWhenOff(
+        subtitleTracks: [enFull, deForced], currentSubtitleID: deForced.id,
+        audioTracks: [enAudio], currentAudioID: enAudio.id))
+    // Without forced subtitles, Off disables regular subtitles.
+    XCTAssertNil(
+      PlaybackLanguage.forcedSubtitleTrackWhenOff(
+        subtitleTracks: [enFull], currentSubtitleID: enFull.id,
+        audioTracks: [enAudio], currentAudioID: enAudio.id))
+    // Untagged audio keeps the file's own untagged forced default.
+    XCTAssertEqual(
+      PlaybackLanguage.forcedSubtitleTrackWhenOff(
+        subtitleTracks: [untaggedForced], currentSubtitleID: untaggedForced.id,
+        audioTracks: [untaggedAudio], currentAudioID: untaggedAudio.id)?.id,
+      untaggedForced.id)
+  }
+
   private func resumingController(engine: FakePlaybackEngine) -> PlaybackController {
     let mediaID = UUID()
     let source = PlaybackSourceResponse(
@@ -1513,6 +1646,8 @@ final class FakePlaybackEngine: PlaybackEngine {
   var onUpdate: (() -> Void)?
   var onEnded: (() -> Void)?
   var onError: ((String) -> Void)?
+  var onConfigurationError: ((String) -> Void)?
+  var configurationErrorOnLoad: String?
   var isPlaying = false
   var isSeekable = true
   var currentTimeMilliseconds: Int64 = 0
@@ -1553,6 +1688,10 @@ final class FakePlaybackEngine: PlaybackEngine {
     load(url: url)
   }
   func load(url: URL) {
+    if let configurationErrorOnLoad {
+      onConfigurationError?(configurationErrorOnLoad)
+      return
+    }
     loadedURL = url
     loadedScopes.append(trackScope)
     currentTimeMilliseconds = 0

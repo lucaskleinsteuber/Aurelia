@@ -280,7 +280,7 @@ final class PlaybackController: ObservableObject {
   private var wantsPlayback = false
   private var pauseRequestPending = false
   private var recovering = false
-  private var endHandled = false
+  @Published private(set) var endHandled = false
   // Queue navigation also retires engine callbacks; it is not proof of a natural media end.
   private var naturalEndReached = false
   private var lastMovementAt = Date()
@@ -472,6 +472,9 @@ final class PlaybackController: ObservableObject {
     engine.onUpdate = { [weak self] in self?.engineUpdated() }
     engine.onEnded = { [weak self] in self?.engineEnded() }
     engine.onError = { [weak self] message in self?.engineFailed(message) }
+    engine.onConfigurationError = { [weak self] message in
+      self?.engineConfigurationFailed(message)
+    }
   }
 
   func attachVideoView(_ view: NSView) {
@@ -740,6 +743,7 @@ final class PlaybackController: ObservableObject {
     hasPreparedCurrentItem = true
     engine.trackScope = presentation.trackScope
     engine.load(url: url, startAt: position)
+    guard !stopped, !terminalFailure, !authorizationFailed else { return }
     for subURL in sidecarSubtitleURLs {
       engine.addSubtitleSlave(url: subURL)
     }
@@ -787,7 +791,10 @@ final class PlaybackController: ObservableObject {
   func setVolume(_ value: Double) {
     volume = min(max(value, 0), 1)
     engine.volume = volume
-    if volume > 0 { isMuted = false }
+    if volume > 0, isMuted || engine.isMuted {
+      isMuted = false
+      engine.isMuted = false
+    }
   }
 
   func setVideoFill(_ fills: Bool, size: CGSize) {
@@ -900,6 +907,23 @@ final class PlaybackController: ObservableObject {
       }
       guard !Task.isCancelled, self.showsSleepTimerGoodNight, !self.stopped else { return }
       self.sleepTimerFinished = true
+    }
+  }
+
+  /// Pauses playback and flushes recent progress before macOS sleeps so audio does not resume
+  /// unexpectedly on wake.
+  func pauseForSystemSleep(flushTimeout: TimeInterval = 2) async {
+    guard !stopped else { return }
+    let hadPlaybackIntent = wantsPlayback || isPlaying
+    if canPause {
+      _ = pause()
+    } else {
+      wantsPlayback = false
+      endPlaybackActivity()
+      enqueueProgressSave(isFinished: naturalEndReached)
+    }
+    if hadPlaybackIntent || progressOutbox.pendingCount(profile: client.profile) > 0 {
+      await progressOutbox.flush(for: flushTimeout)
     }
   }
 
@@ -1046,6 +1070,7 @@ final class PlaybackController: ObservableObject {
     (engine as? VLCPlaybackEngine)?.additionalMediaOptions = streamingQuality.vlcOptions
     engine.load(
       url: streamingQuality.playbackURL(for: localURL), startAt: resumePositionMilliseconds)
+    guard !stopped, !terminalFailure, !authorizationFailed else { return }
     openedAtResume = engine.opensAtStartPosition && resumePositionMilliseconds > 0
     playbackURL = localURL
     startPreviewRelay(from: sourceURL)
@@ -1427,6 +1452,40 @@ final class PlaybackController: ObservableObject {
     guard !stopped, !authorizationFailed, !terminalFailure, !recovering, !endHandled else { return }
     // The decoder's arbitrary error text must never enter diagnostic exports.
     recoverPlayback(cause: .decoderError)
+  }
+
+  /// Non-retryable engine setup failures (such as a missing VLC audio filter module) surface
+  /// their concrete guidance immediately instead of looping through recovery attempts.
+  private func engineConfigurationFailed(_ message: String) {
+    guard !stopped, !authorizationFailed, !terminalFailure, !endHandled else { return }
+    recoveryTask?.cancel()
+    recoveryTask = nil
+    recovering = false
+    recoveryMessage = nil
+    watchdogTask?.cancel()
+    watchdogTask = nil
+    renewalTask?.cancel()
+    renewalTask = nil
+    sidecarSubtitleTask?.cancel()
+    sidecarSubtitleTask = nil
+    stopPreviewRelay()
+    endPlaybackActivity()
+    relay?.stop()
+    relay = nil
+    playbackURL = nil
+    wantsPlayback = false
+    isPlaying = false
+    isPreparing = false
+    showsStartScreen = false
+    terminalFailure = true
+    errorMessage = message
+    if let active = activePlayback {
+      activePlayback = nil
+      let ticketID = active.id
+      playbackIDs.remove(ticketID)
+      Task { await self.revokeTickets([ticketID]) }
+    }
+    record(.failureObserved, cause: .decoderError, phase: .playback)
   }
 
   private func enqueueProgressSave(isFinished: Bool) {
@@ -2143,6 +2202,14 @@ final class PlaybackShutdownCoordinator {
 
   func unregister(_ controller: PlaybackController) {
     if self.controller === controller { self.controller = nil }
+  }
+
+  func pauseForSystemSleep(flushTimeout: TimeInterval = 2) async {
+    if let controller {
+      await controller.pauseForSystemSleep(flushTimeout: flushTimeout)
+    } else {
+      await PlaybackProgressOutbox.shared.flush(for: flushTimeout)
+    }
   }
 
   func shutdown() async {

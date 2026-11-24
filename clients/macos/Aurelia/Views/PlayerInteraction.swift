@@ -18,8 +18,71 @@ struct PlayerControlsPolicy {
     return generation
   }
 
-  func permitsHide(_ token: UInt64, preparing: Bool, error: Bool) -> Bool {
-    token == generation && holds.isEmpty && !preparing && !error
+  func permitsHide(_ token: UInt64, preparing: Bool, error: Bool, playing: Bool = true) -> Bool {
+    token == generation && holds.isEmpty && !preparing && !error && playing
+  }
+}
+
+/// Distinguishes pointer drags (committed on release) from direct keyboard or accessibility
+/// slider changes (which seek immediately).
+struct PlayerTimelineSeekPolicy {
+  enum Action: Equatable {
+    case updateScrub(Double)
+    case seekImmediately(Int64)
+  }
+
+  static func valueChanged(to newValue: Double, isScrubbing: Bool, duration: Int64) -> Action {
+    let upper = duration > 0 ? Double(duration) : Double.greatestFiniteMagnitude
+    let clamped = min(max(newValue, 0), upper)
+    if isScrubbing { return .updateScrub(clamped) }
+    return .seekImmediately(Int64(clamped.rounded()))
+  }
+
+  static func adjustableTarget(
+    current: Int64, duration: Int64, seekIntervalSeconds: Int, increment: Bool
+  ) -> Int64 {
+    let delta = Int64(max(seekIntervalSeconds, 1)) * 1_000
+    let raw = increment ? current + delta : current - delta
+    let upper = duration > 0 ? duration : Int64.max
+    return min(max(raw, 0), upper)
+  }
+}
+
+/// Maps plain player keyboard events to playback actions using typed characters (layout-independent)
+/// for letter shortcuts and key codes for non-character keys.
+struct PlayerKeyboardShortcutPolicy {
+  enum Action: Equatable {
+    case togglePlayback
+    case toggleMute
+    case toggleVideoFill
+    case showShortcuts
+    case skipIntro
+    case seekBackward
+    case seekForward
+    case escape
+    case consume
+  }
+
+  static func action(
+    keyCode: UInt16,
+    characters: String?,
+    isRepeat: Bool,
+    showsSkipIntro: Bool
+  ) -> Action? {
+    let lowered = characters?.lowercased()
+    if lowered == "z" { return isRepeat ? .consume : .toggleVideoFill }
+    if characters == "?" { return .showShortcuts }
+    if showsSkipIntro, keyCode == 36 || keyCode == 76 || lowered == "s" {
+      return isRepeat ? .consume : .skipIntro
+    }
+    if lowered == "k" || keyCode == 49 { return isRepeat ? .consume : .togglePlayback }
+    if lowered == "m" { return isRepeat ? .consume : .toggleMute }
+    switch keyCode {
+    case 123: return .seekBackward
+    case 124: return .seekForward
+    case 53: return .escape
+    default: return nil
+    }
   }
 }
 

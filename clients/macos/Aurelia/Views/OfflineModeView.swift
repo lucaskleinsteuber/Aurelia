@@ -586,11 +586,12 @@ private struct OfflineTitleDetail: View {
     .background(AureliaDesign.canvas)
     .confirmationDialog("Remove \(title.title)?", isPresented: $confirmingRemoval) {
       Button("Remove Download", role: .destructive) {
-        downloads.remove(title.id)
+        let profile = model.profile
+        Task { await downloads.remove(title.id, profile: profile) }
         dismiss()
       }
     } message: {
-      Text("The copy on this Mac is deleted. The title stays on the server.")
+      Text(OfflineTitleText.removalMessage(for: title, hasServerProfile: model.profile != nil))
     }
   }
 }
@@ -613,5 +614,15 @@ enum OfflineTitleText {
     }
     if title.progressDirty { parts.append("Progress not yet on the server") }
     return parts.joined(separator: " · ")
+  }
+
+  static func removalMessage(for title: OfflineTitle, hasServerProfile: Bool) -> String {
+    let base = "The copy on this Mac is deleted. The title stays on the server."
+    guard title.progressDirty else { return base }
+    if hasServerProfile {
+      return "\(base) Aurelia will try to sync your offline watch progress before removing it."
+    }
+    return
+      "\(base) Offline watch progress has not been synced to the server yet and will be lost if you remove this download while offline."
   }
 }

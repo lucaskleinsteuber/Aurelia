@@ -2812,6 +2812,7 @@ final class AppModel: ObservableObject {
   }
 
   func systemWillSleep() async {
+    await PlaybackShutdownCoordinator.shared.pauseForSystemSleep()
     reconnectTask?.cancel()
     reconnectTask = nil
     reconnectCoordinator.cancel()

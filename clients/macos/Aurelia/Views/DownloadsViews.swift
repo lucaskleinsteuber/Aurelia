@@ -269,9 +269,12 @@ struct OfflineTitleList: View {
       isPresented: Binding(
         get: { removing != nil }, set: { if !$0 { removing = nil } }), presenting: removing
     ) { title in
-      Button("Remove Download", role: .destructive) { downloads.remove(title.id) }
-    } message: { _ in
-      Text("The copy on this Mac is deleted. The title stays on the server.")
+      Button("Remove Download", role: .destructive) {
+        let profile = model.profile
+        Task { await downloads.remove(title.id, profile: profile) }
+      }
+    } message: { title in
+      Text(OfflineTitleText.removalMessage(for: title, hasServerProfile: model.profile != nil))
     }
   }
 
@@ -492,10 +495,19 @@ struct DownloadMenuItems: View {
           // Asked as on the Downloads page; a menu can't hold a dialog, so this one is modal.
           let alert = NSAlert()
           alert.messageText = "Remove \(item.title)?"
-          alert.informativeText = "The copy on this Mac is deleted. The title stays on the server."
+          if let downloaded = downloads.title(item.id) {
+            alert.informativeText = OfflineTitleText.removalMessage(
+              for: downloaded, hasServerProfile: model.profile != nil)
+          } else {
+            alert.informativeText =
+              "The copy on this Mac is deleted. The title stays on the server."
+          }
           alert.addButton(withTitle: "Remove Download").hasDestructiveAction = true
           alert.addButton(withTitle: "Cancel")
-          if alert.runModal() == .alertFirstButtonReturn { downloads.remove(item.id) }
+          if alert.runModal() == .alertFirstButtonReturn {
+            let profile = model.profile
+            Task { await downloads.remove(item.id, profile: profile) }
+          }
         }
       } else {
         Button("Download", systemImage: "arrow.down.circle") { model.download(item) }

@@ -164,4 +164,125 @@ struct OfflineDownloadTests {
     title.serverRevision = nil
     #expect(!OfflineDownloads.offlineIsNewer(title, server: unchanged))
   }
+
+  @Test
+  func syncProgressDoesNotClearNewerOfflineProgressSavedMidSync() async throws {
+    let (first, root) = try store()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let title = try invented(first)
+    let downloads = OfflineDownloads(root: root)
+    downloads.saveProgress(title.id, position: 120_000, duration: 600_000, completed: false)
+    let profile = StoredServerProfile(
+      serverId: title.serverId, name: "Synthetic", baseURL: URL(string: "https://fixture.invalid")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64), token: "test-only",
+      sessionId: UUID(), expiresAt: "2099-01-01T00:00:00Z",
+      user: UserSummary(
+        id: title.userId, username: "synthetic", role: .owner, createdAt: "2026-01-01T00:00:00Z"))
+
+    var sentPositions: [Int64] = []
+    await downloads.syncProgress(
+      profile: profile,
+      fetchProgress: { mediaId in
+        // Simulate playback writing a newer position while the network call is in flight.
+        downloads.saveProgress(mediaId, position: 240_000, duration: 600_000, completed: false)
+        return PlaybackProgressResponse(
+          mediaId: mediaId, positionMilliseconds: 60_000, durationMilliseconds: 600_000,
+          isCompleted: false, lastPlayedAt: nil, updatedAt: "2025-01-01T00:00:00Z", revision: 2)
+      },
+      updateProgress: { mediaId, position, duration, finished, _, _ in
+        sentPositions.append(position)
+        return PlaybackProgressResponse(
+          mediaId: mediaId, positionMilliseconds: position, durationMilliseconds: duration,
+          isCompleted: finished, lastPlayedAt: nil, updatedAt: "2026-01-01T00:00:00Z", revision: 3)
+      })
+
+    #expect(sentPositions == [120_000])
+    #expect(downloads.title(title.id)?.progressDirty == true)
+    #expect(downloads.title(title.id)?.positionMilliseconds == 240_000)
+    #expect(downloads.title(title.id)?.serverRevision == nil)
+
+    // A second sync with no concurrent writes clears progressDirty and records the server revision.
+    await downloads.syncProgress(
+      profile: profile,
+      fetchProgress: { mediaId in
+        PlaybackProgressResponse(
+          mediaId: mediaId, positionMilliseconds: 120_000, durationMilliseconds: 600_000,
+          isCompleted: false, lastPlayedAt: nil, updatedAt: "2025-01-01T00:00:00Z", revision: 3)
+      },
+      updateProgress: { mediaId, position, duration, finished, _, _ in
+        sentPositions.append(position)
+        return PlaybackProgressResponse(
+          mediaId: mediaId, positionMilliseconds: position, durationMilliseconds: duration,
+          isCompleted: finished, lastPlayedAt: nil, updatedAt: "2026-01-01T00:00:00Z", revision: 4)
+      })
+    #expect(sentPositions == [120_000, 240_000])
+    #expect(downloads.title(title.id)?.progressDirty == false)
+    #expect(downloads.title(title.id)?.serverRevision == 4)
+  }
+
+  @Test
+  func removingDownloadWithUnsentProgressSyncsOrRetainsInOutboxAndWarnsOffline() async throws {
+    let (first, root1) = try store()
+    defer { try? FileManager.default.removeItem(at: root1) }
+    let syncedTitle = try invented(first)
+    let onlineDownloads = OfflineDownloads(root: root1)
+    onlineDownloads.saveProgress(
+      syncedTitle.id, position: 300_000, duration: 600_000, completed: false)
+    let profile = StoredServerProfile(
+      serverId: syncedTitle.serverId, name: "Synthetic",
+      baseURL: URL(string: "https://fixture.invalid")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64), token: "test-only",
+      sessionId: UUID(), expiresAt: "2099-01-01T00:00:00Z",
+      user: UserSummary(
+        id: syncedTitle.userId, username: "synthetic", role: .owner,
+        createdAt: "2026-01-01T00:00:00Z"))
+
+    var uploadedPositions: [Int64] = []
+    await onlineDownloads.remove(
+      syncedTitle.id, profile: profile,
+      fetchProgress: { mediaId in
+        PlaybackProgressResponse(
+          mediaId: mediaId, positionMilliseconds: 60_000, durationMilliseconds: 600_000,
+          isCompleted: false, lastPlayedAt: nil, updatedAt: "2025-01-01T00:00:00Z", revision: 1)
+      },
+      updateProgress: { mediaId, position, duration, finished, _, _ in
+        uploadedPositions.append(position)
+        return PlaybackProgressResponse(
+          mediaId: mediaId, positionMilliseconds: position, durationMilliseconds: duration,
+          isCompleted: finished, lastPlayedAt: nil, updatedAt: "2026-01-01T00:00:00Z", revision: 2)
+      })
+    #expect(uploadedPositions == [300_000])
+    #expect(onlineDownloads.titles.isEmpty)
+
+    // When the server is unreachable, removing retains the unsent progress in the durable outbox.
+    let (second, root2) = try store()
+    defer { try? FileManager.default.removeItem(at: root2) }
+    let offlineTitle = try invented(second)
+    let fallbackDownloads = OfflineDownloads(root: root2)
+    fallbackDownloads.saveProgress(
+      offlineTitle.id, position: 420_000, duration: 600_000, completed: true)
+    let fallbackProfile = StoredServerProfile(
+      serverId: offlineTitle.serverId, name: "Synthetic",
+      baseURL: URL(string: "https://fixture.invalid")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64), token: "test-only",
+      sessionId: UUID(), expiresAt: "2099-01-01T00:00:00Z",
+      user: UserSummary(
+        id: offlineTitle.userId, username: "synthetic", role: .owner,
+        createdAt: "2026-01-01T00:00:00Z"))
+    let outboxDir = root2.appendingPathComponent("outbox", isDirectory: true)
+    let outbox = PlaybackProgressOutbox(
+      storageURL: outboxDir.appendingPathComponent("progress-outbox.json"))
+
+    let dirtyBefore = try #require(fallbackDownloads.title(offlineTitle.id))
+    #expect(
+      OfflineTitleText.removalMessage(for: dirtyBefore, hasServerProfile: false)
+        .localizedCaseInsensitiveContains("not been synced"))
+
+    await fallbackDownloads.remove(
+      offlineTitle.id, profile: fallbackProfile, outbox: outbox,
+      fetchProgress: { _ in throw URLError(.notConnectedToInternet) },
+      updateProgress: { _, _, _, _, _, _ in throw URLError(.notConnectedToInternet) })
+    #expect(fallbackDownloads.titles.isEmpty)
+    #expect(outbox.pendingCount(profile: fallbackProfile) == 1)
+  }
 }

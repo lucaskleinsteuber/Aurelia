@@ -8,6 +8,7 @@ protocol PlaybackEngine: AnyObject {
   var onUpdate: (() -> Void)? { get set }
   var onEnded: (() -> Void)? { get set }
   var onError: ((String) -> Void)? { get set }
+  var onConfigurationError: ((String) -> Void)? { get set }
   var isPlaying: Bool { get }
   var isSeekable: Bool { get }
   var currentTimeMilliseconds: Int64 { get }
@@ -47,6 +48,11 @@ protocol PlaybackEngine: AnyObject {
 }
 
 extension PlaybackEngine {
+  var onConfigurationError: ((String) -> Void)? {
+    get { nil }
+    set {}
+  }
+
   func applyDialogueBoost(_ mode: DialogueBoost) -> AudioChangeResult { .unavailable }
   var isSeekable: Bool { false }
   func load(url: URL, startAt milliseconds: Int64) { load(url: url) }
@@ -108,6 +114,7 @@ final class VLCPlaybackEngine: PlaybackEngine {
   var onUpdate: (() -> Void)?
   var onEnded: (() -> Void)?
   var onError: ((String) -> Void)?
+  var onConfigurationError: ((String) -> Void)?
 
   private var player: VLCMediaPlayer
   private let playerFactory: @MainActor () -> VLCMediaPlayer
@@ -302,7 +309,7 @@ final class VLCPlaybackEngine: PlaybackEngine {
     guard
       processing.filters.isEmpty || VLCAudioFilter.apply(processing, on: player, output: "auhal")
     else {
-      onError?(
+      onConfigurationError?(
         "Dialogue Boost or Volume Leveling is unavailable in this VLC installation. Turn it off in Playback settings."
       )
       return
@@ -496,7 +503,14 @@ final class VLCPlaybackEngine: PlaybackEngine {
           appliedSubtitlePreferences = true
         }
       } else {
-        player.currentVideoSubTitleIndex = -1
+        if let forced = PlaybackLanguage.forcedSubtitleTrackWhenOff(
+          subtitleTracks: subtitleTracks, currentSubtitleID: selectedSubtitleTrackID,
+          audioTracks: audioTracks, currentAudioID: selectedAudioTrackID)
+        {
+          player.currentVideoSubTitleIndex = forced.id
+        } else {
+          player.currentVideoSubTitleIndex = -1
+        }
         appliedSubtitlePreferences = true
       }
     }
