@@ -114,7 +114,7 @@ struct AppUpdateLogicTests {
   @Test func betaChannelUsesTheReleaseListAndItsOwnCache() async throws {
     #expect(
       AppUpdateClient.catalogURL(repository: "owner/repo", beta: true)?.absoluteString
-        == "https://api.github.com/repos/owner/repo/releases?per_page=20")
+        == "https://api.github.com/repos/owner/repo/releases?per_page=100")
     #expect(
       AppUpdateClient.catalogURL(repository: "owner/repo", beta: false)?.absoluteString
         == "https://api.github.com/repos/owner/repo/releases/latest")
@@ -125,7 +125,7 @@ struct AppUpdateLogicTests {
     let result = try await AppUpdateClient(transport: transport).catalog(
       repository: "owner/repo", cached: nil, beta: true)
     #expect(result.release.build == 100)
-    #expect(await transport.requests.first?.url?.query == "per_page=20")
+    #expect(await transport.requests.first?.url?.query == "per_page=100")
     try withPreferences { defaults, _ in
       // Every Mac version is a beta for now, so Beta Updates is on until someone turns it off.
       #expect(AppUpdatePreferences.betaUpdates(in: defaults))
@@ -138,6 +138,71 @@ struct AppUpdateLogicTests {
       // A beta list is not a valid stable answer, so the stable feed keeps nothing.
       #expect(AppUpdateCatalogCache.load(repository: "owner/repo", defaults: defaults) == nil)
     }
+  }
+
+  @Test func betaChannelPaginatesAcrossNonMacReleasesAndReportsMissingMacRelease() async throws {
+    let nonMacPage = try JSONSerialization.data(withJSONObject: [
+      [
+        "tag_name": "server-2.30.0-200", "prerelease": false, "draft": false, "assets": [] as [Any],
+      ],
+      [
+        "tag_name": "linux-app-1.5.0-150", "prerelease": true, "draft": false,
+        "assets": [] as [Any],
+      ],
+    ])
+    let macPage = try JSONSerialization.data(withJSONObject: [
+      try JSONSerialization.jsonObject(
+        with: releaseData(
+          tag: "2.27.0-188",
+          imageName: "Aurelia-2.27.0-188-macOS-\(AppUpdateLogic.architecture).dmg"))
+    ])
+    let nextLink =
+      #"<https://api.github.com/repos/owner/repo/releases?per_page=100&page=2>; rel="next""#
+    let transport = StubUpdateTransport(steps: [
+      .linked(nonMacPage, nextLink),
+      .body(macPage),
+    ])
+    let result = try await AppUpdateClient(transport: transport).catalog(
+      repository: "owner/repo", cached: nil, beta: true)
+    #expect(result.release.tag == "2.27.0-188")
+    #expect(result.cache == nil)
+    #expect(await transport.requests.count == 2)
+    #expect(await transport.requests[1].url?.query == "per_page=100&page=2")
+
+    // Foreign Link targets are ignored and an exhausted feed reports .noMacRelease.
+    let foreignLink =
+      #"<https://evil.example/repos/owner/repo/releases?per_page=100&page=2>; rel="next""#
+    #expect(
+      AppUpdateLogic.nextPageURL(fromLinkHeader: foreignLink, repository: "owner/repo") == nil)
+    let emptyTransport = StubUpdateTransport(steps: [.linked(nonMacPage, foreignLink)])
+    do {
+      _ = try await AppUpdateClient(transport: emptyTransport).catalog(
+        repository: "owner/repo", cached: nil, beta: true)
+      Issue.record("Expected .noMacRelease when no Mac release exists")
+    } catch let error as AppUpdateError {
+      #expect(error == .noMacRelease)
+    }
+  }
+
+  @Test func installLocationAndHostingRestartNotesAreExplicit() {
+    #expect(AppUpdateLogic.installLocationIssue(bundlePath: "/Applications/Aurelia.app") == nil)
+    #expect(
+      AppUpdateLogic.installLocationIssue(
+        bundlePath: "/private/var/folders/xx/T/AppTranslocation/ABC/d/Aurelia.app")
+        == .translocated)
+    #expect(
+      AppUpdateLogic.installLocationIssue(bundlePath: "/Users/alice/Downloads/Aurelia.app")
+        == .outsideApplications("/Users/alice/Downloads/Aurelia.app"))
+    #expect(
+      AppUpdateLogic.installLocationIssue(bundlePath: "/Applications/Aurelia 2.app")
+        == .outsideApplications("/Applications/Aurelia 2.app"))
+
+    let clientNote = AppUpdateLogic.installRestartNote(
+      downloadBytes: 95_000_000, isHostingLocally: false)
+    #expect(!clientNote.localizedCaseInsensitiveContains("server on this Mac"))
+    let hostNote = AppUpdateLogic.installRestartNote(
+      downloadBytes: 95_000_000, isHostingLocally: true)
+    #expect(hostNote.localizedCaseInsensitiveContains("server on this Mac will stop"))
   }
 
   @Test func theAppGroupFollowsTheSigningTeamWrittenByTheBuild() {
@@ -758,6 +823,7 @@ private actor StubUpdateTransport: AppUpdateTransport {
   enum Step: Sendable {
     case body(Data)
     case tagged(Data, String)
+    case linked(Data, String)
     case partialFailure(AppUpdateError)
   }
   private var steps: [Step]
@@ -775,9 +841,10 @@ private actor StubUpdateTransport: AppUpdateTransport {
     case .partialFailure(let failure):
       if let destination { try Data("partial".utf8).write(to: destination) }
       throw failure
-    case .body(let data), .tagged(let data, _):
+    case .body(let data), .tagged(let data, _), .linked(let data, _):
       var headers = ["Content-Length": String(data.count)]
       if case .tagged(_, let etag) = step { headers["ETag"] = etag }
+      if case .linked(_, let link) = step { headers["Link"] = link }
       let response = HTTPURLResponse(
         url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
         headerFields: headers)!

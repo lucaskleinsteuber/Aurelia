@@ -1374,7 +1374,11 @@ struct AppSettingsView: View {
           "Installed Version", value: "\(updater.currentVersion) (\(updater.currentBuild))")
         LabeledContent("Status", value: updateStatusText)
 
-        if updater.state == .downloading || updater.state == .installing {
+        if let locationIssue = updater.installLocationIssue {
+          Text(locationIssue.message)
+            .font(.callout).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        } else if updater.state == .downloading || updater.state == .installing {
           AppUpdateProgressBar(updater: updater)
           if updater.state == .downloading {
             Button("Cancel Download") { updater.cancelInstall() }
@@ -1384,6 +1388,13 @@ struct AppSettingsView: View {
           Button("Install \(release.version) and Restart") { updater.startInstall(release) }
             .buttonStyle(AureliaPrimaryActionButtonStyle())
             .accessibilityIdentifier("updates-install")
+          if model.isLocalHost {
+            Text(
+              "Your server on this Mac will stop for about a minute during the update, so anyone watching will be interrupted."
+            )
+            .font(.callout).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+          }
         }
 
         Toggle("Check for Updates Automatically", isOn: $automaticUpdateChecks)

@@ -68,6 +68,34 @@ struct UpdateHandoffTests {
     do { _ = try request.image(in: root) } catch { rejected = true }
     try require(rejected, "Reject symlink image")
     try require(manager.fileExists(atPath: outside.path), "Preserve unrelated files")
-    print("Passed 14 request/acknowledgement scenarios; no app, media or disk image opened.")
+
+    // Stale expired pending request is ignored by hasFreshPendingRequest and cleaned before save.
+    let staleImage = directory.appendingPathComponent("Aurelia-1.27.2-126-macOS-universal.dmg")
+    try? manager.removeItem(at: staleImage)
+    try Data("fresh bytes".utf8).write(to: staleImage)
+    let stale = MacUpdateInstallRequest(
+      id: UUID(), directory: request.directory, imageName: staleImage.lastPathComponent,
+      build: 126, appPID: 42, createdAt: Date().addingTimeInterval(-300))
+    try JSONEncoder().encode(stale).write(to: pending)
+    try require(!MacUpdateInstallRequest.hasFreshPendingRequest(in: root), "Reject stale pending")
+    let fresh = try MacUpdateInstallRequest.prepare(
+      image: staleImage, build: 126, appPID: 42, root: root)
+    try fresh.save(in: root)
+    try require(MacUpdateInstallRequest.hasFreshPendingRequest(in: root), "Accept fresh pending")
+    // Atomic withdraw reclaims an unclaimed request and returns false once claimed.
+    try require(fresh.withdraw(in: root), "Withdraw unclaimed pending request")
+    try require(!fresh.withdraw(in: root), "Withdrawing twice returns false")
+    try fresh.save(in: root)
+    _ = try MacUpdateInstallRequest.claim(in: root)
+    try require(!fresh.withdraw(in: root), "Withdraw returns false after helper claimed request")
+    // Helper rejection status surfaces its exact message to waitForAcknowledgement.
+    try fresh.writeStatus("failed", message: "Permission denied in Applications", in: root)
+    do {
+      try await fresh.waitForAcknowledgement(in: root, timeoutSeconds: 0.2)
+      throw NSError(domain: "Rejected status must fail acknowledgement", code: 1)
+    } catch MacUpdateInstallRequest.Failure.rejected(let message) {
+      try require(message == "Permission denied in Applications", "Preserve helper rejection text")
+    }
+    print("Passed 20 request/acknowledgement scenarios; no app, media or disk image opened.")
   }
 }

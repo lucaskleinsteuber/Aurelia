@@ -51,6 +51,7 @@ enum UpdateInstallation {
 
   enum Failure: Error, LocalizedError {
     case notInstalled
+    case notWritable
     case appStillRunning
     case wrongApp
     case wrongVersion
@@ -61,6 +62,8 @@ enum UpdateInstallation {
     var message: String {
       switch self {
       case .notInstalled: "The installed app could not be found."
+      case .notWritable:
+        "Aurelia doesn't have permission to update itself in Applications. Ask an administrator to install the update or copy the new Aurelia app into Applications."
       case .appStillRunning: "Aurelia or its server didn't quit in time."
       case .wrongApp: "The download doesn't contain Aurelia."
       case .wrongVersion: "The download contains a different or older version than expected."
@@ -72,6 +75,24 @@ enum UpdateInstallation {
     }
 
     var errorDescription: String? { message }
+  }
+
+  /// Verifies that the destination folder permits creating the update staging directory and moving
+  /// the installed bundle aside before asking the app to quit.
+  static func verifyWritableDestination(app: URL) throws {
+    let parent = app.deletingLastPathComponent()
+    guard Darwin.access(parent.path, W_OK) == 0 else { throw Failure.notWritable }
+    var parentStat = stat()
+    var appStat = stat()
+    if Darwin.lstat(parent.path, &parentStat) == 0,
+      (parentStat.st_mode & S_ISVTX) != 0,
+      Darwin.lstat(app.path, &appStat) == 0
+    {
+      let euid = Darwin.geteuid()
+      if euid != 0 && appStat.st_uid != euid && parentStat.st_uid != euid {
+        throw Failure.notWritable
+      }
+    }
   }
 
   static func validate(current: Identity, candidate: Identity, expectedBuild: Int) throws {

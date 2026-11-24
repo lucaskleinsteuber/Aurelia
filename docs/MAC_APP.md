@@ -207,10 +207,16 @@ folders (see [Organizing your media](MEDIA_LIBRARY.md)).
 
 ## Updates
 
-The app checks the GitHub releases once a day (*Settings › Updates*). It downloads the disk image
-for its own processor, checks it against the release's checksums and Apple's code signature,
-replaces only the app and starts it again; the library, profiles and settings stay. Turn on
-**Beta updates** to receive test versions before they become stable.
+The app checks GitHub releases at launch and once a day while running (*Settings › Updates*).
+Automatic updates require Aurelia to be installed at `/Applications/Aurelia.app` (not run from a
+disk image, Downloads, or another folder). It downloads the disk image for its own processor, checks
+it against the release's signed checksums and Apple's code signature, replaces only the app and
+starts it again; the library, profiles and settings stay. If this Mac hosts your server, the server
+stops briefly while the update installs.
+
+Aurelia for Mac is currently published only as beta versions (development-signed for Macs registered
+to the developer's Apple account), so **Beta updates** is enabled by default and should stay on to
+receive updates; there are no stable Mac versions yet.
 
 ## Removing Aurelia
 

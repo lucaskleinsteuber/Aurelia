@@ -41,7 +41,25 @@ struct UpdateInstallationTests {
         """, excluding: 11)
     try check(processes == [10, 12], "Only this bundle's other processes block replacement")
     try downloadCleanup(parent: parent)
-    print("Passed 23 installer scenarios; no apps launched or installed.")
+    try destinationWritability(parent: parent)
+    print("Passed 25 installer scenarios; no apps launched or installed.")
+  }
+
+  static func destinationWritability(parent: URL) throws {
+    let manager = FileManager.default
+    let writableDir = parent.appendingPathComponent("WritableApps", isDirectory: true)
+    try manager.createDirectory(at: writableDir, withIntermediateDirectories: true)
+    try UpdateInstallation.verifyWritableDestination(
+      app: writableDir.appendingPathComponent("Aurelia.app"))
+    let readonlyDir = parent.appendingPathComponent("ReadOnlyApps", isDirectory: true)
+    try manager.createDirectory(at: readonlyDir, withIntermediateDirectories: true)
+    try manager.setAttributes([.posixPermissions: 0o555], ofItemAtPath: readonlyDir.path)
+    defer { try? manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: readonlyDir.path) }
+    do {
+      try UpdateInstallation.verifyWritableDestination(
+        app: readonlyDir.appendingPathComponent("Aurelia.app"))
+      throw TestError.failed("Read-only Applications folder must be rejected before quit")
+    } catch UpdateInstallation.Failure.notWritable {}
   }
 
   static func downloadCleanup(parent: URL) throws {

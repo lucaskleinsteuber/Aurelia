@@ -30,6 +30,7 @@ final class AppUpdater: ObservableObject {
   let repository: String?
   let currentVersion: String
   let currentBuild: Int
+  let bundlePath: String
   private let client: AppUpdateClient
   private let defaults: UserDefaults
 
@@ -39,6 +40,7 @@ final class AppUpdater: ObservableObject {
   ) {
     self.client = client
     self.defaults = defaults
+    bundlePath = bundle.bundleURL.standardizedFileURL.path
     let configured = bundle.object(forInfoDictionaryKey: "AureliaUpdateRepository") as? String
     // Aurelia Test never updates itself: an update would install the real app.
     repository =
@@ -56,6 +58,10 @@ final class AppUpdater: ObservableObject {
   }
 
   var canCheck: Bool { repository != nil }
+
+  var installLocationIssue: AppUpdateLogic.InstallLocationIssue? {
+    AppUpdateLogic.installLocationIssue(bundlePath: bundlePath)
+  }
 
   var isBusy: Bool { state == .checking || state == .downloading || state == .installing }
 
@@ -123,12 +129,16 @@ final class AppUpdater: ObservableObject {
       if AppUpdateLogic.isNewer(release, version: currentVersion, build: currentBuild) {
         state = .available(release)
         // Re-read choices after the request: Settings may have changed while it was in flight.
-        // The page already shows Install; only a background check asks in a dialog.
+        // The page already shows Install; only a background check asks in a dialog, and never
+        // repeatedly when this copy cannot self-update from its current folder.
         if !onPage,
+          installLocationIssue == nil,
           AppUpdatePreferences.shouldOffer(
             version: release.version, userInitiated: userInitiated, defaults: defaults)
         {
           offer(release)
+        } else if userInitiated, !onPage, let issue = installLocationIssue {
+          alert("Aurelia \(release.version) Is Available", issue.message)
         }
       } else {
         state = .upToDate
@@ -162,8 +172,9 @@ final class AppUpdater: ObservableObject {
       release.isBeta
       ? "Aurelia \(release.version) Beta Is Available"
       : "Aurelia \(release.version) Is Available"
-    alert.informativeText =
-      "Aurelia will reopen after installing the update. \(AppUpdateLogic.downloadSizeText(release.downloadBytes))"
+    alert.informativeText = AppUpdateLogic.installRestartNote(
+      downloadBytes: release.downloadBytes,
+      isHostingLocally: AppModel.active?.isLocalHost == true)
     alert.addButton(withTitle: "Install and Restart")
     alert.addButton(withTitle: "Later")
     alert.addButton(withTitle: "Skip This Version")
@@ -182,14 +193,21 @@ final class AppUpdater: ObservableObject {
   func install(_ release: AppRelease) async {
     guard !isBusy else { return }
     guard let repository else { return }
+    if let issue = installLocationIssue {
+      state = .failed(issue.message)
+      if !showUpdatesPage() { alert("Move Aurelia to Applications", issue.message) }
+      return
+    }
     installingRelease = release
     progress = AppUpdateProgress(received: 0, expected: release.downloadBytes)
     state = .downloading
     AppUpdateDockProgress.show(nil)
     var downloadedImage: URL?
     var pendingRequest: MacUpdateInstallRequest?
+    var updatesFolder: URL?
     do {
       let folder = try Self.updatesDirectory()
+      updatesFolder = folder
       let size = release.downloadBytes
       let destination = try await client.download(
         release, repository: repository, currentBuild: currentBuild, folder: folder,
@@ -215,21 +233,29 @@ final class AppUpdater: ObservableObject {
       _ = try await NSWorkspace.shared.openApplication(at: helper, configuration: configuration)
       // NSWorkspace ignores arguments from a sandboxed caller. Do not quit until
       // the same-team helper has acknowledged this exact validated request.
-      try await request.waitForAcknowledgement(in: folder)
+      do {
+        try await request.waitForAcknowledgement(in: folder)
+      } catch MacUpdateInstallRequest.Failure.acknowledgementTimedOut {
+        // Atomically withdraw the pending file before giving up. If withdrawal fails, the helper
+        // already claimed the request right at the deadline — keep waiting for its status rather
+        // than deleting the downloaded image out from under it.
+        if !request.withdraw(in: folder) {
+          try await request.waitForAcknowledgement(in: folder, timeoutSeconds: 15)
+        } else {
+          pendingRequest = nil
+          throw MacUpdateInstallRequest.Failure.acknowledgementTimedOut
+        }
+      }
       Self.logger.notice("Installing Aurelia \(release.version, privacy: .public); quitting.")
       AppModel.active?.isPreparingApplicationUpdate = true
       NSApp.terminate(nil)
     } catch {
-      if let pendingRequest, let root = MacUpdateInstallRequest.updatesDirectory() {
-        let path = root.appendingPathComponent(MacUpdateInstallRequest.pendingName)
-        if let data = try? Data(contentsOf: path),
-          let saved = try? JSONDecoder().decode(MacUpdateInstallRequest.self, from: data),
-          saved.id == pendingRequest.id
-        {
-          try? FileManager.default.removeItem(at: path)
-        }
+      var helperClaimedRequest = false
+      if let pendingRequest, let root = updatesFolder ?? MacUpdateInstallRequest.updatesDirectory()
+      {
+        helperClaimedRequest = !pendingRequest.withdraw(in: root)
       }
-      if let downloadedImage {
+      if !helperClaimedRequest, let downloadedImage {
         try? FileManager.default.removeItem(at: downloadedImage.deletingLastPathComponent())
       }
       AppUpdateDockProgress.clear()
@@ -240,9 +266,15 @@ final class AppUpdater: ObservableObject {
         state = .available(release)
         return
       }
-      let message =
-        (error as? AppUpdateError)?.message
-        ?? "The update installer did not acknowledge the request. Aurelia has stayed open; try again."
+      let message: String
+      if let updateError = error as? AppUpdateError {
+        message = updateError.message
+      } else if case .rejected(let detail) = error as? MacUpdateInstallRequest.Failure {
+        message = detail ?? "The update request could not be completed. Please try again."
+      } else {
+        message =
+          "The update installer did not acknowledge the request. Aurelia has stayed open; try again."
+      }
       state = .failed(message)
       if !showUpdatesPage() { alert("Couldn't Install the Update", message) }
     }

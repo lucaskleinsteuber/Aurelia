@@ -24,9 +24,13 @@ enum UpdateInstaller {
       .deletingLastPathComponent().standardizedFileURL
     guard app.path == "/Applications/Aurelia.app",
       let root = MacUpdateInstallRequest.updatesDirectory(),
-      runPending(app: app, root: root, presentsFailure: false)
+      let outcome = runPendingOutcome(app: app, root: root, presentsFailure: false)
     else { return .completed }
-    if let status = MacUpdateInstallRequest.status(in: root), status.phase == "failed" {
+    // Only surface a post-acceptance failure alert from the helper (when the app is already
+    // quitting). Pre-acceptance rejections are read directly by the still-open app from status.
+    if outcome.accepted, let status = MacUpdateInstallRequest.status(in: root),
+      status.id == outcome.requestID, status.phase == "failed"
+    {
       return .failed(app, status.message ?? "The update could not be completed. Please try again.")
     }
     return .completed
@@ -40,14 +44,24 @@ enum UpdateInstaller {
   private static let logger = Logger(
     subsystem: "com.lucas.aurelia.media.server-host", category: "update")
 
-  static func hasPendingRequest() -> Bool {
+  static func hasPendingRequest(
+    arguments: [String] = CommandLine.arguments,
+    environment: [String: String] = ProcessInfo.processInfo.environment
+  ) -> Bool {
+    // A normal host or login-agent start must never be hijacked by a pending/stale update file.
+    if arguments.contains("--background")
+      || environment["AURELIA_HOST_MODE"] != nil
+      || environment["AURELIA_HOST_BOOTSTRAP_DIR"] != nil
+      || environment["AURELIA_HOST_DATA_DIR"] != nil
+    {
+      return false
+    }
     let app = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent()
       .deletingLastPathComponent().standardizedFileURL
     guard app.path == "/Applications/Aurelia.app",
       let root = MacUpdateInstallRequest.updatesDirectory()
     else { return false }
-    return FileManager.default.fileExists(
-      atPath: root.appendingPathComponent(MacUpdateInstallRequest.pendingName).path)
+    return MacUpdateInstallRequest.hasFreshPendingRequest(in: root)
   }
 
   static func runPendingIfRequested() -> Bool {
@@ -60,15 +74,31 @@ enum UpdateInstaller {
     return runPending(app: app, root: root)
   }
 
+  private struct PendingOutcome {
+    let requestID: UUID
+    let accepted: Bool
+  }
+
   /// The complete production transaction can be exercised against signed invented apps.
   /// Production entry points always derive their installed location and App Group above.
   static func runPending(app: URL, root: URL, presentsFailure: Bool = true) -> Bool {
+    runPendingOutcome(app: app, root: root, presentsFailure: presentsFailure) != nil
+  }
+
+  private static func runPendingOutcome(
+    app: URL, root: URL, presentsFailure: Bool
+  ) -> PendingOutcome? {
     var request: MacUpdateInstallRequest?
+    var accepted = false
+    var resolvedImage: URL?
     do {
-      guard let claimed = try MacUpdateInstallRequest.claim(in: root) else { return false }
+      guard let claimed = try MacUpdateInstallRequest.claim(in: root) else { return nil }
       request = claimed
       let image = try claimed.image(in: root)
+      resolvedImage = image
+      try UpdateInstallation.verifyWritableDestination(app: app)
       try claimed.writeStatus("accepted", in: root)
+      accepted = true
       try UpdateInstallation.withDownloadedImage(at: image) {
         try install(image: image, expectedBuild: claimed.build, appPID: claimed.appPID, app: app)
       }
@@ -76,18 +106,22 @@ enum UpdateInstaller {
       logger.notice(
         "Installed build \(claimed.build, privacy: .public) through the App Group handoff.")
       open(app)
+      return PendingOutcome(requestID: claimed.id, accepted: true)
     } catch {
+      if !accepted, let resolvedImage {
+        UpdateInstallation.removeDownloadedImage(at: resolvedImage)
+      }
       let message =
         (error as? InstallError)?.message
         ?? "The update request could not be completed. Please try again."
       if let request { try? request.writeStatus("failed", message: message, in: root) }
       logger.error("App Group update failed: \(message, privacy: .public)")
-      if presentsFailure {
+      if presentsFailure, accepted {
         report(message)
         open(app)
       }
+      return request.map { PendingOutcome(requestID: $0.id, accepted: accepted) }
     }
-    return true
   }
 
   static func runIfRequested(_ arguments: [String]) -> Bool {
@@ -122,6 +156,7 @@ enum UpdateInstaller {
   static func install(image: URL, expectedBuild: Int, appPID: pid_t, app: URL) throws {
     let fileManager = FileManager.default
     try waitUntilGone(pid: appPID)
+    try UpdateInstallation.verifyWritableDestination(app: app)
 
     let mount = fileManager.temporaryDirectory.appendingPathComponent(
       "AureliaUpdate-\(UUID().uuidString)")

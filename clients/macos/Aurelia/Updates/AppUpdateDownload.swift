@@ -5,7 +5,7 @@ import OSLog
 enum AppUpdateError: Error, Equatable, LocalizedError, Sendable {
   case github(Int)
   case rateLimited, notModified, privateRepository
-  case invalidRelease, invalidTag, noDiskImage, noChecksum, checksumMismatch, noFolder
+  case invalidRelease, invalidTag, noDiskImage, noMacRelease, noChecksum, checksumMismatch, noFolder
   case unsigned, badSignature
   case invalidURL, invalidResponse, tooLarge, emptyDownload, incompleteDownload, notNewer
   case timedOut, connectionLost, diskFull, writeFailed
@@ -28,6 +28,8 @@ enum AppUpdateError: Error, Equatable, LocalizedError, Sendable {
     case .invalidRelease: "GitHub returned an invalid release description. Try again later."
     case .invalidTag: "The newest release has an invalid version tag. It wasn't installed."
     case .noDiskImage: "The newest release has no Mac disk image."
+    case .noMacRelease:
+      "No Mac release was found in the recent GitHub release list. Try again later or check the release page."
     case .noChecksum: "The newest release has no checksum for its disk image."
     case .checksumMismatch:
       "The downloaded disk image doesn't match its published checksum, so it wasn't installed."
@@ -74,11 +76,13 @@ struct AppUpdateTransfer: Sendable {
   let data: Data
   let sha256: String
   let etag: String?
+  let linkHeader: String?
 
-  init(data: Data, sha256: String, etag: String? = nil) {
+  init(data: Data, sha256: String, etag: String? = nil, linkHeader: String? = nil) {
     self.data = data
     self.sha256 = sha256
     self.etag = etag
+    self.linkHeader = linkHeader
   }
 }
 
@@ -113,6 +117,7 @@ struct AppUpdateTransferAccumulator {
   private var count: Int64 = 0
   private var prefix = Data()
   private let etag: String?
+  private let linkHeader: String?
   private let progress: AppUpdateProgressHandler?
   private var reported: Int64 = 0
 
@@ -139,6 +144,7 @@ struct AppUpdateTransferAccumulator {
     self.write = write
     self.progress = progress
     self.etag = http.value(forHTTPHeaderField: "ETag")
+    self.linkHeader = http.value(forHTTPHeaderField: "Link")
   }
 
   mutating func consume(_ chunk: Data) throws {
@@ -172,7 +178,7 @@ struct AppUpdateTransferAccumulator {
     }
     return AppUpdateTransfer(
       data: data, sha256: digest.finalize().map { String(format: "%02x", $0) }.joined(),
-      etag: etag)
+      etag: etag, linkHeader: linkHeader)
   }
 }
 
@@ -303,13 +309,15 @@ struct AppUpdateClient: Sendable {
     return (release, result.etag)
   }
 
-  /// Stable: GitHub's latest release. Beta: the newest of the last releases, pre-releases
+  static let maxBetaPages = 10
+
+  /// Stable: GitHub's latest release. Beta: paginated release list (100 per page), pre-releases
   /// included.
   static func catalogURL(repository: String, beta: Bool) -> URL? {
     guard AppUpdateLogic.isRepository(repository) else { return nil }
     return URL(
       string: beta
-        ? "https://api.github.com/repos/\(repository)/releases?per_page=20"
+        ? "https://api.github.com/repos/\(repository)/releases?per_page=100"
         : "https://api.github.com/repos/\(repository)/releases/latest")
   }
 
@@ -323,23 +331,68 @@ struct AppUpdateClient: Sendable {
     let cachedRelease = cached.flatMap {
       try? AppUpdateLogic.release(in: $0.data, beta: beta, repository: repository)
     }
+    if !beta {
+      do {
+        let result = try await transfer(
+          url, ifNoneMatch: cachedRelease == nil ? nil : cached?.etag, maximumBytes: limit)
+        let release = try AppUpdateLogic.validatedRelease(
+          fromLatest: result.data, repository: repository)
+        return (release, result.etag.map { AppUpdateCatalogCache(data: result.data, etag: $0) })
+      } catch AppUpdateError.notModified {
+        if let cached, let cachedRelease { return (cachedRelease, cached) }
+        let result = try await transfer(url, maximumBytes: limit)
+        return (
+          try AppUpdateLogic.validatedRelease(fromLatest: result.data, repository: repository),
+          result.etag.map { AppUpdateCatalogCache(data: result.data, etag: $0) }
+        )
+      } catch AppUpdateError.github(404) {
+        throw AppUpdateError.privateRepository
+      }
+    }
+
+    // Beta channel: check page 1 (with ETag cache), then walk Link rel="next" up to maxBetaPages
+    // so server/Linux releases never hide an older Mac build.
+    let firstPage: AppUpdateTransfer
     do {
-      let result = try await transfer(
+      firstPage = try await transfer(
         url, ifNoneMatch: cachedRelease == nil ? nil : cached?.etag, maximumBytes: limit)
-      let release = try AppUpdateLogic.release(
-        in: result.data, beta: beta, repository: repository)
-      return (release, result.etag.map { AppUpdateCatalogCache(data: result.data, etag: $0) })
     } catch AppUpdateError.notModified {
       if let cached, let cachedRelease { return (cachedRelease, cached) }
-      // An unexpected 304 without a usable body is not proof that the app is current.
-      let result = try await transfer(url, maximumBytes: limit)
-      return (
-        try AppUpdateLogic.release(in: result.data, beta: beta, repository: repository),
-        result.etag.map { AppUpdateCatalogCache(data: result.data, etag: $0) }
-      )
+      do {
+        firstPage = try await transfer(url, maximumBytes: limit)
+      } catch AppUpdateError.github(404) {
+        throw AppUpdateError.privateRepository
+      }
     } catch AppUpdateError.github(404) {
       throw AppUpdateError.privateRepository
     }
+    if let release = try AppUpdateLogic.newestReleaseIfPresent(
+      fromList: firstPage.data, repository: repository)
+    {
+      return (release, firstPage.etag.map { AppUpdateCatalogCache(data: firstPage.data, etag: $0) })
+    }
+
+    var visited: Set<URL> = [url]
+    var nextURL = AppUpdateLogic.nextPageURL(
+      fromLinkHeader: firstPage.linkHeader, repository: repository)
+    var page = 1
+    while page < Self.maxBetaPages, let pageURL = nextURL, visited.insert(pageURL).inserted {
+      page += 1
+      let result: AppUpdateTransfer
+      do {
+        result = try await transfer(pageURL, maximumBytes: limit)
+      } catch AppUpdateError.github(404) {
+        throw AppUpdateError.privateRepository
+      }
+      if let release = try AppUpdateLogic.newestReleaseIfPresent(
+        fromList: result.data, repository: repository)
+      {
+        return (release, nil)
+      }
+      nextURL = AppUpdateLogic.nextPageURL(
+        fromLinkHeader: result.linkHeader, repository: repository)
+    }
+    throw AppUpdateError.noMacRelease
   }
 
   func latest(

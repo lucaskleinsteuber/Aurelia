@@ -41,6 +41,7 @@ struct AureliaApp: App {
             .receive(on: DispatchQueue.main)
         ) { _ in
           Task { await model.systemDidWake() }
+          AppUpdater.shared.checkInBackgroundIfDue()
         }
     }
     .defaultSize(width: 1_470, height: 956)
@@ -99,6 +100,7 @@ enum WindowClosePreference {
 final class AureliaAppDelegate: NSObject, NSApplicationDelegate {
   private let termination = ApplicationTerminationCoordinator()
   private var powerOffObserver: NSObjectProtocol?
+  private var updateCheckTimer: Timer?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     powerOffObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -116,6 +118,11 @@ final class AureliaAppDelegate: NSObject, NSApplicationDelegate {
       await AppModel.active?.start()
     }
     AppUpdater.shared.checkInBackgroundIfDue()
+    let timer = Timer.scheduledTimer(withTimeInterval: 3_600, repeats: true) { _ in
+      Task { @MainActor in AppUpdater.shared.checkInBackgroundIfDue() }
+    }
+    timer.tolerance = 300
+    updateCheckTimer = timer
   }
 
   func applicationShouldHandleReopen(

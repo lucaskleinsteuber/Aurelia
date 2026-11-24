@@ -122,9 +122,12 @@ membership gives one-year profiles.
 was built from (`build-macos-release.sh` writes it into `AureliaUpdateRepository` in the
 app's Info.plist; builds made in Xcode have none and cannot update). The repository is public,
 so updates check and download anonymously; the app has no GitHub token setting. The app
-also looks at launch when at least 24 hours have passed since its last successful check.
+also looks at launch and periodically while running (including after wake) when at least 24 hours
+have passed since its last successful check.
 *Settings › Updates › Check for updates automatically* is on by default; turning it off stops
-background checks. *Check for Updates…* in the Aurelia menu opens *Settings › Updates* and
+background checks. Automatic updates require Aurelia to be installed at `/Applications/Aurelia.app`
+with write permission to `/Applications` (a translocated copy in Downloads or another folder cannot
+replace itself). *Check for Updates…* in the Aurelia menu opens *Settings › Updates* and
 checks there; its answer shows on that page instead of in dialogs.
 
 Once an update is chosen (*Install and Restart* in the offer of a background check, or
