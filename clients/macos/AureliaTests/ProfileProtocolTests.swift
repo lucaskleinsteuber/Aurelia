@@ -38,6 +38,26 @@ struct ProfileProtocolTests {
         "{\"formatVersion\":\(version),\"minimumClientVersion\":\"1.5.1\",\"managementSetupRequired\":false,\"profiles\":[]}"
           .utf8))
     try ProfilePickerProtocol.validate(formatVersion: response.formatVersion)
+    #expect(response.wakeOnLanAddresses == nil)
+    #expect(response.hosting == nil)
+  }
+
+  @Test func profilePickerDecodesAuthenticatedWakeOnLanAddressesAndHosting() throws {
+    let response = try JSONDecoder().decode(
+      ProfilePickerResponse.self,
+      from: Data(
+        """
+        {
+          "formatVersion": 2,
+          "minimumClientVersion": "1.5.1",
+          "managementSetupRequired": false,
+          "profiles": [],
+          "wakeOnLanAddresses": ["02:00:5e:10:00:01", "02:00:5e:10:00:02"],
+          "hosting": "linuxServer"
+        }
+        """.utf8))
+    #expect(response.wakeOnLanAddresses == ["02:00:5e:10:00:01", "02:00:5e:10:00:02"])
+    #expect(response.hosting == "linuxServer")
   }
 
   @Test(arguments: [0, 3, -1])

@@ -32,26 +32,40 @@ enum WakeOnLan {
 
   /// Remembers the wake addresses a server reported, keyed by its identity, and where it runs.
   static func remember(_ info: ServerInfoResponse, defaults: UserDefaults = .standard) {
-    if let hosting = info.hosting {
+    remember(
+      serverId: info.serverId,
+      wakeOnLanAddresses: info.wakeOnLanAddresses,
+      hosting: info.hosting,
+      defaults: defaults)
+  }
+
+  /// Remembers the wake addresses a server reported, keyed by its identity, and where it runs.
+  static func remember(
+    serverId: UUID,
+    wakeOnLanAddresses: [String]?,
+    hosting: String?,
+    defaults: UserDefaults = .standard
+  ) {
+    if let hosting {
       var kinds = defaults.dictionary(forKey: hostingKey) as? [String: String] ?? [:]
-      if kinds[info.serverId.uuidString] != hosting {
-        kinds[info.serverId.uuidString] = hosting
+      if kinds[serverId.uuidString] != hosting {
+        kinds[serverId.uuidString] = hosting
         defaults.set(kinds, forKey: hostingKey)
       }
       if hosting == "macApp" || hosting == "linuxApp" {
         // A desktop or laptop is started by its owner; old addresses must not wake it.
         var stored = defaults.dictionary(forKey: defaultsKey) as? [String: [String]] ?? [:]
-        if stored.removeValue(forKey: info.serverId.uuidString) != nil {
+        if stored.removeValue(forKey: serverId.uuidString) != nil {
           defaults.set(stored, forKey: defaultsKey)
         }
         return
       }
     }
-    let addresses = (info.wakeOnLanAddresses ?? []).compactMap(hardwareAddress).map(format)
+    let addresses = (wakeOnLanAddresses ?? []).compactMap(hardwareAddress).map(format)
     guard !addresses.isEmpty else { return }
     var stored = defaults.dictionary(forKey: defaultsKey) as? [String: [String]] ?? [:]
-    guard stored[info.serverId.uuidString] != addresses else { return }
-    stored[info.serverId.uuidString] = addresses
+    guard stored[serverId.uuidString] != addresses else { return }
+    stored[serverId.uuidString] = addresses
     defaults.set(stored, forKey: defaultsKey)
   }
 

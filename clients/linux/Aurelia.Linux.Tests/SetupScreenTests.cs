@@ -119,6 +119,33 @@ public sealed class SetupScreenTests
     }
 
     [AvaloniaFact]
+    public void AuthenticatedProfilesRememberWakeOnLanAddressesWithoutUnauthenticatedInfo()
+    {
+        var server = new FakeServer()
+            .Answer("GET", "/api/v1/server/info", $$"""
+                {"serverId":"{{FakeServer.ServerId}}","name":"Living Room Server","version":"2.3.0","isSetup":true,"lanAccessEnabled":true,
+                 "lanHttpsPort":43111,"publicKeyFingerprint":"{{FakeServer.Fingerprint}}","displayFingerprint":"A1B2-C3D4-E5F6-0718-293A-4B5C",
+                 "capabilities":["library-state-v1","profile-personalization-v1","age-limits-v1"],"wakeOnLanAddresses":null}
+                """)
+            .Answer("GET", "/api/v1/profiles", $$"""
+                {"formatVersion":2,"minimumClientVersion":"1.0","managementSetupRequired":false,"profiles":[
+                  {"id":"{{OwnerId}}","name":"Lucas","role":"owner","needsPinSetup":false,"pinProtectionEnabled":true}],
+                 "wakeOnLanAddresses":["02:00:5e:10:00:99"],"hosting":"linuxServer"}
+                """);
+        var keyring = new MemoryCredentialStore
+        {
+            Server = new StoredServer(FakeServer.ServerId, "Living Room Server", new Uri("https://192.168.1.20:43111"), FakeServer.Fingerprint,
+                "device-token-synthetic-0000000000000000000001", Guid.NewGuid(), DateTimeOffset.UtcNow.AddDays(30)),
+        };
+        var window = TestWindows.Show(AppServices.ForTests(transport: server, credentials: keyring));
+        Pump();
+        Assert.Equal(AppScreen.ProfilePicker, window.Flow.Screen);
+        Assert.Equal(["02:00:5e:10:00:99"], keyring.Server?.WakeOnLanAddresses);
+        Assert.Equal("linuxServer", keyring.Server?.Hosting);
+        Assert.Equal(["02:00:5e:10:00:99"], window.Session.Server?.WakeOnLanAddresses);
+    }
+
+    [AvaloniaFact]
     public void ASilentServerOffersToTryAgain()
     {
         var keyring = new MemoryCredentialStore

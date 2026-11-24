@@ -297,6 +297,20 @@ public sealed class AppSession : ObservableObject
         flow.Show(AppScreen.ProfilePicker);
     }
 
+    /// <summary>Remembers Wake-on-LAN addresses and hosting from an authenticated profile-picker response.</summary>
+    public async Task RememberWakeOnLanAsync(IReadOnlyList<string>? wakeOnLanAddresses, string? hosting)
+    {
+        if (Server is not { } saved) return;
+        var nextHosting = hosting ?? saved.Hosting;
+        var nextWake = nextHosting is "macApp" or "linuxApp" ? null
+            : wakeOnLanAddresses is { Count: > 0 } known ? known : saved.WakeOnLanAddresses;
+        if (nextHosting == saved.Hosting && SameAddresses(nextWake, saved.WakeOnLanAddresses)) return;
+        await SaveAsync(saved with { WakeOnLanAddresses = nextWake, Hosting = nextHosting });
+    }
+
+    private static bool SameAddresses(IReadOnlyList<string>? left, IReadOnlyList<string>? right) =>
+        left is null ? right is null : right is not null && left.SequenceEqual(right, StringComparer.OrdinalIgnoreCase);
+
     /// <summary>A profile was opened in the picker: show the library until the session ends.</summary>
     public void OpenProfile(ProfileSession session)
     {

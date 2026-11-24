@@ -31,11 +31,22 @@ enum IOSWakeOnLan {
   static func remember(
     serverID: UUID, info: IOSServerInfo?, hosts: [String], defaults: UserDefaults = .standard
   ) {
+    remember(
+      serverID: serverID, wakeOnLanAddresses: info?.wakeOnLanAddresses, hosting: info?.hosting,
+      hosts: hosts, defaults: defaults)
+  }
+
+  /// Remembers what a server reported (from `/server/info` or `/api/v1/profiles`) and where it
+  /// answered, keyed by its identity.
+  static func remember(
+    serverID: UUID, wakeOnLanAddresses: [String]?, hosting: String?, hosts: [String],
+    defaults: UserDefaults = .standard
+  ) {
     var all = load(defaults)
     var target = all[serverID.uuidString] ?? Target()
-    let reported = (info?.wakeOnLanAddresses ?? []).compactMap(hardwareAddress).map(format)
+    let reported = (wakeOnLanAddresses ?? []).compactMap(hardwareAddress).map(format)
     if !reported.isEmpty { target.hardwareAddresses = reported }
-    if let hosting = info?.hosting {
+    if let hosting {
       target.hosting = hosting
       // A desktop or laptop is started by its owner; old addresses must not wake it.
       if hosting == "macApp" || hosting == "linuxApp" { target.hardwareAddresses = [] }
@@ -55,13 +66,24 @@ enum IOSWakeOnLan {
   /// "Server.local", so Wake Server also works for a server found with Bonjour. The lookup runs in
   /// the background; a name that doesn't resolve changes nothing.
   static func rememberResolving(serverID: UUID, info: IOSServerInfo?, hosts: [String]) {
-    remember(serverID: serverID, info: info, hosts: hosts)
+    rememberResolving(
+      serverID: serverID, wakeOnLanAddresses: info?.wakeOnLanAddresses, hosting: info?.hosting,
+      hosts: hosts)
+  }
+
+  /// Remembers hardware addresses, hosting and hosts, resolving non-IPv4 host names in the
+  /// background.
+  static func rememberResolving(
+    serverID: UUID, wakeOnLanAddresses: [String]?, hosting: String?, hosts: [String]
+  ) {
+    remember(
+      serverID: serverID, wakeOnLanAddresses: wakeOnLanAddresses, hosting: hosting, hosts: hosts)
     let names = hosts.filter { !isIPv4($0) }
     guard !names.isEmpty else { return }
     Task.detached(priority: .utility) {
       let resolved = names.flatMap(resolveIPv4)
       guard !resolved.isEmpty else { return }
-      remember(serverID: serverID, info: nil, hosts: resolved)
+      remember(serverID: serverID, wakeOnLanAddresses: nil, hosting: nil, hosts: resolved)
     }
   }
 

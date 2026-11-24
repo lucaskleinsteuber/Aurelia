@@ -756,6 +756,13 @@ final class IOSAppModel: ObservableObject {
     phase = .profiles
     let result = try await makeClient(connection: connection).profiles()
     guard current(run) else { return }
+    let discovered = browser.servers.filter { $0.serverID == connection.serverID }
+      .flatMap { [$0.baseURL] + $0.alternativeURLs }
+    IOSWakeOnLan.rememberResolving(
+      serverID: connection.serverID,
+      wakeOnLanAddresses: result.wakeOnLanAddresses,
+      hosting: result.hosting,
+      hosts: ([connection.baseURL] + discovered).compactMap(\.host))
     try IOSProtocolVersion.check(result.formatVersion)
     if result.managementSetupRequired {
       throw IOSCoreError.server(

@@ -89,4 +89,51 @@ struct IOSWakeOnLanTests {
     IOSWakeOnLan.remember(serverID: serverID, info: try info(nil), hosts: [], defaults: defaults)
     #expect(IOSWakeOnLan.appHost(for: serverID, defaults: defaults) == "Mac")
   }
+
+  @Test func profilePickerDecodesWithAndWithoutWakeOnLanFields() throws {
+    let legacyJSON = """
+      {"formatVersion":2,"minimumClientVersion":"2.0.0","managementSetupRequired":false,
+       "profiles":[]}
+      """
+    let legacy = try JSONDecoder().decode(IOSProfilePicker.self, from: Data(legacyJSON.utf8))
+    #expect(legacy.wakeOnLanAddresses == nil)
+    #expect(legacy.hosting == nil)
+
+    let phase1JSON = """
+      {"formatVersion":2,"minimumClientVersion":"2.0.0","managementSetupRequired":false,
+       "profiles":[],"wakeOnLanAddresses":["02-00-5E-10-00-01"],"hosting":"linuxServer"}
+      """
+    let phase1 = try JSONDecoder().decode(IOSProfilePicker.self, from: Data(phase1JSON.utf8))
+    #expect(phase1.wakeOnLanAddresses == ["02-00-5E-10-00-01"])
+    #expect(phase1.hosting == "linuxServer")
+  }
+
+  @Test func authenticatedProfilesSupplyWakeOnLanWhenServerInfoOmitsIt() throws {
+    let defaults = isolatedDefaults()
+    // Simulate a future Phase 2 server whose unauthenticated /server/info omits MAC addresses.
+    IOSWakeOnLan.remember(
+      serverID: serverID, info: try info(nil), hosts: ["10.0.0.20"], defaults: defaults)
+    #expect(!IOSWakeOnLan.status(for: serverID, defaults: defaults).canWake)
+
+    let pickerJSON = """
+      {"formatVersion":2,"minimumClientVersion":"2.0.0","managementSetupRequired":false,
+       "profiles":[],"wakeOnLanAddresses":["02-00-5E-10-00-01"],"hosting":"linuxServer"}
+      """
+    let picker = try JSONDecoder().decode(IOSProfilePicker.self, from: Data(pickerJSON.utf8))
+    IOSWakeOnLan.remember(
+      serverID: serverID, wakeOnLanAddresses: picker.wakeOnLanAddresses, hosting: picker.hosting,
+      hosts: ["10.0.0.20"], defaults: defaults)
+    let ready = IOSWakeOnLan.status(for: serverID, defaults: defaults)
+    #expect(ready.canWake)
+    #expect(ready.summary == "Ready · 1 network card")
+
+    // An older server whose /api/v1/profiles omits Wake-on-LAN fields preserves remembered cards.
+    IOSWakeOnLan.remember(
+      serverID: serverID, wakeOnLanAddresses: nil, hosting: nil, hosts: ["10.0.0.21"],
+      defaults: defaults)
+    let target = try #require(IOSWakeOnLan.target(for: serverID, defaults: defaults))
+    #expect(target.hardwareAddresses == ["02:00:5e:10:00:01"])
+    #expect(target.ipv4Hosts == ["10.0.0.21", "10.0.0.20"])
+    #expect(IOSWakeOnLan.status(for: serverID, defaults: defaults).canWake)
+  }
 }
