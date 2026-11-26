@@ -21,4 +21,5 @@ public sealed class LibraryMutation
     public int RemovedItems { get; set; }
     public string FilesJson { get; set; } = "[]";
     public string? Error { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

@@ -436,7 +436,8 @@ final class ScrubPreviewController: NSObject, ObservableObject {
   }
   static let endMargin: Int64 = 3_000
 
-  /// About 45 KB per frame instead of 230 KB decoded: an hour-long episode needs about 16 MB.
+  /// About 45 KB per JPEG frame instead of 230 KB decoded; the in-memory LRU cache holds up to
+  /// 8 MB / 120 frames, with up to 24 frames prepared in the background.
   static func encode(_ image: CGImage) -> Data? {
     let data = NSMutableData()
     guard

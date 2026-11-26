@@ -11,10 +11,17 @@ import Foundation
 enum AppUpdateSignature {
   static let publicKey = "RWT0nYptHNjXQSXnVurY9XXdPF2Ssq5sUlSP+WoBwjA5GPXWnugBc7lE"
 
-  /// True when `signatureFile` is a valid signature of `message` by `publicKey`.
-  static func verify(_ message: Data, signatureFile: String, publicKey: String = publicKey) -> Bool
-  {
-    guard let (keyID, key) = readPublicKey(publicKey) else { return false }
+  /// The exact trusted comment `scripts/publish-release.sh` signs into each Mac release.
+  static func expectedTrustedComment(version: String, build: Int) -> String {
+    "Aurelia for Mac \(version) (\(build))"
+  }
+
+  /// Returns the cryptographically verified trusted comment when `signatureFile` is a valid
+  /// signature of `message` by `publicKey`, or `nil` if verification fails.
+  static func verifiedTrustedComment(
+    _ message: Data, signatureFile: String, publicKey: String = publicKey
+  ) -> String? {
+    guard let (keyID, key) = readPublicKey(publicKey) else { return nil }
     let lines = signatureFile.replacingOccurrences(of: "\r\n", with: "\n")
       .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
     let trustedPrefix = "trusted comment: "
@@ -24,16 +31,31 @@ enum AppUpdateSignature {
       block.count == 2 + 8 + 64,
       let global = Data(base64Encoded: lines[3].trimmingCharacters(in: .whitespaces)),
       global.count == 64
-    else { return false }
+    else { return nil }
     let bytes = [UInt8](block)
     guard bytes[0] == UInt8(ascii: "E"), bytes[1] == UInt8(ascii: "d"),
       Data(bytes[2..<10]) == keyID
-    else { return false }
+    else { return nil }
     let signature = Data(bytes[10..<74])
-    guard key.isValidSignature(signature, for: message) else { return false }
+    guard key.isValidSignature(signature, for: message) else { return nil }
     // The trusted comment is signed too, so its text cannot be swapped.
-    let comment = Data(lines[2].dropFirst(trustedPrefix.count).utf8)
-    return key.isValidSignature(global, for: signature + comment)
+    let commentText = String(lines[2].dropFirst(trustedPrefix.count))
+    let comment = Data(commentText.utf8)
+    guard key.isValidSignature(global, for: signature + comment) else { return nil }
+    return commentText
+  }
+
+  /// True when `signatureFile` is a valid signature of `message` by `publicKey` (and, when
+  /// provided, carries the exact expected trusted comment).
+  static func verify(
+    _ message: Data, signatureFile: String, publicKey: String = publicKey,
+    expectedComment: String? = nil
+  ) -> Bool {
+    guard
+      let comment = verifiedTrustedComment(
+        message, signatureFile: signatureFile, publicKey: publicKey)
+    else { return false }
+    return expectedComment == nil || comment == expectedComment
   }
 
   /// A minisign public key: "Ed", an eight-byte key id and the 32-byte Ed25519 key.

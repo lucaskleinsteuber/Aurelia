@@ -115,7 +115,31 @@ struct LocalSetupMoveClient: Sendable {
   }
 
   let bootstrapToken: String
-  private static let base = URL(string: "http://127.0.0.1:43110")!
+  private static let base = AppEdition.localBaseURL
+
+  private final class NoRedirectDelegate: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+      _ session: URLSession,
+      task: URLSessionTask,
+      willPerformHTTPRedirection response: HTTPURLResponse,
+      newRequest request: URLRequest,
+      completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+      completionHandler(nil)
+    }
+  }
+
+  private static func makeSession(resourceTimeout: TimeInterval? = nil) -> URLSession {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.urlCache = nil
+    configuration.httpCookieStorage = nil
+    configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+    if let resourceTimeout {
+      configuration.timeoutIntervalForResource = resourceTimeout
+    }
+    return URLSession(
+      configuration: configuration, delegate: NoRedirectDelegate(), delegateQueue: nil)
+  }
 
   func status() async throws -> SetupMoveStatus {
     try await send("GET", "/api/v1/setup/move")
@@ -137,9 +161,13 @@ struct LocalSetupMoveClient: Sendable {
     struct Request: Encodable { let passphrase: String }
     let access = file.startAccessingSecurityScopedResource()
     defer { if access { file.stopAccessingSecurityScopedResource() } }
-    var request = makeRequest("PUT", "/api/v1/setup/move/file", timeout: 600)
+    let fileSize = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+    let resourceTimeout = max(600, TimeInterval(fileSize) / 262_144)
+    var request = makeRequest("PUT", "/api/v1/setup/move/file", timeout: 60)
     request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-    let (data, response) = try await URLSession.shared.upload(for: request, fromFile: file)
+    let session = Self.makeSession(resourceTimeout: resourceTimeout)
+    defer { session.invalidateAndCancel() }
+    let (data, response) = try await session.upload(for: request, fromFile: file)
     let uploaded: Uploaded = try Self.decode(data, response)
     return try await send(
       "POST", "/api/v1/setup/move/file/\(uploaded.uploadId.uuidString)/open",
@@ -174,7 +202,9 @@ struct LocalSetupMoveClient: Sendable {
       request.httpBody = try JSONEncoder().encode(body)
       request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     }
-    let (data, response) = try await URLSession.shared.data(for: request)
+    let session = Self.makeSession(resourceTimeout: max(timeout, 30))
+    defer { session.invalidateAndCancel() }
+    let (data, response) = try await session.data(for: request)
     return try Self.decode(data, response)
   }
 

@@ -51,4 +51,15 @@ struct HostWatchdogPolicy: Sendable {
     restartDates.removeAll()
     consecutiveFailures = 0
   }
+
+  /// Keep the Mac awake only while the user asked for it and the server process is actually active.
+  /// Once the server stops for being unused (.idle) or stops/fails, the Mac must be allowed to sleep.
+  static func shouldPreventIdleSleep(
+    settingEnabled: Bool,
+    isShuttingDown: Bool,
+    isProcessRunning: Bool,
+    isIdle: Bool
+  ) -> Bool {
+    settingEnabled && !isShuttingDown && isProcessRunning && !isIdle
+  }
 }

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
+using Aurelia.Contracts;
 using Microsoft.Win32.SafeHandles;
 
 namespace Aurelia.Server.Services;
@@ -60,7 +61,24 @@ public sealed partial class LiveConversionService : IDisposable
     private const int ErrorTailCharacters = 4096;
     private const int MaximumProbeBytes = 256 * 1024;
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(15);
-    private static readonly TimeSpan SubtitleTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan MinimumSubtitleTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan MaximumSubtitleTimeout = TimeSpan.FromMinutes(10);
+    private const long SubtitleBytesPerExtraSecond = 50L * 1024 * 1024;
+    private readonly SidecarSubtitles.SubtitleMemoryCache embeddedSubtitleCache =
+        new(maximumEntries: 100, maximumTotalBytes: 32 * 1024 * 1024, maximumEntryBytes: 2 * 1024 * 1024);
+
+    /// <summary>
+    /// Time allowed to demux an embedded text subtitle track: 30 seconds for typical files, scaling
+    /// with file size up to 10 minutes so large remuxes on slower disks finish cleanly.
+    /// </summary>
+    public static TimeSpan SubtitleTimeoutFor(long fileBytes)
+    {
+        if (fileBytes <= 0) return MinimumSubtitleTimeout;
+        var extraSeconds = fileBytes / SubtitleBytesPerExtraSecond;
+        var totalSeconds = Math.Clamp((long)MinimumSubtitleTimeout.TotalSeconds + extraSeconds,
+            (long)MinimumSubtitleTimeout.TotalSeconds, (long)MaximumSubtitleTimeout.TotalSeconds);
+        return TimeSpan.FromSeconds(totalSeconds);
+    }
     private static readonly TimeSpan SlotWait = TimeSpan.FromSeconds(5);
 
     private readonly ILogger<LiveConversionService> logger;
@@ -73,6 +91,7 @@ public sealed partial class LiveConversionService : IDisposable
     private sealed record Slots(SemaphoreSlim All, int AllLimit, SemaphoreSlim Video, int VideoLimit);
     private readonly SemaphoreSlim probes = new(2, 2);
     private readonly ConcurrentDictionary<string, MediaProbeResult> probeCache = new(StringComparer.Ordinal);
+    private int backgroundRunning;
 
     public LiveConversionService(IConfiguration configuration, ServerRuntimeOptions runtime, ILogger<LiveConversionService> logger)
     {
@@ -99,6 +118,9 @@ public sealed partial class LiveConversionService : IDisposable
     /// <summary>How fast each quality converts here; see <see cref="EncodingPace"/>.</summary>
     public EncodingPace Pace { get; } = new();
 
+    /// <summary>The configured video conversion limit from <c>Aurelia:MaximumVideoConversions</c>, or null for the automatic limit.</summary>
+    public int? ConfiguredVideoLimit => configuredVideoLimit;
+
     /// <summary>How many pictures may be encoded at once: one on the processor, three on a chip, or the owner's number.</summary>
     public static int VideoConversionLimit(FfmpegTools? tools, int? configured = null) =>
         configured ?? (tools?.EncodesOnChip == true ? MaximumChipConversions : MaximumVideoConversions);
@@ -120,10 +142,13 @@ public sealed partial class LiveConversionService : IDisposable
     /// <summary>The encoder for the next conversion with this server's tools and chip health.</summary>
     public (LiveVideoEncoder Kind, HardwareEncoder? Chip)? ChooseEncoder(FfmpegTools tools) => ChooseEncoder(tools, Health.IsResting);
 
-    /// <summary>Conversions running now.</summary>
+    /// <summary>Conversions running now (including background analysis).</summary>
     public int Running => slots.IsValueCreated && slots.Value.IsCompletedSuccessfully
         ? slots.Value.Result.AllLimit - slots.Value.Result.All.CurrentCount
         : 0;
+
+    /// <summary>Conversions running for playback or user downloads, excluding background analysis.</summary>
+    public int RunningForPlayback => Math.Max(0, Running - Volatile.Read(ref backgroundRunning));
 
     /// <summary>Picture encodes running now.</summary>
     public int RunningVideo => slots.IsValueCreated && slots.Value.IsCompletedSuccessfully
@@ -141,6 +166,10 @@ public sealed partial class LiveConversionService : IDisposable
 
     /// <summary>Whether sound tracks can be read for subtitles from speech.</summary>
     public async Task<bool> SpeechAudioAvailableAsync() => (await tools)?.Speech is SpeechAudioSupport.Plain or SpeechAudioSupport.CenterMix;
+
+    /// <summary>The features this server advertises in both /server/info and /capabilities.</summary>
+    public async Task<IReadOnlyList<string>> ReportedFeaturesAsync() =>
+        ServerFeatures.Reported(await IsAvailableAsync(), await SpeechAudioAvailableAsync(), await CanEncodeVideoAsync());
 
     /// <summary>The ffmpeg to use: the configured one, the Mac app's own, then the system's on Linux.</summary>
     public static IEnumerable<string> Candidates(string? configured)
@@ -263,7 +292,13 @@ public sealed partial class LiveConversionService : IDisposable
     }
 
     /// <summary>The file's header description, from memory while size and modification time are unchanged.</summary>
-    public async Task<MediaProbeResult> ProbeAsync(FfmpegTools tools, OpenMediaFile file, string checkedPath, Guid mediaId, CancellationToken cancellationToken)
+    public async Task<MediaProbeResult> ProbeAsync(
+        FfmpegTools tools,
+        OpenMediaFile file,
+        string checkedPath,
+        Guid mediaId,
+        CancellationToken cancellationToken,
+        bool lowPriority = false)
     {
         var key = $"{mediaId:N}:{file.Length}:{file.LastModified.UtcTicks}";
         if (probeCache.TryGetValue(key, out var cached)) return cached;
@@ -273,7 +308,7 @@ public sealed partial class LiveConversionService : IDisposable
             if (probeCache.TryGetValue(key, out cached)) return cached;
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(ProbeTimeout);
-            using var process = Start(tools.Ffprobe, MediaProbe.Arguments(InputPath(file.Stream, checkedPath)), lowPriority: false);
+            using var process = Start(tools.Ffprobe, MediaProbe.Arguments(InputPath(file.Stream, checkedPath)), lowPriority: lowPriority, backgroundIo: lowPriority);
             var errors = ReadTailAsync(process.StandardError);
             string json;
             try
@@ -310,11 +345,21 @@ public sealed partial class LiveConversionService : IDisposable
         finally { probes.Release(); }
     }
 
-    /// <summary>Extracts one text track to bounded request memory, never to a temporary file or cache.</summary>
+    private static string EmbeddedSubtitleKey(string checkedPath, int index) => $"{checkedPath}\0{index}";
+
+    /// <summary>Returns a previously extracted embedded WebVTT track from bounded memory if the file has not changed.</summary>
+    public byte[]? TryGetCachedSubtitles(OpenMediaFile file, string checkedPath, int index) =>
+        embeddedSubtitleCache.TryGet(EmbeddedSubtitleKey(checkedPath, index), file.LastModified.UtcTicks, file.Length, out var cached)
+            ? cached
+            : null;
+
+    /// <summary>Extracts one text track to bounded memory (and a small in-memory LRU cache), never to disk.</summary>
     public async Task<byte[]> ExtractSubtitlesAsync(FfmpegTools tools, OpenMediaFile file, string checkedPath, int index, CancellationToken cancellationToken)
     {
+        var cacheKey = EmbeddedSubtitleKey(checkedPath, index);
+        if (embeddedSubtitleCache.TryGet(cacheKey, file.LastModified.UtcTicks, file.Length, out var cached)) return cached;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(SubtitleTimeout);
+        timeout.CancelAfter(SubtitleTimeoutFor(file.Length));
         using var process = Start(tools.Ffmpeg, LiveSubtitles.Arguments(InputPath(file.Stream, checkedPath), index));
         var errors = ReadTailAsync(process.StandardError);
         using var stopOnAbort = timeout.Token.Register(() => Kill(process));
@@ -323,7 +368,11 @@ public sealed partial class LiveConversionService : IDisposable
             var output = await ReadLimitedAsync(process.StandardOutput.BaseStream, LiveSubtitles.MaximumBytes, timeout.Token);
             await process.WaitForExitAsync(timeout.Token);
             EnsureInputMatchesHandle(file.Stream.SafeFileHandle, checkedPath);
-            if (process.ExitCode == 0 && output.AsSpan().StartsWith("WEBVTT"u8)) return output;
+            if (process.ExitCode == 0 && output.AsSpan().StartsWith("WEBVTT"u8))
+            {
+                embeddedSubtitleCache.Set(cacheKey, file.LastModified.UtcTicks, file.Length, output);
+                return output;
+            }
             LogFailed(logger, "ffmpeg subtitles", process.ExitCode, await errors, checkedPath);
             throw new PlaybackException("subtitle_conversion_failed", "The server couldn’t read this subtitle track.", StatusCodes.Status422UnprocessableEntity);
         }
@@ -356,13 +405,16 @@ public sealed partial class LiveConversionService : IDisposable
     /// <summary>
     /// A place among the running conversions: three at a time, of which one may re-encode the
     /// picture. A seek replaces a stream, so a full server waits briefly for the old one to end.
+    /// Background analysis passes <paramref name="background"/> = true so background workers never
+    /// mistake each other for active playback.
     /// </summary>
-    public async Task<IDisposable?> EnterAsync(bool encodesVideo, CancellationToken cancellationToken)
+    public async Task<IDisposable?> EnterAsync(bool encodesVideo, CancellationToken cancellationToken, bool background = false)
     {
         var limits = await slots.Value;
         if (!await limits.All.WaitAsync(SlotWait, cancellationToken)) return null;
         if (encodesVideo && !await WaitOrRelease(limits, cancellationToken)) return null;
-        return new Slot(limits, encodesVideo);
+        if (background) Interlocked.Increment(ref backgroundRunning);
+        return new Slot(this, limits, encodesVideo, background);
     }
 
     private static async Task<bool> WaitOrRelease(Slots limits, CancellationToken cancellationToken)
@@ -380,19 +432,20 @@ public sealed partial class LiveConversionService : IDisposable
         return false;
     }
 
-    private sealed class Slot(Slots limits, bool encodesVideo) : IDisposable
+    private sealed class Slot(LiveConversionService owner, Slots limits, bool encodesVideo, bool background) : IDisposable
     {
         private int released;
         public void Dispose()
         {
             if (Interlocked.Exchange(ref released, 1) != 0) return;
+            if (background) Interlocked.Decrement(ref owner.backgroundRunning);
             if (encodesVideo) limits.Video.Release();
             limits.All.Release();
         }
     }
 
     /// <summary>Starts ffmpeg or ffprobe without a shell, in the empty read-only folder, at low priority.</summary>
-    public Process Start(string program, IReadOnlyList<string> arguments, bool lowPriority = true)
+    public Process Start(string program, IReadOnlyList<string> arguments, bool lowPriority = true, bool backgroundIo = false)
     {
         var start = new ProcessStartInfo(program)
         {
@@ -415,7 +468,11 @@ public sealed partial class LiveConversionService : IDisposable
         }
         var process = Process.Start(start) ?? throw new InvalidOperationException("ffmpeg did not start.");
         process.StandardInput.Close();
-        if (lowPriority)
+        if (backgroundIo)
+        {
+            BackgroundPriority.ApplyToProcess(process);
+        }
+        else if (lowPriority)
         {
             try { process.PriorityClass = ProcessPriorityClass.BelowNormal; }
             catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception) { }

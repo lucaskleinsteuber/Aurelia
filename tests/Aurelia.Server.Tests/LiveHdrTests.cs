@@ -116,12 +116,12 @@ public sealed partial class LiveConversionTests
         Assert.Equal(HdrToneMapping.Unavailable, LiveHdr.Detect(null, null));
     }
 
-    [Theory]
+    [FfmpegTheory]
     [InlineData("smpte2084")]
     [InlineData("arib-std-b67")]
     public async Task HdrLiveConversionProducesTaggedSdrWithoutWritingConvertedFiles(string transfer)
     {
-        if (Installed() is not { } maker) return;
+        var maker = FfmpegTestTools.RequireInstalled();
         var ffmpeg = Tools() ?? maker;
         var root = Path.Combine(TestPaths.CreateDataDirectory(), "Invented HDR Library");
         Directory.CreateDirectory(root);

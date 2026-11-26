@@ -298,8 +298,9 @@ export function importChoicesFor(items) {
 /** The editor's first choice for the selected rows. */
 export function importEditorStart(items) {
   const first = items[0];
+  const fallback = first?.isDirectory ? (first.status === "error" ? "ignore" : "movie") : "extra";
   return {
-    choice: IMPORT_CHOICES.some(([value]) => value === first?.kind) ? first.kind : "extra",
+    choice: IMPORT_CHOICES.some(([value]) => value === first?.kind) ? first.kind : fallback,
     parentPath: first?.parentRelativePath ?? "",
     entireSeries: first?.seasonNumber == null,
     season: String(first?.seasonNumber ?? 1),
@@ -541,10 +542,95 @@ export function profileColorIndex(id, count = 7) {
 export const PICTURE_SYMBOLS = Object.freeze([
   "star", "rocket", "cat", "dog", "heart", "bolt", "leaf", "moon", "music", "gamecontroller", "film", "crown",
 ]);
+export const PICTURE_SYMBOL_LABELS = Object.freeze({
+  star: "Star",
+  rocket: "Rocket",
+  cat: "Cat",
+  dog: "Dog",
+  heart: "Heart",
+  bolt: "Bolt",
+  leaf: "Leaf",
+  moon: "Moon",
+  music: "Music",
+  gamecontroller: "Game Controller",
+  film: "Film",
+  crown: "Crown",
+});
 /** In the order of the existing profile gradients (palette-0 … palette-6), plus red. */
 export const PICTURE_PALETTES = Object.freeze(["blue", "purple", "pink", "orange", "teal", "green", "indigo", "red"]);
+export const PICTURE_PALETTE_LABELS = Object.freeze({
+  blue: "Blue",
+  purple: "Purple",
+  pink: "Pink",
+  orange: "Orange",
+  teal: "Teal",
+  green: "Green",
+  indigo: "Indigo",
+  red: "Red",
+});
 export const PHOTO_PICTURE = "photo";
 export const MAXIMUM_PHOTO_BYTES = 8 * 1024 * 1024;
+
+/** Human-readable accessible name for a built-in profile symbol key. */
+export function pictureSymbolLabel(symbol) {
+  const key = String(symbol ?? "");
+  return PICTURE_SYMBOL_LABELS[key] ?? (key ? key[0].toUpperCase() + key.slice(1) : "Picture");
+}
+
+/** Human-readable accessible name for a built-in profile color key. */
+export function picturePaletteLabel(palette) {
+  const key = String(palette ?? "");
+  return PICTURE_PALETTE_LABELS[key] ?? (key ? key[0].toUpperCase() + key.slice(1) : "Color");
+}
+
+/** Home empty-state copy tailored to owners, children's profiles, and viewers. */
+export function homeEmptyState(profile) {
+  if (managementPermissions(profile).owner) {
+    return {
+      kind: "owner",
+      title: "Nothing Here Yet",
+      text: "Your library has no titles yet. Add a storage location to start scanning your films and shows.",
+    };
+  }
+  if (profile?.ageLimit != null) {
+    return {
+      kind: "child",
+      title: "Nothing Here Yet",
+      text: "No movies or shows are available for this profile right now. Ask a parent or the server owner to allow titles or add age ratings.",
+    };
+  }
+  return {
+    kind: "viewer",
+    title: "Nothing Here Yet",
+    text: "This profile has no titles yet. Ask the owner to add a storage location or share titles with this profile.",
+  };
+}
+
+/** Route error presentation: 404 errors offer navigation home instead of a pointless retry. */
+export function routeErrorState(error, { kind = "page" } = {}) {
+  if (error?.status === 404) {
+    if (kind === "title") {
+      return {
+        symbol: "search",
+        title: "Title Not Found",
+        text: "This title isn’t in your library or isn’t available for this profile.",
+        retryable: false,
+      };
+    }
+    return {
+      symbol: "search",
+      title: "Page Not Found",
+      text: error.message || "The page you asked for wasn’t found.",
+      retryable: false,
+    };
+  }
+  return {
+    symbol: "warning",
+    title: "Couldn’t Load This Page",
+    text: error?.message || "Something went wrong.",
+    retryable: true,
+  };
+}
 
 /** The symbol and palette of a built-in picture key; null for a photo, no picture or an unknown key. */
 export function parsePicture(key) {
@@ -993,9 +1079,11 @@ export class ProgressSaver {
     const recordedAt = this.now();
     if (this.inFlight && options.keepalive) {
       // The page is closing: a queued save would never be sent, so the last position goes out
-      // now on its own keepalive request instead of waiting for the running one.
+      // now on its own keepalive request instead of waiting for the running one. Skip revision
+      // enforcement so it does not 409 against the in-flight periodic save; if the periodic save
+      // arrives later with the older revision, its own revision check rejects it.
       this.next = null;
-      const body = { ...values, clientMutationId: this.newId(), enforceRevision: true, expectedRevision: this.revision };
+      const body = { ...values, clientMutationId: this.newId(), enforceRevision: false };
       return Promise.resolve(this.send(this.mediaId, body, options)).then(() => true, () => false);
     }
     if (this.inFlight) {
@@ -1753,6 +1841,13 @@ export function syncFailure(error, failures, offlineInRow) {
  */
 export function sessionRefused(status, code) {
   return status === 401 || (status === 403 && /session|profile|device/.test(String(code ?? "")));
+}
+
+/** Whether a reconnecting page is running an older bundled browser app than the server now serves. */
+export function serverVersionChanged({ loadedAssetVersion = null, loadedServerVersion = null, serverInfo = null } = {}) {
+  if (loadedAssetVersion && serverInfo?.webVersion && loadedAssetVersion !== serverInfo.webVersion) return true;
+  if (loadedServerVersion && serverInfo?.version && loadedServerVersion !== serverInfo.version) return true;
+  return false;
 }
 
 /**

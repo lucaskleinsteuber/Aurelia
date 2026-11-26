@@ -80,12 +80,20 @@ public sealed class SecurityModelEnforcementTests
         tmdbResp.EnsureSuccessStatusCode();
 
         // 3. Admin action: Add storage location (NO unlock, NO approval)
-        var storageDir = Path.Combine(factory.DataDirectory, "admin-added-storage");
-        Directory.CreateDirectory(storageDir);
-        using var addStorageReq = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/libraries", adminToken,
-            new CreateLibraryRequest("Admin Added Storage", storageDir, LibraryKind.Movies));
-        using var addStorageResp = await client.SendAsync(addStorageReq);
-        addStorageResp.EnsureSuccessStatusCode();
+        var storageParent = TestPaths.CreateDataDirectory();
+        var storageDir = Path.Combine(storageParent, "admin-added-storage");
+        try
+        {
+            Directory.CreateDirectory(storageDir);
+            using var addStorageReq = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/libraries", adminToken,
+                new CreateLibraryRequest("Admin Added Storage", storageDir, LibraryKind.Movies));
+            using var addStorageResp = await client.SendAsync(addStorageReq);
+            addStorageResp.EnsureSuccessStatusCode();
+        }
+        finally
+        {
+            if (Directory.Exists(storageParent)) Directory.Delete(storageParent, recursive: true);
+        }
     }
 
     [Fact]
@@ -321,12 +329,203 @@ public sealed class SecurityModelEnforcementTests
     [InlineData("PUT", "/api/v1/users/6f0c1c6e-8a3d-4d0c-9b55-111111111111/profile", true)]
     [InlineData("PUT", "/api/v1/users/6f0c1c6e-8a3d-4d0c-9b55-111111111111/enabled", true)]
     [InlineData("PUT", "/api/v1/users/6f0c1c6e-8a3d-4d0c-9b55-111111111111/access", true)]
+    [InlineData("PUT", "/api/v1/users/6f0c1c6e-8a3d-4d0c-9b55-111111111111/titles", true)]
     [InlineData("PUT", "/api/v1/users/6f0c1c6e-8a3d-4d0c-9b55-111111111111/pin", true)]
     [InlineData("PUT", "/api/v1/users/6f0c1c6e-8a3d-4d0c-9b55-111111111111/name", false)]
     [InlineData("PUT", "/api/v1/users/6f0c1c6e-8a3d-4d0c-9b55-111111111111/screen-time", false)]
     [InlineData("GET", "/api/v1/users", false)]
     public void OnlyProfileChangesThatCanChangeWhoManagesAreLookedAt(string method, string path, bool looked)
         => Assert.Equal(looked, ServerRequestGuard.MayChangeWhoManages(method, path));
+
+    // Audit SRV-SEC-003: revoking libraries or titles from an Owner or Admin profile requires
+    // the Server Password (via /access, /titles, or /profile), while adding access, upgrading
+    // to EntireLibrary, or revoking access on a regular User profile still works with PIN only.
+    [Fact]
+    public async Task RevokingLibrariesOrTitlesFromAdminOrOwnerNeedsTheServerPassword()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+
+        var lib1Id = Guid.NewGuid();
+        var lib2Id = Guid.NewGuid();
+        var movie1Id = Guid.NewGuid();
+        var movie2Id = Guid.NewGuid();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            db.LibraryRoots.AddRange(
+                new LibraryRoot { Id = lib1Id, Name = "Synth Movies 1", Path = "/tmp/synth-lib-1", NormalizedPath = "/tmp/synth-lib-1", Kind = LibraryKind.Movies, CreatedAt = now },
+                new LibraryRoot { Id = lib2Id, Name = "Synth Movies 2", Path = "/tmp/synth-lib-2", NormalizedPath = "/tmp/synth-lib-2", Kind = LibraryKind.Movies, CreatedAt = now });
+            db.MediaItems.AddRange(
+                new MediaItem { Id = movie1Id, LibraryRootId = lib1Id, Kind = MediaKind.Movie, DetectedTitle = "Synth Film 1", SourcePath = "/tmp/synth-lib-1/a.mkv", NormalizedSourcePath = "/tmp/synth-lib-1/a.mkv", Extension = ".mkv", CreatedAt = now, UpdatedAt = now },
+                new MediaItem { Id = movie2Id, LibraryRootId = lib2Id, Kind = MediaKind.Movie, DetectedTitle = "Synth Film 2", SourcePath = "/tmp/synth-lib-2/b.mkv", NormalizedSourcePath = "/tmp/synth-lib-2/b.mkv", Extension = ".mkv", CreatedAt = now, UpdatedAt = now });
+            await db.SaveChangesAsync();
+        }
+
+        UserSummary admin;
+        using (var create = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token,
+                   new CreateUserRequest("Synthetic Admin", null, UserRole.Admin, ApiTestClient.TestPin, AccessMode: ProfileAccessMode.EntireLibrary)))
+        using (var response = await ApiTestClient.SendAsync(client, create))
+        {
+            response.EnsureSuccessStatusCode();
+            admin = await ApiTestClient.ReadAsync<UserSummary>(response);
+        }
+
+        UserSummary viewer;
+        using (var create = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token,
+                   new CreateUserRequest("Synthetic Viewer", null, UserRole.User, ApiTestClient.TestPin, AccessMode: ProfileAccessMode.EntireLibrary)))
+        using (var response = await ApiTestClient.SendAsync(client, create))
+        {
+            response.EnsureSuccessStatusCode();
+            viewer = await ApiTestClient.ReadAsync<UserSummary>(response);
+        }
+
+        // Pair a second device and unlock the owner profile with PIN only (no /api/v1/management/unlock),
+        // keeping the first device's unlocked management session active for approval tests.
+        string pinOnlyOwner;
+        using (var login = await client.PostAsJsonAsync("/api/v1/auth/login",
+                   new LoginRequest("lucas", "correct horse battery staple", "PIN-Only Device"), ApiTestClient.JsonOptions))
+        {
+            login.EnsureSuccessStatusCode();
+            var device = await ApiTestClient.ReadAsync<AuthenticationResponse>(login);
+            using var unlock = ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/profiles/{owner.User.Id}/unlock",
+                device.Token, new UnlockProfileRequest(ApiTestClient.TestPin));
+            using var unlockResp = await client.SendAsync(unlock);
+            unlockResp.EnsureSuccessStatusCode();
+            pinOnlyOwner = (await ApiTestClient.ReadAsync<ProfileSessionResponse>(unlockResp)).Token;
+        }
+
+        static async Task<string?> Refusal(HttpResponseMessage response) =>
+            response.StatusCode == HttpStatusCode.Forbidden ? (await ApiTestClient.ReadAsync<ApiProblem>(response)).Code : null;
+
+        async Task<HttpResponseMessage> SendRaw(string token, HttpMethod method, string path, string json)
+        {
+            using var request = ApiTestClient.Authorized(method, path, token);
+            request.Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            return await client.SendAsync(request);
+        }
+
+        async Task<ProfileTitleAccessResponse> ReadTitles(Guid userId)
+        {
+            using var request = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/users/{userId}/titles", pinOnlyOwner);
+            using var response = await client.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            return await ApiTestClient.ReadAsync<ProfileTitleAccessResponse>(response);
+        }
+
+        // 1. PUT /api/v1/users/{adminId}/access with empty libraryIds -> refused without Server Password, succeeds with approval.
+        using (var pinOnly = await SendRaw(pinOnlyOwner, HttpMethod.Put, $"/api/v1/users/{admin.Id}/access", """{"isEnabled":true,"libraryIds":[]}"""))
+            Assert.Equal("management_locked", await Refusal(pinOnly));
+        using (var proofless = await SendRaw(owner.Token, HttpMethod.Put, $"/api/v1/users/{admin.Id}/access", """{"isEnabled":true,"libraryIds":[]}"""))
+            Assert.Equal("approval_required", await Refusal(proofless));
+        using (var duplicateKey = await SendRaw(pinOnlyOwner, HttpMethod.Put, $"/api/v1/users/{admin.Id}/access",
+                   $$"""{"isEnabled":true,"libraryIds":["{{lib1Id}}","{{lib2Id}}"],"LibraryIds":[]}"""))
+            Assert.Equal("management_locked", await Refusal(duplicateKey));
+        using (var ownerCut = await SendRaw(pinOnlyOwner, HttpMethod.Put, $"/api/v1/users/{owner.User.Id}/access", """{"isEnabled":true,"libraryIds":[]}"""))
+            Assert.Equal("management_locked", await Refusal(ownerCut));
+
+        using (var approvedAccess = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{admin.Id}/access", owner.Token,
+                   new UpdateUserAccessRequest(true, [])))
+        using (var approvedResponse = await ApiTestClient.SendAsync(client, approvedAccess))
+            Assert.Equal(HttpStatusCode.NoContent, approvedResponse.StatusCode);
+
+        // Adding libraries to a LegacyLibraries admin does not revoke access and works with PIN only;
+        // revoking one of those libraries requires the Server Password.
+        using (var addLib1 = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{admin.Id}/access", pinOnlyOwner,
+                   new UpdateUserAccessRequest(true, [lib1Id])))
+        using (var addLib1Response = await client.SendAsync(addLib1))
+            Assert.Equal(HttpStatusCode.NoContent, addLib1Response.StatusCode);
+
+        using (var addLib2 = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{admin.Id}/access", pinOnlyOwner,
+                   new UpdateUserAccessRequest(true, [lib1Id, lib2Id])))
+        using (var addLib2Response = await client.SendAsync(addLib2))
+            Assert.Equal(HttpStatusCode.NoContent, addLib2Response.StatusCode);
+
+        using (var dropLib2 = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{admin.Id}/access", pinOnlyOwner,
+                   new UpdateUserAccessRequest(true, [lib1Id])))
+        using (var dropLib2Response = await client.SendAsync(dropLib2))
+            Assert.Equal("management_locked", await Refusal(dropLib2Response));
+
+        // 2. Upgrading admin to EntireLibrary via PUT /users/{adminId}/titles works with PIN only.
+        var titles = await ReadTitles(admin.Id);
+        using (var upgrade = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{admin.Id}/titles", pinOnlyOwner,
+                   new UpdateProfileTitleAccessRequest(ProfileAccessMode.EntireLibrary, [], titles.Revision)))
+        using (var upgradeResponse = await client.SendAsync(upgrade))
+            Assert.Equal(HttpStatusCode.OK, upgradeResponse.StatusCode);
+
+        // 3. Switching EntireLibrary admin to SelectedTitles via PUT /users/{adminId}/titles requires Server Password.
+        titles = await ReadTitles(admin.Id);
+        using (var restrictPinOnly = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{admin.Id}/titles", pinOnlyOwner,
+                   new UpdateProfileTitleAccessRequest(ProfileAccessMode.SelectedTitles, [], titles.Revision)))
+        using (var restrictPinOnlyResponse = await client.SendAsync(restrictPinOnly))
+            Assert.Equal("management_locked", await Refusal(restrictPinOnlyResponse));
+
+        using (var restrictProofless = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{admin.Id}/titles", owner.Token,
+                   new UpdateProfileTitleAccessRequest(ProfileAccessMode.SelectedTitles, [], titles.Revision)))
+        using (var restrictProoflessResponse = await client.SendAsync(restrictProofless))
+            Assert.Equal("approval_required", await Refusal(restrictProoflessResponse));
+
+        using (var duplicateMode = await SendRaw(pinOnlyOwner, HttpMethod.Put, $"/api/v1/users/{admin.Id}/titles",
+                   $$"""{"mode":"entireLibrary","Mode":"selectedTitles","titleIds":[],"revision":{{titles.Revision}}}"""))
+            Assert.Equal("management_locked", await Refusal(duplicateMode));
+
+        using (var approvedTitles = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{admin.Id}/titles", owner.Token,
+                   new UpdateProfileTitleAccessRequest(ProfileAccessMode.SelectedTitles, [], titles.Revision)))
+        using (var approvedTitlesResponse = await ApiTestClient.SendAsync(client, approvedTitles))
+            Assert.Equal(HttpStatusCode.OK, approvedTitlesResponse.StatusCode);
+
+        // 4. Adding titles to a SelectedTitles admin works with PIN only; revoking a single title requires Server Password.
+        titles = await ReadTitles(admin.Id);
+        using (var grantBoth = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{admin.Id}/titles", pinOnlyOwner,
+                   new UpdateProfileTitleAccessRequest(ProfileAccessMode.SelectedTitles, [movie1Id, movie2Id], titles.Revision)))
+        using (var grantBothResponse = await client.SendAsync(grantBoth))
+            Assert.Equal(HttpStatusCode.OK, grantBothResponse.StatusCode);
+
+        titles = await ReadTitles(admin.Id);
+        using (var revokeOne = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{admin.Id}/titles", pinOnlyOwner,
+                   new UpdateProfileTitleAccessRequest(ProfileAccessMode.SelectedTitles, [movie1Id], titles.Revision)))
+        using (var revokeOneResponse = await client.SendAsync(revokeOne))
+            Assert.Equal("management_locked", await Refusal(revokeOneResponse));
+
+        using (var revokeOneApproved = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{admin.Id}/titles", owner.Token,
+                   new UpdateProfileTitleAccessRequest(ProfileAccessMode.SelectedTitles, [movie1Id], titles.Revision)))
+        using (var revokeOneApprovedResponse = await ApiTestClient.SendAsync(client, revokeOneApproved))
+            Assert.Equal(HttpStatusCode.OK, revokeOneApprovedResponse.StatusCode);
+
+        // Upgrading SelectedTitles admin back to EntireLibrary succeeds without Server Password.
+        titles = await ReadTitles(admin.Id);
+        using (var backToEntire = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{admin.Id}/titles", pinOnlyOwner,
+                   new UpdateProfileTitleAccessRequest(ProfileAccessMode.EntireLibrary, [], titles.Revision)))
+        using (var backToEntireResponse = await client.SendAsync(backToEntire))
+            Assert.Equal(HttpStatusCode.OK, backToEntireResponse.StatusCode);
+
+        // 5. PUT /api/v1/users/{adminId}/profile setting accessMode to selectedTitles requires Server Password.
+        ProfileEditorResponse editor;
+        using (var editorReq = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/users/{admin.Id}/profile", pinOnlyOwner))
+        using (var editorResp = await client.SendAsync(editorReq))
+        {
+            editorResp.EnsureSuccessStatusCode();
+            editor = await ApiTestClient.ReadAsync<ProfileEditorResponse>(editorResp);
+        }
+        using (var profileRestrict = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{admin.Id}/profile", pinOnlyOwner,
+                   new UpdateProfileRequest(editor.Revision, UserRole.Admin, true, true, AccessMode: ProfileAccessMode.SelectedTitles, TitleIds: [])))
+        using (var profileRestrictResp = await client.SendAsync(profileRestrict))
+            Assert.Equal("management_locked", await Refusal(profileRestrictResp));
+
+        // 6. Regular User profile: revoking libraries or titles works with PIN only.
+        using (var viewerAccess = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{viewer.Id}/access", pinOnlyOwner,
+                   new UpdateUserAccessRequest(true, [])))
+        using (var viewerAccessResp = await client.SendAsync(viewerAccess))
+            Assert.Equal(HttpStatusCode.NoContent, viewerAccessResp.StatusCode);
+
+        var viewerTitles = await ReadTitles(viewer.Id);
+        using (var viewerRestrict = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/users/{viewer.Id}/titles", pinOnlyOwner,
+                   new UpdateProfileTitleAccessRequest(ProfileAccessMode.SelectedTitles, [], viewerTitles.Revision)))
+        using (var viewerRestrictResp = await client.SendAsync(viewerRestrict))
+            Assert.Equal(HttpStatusCode.OK, viewerRestrictResp.StatusCode);
+    }
 
     // Audit S-L5: one device with many IPv6 addresses counts once, and a full table never refuses
     // a new address: it forgets the one seen longest ago.

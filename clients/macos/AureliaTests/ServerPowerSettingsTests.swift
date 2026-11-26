@@ -111,4 +111,37 @@ struct ServerPowerSettingsTests {
     #expect(WakeOnLan.addresses(for: id, defaults: defaults).isEmpty)
     #expect(WakeOnLan.appHost(for: id, defaults: defaults) == "macApp")
   }
+
+  @Test func wakeOnLanRemembersAddressesFromAuthenticatedProfilePicker() throws {
+    let suite = "ServerPowerSettingsTests-Picker-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let id = UUID()
+
+    WakeOnLan.remember(
+      serverId: id,
+      wakeOnLanAddresses: ["02:00:5e:10:00:01"],
+      hosting: "linuxServer",
+      defaults: defaults)
+    #expect(
+      WakeOnLan.addresses(for: id, defaults: defaults) == [[0x02, 0x00, 0x5E, 0x10, 0x00, 0x01]])
+    #expect(WakeOnLan.appHost(for: id, defaults: defaults) == nil)
+
+    // An older picker without Wake-on-LAN fields preserves previously remembered addresses.
+    WakeOnLan.remember(
+      serverId: id,
+      wakeOnLanAddresses: nil,
+      hosting: nil,
+      defaults: defaults)
+    #expect(WakeOnLan.addresses(for: id, defaults: defaults).count == 1)
+
+    // App-hosted servers clear previously stored Wake-on-LAN addresses.
+    WakeOnLan.remember(
+      serverId: id,
+      wakeOnLanAddresses: ["02:00:5e:10:00:01"],
+      hosting: "linuxApp",
+      defaults: defaults)
+    #expect(WakeOnLan.addresses(for: id, defaults: defaults).isEmpty)
+    #expect(WakeOnLan.appHost(for: id, defaults: defaults) == "linuxApp")
+  }
 }

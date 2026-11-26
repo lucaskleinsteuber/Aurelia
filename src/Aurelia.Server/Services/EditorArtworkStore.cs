@@ -211,9 +211,9 @@ public sealed class EditorArtworkStore(ServerRuntimeOptions runtime) : IDisposab
         { bitmap.Dispose(); throw new AccountException("invalid_image", "The image could not be decoded completely.", 400); }
         return new(bitmap, codec.EncodedOrigin, isJpeg);
     }
-    internal static void ValidateStoredImage(string path)
+    internal static void ValidateStoredImage(string path, bool allowProviderWebP = false)
     {
-        using var image = Decode(File.ReadAllBytes(path));
+        using var image = Decode(File.ReadAllBytes(path), allowProviderWebP: allowProviderWebP);
     }
     internal static SKBitmap Orient(SKBitmap source, SKEncodedOrigin origin)
     {

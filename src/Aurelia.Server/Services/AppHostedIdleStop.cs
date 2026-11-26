@@ -17,15 +17,16 @@ public sealed partial class AppHostedIdleStop(
     ActiveStreamRegistry streams,
     IHostApplicationLifetime lifetime,
     TimeProvider clock,
-    ILogger<AppHostedIdleStop> logger) : BackgroundService
+    ILogger<AppHostedIdleStop> logger,
+    ServerWorkSignal? work = null) : BackgroundService
 {
     private static readonly TimeSpan Check = TimeSpan.FromMinutes(1);
 
     /// <summary>Why the server should stop now, or null while it should keep running.</summary>
     public static string? Decide(ServerPowerSettings settings, DateTimeOffset now, DateTimeOffset lastActive, int playing,
-        DateTimeOffset? sleepTimerEnded, TimeZoneInfo zone)
+        DateTimeOffset? sleepTimerEnded, TimeZoneInfo zone, bool keepAwake = false)
     {
-        if (settings.Mode != "stop" || playing > 0) return null;
+        if (settings.Mode != "stop" || playing > 0 || keepAwake) return null;
         if (settings.AfterSleepTimer && sleepTimerEnded is { } ended && ended >= lastActive) return "A sleep timer ended";
         if (InAwakeHours(settings, TimeZoneInfo.ConvertTime(now, zone))) return null;
         return now - lastActive >= TimeSpan.FromMinutes(settings.IdleMinutes) ? $"Unused for {settings.IdleMinutes} minutes" : null;
@@ -40,26 +41,36 @@ public sealed partial class AppHostedIdleStop(
         return start < end ? time >= start && time < end : time >= start || time < end;
     }
 
+    private static readonly Action<ILogger, Exception?> LoopFailed = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(4415, nameof(LoopFailed)), "Idle stop check paused after an unexpected failure.");
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (!ServerHosting.ByApp(ServerHosting.Kind(runtime))) return;
         var started = clock.GetUtcNow();
-        try
+        while (!stoppingToken.IsCancellationRequested)
         {
-            while (!stoppingToken.IsCancellationRequested)
+            try
             {
                 await Task.Delay(Check, clock, stoppingToken);
                 var now = clock.GetUtcNow();
                 var lastActive = new[] { started, use.LastUse ?? started, streams.LastPlaybackActivity ?? started }.Max();
-                var reason = Decide(power.Read(), now, lastActive, streams.PlaybackCount, SleepTimerEnded(), TimeZoneInfo.Local);
+                var keepAwake = string.Equals(work?.State, "keepawake", StringComparison.Ordinal);
+                var reason = Decide(power.Read(), now, lastActive, streams.PlaybackCount, SleepTimerEnded(), TimeZoneInfo.Local, keepAwake);
                 if (reason is null) continue;
                 Stopping(logger, reason);
                 Environment.ExitCode = ServerHosting.IdleExitCode;
                 lifetime.StopApplication();
                 return;
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                LoopFailed(logger, exception);
+                try { await Task.Delay(Check, clock, stoppingToken); }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            }
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
     }
 
     private DateTimeOffset? SleepTimerEnded()

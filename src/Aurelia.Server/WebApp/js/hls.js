@@ -65,25 +65,32 @@ export class HlsSource {
   }
 
   async request(path, signal, type = "text") {
-    const response = await fetch(path, {
-      credentials: "same-origin",
-      cache: "no-store",
-      signal,
-      headers: { "X-Aurelia-Web": "profile" },
-    });
-    if (!response.ok) {
-      let code = `http_${response.status}`;
-      try {
-        code = (await response.json())?.code ?? code;
-      } catch {
-        // No problem details.
+    for (let attempt = 0; ; attempt += 1) {
+      const response = await fetch(path, {
+        credentials: "same-origin",
+        cache: "no-store",
+        signal,
+        headers: { "X-Aurelia-Web": "profile" },
+      });
+      if (!response.ok) {
+        if (response.status === 429 && attempt < RETRIES && !this.destroyed && !signal?.aborted) {
+          await this.sleep(hls.retryAfterDelayMs(response.headers?.get?.("Retry-After")));
+          if (this.destroyed || signal?.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
+          continue;
+        }
+        let code = `http_${response.status}`;
+        try {
+          code = (await response.json())?.code ?? code;
+        } catch {
+          // No problem details.
+        }
+        const error = new Error(code);
+        error.status = response.status;
+        error.code = code;
+        throw error;
       }
-      const error = new Error(code);
-      error.status = response.status;
-      error.code = code;
-      throw error;
+      return type === "text" ? response.text() : new Uint8Array(await response.arrayBuffer());
     }
-    return type === "text" ? response.text() : new Uint8Array(await response.arrayBuffer());
   }
 
   /** Reads the qualities, attaches a new MediaSource and starts at `at` seconds. */
@@ -334,17 +341,29 @@ export class HlsSource {
     this.seekTimer = setTimeout(async () => {
       this.seekTimer = null;
       if (this.destroyed || !this.buffer) return;
-      const time = this.video.currentTime;
-      if (rules.bufferedEnd(rules.ranges(this.buffer.buffered), time) != null) return this.wake();
-      const playlist = await this.playlist(this.current);
-      const target = hls.segmentAt(playlist.segments, time);
-      // A resumed title starts its stream at the right segment and then seeks there: the segment
-      // on its way is the one needed, so it isn't broken off and asked for again (audit X3).
-      if (this.streaming && target === this.next) return this.wake();
-      // After abort the parser starts over, so the quality's init segment is sent again; it is
-      // kept, so only the media segment is fetched anew.
-      this.loaded = -1;
-      this.continueAt(target);
+      const generation = this.generation;
+      try {
+        const time = this.video.currentTime;
+        if (rules.bufferedEnd(rules.ranges(this.buffer.buffered), time) != null) return this.wake();
+        const playlist = await this.playlist(this.current);
+        if (this.destroyed || generation !== this.generation || !this.buffer) return;
+        const target = hls.segmentAt(playlist.segments, time);
+        // A resumed title starts its stream at the right segment and then seeks there: the segment
+        // on its way is the one needed, so it isn't broken off and asked for again (audit X3).
+        if (this.streaming && target === this.next) return this.wake();
+        // After abort the parser starts over, so the quality's init segment is sent again; it is
+        // kept, so only the media segment is fetched anew.
+        this.loaded = -1;
+        this.continueAt(target);
+      } catch (error) {
+        if (this.destroyed || generation !== this.generation || error?.name === "AbortError") return;
+        this.streaming = false;
+        if (error?.status) {
+          this.onFailure?.(error.status, error.code);
+          return;
+        }
+        this.interrupted(generation);
+      }
     }, SEEK_SETTLE_MS);
   }
 

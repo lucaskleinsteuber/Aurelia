@@ -11,6 +11,7 @@ struct AureliaProfileAvatar: View {
   var pictureKey: String? = nil
   var pictureRevision: Int64 = 0
   @ObservedObject private var photos = ProfilePhotoCache.shared
+  @Environment(\.aureliaContrast) private var contrast
 
   init(
     id: UUID?, name: String, size: CGFloat = 96, pictureKey: String? = nil,
@@ -70,7 +71,8 @@ struct AureliaProfileAvatar: View {
     let photo =
       pictureKey == ProfilePictureCatalog.photoKey
       ? id.flatMap { photos.image(id: $0, revision: pictureRevision) } : nil
-    let waitsForPhoto = pictureKey == ProfilePictureCatalog.photoKey && id != nil
+    let photoFailed = id.map { photos.hasFailed(id: $0, revision: pictureRevision) } ?? true
+    let waitsForPhoto = pictureKey == ProfilePictureCatalog.photoKey && id != nil && !photoFailed
     Circle()
       // A photo covers the whole circle; the gradient beneath it would show as a colored rim
       // along the photo's edge.
@@ -97,11 +99,18 @@ struct AureliaProfileAvatar: View {
             .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
         }
       }
-      .overlay { Circle().strokeBorder(.white.opacity(0.14), lineWidth: 1) }
+      .overlay {
+        Circle().strokeBorder(
+          .white.opacity(contrast == .increased ? 0.56 : 0.14),
+          lineWidth: contrast == .increased ? 1.5 : 1)
+      }
       .frame(width: size, height: size)
       .animation(.easeOut(duration: 0.2), value: photo != nil)
       .accessibilityHidden(true)
-      .task(id: "\(id?.uuidString ?? "")-\(pictureKey ?? "")-\(pictureRevision)") {
+      .task(
+        id:
+          "\(id?.uuidString ?? "")-\(pictureKey ?? "")-\(pictureRevision)-\(photos.loaderRevision)"
+      ) {
         if pictureKey == ProfilePictureCatalog.photoKey, let id {
           photos.load(id: id, revision: pictureRevision)
         }
@@ -162,47 +171,94 @@ struct RocketSymbolShape: Shape {
 
 /// Profile photos, loaded once per picture revision with the paired device's credential (the
 /// picker shows them before any profile is unlocked). A new revision loads the new photo.
-/// Each photo is also kept in this app's caches folder, so the picker draws it in its first frame
-/// after the next launch, and the offline mode shows it without the server.
+/// Each photo is kept in Application Support (falling back to older Caches copies) so the picker
+/// draws it in its first frame after the next launch and offline mode keeps it even when macOS
+/// clears Caches. Failed loads are remembered so avatars fall back to initials instead of staying
+/// blank, and disk misses are checked once per key rather than on every view update.
 @MainActor
 final class ProfilePhotoCache: ObservableObject {
-  static let shared = ProfilePhotoCache()
+  static let shared = ProfilePhotoCache(
+    folder: defaultFolder, legacyFolder: defaultLegacyFolder)
+
+  static var defaultFolder: URL? {
+    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+      .appendingPathComponent("Aurelia/Profile Photos", isDirectory: true)
+  }
+
+  static var defaultLegacyFolder: URL? {
+    FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+      .appendingPathComponent("Aurelia Profile Photos", isDirectory: true)
+  }
 
   @Published private var images: [String: NSImage] = [:]
+  @Published private var failed: Set<String> = []
+  @Published private(set) var loaderRevision: Int = 0
   private var loading: Set<String> = []
+  private var diskChecked: Set<String> = []
   private let folder: URL?
+  private let legacyFolder: URL?
   /// Set by the app model: fetches a profile's photo (JPEG) from the connected server.
-  var loader: (@MainActor (UUID, Int64) async throws -> Data)?
+  var loader: (@MainActor (UUID, Int64) async throws -> Data)? {
+    didSet {
+      if loader != nil {
+        failed.removeAll()
+        loaderRevision += 1
+      }
+    }
+  }
 
-  init(
-    folder: URL? = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
-      .appendingPathComponent("Aurelia Profile Photos", isDirectory: true)
-  ) {
+  init(folder: URL? = ProfilePhotoCache.defaultFolder, legacyFolder: URL? = nil) {
     self.folder = folder
+    self.legacyFolder = legacyFolder
+  }
+
+  func hasFailed(id: UUID, revision: Int64) -> Bool {
+    failed.contains(Self.key(id, revision))
   }
 
   func image(id: UUID, revision: Int64) -> NSImage? {
     let key = Self.key(id, revision)
     if let image = images[key] { return image }
-    // Read from disk at once, so a saved photo never appears a moment after its circle.
-    guard let file = file(key), let data = try? Data(contentsOf: file),
+    guard !diskChecked.contains(key) else { return nil }
+    diskChecked.insert(key)
+    // Read from disk once per key so a saved photo draws in the first frame without repeating
+    // synchronous file I/O on every body redraw after a miss.
+    if let file = file(key, in: folder), let data = try? Data(contentsOf: file),
       let image = NSImage(data: data)
-    else { return nil }
-    Task { @MainActor in self.images[key] = image }
-    return image
+    {
+      Task { @MainActor in self.images[key] = image }
+      return image
+    }
+    if let legacyFile = file(key, in: legacyFolder), let data = try? Data(contentsOf: legacyFile),
+      let image = NSImage(data: data)
+    {
+      keep(data, id: id, revision: revision)
+      Task { @MainActor in self.images[key] = image }
+      return image
+    }
+    return nil
   }
 
   func load(id: UUID, revision: Int64) {
     let key = Self.key(id, revision)
-    guard image(id: id, revision: revision) == nil, !loading.contains(key), let loader else {
+    if image(id: id, revision: revision) != nil {
+      failed.remove(key)
+      return
+    }
+    guard !loading.contains(key), !failed.contains(key) else { return }
+    guard let loader else {
+      failed.insert(key)
       return
     }
     loading.insert(key)
     Task {
       defer { loading.remove(key) }
       guard let data = try? await loader(id, revision), let image = NSImage(data: data) else {
+        failed.insert(key)
         return
       }
+      failed.remove(key)
+      diskChecked.insert(key)
       images[key] = image
       keep(data, id: id, revision: revision)
     }
@@ -210,17 +266,22 @@ final class ProfilePhotoCache: ObservableObject {
 
   /// Keeps a just-uploaded photo, so it shows at once without loading it back.
   func store(_ image: NSImage, data: Data? = nil, id: UUID, revision: Int64) {
-    images[Self.key(id, revision)] = image
+    let key = Self.key(id, revision)
+    failed.remove(key)
+    diskChecked.insert(key)
+    images[key] = image
     if let data { keep(data, id: id, revision: revision) }
   }
 
   func removeAll() {
     images.removeAll()
+    failed.removeAll()
+    diskChecked.removeAll()
   }
 
   /// Writes the photo of one revision and removes the profile's earlier ones.
   private func keep(_ data: Data, id: UUID, revision: Int64) {
-    guard let folder, let file = file(Self.key(id, revision)) else { return }
+    guard let folder, let file = file(Self.key(id, revision), in: folder) else { return }
     try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     try? data.write(to: file, options: .atomic)
     let earlier = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
@@ -230,8 +291,8 @@ final class ProfilePhotoCache: ObservableObject {
     }
   }
 
-  private func file(_ key: String) -> URL? {
-    folder?.appendingPathComponent(key + ".jpg")
+  private func file(_ key: String, in directory: URL?) -> URL? {
+    directory?.appendingPathComponent(key + ".jpg")
   }
 
   private static func key(_ id: UUID, _ revision: Int64) -> String {
@@ -292,6 +353,7 @@ struct AureliaCompactHeader: View {
   let isVisible: Bool
   let onBack: () -> Void
   @Environment(\.aureliaReduceTransparency) private var reduceTransparency
+  @Environment(\.aureliaContrast) private var contrast
 
   var body: some View {
     HStack(spacing: 14) {
@@ -317,7 +379,9 @@ struct AureliaCompactHeader: View {
         }
       }
     }
-    .overlay(alignment: .bottom) { AureliaDesign.hairline.frame(height: 1) }
+    .overlay(alignment: .bottom) {
+      AureliaDesign.hairline(for: contrast).frame(height: AureliaDesign.strokeWidth(for: contrast))
+    }
     .opacity(isVisible ? 1 : 0)
     .allowsHitTesting(isVisible)
     .accessibilityElement(children: .contain)

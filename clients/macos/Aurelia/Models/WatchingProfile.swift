@@ -54,6 +54,8 @@ struct ProfilePickerResponse: Decodable, Sendable {
   let minimumClientVersion: String
   let managementSetupRequired: Bool
   let profiles: [WatchingProfile]
+  var wakeOnLanAddresses: [String]? = nil
+  var hosting: String? = nil
 }
 
 struct ProfileSessionResponse: Decodable, Sendable {

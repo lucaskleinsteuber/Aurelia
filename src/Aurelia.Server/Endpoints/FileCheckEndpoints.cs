@@ -18,8 +18,12 @@ public static class FileCheckEndpoints
             checks.UpdateSettingsAsync(request, token));
 
         var health = app.MapGroup("/api/v1/library/health").RequireAuthorization("Administrator");
-        health.MapGet("/files", (bool? ignored, int? offset, int? limit, FileCheckService checks, CancellationToken token) =>
-            checks.ProblemsAsync(ignored ?? false, offset ?? 0, limit ?? 50, token));
+        health.MapGet("/files", async (HttpContext context, bool? ignored, int? offset, int? limit, FileCheckService checks, CancellationToken token) =>
+        {
+            var (items, total) = await checks.ProblemsPageAsync(ignored ?? false, offset ?? 0, limit ?? 50, token);
+            context.Response.Headers["X-Total-Count"] = total.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return items;
+        });
         health.MapPost("/files/{mediaId:guid}/recheck", (Guid mediaId, FileCheckService checks, CancellationToken token) =>
             RunNoContent(() => checks.RecheckAsync(mediaId, token)));
         health.MapPost("/files/{mediaId:guid}/ignore", (Guid mediaId, FileCheckService checks, CancellationToken token) =>

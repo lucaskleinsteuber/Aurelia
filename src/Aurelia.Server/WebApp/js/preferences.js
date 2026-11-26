@@ -41,6 +41,12 @@ export function applyAppearance(general = loadGeneral(), playback = loadPreferen
   root.dataset.subtitleBackground = playback.subtitleBackground;
 }
 
+/** Whether pages and animations may move: both the system setting and Settings › General keep them still. */
+export function motionAllowed() {
+  return !globalThis.window?.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches
+    && document.body?.dataset?.heroMotion !== "reduced";
+}
+
 /** The titles a row or grid shows: offline and watched ones only when the settings allow it. */
 export function visibleTitles(items, general = loadGeneral(), { keepWatched = false } = {}) {
   return (items ?? []).filter((item) => !(general.hideOfflineTitles && isTitleOffline(item))

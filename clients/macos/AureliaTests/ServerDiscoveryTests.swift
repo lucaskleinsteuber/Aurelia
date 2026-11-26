@@ -272,6 +272,48 @@ struct ServerDiscoveryTests {
     }
   }
 
+  @Test func spoofedBonjourEntriesCannotBlockWorkingSavedOrValidDiscoveredAddress() async throws {
+    let stored = profile()
+    let spoofed = URL(string: "https://spoofed.local:43111")!
+    let brokenTLS = URL(string: "https://broken-tls.local:43111")!
+    let relocated = URL(string: "https://real-new.local:43111")!
+
+    // Case 1: Saved address answers with valid identity; spoofed Bonjour entry must never abort it.
+    let browser1 = SyntheticDiscovery(servers: [discovered(stored, spoofed)])
+    var probed1: [URL] = []
+    let coordinator1 = ServerReconnectCoordinator(
+      browser: browser1,
+      inspect: { url in
+        probed1.append(url)
+        if url == spoofed {
+          return inspected(stored, at: url, fingerprint: "wrong-key")
+        }
+        return inspected(stored, at: url)
+      }, delay: { _ in })
+    let result1 = try await coordinator1.reconnect(stored)
+    #expect(result1.baseURL == stored.baseURL)
+    #expect(probed1 == [stored.baseURL])
+
+    // Case 2: Saved address is down; spoofed identity and TLS failure on discovered hosts are skipped.
+    let browser2 = SyntheticDiscovery(servers: [
+      discovered(stored, spoofed),
+      discovered(stored, brokenTLS),
+      discovered(stored, relocated),
+    ])
+    let coordinator2 = ServerReconnectCoordinator(
+      browser: browser2,
+      inspect: { url in
+        switch url {
+        case stored.baseURL: throw URLError(.cannotConnectToHost)
+        case spoofed: return inspected(stored, at: url, fingerprint: "wrong-key")
+        case brokenTLS: throw URLError(.secureConnectionFailed)
+        default: return inspected(stored, at: url)
+        }
+      }, delay: { _ in })
+    let result2 = try await coordinator2.reconnect(stored)
+    #expect(result2.baseURL == relocated)
+  }
+
   @Test func cancelledResolutionCannotCompleteWithLateAnswer() async throws {
     let stored = profile()
     let pending = PendingInspection()

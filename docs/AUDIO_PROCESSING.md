@@ -36,11 +36,13 @@ to the selected leveling mode. Other preferences and track choices remain intact
 
 ## Filter configuration
 
-Each client has one configuration that owns the full `compressor:equalizer` chain.
+Each native client has one configuration that owns the full `compressor:equalizer` chain.
 The public libVLC equalizer API sets band gains, but also replaces both the player's
 and active output's audio-filter string. Merely setting an equalizer after enabling
 compression would remove the compressor. Aurelia restores the complete chain and
-recreates the audio output before opening the title.
+recreates the audio output before opening the title. The browser player applies the same
+presets through Web Audio (`BiquadFilterNode` equalizer bands feeding a `DynamicsCompressorNode`,
+so equalization runs before compression in the browser).
 
 With compression Off, Dialogue Boost can change through the public equalizer API
 immediately. With compression active, or when changing compressor profiles, Aurelia

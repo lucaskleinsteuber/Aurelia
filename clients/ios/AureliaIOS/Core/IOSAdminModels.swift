@@ -170,6 +170,38 @@ struct IOSScreenTimeRules: Codable, Equatable, Sendable {
   var maxOvertimeMinutes: Int
   var schoolNight: IOSScreenTimeDayRule
   var weekend: IOSScreenTimeDayRule
+  var allowOfflineDownloads: Bool = false
+
+  init(
+    enabled: Bool, lockScope: String, ending: String, maxOvertimeMinutes: Int,
+    schoolNight: IOSScreenTimeDayRule, weekend: IOSScreenTimeDayRule,
+    allowOfflineDownloads: Bool = false
+  ) {
+    self.enabled = enabled
+    self.lockScope = lockScope
+    self.ending = ending
+    self.maxOvertimeMinutes = maxOvertimeMinutes
+    self.schoolNight = schoolNight
+    self.weekend = weekend
+    self.allowOfflineDownloads = allowOfflineDownloads
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case enabled, lockScope, ending, maxOvertimeMinutes, schoolNight, weekend,
+      allowOfflineDownloads
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    enabled = try container.decode(Bool.self, forKey: .enabled)
+    lockScope = try container.decode(String.self, forKey: .lockScope)
+    ending = try container.decode(String.self, forKey: .ending)
+    maxOvertimeMinutes = try container.decode(Int.self, forKey: .maxOvertimeMinutes)
+    schoolNight = try container.decode(IOSScreenTimeDayRule.self, forKey: .schoolNight)
+    weekend = try container.decode(IOSScreenTimeDayRule.self, forKey: .weekend)
+    allowOfflineDownloads =
+      try container.decodeIfPresent(Bool.self, forKey: .allowOfflineDownloads) ?? false
+  }
 
   static let `default` = IOSScreenTimeRules(
     enabled: false, lockScope: "playbackOnly", ending: "finishTitle", maxOvertimeMinutes: 30,

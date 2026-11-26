@@ -346,6 +346,10 @@ struct TVProfilePicker: Codable, Equatable, Sendable {
   let minimumClientVersion: String
   let managementSetupRequired: Bool
   let profiles: [TVWatchingProfile]
+  /// Hardware addresses of the server's network cards, reported for Wake-on-LAN.
+  var wakeOnLanAddresses: [String]? = nil
+  /// Where the server runs ("macApp", "linuxApp", "linuxServer", "server"); nil on older servers.
+  var hosting: String? = nil
 
   func validate() throws {
     try TVProtocolVersion.check(formatVersion)

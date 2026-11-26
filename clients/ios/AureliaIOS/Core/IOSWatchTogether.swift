@@ -95,9 +95,18 @@ enum IOSWatchTogetherFollower {
 }
 
 enum IOSWatchTogetherClock {
+  static let maxMeasurementRTT: TimeInterval = 4
+
   static func offset(serverTime: String, sent: Date, received: Date) -> TimeInterval? {
     guard let server = date(serverTime) else { return nil }
     return server.timeIntervalSince(sent.addingTimeInterval(received.timeIntervalSince(sent) / 2))
+  }
+
+  static func measuredOffset(
+    serverTime: String, sent: Date, received: Date, isLongPoll: Bool
+  ) -> TimeInterval? {
+    guard !isLongPoll, received.timeIntervalSince(sent) <= maxMeasurementRTT else { return nil }
+    return offset(serverTime: serverTime, sent: sent, received: received)
   }
 
   /// Reads "2026-11-07T20:00:00.1234567+00:00"; fractions longer than milliseconds are cut.
@@ -328,8 +337,8 @@ final class IOSWatchTogetherSession: ObservableObject {
   }
 
   func receive(_ next: IOSWatchPartyState, sent: Date, own: Bool) {
-    if let measured = IOSWatchTogetherClock.offset(
-      serverTime: next.serverTime, sent: sent, received: now())
+    if let measured = IOSWatchTogetherClock.measuredOffset(
+      serverTime: next.serverTime, sent: sent, received: now(), isLongPoll: !own)
     {
       offset = measured
     }

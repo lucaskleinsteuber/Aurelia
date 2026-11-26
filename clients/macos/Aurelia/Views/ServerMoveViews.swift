@@ -405,11 +405,11 @@ struct StorageLocationMovedSheet: View {
     ) {
       ScrollView {
         VStack(alignment: .leading, spacing: 14) {
-          LabeledContent("Old folder") {
+          LabeledContent("Old Folder") {
             Text(library.path).textSelection(.enabled).lineLimit(2)
           }
           suggestionList
-          Text("New folder").font(.headline)
+          Text("New Folder").font(.headline)
           HStack {
             TextField("/path/to/the/folder", text: $path)
               .textFieldStyle(.roundedBorder)

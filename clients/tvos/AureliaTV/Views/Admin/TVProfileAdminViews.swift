@@ -79,6 +79,14 @@ struct TVScreenTimeEditor: View {
                 after: rules.maxOvertimeMinutes, in: [15, 30, 45, 60, 90, 120])
             }
           }
+          TVSettingsRow(
+            title: "Allow Offline Downloads", value: rules.allowOfflineDownloads ? "On" : "Off",
+            id: "st-downloads"
+          ) { rules.allowOfflineDownloads.toggle() }
+          TVSettingsNote(
+            text:
+              "Off by default so offline downloads cannot bypass bedtime or daily limits. Existing downloads stay on devices."
+          )
         }
         TVSettingsRow(
           title: saving ? "Saving…" : "Save", value: rules == stored.rules ? "Saved" : nil,

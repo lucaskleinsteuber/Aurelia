@@ -251,10 +251,10 @@ public sealed partial class LiveConversionTests
         }
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task AnInventedMkvStreamsOverHlsInMemoryWithoutWritingFiles()
     {
-        if (Installed() is not { } maker) return;
+        var maker = FfmpegTestTools.RequireInstalled();
         var ffmpeg = Tools() ?? maker;
         var root = Path.Combine(TestPaths.CreateDataDirectory(), "Adaptive Streaming");
         Directory.CreateDirectory(root);
@@ -322,18 +322,115 @@ public sealed partial class LiveConversionTests
             using (var gone = await client.SendAsync(stale))
                 Assert.Equal(HttpStatusCode.NotFound, gone.StatusCode);
 
-            Assert.Equal(1, sessions.Count);
-            await sessions.DisposeAsync();
             Assert.Equal(0, sessions.Count);
             await WaitUntilAsync(() => live.Running == 0);
+            await WaitUntilAsync(() => FfmpegTestTools.ChildFfmpegProcessCount() == 0);
         }
         finally { Directory.Delete(Path.GetDirectoryName(root)!, recursive: true); }
     }
 
     [Fact]
+    public async Task QualitySwitchesReclaimYieldedSessionsSoAnotherTitleCanStart()
+    {
+        using var factory = Factory("off");
+        var converter = new InventedConverter { SegmentsPerRun = 20 };
+        await using var manager = Manager(factory, converter, new SteppingClock());
+        var profileSession = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var firstTitle = Guid.NewGuid();
+        var secondTitle = Guid.NewGuid();
+        var files = new List<IAsyncDisposable>();
+        try
+        {
+            foreach (var step in new[] { "1080p", "720p", "480p", "360p" })
+            {
+                var file = new InventedFile();
+                files.Add(file);
+                var quality = StreamingLadder.Find(SmallPicture with { Width = 1920, Height = 1080 }, null, step)!;
+                var key = new HlsSessionKey(userId, profileSession, firstTitle, step, 1);
+                var session = manager.Create(key, file.Stream, file.Stream, file.Path, "First", 200, quality, SmallPicture,
+                    new ProbedAudio(1, "aac", null, 2, null, null, true), HdrToneMapping.Unavailable,
+                    new FfmpegTools("/invented/ffmpeg", "/invented/ffprobe", LiveVideoEncoder.Libx264) { HasSoftwareEncoder = true });
+                session = await manager.AddAsync(session);
+                Assert.NotNull(await session.SegmentAsync(0, default));
+            }
+
+            var nextFile = new InventedFile();
+            files.Add(nextFile);
+            var nextQuality = StreamingLadder.Find(SmallPicture with { Width = 1920, Height = 1080 }, null, "720p")!;
+            var nextKey = new HlsSessionKey(userId, profileSession, secondTitle, "720p", 1);
+            var next = manager.Create(nextKey, nextFile.Stream, nextFile.Stream, nextFile.Path, "Second", 200, nextQuality, SmallPicture,
+                new ProbedAudio(1, "aac", null, 2, null, null, true), HdrToneMapping.Unavailable,
+                new FfmpegTools("/invented/ffmpeg", "/invented/ffprobe", LiveVideoEncoder.Libx264) { HasSoftwareEncoder = true });
+            next = await manager.AddAsync(next);
+            Assert.NotNull(await next.SegmentAsync(0, default));
+        }
+        finally
+        {
+            foreach (var file in files) await file.DisposeAsync();
+        }
+    }
+
+    [FfmpegFact]
+    public async Task RevokingLastPlaybackTicketEndsHlsSessionWhileRenewalKeepsIt()
+    {
+        var maker = FfmpegTestTools.RequireInstalled();
+        var ffmpeg = Tools() ?? maker;
+        var root = Path.Combine(TestPaths.CreateDataDirectory(), "Revoke Hls");
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "Invented Film.mkv");
+        try
+        {
+            await MakeMediaAsync(maker, path);
+            using var factory = Factory(ffmpeg);
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var mediaId = await AddMediaAsync(factory, root, path);
+            var sessions = factory.Services.GetRequiredService<HlsSessionManager>();
+            var live = factory.Services.GetRequiredService<LiveConversionService>();
+
+            var first = await CreatePlaybackAsync(client, owner.Token, mediaId);
+            _ = await ReadStreamAsync(client, owner.Token, $"{first.StreamPath}/hls/360p/init.mp4?audio=1");
+            Assert.Equal(1, sessions.Count);
+
+            // Renewing creates a second ticket before revoking the first: the HLS session stays alive.
+            var renewed = await CreatePlaybackAsync(client, owner.Token, mediaId);
+            using (var revokeFirst = ApiTestClient.Authorized(HttpMethod.Delete, $"/api/v1/playback/{first.Id}", owner.Token))
+            using (var firstRevoked = await ApiTestClient.SendAsync(client, revokeFirst))
+                firstRevoked.EnsureSuccessStatusCode();
+            Assert.Equal(1, sessions.Count);
+
+            // Closing the player revokes the last active ticket: the HLS session and conversion end immediately.
+            using (var revokeRenewed = ApiTestClient.Authorized(HttpMethod.Delete, $"/api/v1/playback/{renewed.Id}", owner.Token))
+            using (var renewedRevoked = await ApiTestClient.SendAsync(client, revokeRenewed))
+                renewedRevoked.EnsureSuccessStatusCode();
+            Assert.Equal(0, sessions.Count);
+            await WaitUntilAsync(() => live.Running == 0);
+            await WaitUntilAsync(() => FfmpegTestTools.ChildFfmpegProcessCount() == 0);
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(root)!, recursive: true); }
+    }
+
+    [FfmpegFact]
+    public async Task ServerInfoReportsTheSameCapabilitiesAsCapabilitiesEndpoint()
+    {
+        var ffmpeg = Tools() ?? FfmpegTestTools.RequireInstalled();
+        using var factory = Factory(ffmpeg);
+        using var client = factory.CreateClient();
+        using var infoResponse = await client.GetAsync("/api/v1/server/info");
+        using var capabilitiesResponse = await client.GetAsync("/api/v1/capabilities");
+        var info = await ApiTestClient.ReadAsync<ServerInfoResponse>(infoResponse);
+        var capabilities = await ApiTestClient.ReadAsync<ClientCapabilitiesResponse>(capabilitiesResponse);
+        Assert.NotNull(info.Capabilities);
+        Assert.Equal(capabilities.Capabilities, info.Capabilities);
+        Assert.Contains(ServerFeatures.AdaptiveStreaming, info.Capabilities);
+        Assert.Contains(ServerFeatures.ConvertedDownloads, info.Capabilities);
+    }
+
+    [FfmpegFact]
     public async Task ConvertingFromALaterSegmentPutsAKeyFrameAtTheStartOfEverySegment()
     {
-        if (Installed() is not { } ffmpeg) return;
+        var ffmpeg = FfmpegTestTools.RequireInstalled();
         var root = Path.Combine(TestPaths.CreateDataDirectory(), "Segment Key Frames");
         Directory.CreateDirectory(root);
         var path = Path.Combine(root, "Invented Film.mkv");
@@ -402,7 +499,11 @@ public sealed partial class LiveConversionTests
         using var process = Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync();
         var errors = process.StandardError.ReadToEndAsync();
-        await process.StandardInput.BaseStream.WriteAsync(data);
+        try { await process.StandardInput.BaseStream.WriteAsync(data); }
+        catch (IOException)
+        {
+            // ffprobe only reads the first frame (%+#1) and may close stdin before all bytes are written.
+        }
         process.StandardInput.Close();
         await process.WaitForExitAsync();
         Assert.True(process.ExitCode == 0, await errors);

@@ -461,9 +461,17 @@ test("closing the page sends the last position at once with keepalive while a sa
   const saver = new logic.ProgressSaver({ mediaId: "m", revision: 3, send, newId: () => `id-${++ids}` });
   const first = saver.save(1000, 60_000);
   await saver.save(9000, 60_000, false, { keepalive: true });
-  assert.deepEqual(sent.map((body) => [body.positionMilliseconds, body.keepalive]), [[1000, false], [9000, true]]);
+  assert.deepEqual(sent.map((body) => [body.positionMilliseconds, body.keepalive, body.enforceRevision]), [[1000, false, true], [9000, true, false]]);
+  assert.equal(sent[1].expectedRevision, undefined, "closing keepalive save must not race the in-flight periodic save with a stale expectedRevision");
   release(); await first;
   assert.equal(sent.length, 2, "the closing position is not sent a second time");
+});
+
+test("serverVersionChanged detects updated web asset hashes or server versions", () => {
+  assert.equal(logic.serverVersionChanged({ loadedAssetVersion: "abc", loadedServerVersion: "1.0.0", serverInfo: { webVersion: "abc", version: "1.0.0" } }), false);
+  assert.equal(logic.serverVersionChanged({ loadedAssetVersion: "abc", loadedServerVersion: "1.0.0", serverInfo: { webVersion: "def", version: "1.0.0" } }), true);
+  assert.equal(logic.serverVersionChanged({ loadedAssetVersion: null, loadedServerVersion: "1.0.0", serverInfo: { version: "1.1.0" } }), true);
+  assert.equal(logic.serverVersionChanged({ loadedAssetVersion: null, loadedServerVersion: null, serverInfo: { webVersion: "abc", version: "1.0.0" } }), false);
 });
 
 test("the weekly chart shows twelve weeks with empty ones", () => {

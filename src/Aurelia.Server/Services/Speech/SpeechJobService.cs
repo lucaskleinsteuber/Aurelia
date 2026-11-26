@@ -67,6 +67,8 @@ public sealed partial class SpeechJobService : BackgroundService
 
     public bool ModelReady => models.Current is not null;
 
+    public bool HasActiveJobs => jobs.Values.Any(job => !job.Finished);
+
     public IReadOnlyList<SpeechJobStatus> Jobs => [.. jobs.Values.Select(job => job.Status()).OrderBy(job => job.Title, StringComparer.CurrentCulture)];
 
     public SpeechJobStatus? Status(Guid mediaId) => jobs.TryGetValue(mediaId, out var job) ? job.Status() : null;
@@ -79,7 +81,7 @@ public sealed partial class SpeechJobService : BackgroundService
             throw new MetadataException("speech_unavailable", "Speech recognition (whisper.cpp) isn't installed on this server.", StatusCodes.Status409Conflict);
         if (models.Current is null)
             throw new MetadataException("speech_model_missing", "Download a speech model in the server settings first.", StatusCodes.Status409Conflict);
-        if (!SidecarSubtitles.TryParseLanguage(request.Language.Trim(), out var language))
+        if (!SidecarSubtitles.TryParseLanguage((request.Language ?? string.Empty).Trim(), out var language))
             throw new MetadataException("invalid_subtitle_language", "Choose the language that is spoken.", StatusCodes.Status400BadRequest);
         if (request.Kind == SpeechJobKind.Sync && request.SubtitleIndex is null)
             throw new MetadataException("subtitle_track_required", "Choose the subtitles to sync.", StatusCodes.Status400BadRequest);
@@ -123,21 +125,36 @@ public sealed partial class SpeechJobService : BackgroundService
             : FormattableString.Invariant($"{series} · S{media.SeasonNumber ?? 0:00}E{media.EpisodeNumber ?? 0:00}");
     }
 
+    private static readonly TimeSpan UnexpectedFailurePause = TimeSpan.FromSeconds(30);
+    private static readonly Action<ILogger, Exception?> LoopFailed = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(4401, nameof(LoopFailed)), "Speech subtitles paused after an unexpected failure.");
+    private static readonly Action<ILogger, Guid, Exception?> JobFailedUnexpectedly = LoggerMessage.Define<Guid>(
+        LogLevel.Warning, new EventId(4402, nameof(JobFailedUnexpectedly)), "Speech subtitles for title {MediaId} failed unexpectedly.");
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        try
+        while (!stoppingToken.IsCancellationRequested)
         {
-            while (!stoppingToken.IsCancellationRequested)
+            try
             {
                 await signal.WaitAsync(stoppingToken);
                 while (queue.TryDequeue(out var mediaId))
                 {
                     if (!jobs.TryGetValue(mediaId, out var job) || job.Finished) continue;
-                    using (ServerWorkSignal.Begin(scopes, keepAwake: false)) await RunAsync(job, stoppingToken);
+                    await RunAsync(job, stoppingToken);
                 }
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                LoopFailed(logger, exception);
+                try { await Task.Delay(UnexpectedFailurePause, stoppingToken); }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            }
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
     }
 
     /// <summary>Runs one job to its end; tests call it directly.</summary>
@@ -151,6 +168,9 @@ public sealed partial class SpeechJobService : BackgroundService
 
     private async Task RunAsync(Job job, CancellationToken stoppingToken)
     {
+        // Speech jobs are explicitly requested by the owner and keep progress in memory, so they
+        // keep the server awake until finished (audit SRV-BG-007).
+        using var work = ServerWorkSignal.Begin(scopes, keepAwake: true);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, job.Cancellation.Token);
         var token = linked.Token;
         try
@@ -167,7 +187,7 @@ public sealed partial class SpeechJobService : BackgroundService
             catch (PlaybackException) { throw new SpeechJobException("The video file is offline."); }
             await using var stream = file.Stream;
             var path = Path.GetFullPath(media.SourcePath);
-            var probe = await live.ProbeAsync(tools, file, path, media.Id, token);
+            var probe = await live.ProbeAsync(tools, file, path, media.Id, token, lowPriority: true);
             var track = LiveSpeechAudio.Choose(probe.Audio, job.Request.AudioIndex) ?? throw new SpeechJobException("The title has no sound track.");
             IReadOnlyList<SubtitleCue>? original = null;
             if (job.Request.Kind == SpeechJobKind.Sync)
@@ -226,6 +246,12 @@ public sealed partial class SpeechJobService : BackgroundService
             job.Message = failure is MetadataException or PlaybackException ? failure.Message : "The server couldn't listen to this title.";
             LogFailed(logger, job.MediaId, failure.GetType().Name);
         }
+        catch (Exception failure) when (failure is not OperationCanceledException)
+        {
+            job.State = SpeechJobState.Failed;
+            job.Message = "The server couldn't listen to this title.";
+            JobFailedUnexpectedly(logger, job.MediaId, failure);
+        }
         finally
         {
             job.Paused = false;
@@ -236,9 +262,8 @@ public sealed partial class SpeechJobService : BackgroundService
     private async Task<List<SpeechWord>> ListenAsync(Job job, FfmpegTools tools, OpenMediaFile file, string path, ProbedAudio track,
         double duration, string modelPath, CancellationToken token)
     {
-        using var process = live.Start(tools.Ffmpeg, LiveSpeechAudio.Arguments(LiveConversionService.InputPath(file.Stream, path), track), lowPriority: true);
-        try { process.PriorityClass = System.Diagnostics.ProcessPriorityClass.Idle; }
-        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        using var process = live.Start(tools.Ffmpeg, LiveSpeechAudio.Arguments(LiveConversionService.InputPath(file.Stream, path), track), lowPriority: true, backgroundIo: true);
+        BackgroundPriority.ApplyToProcess(process, idle: true);
         using var stop = token.Register(() => LiveConversionService.Kill(process));
         var words = new List<SpeechWord>();
         var chunker = new SpeechChunker(Rate * ChunkSeconds, Rate * CutSearchSeconds);
@@ -269,12 +294,12 @@ public sealed partial class SpeechJobService : BackgroundService
     private async Task RecognizeAsync(Job job, SpeechChunk chunk, string modelPath, List<SpeechWord> words, CancellationToken token)
     {
         await WaitWhilePlaybackAsync(job, token);
-        var heard = await recognizer.RecognizeAsync(chunk.Samples, job.Request.Language, modelPath, token);
+        var heard = await recognizer.RecognizeAsync(chunk.Samples, job.Request.Language, modelPath, BusyWithPlayback, paused => job.Paused = paused, token);
         var trimmed = SpeechTiming.TrimmingSilence(heard, SpeechTiming.Levels(chunk.Samples));
         words.AddRange(trimmed.Select(word => word with { Start = word.Start + chunk.StartSeconds, End = word.End + chunk.StartSeconds }));
     }
 
-    private bool BusyWithPlayback() => streams.PlaybackCount > 0 || live.Running > 0;
+    private bool BusyWithPlayback() => streams.PlaybackCount > 0 || live.RunningForPlayback > 0;
 
     private async Task WaitWhilePlaybackAsync(Job job, CancellationToken token)
     {

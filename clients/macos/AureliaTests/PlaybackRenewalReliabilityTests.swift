@@ -16,10 +16,13 @@ struct PlaybackRenewalReliabilityTests {
     try await fixture.clock.waitForSleeps(2)
     #expect(fixture.client.calls == 2)
     #expect(fixture.engine.isPlaying)
+    #expect(fixture.controller.errorMessage == nil)
+    #expect(fixture.controller.noticeMessage != nil)
     fixture.clock.wake()
     try await fixture.clock.waitForSleeps(3)
     #expect(fixture.client.calls == 3)
     #expect(fixture.controller.errorMessage == nil)
+    #expect(fixture.controller.noticeMessage == nil)
     #expect(fixture.engine.isPlaying)
     await fixture.controller.shutdown(saveProgress: false)
     fixture.clock.wake()
@@ -244,6 +247,63 @@ struct PlaybackRenewalReliabilityTests {
       })
     await fixture.controller.shutdown(saveProgress: false)
   }
+
+  @Test func nonFatalDialogueBoostUsesNoticeAndAudioReopenReattachesSidecars() async throws {
+    let fixture = RenewalFixture(outcomes: [])
+    fixture.client.sidecarTracks = [
+      try JSONDecoder().decode(
+        LiveSubtitleTrack.self,
+        from: Data(
+          #"{"index":7,"codec":"srt","language":"en","title":"English","isDefault":false,"isForced":false,"supported":true,"isSidecar":true,"isSdh":false}"#
+            .utf8))
+    ]
+    await fixture.controller.start()
+    for _ in 0..<50 where fixture.engine.addedSubtitleSlaves.isEmpty {
+      await Task.yield()
+    }
+    #expect(fixture.engine.addedSubtitleSlaves.count == 1)
+
+    // Dialogue Boost unavailable shows a non-fatal notice without setting errorMessage.
+    fixture.engine.dialogueBoostResult = .unavailable
+    #expect(!fixture.controller.setDialogueBoost(.standard))
+    #expect(fixture.controller.errorMessage == nil)
+    #expect(fixture.controller.noticeMessage?.contains("Dialogue Boost") == true)
+
+    // Audio change reload re-attaches previously discovered sidecar subtitles.
+    fixture.engine.currentTimeMilliseconds = 5_000
+    fixture.engine.durationMilliseconds = 120_000
+    fixture.engine.onUpdate?()
+    fixture.controller.reopenForAudioChange()
+    #expect(fixture.engine.addedSubtitleSlaves.count == 2)
+    #expect(fixture.engine.addedSubtitleSlaves[0] == fixture.engine.addedSubtitleSlaves[1])
+
+    // Remote commands control the active registered player.
+    PlaybackShutdownCoordinator.shared.register(fixture.controller)
+    defer { PlaybackShutdownCoordinator.shared.unregister(fixture.controller) }
+    let app = AppModel(store: InMemoryServerProfileStore())
+    app.handleIncomingRemoteCommand(
+      RemotePlaybackCommand(
+        commandId: UUID(), action: "pause", mediaId: nil, positionSeconds: nil, skipSeconds: nil,
+        createdAt: "2026-11-22T00:00:00Z"))
+    #expect(!fixture.engine.isPlaying)
+    app.handleIncomingRemoteCommand(
+      RemotePlaybackCommand(
+        commandId: UUID(), action: "resume", mediaId: nil, positionSeconds: nil, skipSeconds: nil,
+        createdAt: "2026-11-22T00:00:00Z"))
+    #expect(fixture.engine.isPlaying)
+    app.handleIncomingRemoteCommand(
+      RemotePlaybackCommand(
+        commandId: UUID(), action: "seek", mediaId: nil, positionSeconds: 45, skipSeconds: nil,
+        createdAt: "2026-11-22T00:00:00Z"))
+    #expect(fixture.engine.seekTargets.last == 45_000)
+    app.handleIncomingRemoteCommand(
+      RemotePlaybackCommand(
+        commandId: UUID(), action: "skip", mediaId: nil, positionSeconds: nil, skipSeconds: 15,
+        createdAt: "2026-11-22T00:00:00Z"))
+    #expect(fixture.engine.seekTargets.last == 60_000)
+
+    await fixture.controller.shutdown(saveProgress: false)
+  }
 }
 
 @MainActor
@@ -275,6 +335,10 @@ private final class RenewalRelay: PlaybackRelayProtocol {
 
   func start() async throws -> URL {
     URL(string: "http://127.0.0.1:54321/stream/synthetic-renewal")!
+  }
+
+  func subtitleURL(index: Int) -> URL? {
+    URL(string: "http://127.0.0.1:54321/subtitle/\(index)")
   }
 
   func updateSourceURL(_ url: URL) { updatedURLs.append(url) }
@@ -323,10 +387,12 @@ private final class RenewalClient: PlaybackClientProtocol {
   var pendingRequest: CheckedContinuation<Void, Never>?
   var revokedIDs: [UUID] = []
   var failNextStreamURL = false
+  var sidecarTracks: [LiveSubtitleTrack] = []
   init(expires: Date, outcomes: [Result<Void, Error>]) {
     self.expires = expires
     self.outcomes = outcomes
   }
+  func streamSubtitles(ticket: UUID) async throws -> [LiveSubtitleTrack] { sidecarTracks }
   func createPlayback(mediaId: UUID) async throws -> PlaybackSourceResponse {
     calls += 1
     if holdNextRequest {

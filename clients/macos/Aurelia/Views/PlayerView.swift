@@ -313,8 +313,15 @@ struct PlayerView: View {
     .task(id: controller.wantsSuggestions) { await loadSuggestions() }
     .onChange(of: controller.isPlaying) {
       model.reportPlayerPlaying(controller.isPlaying)
-      if !controller.isPlaying, preShow == nil { cursor.show() }
+      if controller.isPlaying {
+        revealControls(scheduleHide: true)
+      } else if preShow == nil {
+        revealControls(scheduleHide: false)
+      }
       advanceSceneNotes()
+    }
+    .onChange(of: controller.endHandled) { _, ended in
+      if ended { revealControls(scheduleHide: false) }
     }
     .onChange(of: controller.currentTimeMilliseconds) { advanceSceneNotes() }
     .onChange(of: controller.navigationRevision) { advanceSceneNotes() }
@@ -397,6 +404,21 @@ struct PlayerView: View {
           .position(
             x: viewport.width / 2,
             y: viewport.height - bottomInset - 56)
+      }
+
+      if let notice = controller.noticeMessage, controller.errorMessage == nil {
+        HStack(spacing: 8) {
+          Image(systemName: "info.circle")
+          Text(notice).font(.caption).lineLimit(2)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
+        .frame(maxWidth: controlWidth)
+        .allowsHitTesting(false)
+        .position(
+          x: viewport.width / 2,
+          y: viewport.height - bottomInset - (controller.progressMessage == nil ? 142 : 186))
       }
 
       if let message = controller.progressMessage {
@@ -687,7 +709,7 @@ struct PlayerView: View {
         PlayerTimeline(
           position: Binding(
             get: { displayedPosition },
-            set: { scrubPosition = $0 }),
+            set: { handleTimelineValueChange($0) }),
           duration: max(Double(controller.durationMilliseconds), 1),
           chapters: controller.chapters,
           notes: sceneNotes.notes,
@@ -702,6 +724,7 @@ struct PlayerView: View {
           },
           valueDescription:
             "\(formatTime(displayedPosition)) of \(formatTime(max(Double(controller.durationMilliseconds), 1)))",
+          onAdjustableStep: handleTimelineAdjustableStep,
           onEditingChanged: timelineEditingChanged
         )
         .focused($focusedControl, equals: "timeline")
@@ -1280,6 +1303,36 @@ struct PlayerView: View {
       preparing: controller.isPreparing)
   }
 
+  private func handleTimelineValueChange(_ newValue: Double) {
+    switch PlayerTimelineSeekPolicy.valueChanged(
+      to: newValue, isScrubbing: isScrubbing, duration: controller.durationMilliseconds)
+    {
+    case .updateScrub(let clamped):
+      scrubPosition = clamped
+    case .seekImmediately(let target):
+      scrubPosition = Double(target)
+      controller.seek(to: target)
+      revealControls()
+    }
+  }
+
+  private func handleTimelineAdjustableStep(_ direction: AccessibilityAdjustmentDirection) {
+    let increment: Bool
+    switch direction {
+    case .increment: increment = true
+    case .decrement: increment = false
+    @unknown default: return
+    }
+    let target = PlayerTimelineSeekPolicy.adjustableTarget(
+      current: Int64(displayedPosition.rounded()),
+      duration: controller.durationMilliseconds,
+      seekIntervalSeconds: preferencesStore.preferences.seekInterval,
+      increment: increment)
+    scrubPosition = Double(target)
+    controller.seek(to: target)
+    revealControls()
+  }
+
   private func timelineEditingChanged(_ editing: Bool) {
     isScrubbing = editing
     controlsPolicy.hold("scrubbing", active: editing)
@@ -1344,32 +1397,30 @@ struct PlayerView: View {
       }
       return true
     }
-    if event.charactersIgnoringModifiers?.lowercased() == "z", !event.isARepeat {
+    guard
+      let action = PlayerKeyboardShortcutPolicy.action(
+        keyCode: event.keyCode, characters: event.charactersIgnoringModifiers,
+        isRepeat: event.isARepeat, showsSkipIntro: controller.showsSkipIntro)
+    else { return false }
+    switch action {
+    case .togglePlayback:
+      controller.togglePlayback()
+    case .toggleMute:
+      controller.toggleMute()
+    case .toggleVideoFill:
       toggleVideoFill()
       return true
-    }
-    if event.charactersIgnoringModifiers == "?" {
+    case .showShortcuts:
       model.isKeyboardShortcutsPresented = true
       return true
-    }
-    // Return or S skips the intro while Skip Intro is offered.
-    if controller.showsSkipIntro, !event.isARepeat,
-      event.keyCode == 36 || event.keyCode == 76
-        || event.charactersIgnoringModifiers?.lowercased() == "s"
-    {
+    case .skipIntro:
       controller.skipIntro()
       return true
-    }
-    switch event.keyCode {
-    case 49:
-      controller.togglePlayback()
-    case 123:
+    case .seekBackward:
       controller.skip(seconds: -Int64(preferencesStore.preferences.seekInterval))
-    case 124:
+    case .seekForward:
       controller.skip(seconds: Int64(preferencesStore.preferences.seekInterval))
-    case 46:
-      controller.toggleMute()
-    case 53:
+    case .escape:
       if isPictureInPicture {
         togglePictureInPicture()
       } else if isNativeFullScreen {
@@ -1377,8 +1428,8 @@ struct PlayerView: View {
       } else {
         closePlayer()
       }
-    default:
-      return false
+    case .consume:
+      return true
     }
     revealControls()
     return true
@@ -1420,20 +1471,26 @@ struct PlayerView: View {
       try? await Task.sleep(for: .seconds(delay))
       guard !Task.isCancelled, canAutoHide,
         controlsPolicy.permitsHide(
-          generation, preparing: filmPreparing, error: controller.errorMessage != nil)
+          generation, preparing: filmPreparing, error: controller.errorMessage != nil,
+          playing: isActivelyPlaying)
       else { return }
       withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { controlsVisible = false }
       updateCursorEnvironment()
       // An ad, a trailer or the curtain plays like the film itself.
-      cursor.hideIfPermitted(playing: controller.isPlaying || preShow != nil, blocked: !canAutoHide)
+      cursor.hideIfPermitted(playing: isActivelyPlaying, blocked: !canAutoHide)
     }
   }
 
   /// The film is loading in view; behind cinema mode's curtain it loads out of sight.
   private var filmPreparing: Bool { controller.isPreparing && preShow == nil }
 
+  private var isActivelyPlaying: Bool {
+    (controller.isPlaying && !controller.endHandled) || preShow != nil
+  }
+
   private var canAutoHide: Bool {
-    !cursor.isRetired && !filmPreparing && controller.errorMessage == nil && !isScrubbing
+    !cursor.isRetired && !filmPreparing && controller.errorMessage == nil && isActivelyPlaying
+      && !isScrubbing
       && !isAdjustingVolume
       && controlsPolicy.holds.isEmpty
   }
@@ -1507,6 +1564,7 @@ private struct PlayerTimeline: View {
   let previewClearance: CGFloat
   let preview: PlayerTimelinePreview?
   let valueDescription: String
+  let onAdjustableStep: (AccessibilityAdjustmentDirection) -> Void
   let onEditingChanged: (Bool) -> Void
 
   var body: some View {
@@ -1561,6 +1619,7 @@ private struct PlayerTimeline: View {
     .frame(minHeight: 44)
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Playback Position")
+    .accessibilityAdjustableAction(onAdjustableStep)
     .accessibilityIdentifier("player-timeline")
   }
 }
@@ -1637,16 +1696,32 @@ private struct PlayerControlLabel<Content: View>: View {
   }
 }
 
-extension View {
-  func playerMaterial<S: Shape>(reduceTransparency: Bool, shape: S) -> some View {
-    background {
-      if reduceTransparency {
-        shape.fill(Color(red: 0.11, green: 0.12, blue: 0.14).opacity(0.98))
-      } else {
-        shape.fill(.ultraThinMaterial)
+private struct PlayerMaterialModifier<S: InsettableShape>: ViewModifier {
+  @Environment(\.aureliaContrast) private var contrast
+  let reduceTransparency: Bool
+  let shape: S
+
+  func body(content: Content) -> some View {
+    content
+      .background {
+        if reduceTransparency {
+          shape.fill(Color(red: 0.11, green: 0.12, blue: 0.14).opacity(0.98))
+        } else {
+          shape.fill(.ultraThinMaterial)
+        }
       }
-    }
-    .overlay { shape.stroke(.white.opacity(0.12), lineWidth: 1) }
+      .clipShape(shape)
+      .overlay {
+        shape.strokeBorder(
+          .white.opacity(contrast == .increased ? 0.56 : 0.12),
+          lineWidth: contrast == .increased ? 1.5 : 1)
+      }
+  }
+}
+
+extension View {
+  func playerMaterial<S: InsettableShape>(reduceTransparency: Bool, shape: S) -> some View {
+    modifier(PlayerMaterialModifier(reduceTransparency: reduceTransparency, shape: shape))
   }
 }
 

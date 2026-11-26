@@ -31,7 +31,8 @@ public sealed class DeviceAuthorizationService(
         guard.Admit("start", address);
         RequireEnabled();
         var name = (deviceName ?? string.Empty).Trim().Normalize(NormalizationForm.FormKC);
-        if (name.Length is < 1 or > 128 || name.Any(char.IsControl))
+        if (name.Length is < 1 or > 128 || TextInputValidation.HasForbiddenControlCharacters(name)
+            || !TextInputValidation.HasVisibleCharacter(name))
             throw new AccountException("invalid_device_name", "The device name must contain 1 to 128 visible characters.", 400);
         using var lease = await guard.EnterAsync(token);
         var now = clock.GetUtcNow();
@@ -50,18 +51,29 @@ public sealed class DeviceAuthorizationService(
             codeHash = tokens.HashCode(code);
         } while (await database.DeviceAuthorizationRequests.AnyAsync(request => request.CodeHash == codeHash, token));
         var secret = tokens.CreateDeviceToken();
+        var requestId = Guid.NewGuid();
+        var expiresAt = now.AddMinutes(5);
+        guard.ReservePending(address, requestId, expiresAt);
         var request = new DeviceAuthorizationRequest
         {
-            Id = Guid.NewGuid(),
+            Id = requestId,
             DeviceName = name,
             CodeHash = codeHash,
             SecretHash = tokens.Hash(secret),
             State = DeviceAuthorizationState.Pending,
             CreatedAt = now,
-            ExpiresAt = now.AddMinutes(5),
+            ExpiresAt = expiresAt,
         };
-        database.DeviceAuthorizationRequests.Add(request);
-        await database.SaveChangesAsync(token);
+        try
+        {
+            database.DeviceAuthorizationRequests.Add(request);
+            await database.SaveChangesAsync(token);
+        }
+        catch
+        {
+            guard.ReleasePending(requestId);
+            throw;
+        }
         return new(request.Id, code, secret, request.ExpiresAt, PollIntervalSeconds);
     }
 
@@ -127,6 +139,7 @@ public sealed class DeviceAuthorizationService(
             await database.SaveChangesAsync(token);
         }
         await transaction.CommitAsync(token);
+        guard.ReleasePending(request.Id);
         // Only an approval that was saved is a sign-in (audit S-X5).
         if (created is not null)
         {
@@ -233,6 +246,7 @@ public sealed class DeviceAuthorizationService(
         request.ProtectedAuthentication = null;
         if (request.DeviceSession is { } session) session.RevokedAt ??= clock.GetUtcNow();
         await database.SaveChangesAsync(token);
+        guard.ReleasePending(request.Id);
     }
 
     private async Task<ServerUser> RequireOwnerAsync(Guid ownerId, Guid deviceId, Guid profileId, CancellationToken token)

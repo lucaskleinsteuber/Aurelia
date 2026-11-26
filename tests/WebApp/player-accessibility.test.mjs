@@ -49,3 +49,31 @@ test("question mark shortcut opens keyboard shortcuts overview", (t) => {
   assert.equal(event.defaultPrevented, true);
   assert.equal(shortcutsShown, 1);
 });
+
+test("left and right arrow keys adjust the volume slider when it has focus instead of seeking", (t) => {
+  installDOM(t);
+  const names = ["HTMLInputElement", "HTMLTextAreaElement", "HTMLButtonElement"];
+  const prior = names.map((name) => globalThis[name]);
+  for (const name of names) globalThis[name] = class {};
+  t.after(() => names.forEach((name, i) => { globalThis[name] = prior[i]; }));
+
+  const volume = Object.assign(new globalThis.HTMLInputElement(), { type: "range" });
+  const skips = [];
+  const instance = Object.assign(Object.create(Player.prototype), {
+    closed: false,
+    volume,
+    preferences: { seekInterval: 10 },
+    skip(seconds) { skips.push(seconds); },
+    showControls() {},
+  });
+  for (const key of ["ArrowLeft", "ArrowRight"]) {
+    const event = { key, target: volume, preventDefault() { this.defaultPrevented = true; } };
+    instance.key(event);
+    assert.equal(event.defaultPrevented, undefined, `${key} on volume slider must not call preventDefault`);
+  }
+  assert.deepEqual(skips, []);
+  const seekEvent = { key: "ArrowRight", target: {}, preventDefault() { this.defaultPrevented = true; } };
+  instance.key(seekEvent);
+  assert.equal(seekEvent.defaultPrevented, true);
+  assert.deepEqual(skips, [10]);
+});

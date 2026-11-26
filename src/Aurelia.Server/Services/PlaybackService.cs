@@ -19,7 +19,8 @@ public sealed class PlaybackService(
     PlaybackTicketPolicy? ticketPolicy = null,
     ProfileSessionStore? profiles = null,
     MediaSegmentService? segments = null,
-    ScreenTimeService? screenTime = null)
+    ScreenTimeService? screenTime = null,
+    Hls.HlsSessionManager? hlsSessions = null)
 {
     private const int CleanupBatchSize = 100;
 
@@ -29,7 +30,7 @@ public sealed class PlaybackService(
         Guid mediaId,
         CancellationToken cancellationToken,
         Guid? profileSessionId = null,
-        bool download = false)
+        bool forDownload = false)
     {
         var now = DateTimeOffset.UtcNow;
         await PruneExpiredAsync(now, cancellationToken);
@@ -64,6 +65,11 @@ public sealed class PlaybackService(
                 "media_not_playable",
                 "This media item is a container and cannot be played directly.",
                 StatusCodes.Status409Conflict);
+        }
+
+        if (forDownload && screenTime is not null)
+        {
+            await screenTime.RequireDownloadsAllowedAsync(userId, cancellationToken);
         }
 
         // A children's profile's bedtime or daily limit may refuse a new title (docs/SCREEN_TIME.md).
@@ -122,8 +128,27 @@ public sealed class PlaybackService(
                 "The playback ticket was not found.",
                 StatusCodes.Status404NotFound);
 
-        ticket.RevokedAt ??= DateTimeOffset.UtcNow;
+        var now = DateTimeOffset.UtcNow;
+        ticket.RevokedAt ??= now;
         await database.SaveChangesAsync(cancellationToken);
+
+        // End the title's HLS conversion once no active playback ticket remains for it in this
+        // profile session (renewal creates the replacement ticket before revoking the old one).
+        if (hlsSessions is not null && ticket.ProfileSessionId is { } profileSessionId)
+        {
+            var hasAnotherActiveTicket = await database.PlaybackTickets.AnyAsync(
+                candidate => candidate.Id != ticket.Id
+                    && candidate.UserId == userId
+                    && candidate.ProfileSessionId == profileSessionId
+                    && candidate.MediaItemId == ticket.MediaItemId
+                    && candidate.RevokedAt == null
+                    && candidate.ExpiresAt > now,
+                cancellationToken);
+            if (!hasAnotherActiveTicket)
+            {
+                await hlsSessions.EndTitleAsync(profileSessionId, ticket.MediaItemId);
+            }
+        }
     }
 
     public async Task<PlaybackStreamSource?> OpenStreamAsync(

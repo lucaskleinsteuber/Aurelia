@@ -8,6 +8,7 @@ protocol PlaybackEngine: AnyObject {
   var onUpdate: (() -> Void)? { get set }
   var onEnded: (() -> Void)? { get set }
   var onError: ((String) -> Void)? { get set }
+  var onConfigurationError: ((String) -> Void)? { get set }
   var isPlaying: Bool { get }
   var isSeekable: Bool { get }
   var currentTimeMilliseconds: Int64 { get }
@@ -47,6 +48,11 @@ protocol PlaybackEngine: AnyObject {
 }
 
 extension PlaybackEngine {
+  var onConfigurationError: ((String) -> Void)? {
+    get { nil }
+    set {}
+  }
+
   func applyDialogueBoost(_ mode: DialogueBoost) -> AudioChangeResult { .unavailable }
   var isSeekable: Bool { false }
   func load(url: URL, startAt milliseconds: Int64) { load(url: url) }
@@ -93,13 +99,14 @@ final class VLCPlaybackEngine: PlaybackEngine {
   /// A player for one title; `output` is the audio output module, Core Audio by default.
   static func makePlayer(
     nightMode: Bool = false, output: String = "auhal", extraOptions: [String] = [],
-    dialogueBoost: DialogueBoost = .off, volumeLeveling: VolumeLeveling? = nil
+    dialogueBoost: DialogueBoost = .off, volumeLeveling: VolumeLeveling? = nil,
+    applyAudioFilters: Bool = true
   ) -> VLCMediaPlayer {
     let processing = AudioProcessing(
       dialogue: dialogueBoost, leveling: volumeLeveling ?? (nightMode ? .standard : .off))
     let player = VLCMediaPlayer(
       options: defaultPlayerOptions + processing.leveling.options + extraOptions)
-    if !processing.filters.isEmpty {
+    if applyAudioFilters, !processing.filters.isEmpty {
       _ = VLCAudioFilter.apply(processing, on: player, output: output)
     }
     return player
@@ -108,14 +115,24 @@ final class VLCPlaybackEngine: PlaybackEngine {
   var onUpdate: (() -> Void)?
   var onEnded: (() -> Void)?
   var onError: ((String) -> Void)?
+  var onConfigurationError: ((String) -> Void)?
 
   private var player: VLCMediaPlayer
-  private let playerFactory: @MainActor () -> VLCMediaPlayer
+  private let customPlayerFactory: (@MainActor () -> VLCMediaPlayer)?
   private weak var attachedVideoView: NSView?
   private var videoFillGeometry: String?
   private var timeObserver: NSObjectProtocol?
   private var stateObserver: NSObjectProtocol?
-  private var appliedTrackPreferences = false
+  private var appliedAudioPreferences = false
+  private var appliedSubtitlePreferences = false
+  private var userSelectedSubtitle = false
+  private var cachedAudioTracks: [PlaybackTrack] = []
+  private var cachedSubtitleTracks: [PlaybackTrack] = []
+  private var cachedChapters: [PlaybackChapter] = []
+  private var cachedChaptersTitleIndex: Int32 = -1
+  private var needsTrackRefresh = true
+  private var pendingSubtitleSlaveDeadline: TimeInterval?
+  private var expectedSubtitleTrackCountAfterSlave: Int?
   private var playbackGeneration: UInt64 = 0
   private var acceptsPlayerEvents = false
   private var deliveredTerminalEvent = false
@@ -133,19 +150,11 @@ final class VLCPlaybackEngine: PlaybackEngine {
   var additionalMediaOptions: [String] = []
   var opensAtStartPosition: Bool { true }
 
-  init(
-    playerFactory: @escaping @MainActor () -> VLCMediaPlayer = {
-      // A player is created for every title, so a changed night mode applies to the next load.
-      let preferences = PlaybackPreferencesStore.shared.preferences
-      return VLCPlaybackEngine.makePlayer(
-        extraOptions: SubtitleAppearance.vlcOptions(
-          size: preferences.subtitleSize, background: preferences.subtitleBackground),
-        dialogueBoost: preferences.dialogueBoost,
-        volumeLeveling: preferences.volumeLeveling)
-    }
-  ) {
-    self.playerFactory = playerFactory
-    player = playerFactory()
+  init(playerFactory: (@MainActor () -> VLCMediaPlayer)? = nil) {
+    self.customPlayerFactory = playerFactory
+    // Placeholder player before load(url:startAt:) creates the configured title player.
+    player =
+      playerFactory?() ?? VLCPlaybackEngine.makePlayer(nightMode: false, applyAudioFilters: false)
   }
 
   func applyDialogueBoost(_ mode: DialogueBoost) -> AudioChangeResult {
@@ -239,11 +248,13 @@ final class VLCPlaybackEngine: PlaybackEngine {
   }
 
   var audioTracks: [PlaybackTrack] {
-    tracks(names: player.audioTrackNames, indexes: player.audioTrackIndexes)
+    if needsTrackRefresh { refreshTrackAndChapterCache() }
+    return cachedAudioTracks
   }
 
   var subtitleTracks: [PlaybackTrack] {
-    tracks(names: player.videoSubTitlesNames, indexes: player.videoSubTitlesIndexes)
+    if needsTrackRefresh { refreshTrackAndChapterCache() }
+    return cachedSubtitleTracks
   }
 
   var selectedAudioTrackID: Int32? {
@@ -257,7 +268,11 @@ final class VLCPlaybackEngine: PlaybackEngine {
   }
 
   var chapters: [PlaybackChapter] {
-    let titleIndex = player.currentTitleIndex
+    if needsTrackRefresh { refreshTrackAndChapterCache() }
+    return cachedChapters
+  }
+
+  private func readChaptersFromPlayer(titleIndex: Int32) -> [PlaybackChapter] {
     guard titleIndex >= 0 else { return [] }
     return player.chapterDescriptions(ofTitle: titleIndex).enumerated().compactMap { offset, raw in
       guard let values = raw as? [AnyHashable: Any] else { return nil }
@@ -270,6 +285,24 @@ final class VLCPlaybackEngine: PlaybackEngine {
         title: title.isEmpty ? "Chapter \(offset + 1)" : title,
         timeOffsetMilliseconds: max(0, time),
         durationMilliseconds: max(0, duration))
+    }
+  }
+
+  private func refreshTrackAndChapterCache(forceChapters: Bool = false) {
+    needsTrackRefresh = false
+    cachedAudioTracks = tracks(names: player.audioTrackNames, indexes: player.audioTrackIndexes)
+    cachedSubtitleTracks = tracks(
+      names: player.videoSubTitlesNames, indexes: player.videoSubTitlesIndexes)
+    let titleIndex = player.currentTitleIndex
+    if forceChapters || titleIndex != cachedChaptersTitleIndex {
+      cachedChaptersTitleIndex = titleIndex
+      cachedChapters = readChaptersFromPlayer(titleIndex: titleIndex)
+    }
+    if let expected = expectedSubtitleTrackCountAfterSlave,
+      cachedSubtitleTracks.count >= expected
+    {
+      expectedSubtitleTrackCountAfterSlave = nil
+      pendingSubtitleSlaveDeadline = nil
     }
   }
 
@@ -291,23 +324,40 @@ final class VLCPlaybackEngine: PlaybackEngine {
 
   func load(url: URL, startAt milliseconds: Int64) {
     retireCurrentPlayer()
-    // A separate player prevents delayed terminal events from a previous input
-    // from being interpreted as the end of a retry or the next episode.
-    player = playerFactory()
+    // Read playback preferences once per load and apply the complete audio filter chain once.
     let preferences = PlaybackPreferencesStore.shared.preferences
     let processing = AudioProcessing(
       dialogue: preferences.dialogueBoost, leveling: preferences.volumeLeveling)
+    // A separate player prevents delayed terminal events from a previous input
+    // from being interpreted as the end of a retry or the next episode.
+    player =
+      customPlayerFactory?()
+      ?? VLCPlaybackEngine.makePlayer(
+        extraOptions: SubtitleAppearance.vlcOptions(
+          size: preferences.subtitleSize, background: preferences.subtitleBackground),
+        dialogueBoost: processing.dialogue,
+        volumeLeveling: processing.leveling,
+        applyAudioFilters: false)
     guard
       processing.filters.isEmpty || VLCAudioFilter.apply(processing, on: player, output: "auhal")
     else {
-      onError?(
+      onConfigurationError?(
         "Dialogue Boost or Volume Leveling is unavailable in this VLC installation. Turn it off in Playback settings."
       )
       return
     }
     player.drawable = attachedVideoView
     applyVideoFill()
-    appliedTrackPreferences = false
+    appliedAudioPreferences = false
+    appliedSubtitlePreferences = false
+    userSelectedSubtitle = false
+    cachedAudioTracks = []
+    cachedSubtitleTracks = []
+    cachedChapters = []
+    cachedChaptersTitleIndex = -1
+    needsTrackRefresh = true
+    pendingSubtitleSlaveDeadline = nil
+    expectedSubtitleTrackCountAfterSlave = nil
     deliveredTerminalEvent = false
     lastKnownTimeMilliseconds = 0
     lastKnownDurationMilliseconds = 0
@@ -378,6 +428,7 @@ final class VLCPlaybackEngine: PlaybackEngine {
   }
 
   func selectAudioTrack(id: Int32) {
+    needsTrackRefresh = true
     player.currentAudioTrackIndex = id
     if let track = audioTracks.first(where: { $0.id == id }) {
       PlaybackTrackPreferenceStore.shared.rememberAudio(
@@ -387,6 +438,9 @@ final class VLCPlaybackEngine: PlaybackEngine {
   }
 
   func selectSubtitleTrack(id: Int32?) {
+    needsTrackRefresh = true
+    userSelectedSubtitle = true
+    appliedSubtitlePreferences = true
     player.currentVideoSubTitleIndex = id ?? -1
     PlaybackTrackPreferenceStore.shared.rememberSubtitle(
       id.flatMap { selected in
@@ -397,6 +451,13 @@ final class VLCPlaybackEngine: PlaybackEngine {
 
   func addSubtitleSlave(url: URL) {
     player.addPlaybackSlave(url, type: .subtitle, enforce: false)
+    needsTrackRefresh = true
+    expectedSubtitleTrackCountAfterSlave = cachedSubtitleTracks.count + 1
+    pendingSubtitleSlaveDeadline = ProcessInfo.processInfo.systemUptime + 5
+    // Re-evaluate remembered/default subtitle preference when the async sidecar track appears.
+    if !userSelectedSubtitle {
+      appliedSubtitlePreferences = false
+    }
   }
 
   func selectChapter(index: Int32) {
@@ -406,6 +467,7 @@ final class VLCPlaybackEngine: PlaybackEngine {
 
   private func stateChanged(_ state: VLCMediaPlayerState) {
     let generation = playbackGeneration
+    refreshTrackAndChapterCache(forceChapters: true)
     update()
     guard acceptsPlayerEvents, generation == playbackGeneration else { return }
     switch state {
@@ -424,6 +486,23 @@ final class VLCPlaybackEngine: PlaybackEngine {
 
   private func update() {
     captureProgress()
+    if let deadline = pendingSubtitleSlaveDeadline {
+      if ProcessInfo.processInfo.systemUptime <= deadline {
+        needsTrackRefresh = true
+      } else {
+        pendingSubtitleSlaveDeadline = nil
+        expectedSubtitleTrackCountAfterSlave = nil
+      }
+    } else if player.currentTitleIndex != cachedChaptersTitleIndex {
+      needsTrackRefresh = true
+    } else if cachedAudioTracks.isEmpty && lastKnownDurationMilliseconds > 0
+      && !appliedAudioPreferences
+    {
+      needsTrackRefresh = true
+    }
+    if needsTrackRefresh {
+      refreshTrackAndChapterCache()
+    }
     applyTrackPreferencesIfNeeded()
     onUpdate?()
   }
@@ -449,38 +528,52 @@ final class VLCPlaybackEngine: PlaybackEngine {
   }
 
   private func applyTrackPreferencesIfNeeded() {
-    guard !appliedTrackPreferences, !audioTracks.isEmpty || !subtitleTracks.isEmpty else {
-      return
-    }
-    appliedTrackPreferences = true
-
     let store = PlaybackTrackPreferenceStore.shared
     let defaults = PlaybackPreferencesStore.shared.preferences
-    if let preference = store.audio(scope: trackScope, profileId: profileScope) {
-      if let track = bestMatch(preference, tracks: audioTracks) {
+
+    if !appliedAudioPreferences, !audioTracks.isEmpty {
+      appliedAudioPreferences = true
+      if let preference = store.audio(scope: trackScope, profileId: profileScope) {
+        if let track = bestMatch(preference, tracks: audioTracks) {
+          player.currentAudioTrackIndex = track.id
+        }
+      } else if let track = PlaybackLanguage.track(
+        in: audioTracks, for: defaults.defaultAudioLanguage)
+      {
         player.currentAudioTrackIndex = track.id
       }
-    } else if let track = PlaybackLanguage.track(
-      in: audioTracks, for: defaults.defaultAudioLanguage)
-    {
-      player.currentAudioTrackIndex = track.id
     }
-    let subChoice = store.subtitleChoice(scope: trackScope, profileId: profileScope)
-    if !subChoice.chosen {
-      // Without a choice for this series, Settings › Playback may pick a subtitle language;
-      // otherwise the file's own default (such as forced subtitles) stays.
-      if let track = PlaybackLanguage.track(
-        in: subtitleTracks, for: defaults.defaultSubtitleLanguage)
-      {
-        player.currentVideoSubTitleIndex = track.id
-      }
-    } else {
-      if let preference = subChoice.preference {
+
+    if !appliedSubtitlePreferences, !userSelectedSubtitle, !subtitleTracks.isEmpty {
+      let subChoice = store.subtitleChoice(scope: trackScope, profileId: profileScope)
+      if !subChoice.chosen {
+        // Without a choice for this series, Settings › Playback may pick a subtitle language;
+        // otherwise the file's own default (such as forced subtitles) stays.
+        if !defaults.defaultSubtitleLanguage.isEmpty {
+          if let track = PlaybackLanguage.track(
+            in: subtitleTracks, for: defaults.defaultSubtitleLanguage)
+          {
+            player.currentVideoSubTitleIndex = track.id
+            appliedSubtitlePreferences = true
+          }
+        } else {
+          appliedSubtitlePreferences = true
+        }
+      } else if let preference = subChoice.preference {
         if let track = bestMatch(preference, tracks: subtitleTracks) {
           player.currentVideoSubTitleIndex = track.id
+          appliedSubtitlePreferences = true
         }
       } else {
-        player.currentVideoSubTitleIndex = -1
+        if let forced = PlaybackLanguage.forcedSubtitleTrackWhenOff(
+          subtitleTracks: subtitleTracks, currentSubtitleID: selectedSubtitleTrackID,
+          audioTracks: audioTracks, currentAudioID: selectedAudioTrackID)
+        {
+          player.currentVideoSubTitleIndex = forced.id
+        } else {
+          player.currentVideoSubTitleIndex = -1
+        }
+        appliedSubtitlePreferences = true
       }
     }
   }

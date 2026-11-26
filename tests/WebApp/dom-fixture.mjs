@@ -9,10 +9,30 @@ export class TestNode extends EventTarget {
     this.dataset = {};
     this.style = { setProperty() {} };
     this.value = "";
+    this.className = "";
     this.disabled = this.checked = this.selected = this.hidden = false;
     this.text = text;
+    this.classList = {
+      add: (...names) => {
+        const set = new Set(String(this.className ?? "").split(/\s+/).filter(Boolean));
+        for (const name of names) if (name) set.add(name);
+        this.className = [...set].join(" ");
+      },
+      remove: (...names) => {
+        const set = new Set(String(this.className ?? "").split(/\s+/).filter(Boolean));
+        for (const name of names) set.delete(name);
+        this.className = [...set].join(" ");
+      },
+      contains: (name) => String(this.className ?? "").split(/\s+/).includes(name),
+      toggle: (name, force) => {
+        const on = force === undefined ? !this.classList.contains(name) : Boolean(force);
+        if (on) this.classList.add(name); else this.classList.remove(name);
+        return on;
+      },
+    };
   }
   get firstChild() { return this.children[0] ?? null; }
+  get lastElementChild() { return this.children.at(-1) ?? null; }
   get isConnected() { return this === globalThis.document?.body || Boolean(this.parentNode?.isConnected); }
   get textContent() { return this.text + this.children.map((child) => child.textContent).join(""); }
   set textContent(value) { this.replaceChildren(); this.text = String(value); }
@@ -22,6 +42,7 @@ export class TestNode extends EventTarget {
     if (["value", "type", "class"].includes(key)) this[key === "class" ? "className" : key] = String(value);
   }
   getAttribute(key) { return this.attributes.get(key) ?? null; }
+  removeAttribute(key) { this.attributes.delete(key); }
   append(...nodes) {
     for (let node of nodes) {
       if (!(node instanceof TestNode)) node = new TestNode("", String(node));

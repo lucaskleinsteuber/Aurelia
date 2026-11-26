@@ -161,7 +161,8 @@ public sealed class LibraryStateService(AureliaDbContext database)
                 ClientMutationId = mutationId,
                 AccessRevision = user.AccessRevision,
                 Fingerprint = fingerprint,
-                ResponseJson = JsonSerializer.Serialize(result)
+                ResponseJson = JsonSerializer.Serialize(result),
+                CreatedAt = DateTimeOffset.UtcNow
             });
             await database.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);

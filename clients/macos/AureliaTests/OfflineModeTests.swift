@@ -95,4 +95,40 @@ struct OfflineModeTests {
     #expect(titles[0].posterFile == nil)
     #expect(!titles[0].hasArtwork)
   }
+
+  @Test
+  func offlinePinLockoutPersistsAcrossRestartsPerCard() throws {
+    let store = MemoryOfflineProfileStore()
+    var card = try #require(
+      OfflineProfileCard.make(serverId: server, profile: profile(pin: true), pin: "2468"))
+    let otherCard = try #require(
+      OfflineProfileCard.make(serverId: server, profile: profile(pin: true), pin: "1357"))
+    store.remember(card)
+    store.remember(otherCard)
+
+    let start = Date(timeIntervalSince1970: 1_700_000_000)
+    for _ in 0..<4 {
+      card.recordPINAttempt(succeeded: false, now: start)
+      #expect(card.lockedUntil(now: start) == nil)
+    }
+    card.recordPINAttempt(succeeded: false, now: start)
+    let lockedUntil = try #require(card.lockedUntil(now: start))
+    #expect(lockedUntil == start.addingTimeInterval(30))
+    store.remember(card)
+
+    // Simulating an app restart by reloading the encoded card from storage preserves the lockout
+    // for that profile while leaving other profiles unlocked.
+    let reloaded = store.cards(serverId: server)
+    let reloadedLocked = try #require(reloaded.first { $0.userId == card.userId })
+    let reloadedOther = try #require(reloaded.first { $0.userId == otherCard.userId })
+    #expect(reloadedLocked.failedPinAttempts == 5)
+    #expect(reloadedLocked.lockedUntil(now: start) == lockedUntil)
+    #expect(reloadedOther.lockedUntil(now: start) == nil)
+
+    // Success clears lockout state.
+    var unlocked = reloadedLocked
+    unlocked.recordPINAttempt(succeeded: true, now: start.addingTimeInterval(35))
+    #expect(unlocked.failedPinAttempts == 0)
+    #expect(unlocked.lockedUntil(now: start.addingTimeInterval(35)) == nil)
+  }
 }

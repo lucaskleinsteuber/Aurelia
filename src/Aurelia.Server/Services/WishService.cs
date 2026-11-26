@@ -58,8 +58,6 @@ public sealed class WishService(
         if (hits.Count == 0)
             return new WishSearchResponse([], true);
 
-        posterCache.AllowRecent(hits.Select(hit => hit.PosterPath));
-
         var providerIds = hits.Select(hit => hit.ProviderMediaId).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToList();
         var existingLibrary = await (
             from meta in database.MediaMetadata.AsNoTracking()
@@ -90,7 +88,54 @@ public sealed class WishService(
             .GroupBy(wish => wish.ProviderMediaId!, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
 
-        var mapped = hits.Select(hit =>
+        var keptHits = hits;
+        if (IsChildAgeLimited(caller))
+        {
+            var limit = caller.AgeLimit!.Value;
+            var mediaType = kind == MediaKind.Series ? "tv" : "movie";
+            var filtered = new List<MetadataCandidateSummary>();
+            var tmdbChecks = 0;
+            foreach (var hit in hits)
+            {
+                if (libraryByProviderId.ContainsKey(hit.ProviderMediaId))
+                {
+                    filtered.Add(hit);
+                    continue;
+                }
+                if (visibleWishByProviderId.TryGetValue(hit.ProviderMediaId, out var wish)
+                    && AgeRatings.MinimumAge(wish.AgeRating) is int wishMinAge
+                    && wishMinAge <= limit)
+                {
+                    filtered.Add(hit);
+                    continue;
+                }
+                if (tmdbChecks >= 8) continue;
+                tmdbChecks++;
+                try
+                {
+                    using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    deadline.CancelAfter(TimeSpan.FromSeconds(3));
+                    var detail = await tmdb.GetAsync(configuration.Token, configuration.Language, mediaType, hit.ProviderMediaId, deadline.Token);
+                    if (AgeRatings.MinimumAge(detail.ContentRating) is int detailMinAge && detailMinAge <= limit)
+                    {
+                        filtered.Add(hit);
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception error) when (error is HttpRequestException or MetadataException or OperationCanceledException or InvalidDataException)
+                {
+                    // Unrated or unreachable TMDB details stay hidden from child profiles.
+                }
+            }
+            keptHits = filtered;
+        }
+
+        posterCache.AllowRecent(keptHits.Select(hit => hit.PosterPath));
+
+        var mapped = keptHits.Select(hit =>
         {
             libraryByProviderId.TryGetValue(hit.ProviderMediaId, out var mediaId);
             visibleWishByProviderId.TryGetValue(hit.ProviderMediaId, out var existingWish);
@@ -211,8 +256,9 @@ public sealed class WishService(
             throw new AccountException("invalid_wish_kind", "Choose movie or series.", StatusCodes.Status400BadRequest);
 
         var title = (request.Title ?? string.Empty).Trim();
-        if (title.Length == 0 || title.Length > 512)
-            throw new AccountException("invalid_wish_title", "Enter a title between 1 and 512 characters.", StatusCodes.Status400BadRequest);
+        if (title.Length == 0 || title.Length > 512 || TextInputValidation.HasForbiddenControlCharacters(title)
+            || !TextInputValidation.HasVisibleCharacter(title))
+            throw new AccountException("invalid_wish_title", "Enter a title between 1 and 512 visible characters.", StatusCodes.Status400BadRequest);
 
         if (request.Year is < 1888 or > 2100)
             throw new AccountException("invalid_wish_year", "Enter a year between 1888 and 2100.", StatusCodes.Status400BadRequest);
@@ -271,14 +317,22 @@ public sealed class WishService(
                 var now = clock.GetUtcNow();
                 if (existingOpen.UserId != callerId && !existingOpen.Supports.Any(support => support.UserId == callerId))
                 {
-                    database.WishSupports.Add(new WishSupport
+                    var addedSupport = new WishSupport
                     {
                         WishId = existingOpen.Id,
                         UserId = callerId,
                         CreatedAt = now,
-                    });
+                    };
+                    database.WishSupports.Add(addedSupport);
                     await EmitUserStateChangesAsync([existingOpen.UserId, callerId], includeAdmins: true, now, cancellationToken);
-                    await database.SaveChangesAsync(cancellationToken);
+                    try
+                    {
+                        await database.SaveChangesAsync(cancellationToken);
+                    }
+                    catch (DbUpdateException exception) when (IsUniqueConstraintViolation(exception))
+                    {
+                        database.Entry(addedSupport).State = EntityState.Detached;
+                    }
                 }
 
                 var reloaded = await LoadWishRequiredAsync(existingOpen.Id, cancellationToken);
@@ -319,6 +373,13 @@ public sealed class WishService(
                     // Fall back to the submitted search summary; ageRating remains null (hidden from other child profiles).
                 }
             }
+        }
+
+        if (IsChildAgeLimited(caller)
+            && AgeRatings.MinimumAge(ageRating) is int createdMinAge
+            && createdMinAge > caller.AgeLimit!.Value)
+        {
+            throw new AccountException("wish_age_restricted", "This title exceeds your profile's age limit.", StatusCodes.Status403Forbidden);
         }
 
         if (posterPath is not null)
@@ -370,14 +431,16 @@ public sealed class WishService(
         var now = clock.GetUtcNow();
         var changed = false;
 
+        WishSupport? addedSupport = null;
         if (supported && existingSupport is null)
         {
-            database.WishSupports.Add(new WishSupport
+            addedSupport = new WishSupport
             {
                 WishId = wish.Id,
                 UserId = callerId,
                 CreatedAt = now,
-            });
+            };
+            database.WishSupports.Add(addedSupport);
             changed = true;
         }
         else if (!supported && existingSupport is not null)
@@ -389,12 +452,28 @@ public sealed class WishService(
         if (changed)
         {
             await EmitUserStateChangesAsync([wish.UserId, callerId], includeAdmins: true, now, cancellationToken);
-            await database.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await database.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException exception) when (supported && addedSupport is not null && IsUniqueConstraintViolation(exception))
+            {
+                // Concurrent duplicate "Me Too" from the same profile: idempotent success.
+                database.Entry(addedSupport).State = EntityState.Detached;
+            }
+            catch (DbUpdateConcurrencyException) when (!supported && existingSupport is not null)
+            {
+                // Concurrent removal of the same support row: idempotent success.
+                database.Entry(existingSupport).State = EntityState.Detached;
+            }
             wish = await LoadWishRequiredAsync(wish.Id, cancellationToken);
         }
 
         return ToSummary(wish, callerId, []);
     }
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException exception) =>
+        exception.InnerException is Microsoft.Data.Sqlite.SqliteException { SqliteErrorCode: 19 };
 
     public async Task<WishSummary> UpdateStateAsync(
         Guid adminUserId,

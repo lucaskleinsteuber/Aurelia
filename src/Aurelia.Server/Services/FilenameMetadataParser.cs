@@ -84,7 +84,7 @@ public static partial class FilenameMetadataParser
         return builder.ToString();
     }
 
-    public static EpisodeIdentity Episode(string path, int? expectedSeason)
+    public static EpisodeIdentity Episode(string path, int? expectedSeason, string? seriesTitle = null)
     {
         var raw = Path.GetFileNameWithoutExtension(path);
         foreach (var expression in EpisodeExpressions())
@@ -95,12 +95,14 @@ public static partial class FilenameMetadataParser
                 continue;
             }
 
+            var season = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+            var episode = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
             var prefix = CleanTitleOrNull(raw[..match.Index]);
             var suffix = CleanTitleOrNull(raw[(match.Index + match.Length)..]);
-            return new EpisodeIdentity(
-                suffix ?? prefix ?? CleanTitle(raw),
-                int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
-                int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+            var title = suffix
+                ?? (prefix is not null && !MatchesSeriesTitle(prefix, seriesTitle) ? prefix : null)
+                ?? $"Episode {episode}";
+            return new EpisodeIdentity(title, season, episode);
         }
 
         if (expectedSeason.HasValue)
@@ -221,6 +223,35 @@ public static partial class FilenameMetadataParser
         return (left.Length - leftIndex).CompareTo(right.Length - rightIndex);
     }
 
+    private static bool MatchesSeriesTitle(string candidate, string? seriesTitle)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            return false;
+        }
+
+        var normalizedSeries = NormalizeMatchTitle(seriesTitle);
+        if (normalizedSeries.Length == 0)
+        {
+            return false;
+        }
+
+        if (string.Equals(NormalizeMatchTitle(candidate), normalizedSeries, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var yearMatch = MovieYearExpression().Match(candidate);
+        if (yearMatch.Success
+            && int.TryParse(yearMatch.Groups[2].Value, CultureInfo.InvariantCulture, out var year)
+            && IsPlausibleYear(year))
+        {
+            return string.Equals(NormalizeMatchTitle(yearMatch.Groups[1].Value), normalizedSeries, StringComparison.Ordinal);
+        }
+
+        return false;
+    }
+
     private static string? CleanTitleOrNull(string value)
     {
         var title = value.Replace('.', ' ').Replace('_', ' ');
@@ -263,7 +294,7 @@ public static partial class FilenameMetadataParser
     [GeneratedRegex(@"[-_]+\s*(?:extra|featurette|behind[ ._-]*the[ ._-]*scenes|deleted[ ._-]*scenes?|deleted|interview|scene|clip|short|other)(?:[\s._-]*\d+)?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ExtraSuffixExpression();
 
-    [GeneratedRegex(@"S(\d{1,2})[ ._-]*E(\d{1,3})\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"S(\d{1,2})[ ._-]*E(\d{1,3})(?:(?:[ ._-]*[-–—][ ._-]*E?|[ ._-]*E)\d{1,3})*\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SeasonEpisodeExpression();
 
     [GeneratedRegex(@"\b(\d{1,2})x(\d{1,3})\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]

@@ -20,7 +20,9 @@ own_build=0
 distribution=${AURELIA_DISTRIBUTION:-development}
 # AURELIA_TEST_EDITION=1 builds "Aurelia Test": its own bundle identifier, App Group, Keychain entry and
 # launch agents beside the real app, no self-updates, and Reset App Data in Settings. It is signed
-# without a provisioning profile and never replaces or reads the real app's data.
+# without a provisioning profile (profileless-development), auto-selecting the matching Apple Development
+# identity for AURELIA_TEAM_ID unless AURELIA_SIGNING_IDENTITY is set, and never replaces or reads the
+# real app's data.
 test_edition=${AURELIA_TEST_EDITION:-0}
 # One build per architecture (AURELIA_MAC_ARCH=arm64 for Apple silicon, the default, or x64 for
 # Intel Macs); each carries only its own server runtime, VLCKit and ffmpeg slice.
@@ -90,6 +92,61 @@ if [[ "$distribution" == profileless-development ]]; then
   # This is an explicitly selected local mode, never a public package. Its
   # certificate still expires; the short-lived provisioning profile is absent.
   signing_identity=${AURELIA_SIGNING_IDENTITY:-}
+  if [[ -z "$signing_identity" ]]; then
+    # Auto-select the first valid Apple Development identity belonging to team_identifier.
+    signing_identity=$(python3 - "$team_identifier" <<'PY'
+import re, subprocess, sys
+team = sys.argv[1]
+identities = subprocess.run(
+    ["/usr/bin/security", "find-identity", "-v", "-p", "codesigning"],
+    capture_output=True, text=True, check=False,
+).stdout
+hashes = []
+for line in identities.splitlines():
+    m = re.match(r'^\s*\d+\)\s+([0-9A-F]{40})\s+"Apple Development:', line)
+    if m and m.group(1) not in hashes:
+        hashes.append(m.group(1))
+if not hashes:
+    sys.exit(0)
+certs = subprocess.run(
+    ["/usr/bin/security", "find-certificate", "-a", "-Z", "-p", "-c", "Apple Development"],
+    capture_output=True, text=True, check=False,
+).stdout
+current_hash = None
+pem_lines = []
+by_hash = {}
+for line in certs.splitlines():
+    m = re.match(r"^SHA-1 hash:\s+([0-9A-F]{40})$", line.strip(), re.I)
+    if m:
+        current_hash = m.group(1).upper()
+        pem_lines = []
+    elif line.startswith("-----BEGIN CERTIFICATE-----"):
+        pem_lines = [line]
+    elif pem_lines:
+        pem_lines.append(line)
+        if line.startswith("-----END CERTIFICATE-----"):
+            if current_hash:
+                by_hash[current_hash] = "\n".join(pem_lines) + "\n"
+            pem_lines = []
+for h in hashes:
+    pem = by_hash.get(h)
+    if not pem:
+        continue
+    subj = subprocess.run(
+        ["/usr/bin/openssl", "x509", "-noout", "-subject", "-nameopt", "RFC2253"],
+        input=pem, capture_output=True, text=True, check=False,
+    ).stdout
+    if re.search(rf"(?:^|[=,\s])OU={re.escape(team)}(?:,|$)", subj.strip()):
+        print(h)
+        sys.exit(0)
+PY
+    )
+  fi
+  if [[ -z "$signing_identity" ]]; then
+    echo "No Apple Development signing identity for team $team_identifier was found." >&2
+    echo "Set AURELIA_SIGNING_IDENTITY to the 40-character SHA-1 of your Apple Development identity (see: security find-identity -v -p codesigning)." >&2
+    exit 1
+  fi
   /bin/zsh "$repository_root/scripts/verify-profileless-macos-identity.sh" \
     "$signing_identity" "$team_identifier" "$stage_root/Identity Verification"
   if [[ -n "$provisioning_profile" ]]; then
@@ -199,6 +256,12 @@ fi
 fi
 
 mkdir -p "$publish_root"
+source_commit=$(git -C "$repository_root" rev-parse HEAD)
+if [[ -z "$(git -C "$repository_root" status --porcelain --untracked-files=normal)" ]]; then
+  source_clean=true
+else
+  source_clean=false
+fi
 "$repository_root/scripts/prepare-vlckit.sh"
 "$repository_root/scripts/verify-build-number.sh"
 
@@ -297,8 +360,9 @@ mkdir -p "$vlc_check"
 codesign --force --sign - "$vlc_check/VLCKit.framework"
 python3 "$repository_root/scripts/verify-vlc-audio-filters.py" "$vlc_check/VLCKit.framework/VLCKit"
 rm -rf "$vlc_check"
-# ffmpeg and VLCKit come universal; only this build's architecture stays in the app.
+# ffmpeg (including its libav* libraries), whisper.cpp and VLCKit come universal; only this build's architecture stays in the app.
 for binary in "$candidate/Contents/Resources/Server/ffmpeg/ffmpeg" "$candidate/Contents/Resources/Server/ffmpeg/ffprobe" \
+  "$candidate/Contents/Resources/Server/ffmpeg/"*.dylib(N.) \
   "$candidate/Contents/Resources/Server/whisper/whisper-cli" \
   "$candidate/Contents/Frameworks/VLCKit.framework/Versions/A/VLCKit"; do
   if [[ "$(/usr/bin/lipo -archs "$binary")" == *" "* ]]; then
@@ -327,6 +391,12 @@ cp "$repository_root/clients/macos/Configuration/Aurelia.entitlements" "$release
 for entitlements in "$helper_entitlements" "$release_entitlements"; do
   /usr/libexec/PlistBuddy -c "Set :com.apple.security.application-groups:0 $app_group" "$entitlements"
 done
+if (( test_edition )); then
+  # Aurelia Test must never share the real app's Data Protection Keychain access groups.
+  /usr/libexec/PlistBuddy -c 'Delete :keychain-access-groups' "$release_entitlements"
+  /usr/libexec/PlistBuddy -c 'Add :keychain-access-groups array' "$release_entitlements"
+  /usr/libexec/PlistBuddy -c "Add :keychain-access-groups:0 string $team_identifier.$bundle_identifier" "$release_entitlements"
+fi
 codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
   --entitlements "$helper_entitlements" \
   "$candidate/Contents/Helpers/Aurelia Server Host.app"
@@ -358,11 +428,12 @@ codesign --force --sign "$signing_identity" --options runtime "$timestamp_option
   --entitlements "$release_entitlements" \
   "$candidate"
 codesign --verify --deep --strict --verbose=2 "$candidate"
-# The app, its helper, VLCKit, ffmpeg and the server are built for this architecture only.
+# The app, its helper, VLCKit, ffmpeg (including its libav* libraries), whisper.cpp and the server are built for this architecture only.
 for binary in "$candidate/Contents/MacOS/Aurelia" \
   "$candidate/Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost" \
   "$candidate/Contents/Frameworks/VLCKit.framework/Versions/A/VLCKit" \
   "$candidate/Contents/Resources/Server/ffmpeg/ffmpeg" "$candidate/Contents/Resources/Server/ffmpeg/ffprobe" \
+  "$candidate/Contents/Resources/Server/ffmpeg/"*.dylib(N.) \
   "$candidate/Contents/Resources/Server/whisper/whisper-cli" \
   "$candidate/Contents/Resources/Server/$server_runtime/Aurelia.Server"; do
   [[ "$(/usr/bin/lipo -archs "$binary")" == "$xcode_arch" ]] \
@@ -392,5 +463,11 @@ fi
 mkdir -p "$final_root"
 /usr/bin/ditto "$candidate" "$final_root/$app_name.app"
 /usr/bin/ditto "$publish_root" "$final_root/Server"
+if [[ "$(git -C "$repository_root" rev-parse HEAD)" != "$source_commit" \
+  || -n "$(git -C "$repository_root" status --porcelain --untracked-files=normal)" ]]; then
+  source_clean=false
+fi
+print -r -- "$source_commit" > "$final_root/SOURCE_COMMIT"
+print -r -- "$source_clean" > "$final_root/SOURCE_CLEAN"
 
 echo "Build $build_number release ($mac_arch) is available at $final_root"

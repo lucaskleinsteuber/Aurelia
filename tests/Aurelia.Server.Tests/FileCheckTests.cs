@@ -91,9 +91,11 @@ public sealed class FileCheckTests
     public void ffmpegReadsPacketsOrDecodesWithTheChipBeforeTheInput()
     {
         var packets = FileCheckService.Arguments("/proc/1/fd/9", FileCheckDepth.Container, []);
-        Assert.Equal(["-hide_banner", "-nostdin", "-nostats", "-v", "error", "-progress", "pipe:2", "-stats_period", "0.5",
-            "-i", "/proc/1/fd/9", "-map", "0:v?", "-map", "0:a?", "-map", "0:s?", "-c", "copy", "-f", "null", "-"], packets);
+        Assert.Equal(["-hide_banner", "-nostdin", "-nostats", "-v", "error", "-protocol_whitelist", "file", "-progress", "pipe:2", "-stats_period", "0.5",
+            "-i", "file:/proc/1/fd/9", "-map", "0:v?", "-map", "0:a?", "-map", "0:s?", "-c", "copy", "-f", "null", "-"], packets);
         var decode = FileCheckService.Arguments("input", FileCheckDepth.Decode, ["-hwaccel", "videotoolbox"]);
+        Assert.Contains("-protocol_whitelist", decode);
+        Assert.Contains("file:input", decode);
         Assert.True(decode.ToList().IndexOf("-hwaccel") < decode.ToList().IndexOf("-i"));
         Assert.DoesNotContain("copy", decode);
     }
@@ -178,10 +180,10 @@ public sealed class FileCheckTests
         Assert.Null(DriveHealthService.ParsePlist("<plist"));
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task TheWatchFindsCutOffAndSilentlyChangedFilesAndOnlyReadsThem()
     {
-        if (Installed() is not { } ffmpeg) return;
+        var ffmpeg = FfmpegTestTools.RequireInstalled();
         var parent = TestPaths.CreateDataDirectory();
         var root = Path.Combine(parent, "Invented Movies");
         Directory.CreateDirectory(root);
@@ -305,10 +307,10 @@ public sealed class FileCheckTests
         }
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task TheWatchWaitsWhileSomeoneWatches()
     {
-        if (Installed() is not { } ffmpeg) return;
+        var ffmpeg = FfmpegTestTools.RequireInstalled();
         var parent = TestPaths.CreateDataDirectory();
         var root = Path.Combine(parent, "Invented Movies");
         Directory.CreateDirectory(root);

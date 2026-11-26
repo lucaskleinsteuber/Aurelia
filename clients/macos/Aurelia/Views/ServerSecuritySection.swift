@@ -1,18 +1,52 @@
 import SwiftUI
 import UserNotifications
 
+/// Pure display state for the Touch ID row so a failed or in-flight passkey lookup never offers
+/// "Set Up Touch ID" over an existing local key.
+enum ServerSecurityTouchIDState: Equatable {
+  case hardwareUnavailable
+  case failed(String)
+  case loading
+  case configured(UUID)
+  case canSetUp
+
+  static func resolve(
+    hardwareAvailable: Bool,
+    loaded: Bool,
+    error: String?,
+    storedPasskeyID: UUID?,
+    serverPasskeyIDs: Set<UUID>
+  ) -> Self {
+    guard hardwareAvailable else { return .hardwareUnavailable }
+    if let error { return .failed(error) }
+    guard loaded else { return .loading }
+    if let storedPasskeyID, serverPasskeyIDs.contains(storedPasskeyID) {
+      return .configured(storedPasskeyID)
+    }
+    return .canSetUp
+  }
+}
+
 /// Settings › Profiles and Devices › Security: Touch ID on this Mac, signed-in devices with Block,
 /// the block list, the owner's security settings and the security log ("security-v1").
 struct ServerSecuritySection: View {
   @EnvironmentObject private var model: AppModel
   @State private var passkeys: [ServerPasskey] = []
+  @State private var passkeysLoaded = false
+  @State private var passkeysError: String?
   @State private var settings: ServerSecuritySettings?
+  @State private var settingsError: String?
   @State private var devices: [ServerSecurityDevice] = []
+  @State private var devicesError: String?
   @State private var blocked: [ServerBlockedDevice] = []
+  @State private var blockedError: String?
   @State private var logDays: Int?
   @State private var message: String?
   @State private var working = false
   @State private var showsLog = false
+  @State private var passkeyToRemove: (id: UUID, name: String)?
+  @State private var sessionToSignOut: (id: UUID, name: String)?
+  @State private var deviceToBlock: ServerSecurityDevice?
 
   private var client: APIClient? { model.profile.map(APIClient.init(profile:)) }
   private var owner: Bool { model.profile?.user?.role == .owner }
@@ -28,9 +62,16 @@ struct ServerSecuritySection: View {
       ) {
         VStack(alignment: .leading, spacing: 16) {
           touchID
-          if owner, let settings { settingsRows(settings) }
+          if owner {
+            if let settings {
+              settingsRows(settings)
+            } else if let settingsError {
+              Divider()
+              ErrorBanner(message: settingsError, retry: { Task { await reload() } }, inline: true)
+            }
+          }
           if owner { devicesRows }
-          if owner && !blocked.isEmpty { blockedRows }
+          if owner && (!blocked.isEmpty || blockedError != nil) { blockedRows }
           if owner {
             Button("Show Security Log…") { showsLog = true }
           }
@@ -45,20 +86,90 @@ struct ServerSecuritySection: View {
       .sheet(isPresented: $showsLog) {
         if let client { SecurityLogSheet(client: client) }
       }
+      .confirmationDialog(
+        "Remove “\(passkeyToRemove?.name ?? "Touch ID Key")”?",
+        isPresented: Binding(
+          get: { passkeyToRemove != nil },
+          set: { if !$0 { passkeyToRemove = nil } }),
+        titleVisibility: .visible
+      ) {
+        if let target = passkeyToRemove {
+          Button("Remove", role: .destructive) {
+            passkeyToRemove = nil
+            Task { await remove(target.id) }
+          }
+        }
+        Button("Cancel", role: .cancel) { passkeyToRemove = nil }
+      } message: {
+        Text(
+          "This device will need the Server Password or another Touch ID key to confirm server changes."
+        )
+      }
+      .confirmationDialog(
+        "Sign Out “\(sessionToSignOut?.name ?? "Device")”?",
+        isPresented: Binding(
+          get: { sessionToSignOut != nil },
+          set: { if !$0 { sessionToSignOut = nil } }),
+        titleVisibility: .visible
+      ) {
+        if let target = sessionToSignOut {
+          Button("Sign Out", role: .destructive) {
+            sessionToSignOut = nil
+            Task {
+              await model.revokeSession(id: target.id)
+              await reload()
+            }
+          }
+        }
+        Button("Cancel", role: .cancel) { sessionToSignOut = nil }
+      } message: {
+        Text("It needs a new code to use Aurelia again.")
+      }
+      .confirmationDialog(
+        "Block “\(deviceToBlock?.deviceName ?? "Device")”?",
+        isPresented: Binding(
+          get: { deviceToBlock != nil },
+          set: { if !$0 { deviceToBlock = nil } }),
+        titleVisibility: .visible
+      ) {
+        if let target = deviceToBlock {
+          Button("Block", role: .destructive) {
+            deviceToBlock = nil
+            Task { await block(target) }
+          }
+        }
+        Button("Cancel", role: .cancel) { deviceToBlock = nil }
+      } message: {
+        Text("It is signed out at once and can't sign in or pair again until you unblock it.")
+      }
     }
   }
 
   @ViewBuilder private var touchID: some View {
     Text("Touch ID").font(.headline)
-    if !SecureEnclavePasskeySigner.isAvailable {
+    switch ServerSecurityTouchIDState.resolve(
+      hardwareAvailable: SecureEnclavePasskeySigner.isAvailable,
+      loaded: passkeysLoaded,
+      error: passkeysError,
+      storedPasskeyID: model.storedPasskey?.passkeyId,
+      serverPasskeyIDs: Set(passkeys.map(\.id)))
+    {
+    case .hardwareUnavailable:
       Text("This Mac can't keep a Touch ID key.").font(.callout).foregroundStyle(.secondary)
-    } else if let key = model.storedPasskey, passkeys.contains(where: { $0.id == key.passkeyId }) {
+    case .failed(let error):
+      ErrorBanner(message: error, retry: { Task { await reload() } }, inline: true)
+    case .loading:
+      AureliaDelayedProgress(controlSize: .small)
+    case .configured(let keyID):
       HStack {
         Label("Touch ID is set up on this Mac", systemImage: "checkmark.shield")
         Spacer()
-        Button("Remove", role: .destructive) { Task { await remove(key.passkeyId) } }
+        Button("Remove…", role: .destructive) {
+          let label = passkeys.first { $0.id == keyID }?.name ?? "Touch ID on This Mac"
+          passkeyToRemove = (id: keyID, name: label)
+        }
       }
-    } else {
+    case .canSetUp:
       HStack {
         Text(
           "Confirm changes with Touch ID instead of the Server Password. Setting it up asks once for the password."
@@ -68,7 +179,7 @@ struct ServerSecuritySection: View {
         Button("Set Up Touch ID") { Task { await setUp() } }
       }
     }
-    if passkeys.contains(where: { !$0.isThisDevice }) {
+    if passkeysError == nil, passkeys.contains(where: { !$0.isThisDevice }) {
       ForEach(passkeys.filter { !$0.isThisDevice }) { passkey in
         HStack {
           VStack(alignment: .leading) {
@@ -77,7 +188,9 @@ struct ServerSecuritySection: View {
               .font(.caption).foregroundStyle(.secondary)
           }
           Spacer()
-          Button("Remove", role: .destructive) { Task { await remove(passkey.id) } }
+          Button("Remove…", role: .destructive) {
+            passkeyToRemove = (id: passkey.id, name: passkey.name)
+          }
         }
       }
     }
@@ -86,7 +199,7 @@ struct ServerSecuritySection: View {
   @ViewBuilder private func settingsRows(_ settings: ServerSecuritySettings) -> some View {
     Divider()
     Toggle(
-      "Require Face ID or Touch ID for administrators",
+      "Require Face ID or Touch ID for Administrators",
       isOn: Binding(
         get: { settings.requirePasskeysForAdministrators },
         set: { value in
@@ -120,6 +233,9 @@ struct ServerSecuritySection: View {
       "Sign Out ends a device's access; it can connect again with a new code. Block also keeps it from signing in or pairing again until you unblock it."
     )
     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+    if let devicesError {
+      ErrorBanner(message: devicesError, retry: { Task { await reload() } }, inline: true)
+    }
     ForEach(sessions) { session in
       deviceRow(
         id: session.id, name: session.deviceName, isCurrent: session.isCurrent,
@@ -160,15 +276,12 @@ struct ServerSecuritySection: View {
         Button("That Was Me") { Task { await acknowledge(security) } }
       }
       if !isCurrent {
-        Button("Sign Out", role: .destructive) {
-          Task {
-            await model.revokeSession(id: id)
-            await reload()
-          }
+        Button("Sign Out…", role: .destructive) {
+          sessionToSignOut = (id: id, name: name)
         }
       }
       if let security, security.canBlock {
-        Button("Block…", role: .destructive) { Task { await block(security) } }
+        Button("Block…", role: .destructive) { deviceToBlock = security }
       }
     }
   }
@@ -176,6 +289,9 @@ struct ServerSecuritySection: View {
   @ViewBuilder private var blockedRows: some View {
     Divider()
     Text("Blocked Devices").font(.headline)
+    if let blockedError {
+      ErrorBanner(message: blockedError, retry: { Task { await reload() } }, inline: true)
+    }
     ForEach(blocked) { device in
       HStack {
         VStack(alignment: .leading) {
@@ -197,11 +313,40 @@ struct ServerSecuritySection: View {
 
   private func reload() async {
     guard let client else { return }
-    passkeys = (try? await client.passkeys()) ?? []
+    do {
+      passkeys = try await client.passkeys()
+      passkeysLoaded = true
+      passkeysError = nil
+    } catch is CancellationError {
+      return
+    } catch {
+      passkeysError = error.localizedDescription
+    }
     guard owner else { return }
-    settings = try? await client.securitySettings()
-    devices = (try? await client.securityDevices()) ?? []
-    blocked = (try? await client.blockedDevices()) ?? []
+    do {
+      settings = try await client.securitySettings()
+      settingsError = nil
+    } catch is CancellationError {
+      return
+    } catch {
+      settingsError = error.localizedDescription
+    }
+    do {
+      devices = try await client.securityDevices()
+      devicesError = nil
+    } catch is CancellationError {
+      return
+    } catch {
+      devicesError = error.localizedDescription
+    }
+    do {
+      blocked = try await client.blockedDevices()
+      blockedError = nil
+    } catch is CancellationError {
+      return
+    } catch {
+      blockedError = error.localizedDescription
+    }
   }
 
   /// Runs a change; a locked server asks for Touch ID or the Server Password once.
@@ -231,7 +376,7 @@ struct ServerSecuritySection: View {
       message = error.localizedDescription
       return
     }
-    let name = Host.current().localizedName ?? "Mac"
+    let name = AureliaDeviceName.current
     if let created = await run({ try await $0.registerPasskey(name: name, signer: signer) }) {
       do {
         try PasskeyStore.save(
@@ -269,13 +414,6 @@ struct ServerSecuritySection: View {
   }
 
   private func block(_ device: ServerSecurityDevice) async {
-    let alert = NSAlert()
-    alert.messageText = "Block “\(device.deviceName)”?"
-    alert.informativeText =
-      "It is signed out at once and can't sign in or pair again until you unblock it."
-    alert.addButton(withTitle: "Block")
-    alert.addButton(withTitle: "Cancel")
-    guard alert.runModal() == .alertFirstButtonReturn else { return }
     _ = await run({ _ = try await $0.blockDevice(id: device.id) })
   }
 
@@ -481,6 +619,7 @@ final class SecurityAlertCenter: ObservableObject {
 /// The banner at the top of the window.
 struct SecurityAlertBanner: View {
   @ObservedObject var center: SecurityAlertCenter
+  @State private var deviceToBlock: ServerSecurityDevice?
 
   var body: some View {
     VStack(spacing: 8) {
@@ -506,13 +645,7 @@ struct SecurityAlertBanner: View {
           HStack {
             Spacer()
             Button("Block…", role: .destructive) {
-              let alert = NSAlert()
-              alert.messageText = "Block “\(device.deviceName)”?"
-              alert.informativeText =
-                "It is signed out at once and can't sign in or pair again until you unblock it."
-              alert.addButton(withTitle: "Block")
-              alert.addButton(withTitle: "Cancel")
-              if alert.runModal() == .alertFirstButtonReturn { Task { await center.block(device) } }
+              deviceToBlock = device
             }
             Button("That Was Me") { Task { await center.acknowledge(device) } }
           }
@@ -530,15 +663,33 @@ struct SecurityAlertBanner: View {
     }
     .frame(maxWidth: 560)
     .padding(.top, 12)
+    .confirmationDialog(
+      "Block “\(deviceToBlock?.deviceName ?? "Device")”?",
+      isPresented: Binding(
+        get: { deviceToBlock != nil },
+        set: { if !$0 { deviceToBlock = nil } }),
+      titleVisibility: .visible
+    ) {
+      if let device = deviceToBlock {
+        Button("Block", role: .destructive) {
+          deviceToBlock = nil
+          Task { await center.block(device) }
+        }
+      }
+      Button("Cancel", role: .cancel) { deviceToBlock = nil }
+    } message: {
+      Text("It is signed out at once and can't sign in or pair again until you unblock it.")
+    }
   }
 
   private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
     VStack(alignment: .leading, spacing: 10) { content() }
       .padding(14)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .background(
-        .regularMaterial,
-        in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
+      .aureliaGlass(
+        in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous),
+        material: .regularMaterial,
+        opaqueFill: AureliaDesign.surface
       )
       .shadow(color: .black.opacity(0.3), radius: 10, y: 3)
   }

@@ -64,14 +64,14 @@ struct WishesPage: View {
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 26) {
+      VStack(alignment: .leading, spacing: AureliaDesign.sectionSpacing) {
         headerSection
         composerSection
         feedbackSection
         listSection
       }
       .padding(AureliaDesign.pagePadding)
-      .padding(.top, 22)
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
     .scrollClipDisabled()
     .aureliaOverlayScrollbars()
@@ -108,102 +108,110 @@ struct WishesPage: View {
   }
 
   private var headerSection: some View {
-    HStack(alignment: .firstTextBaseline, spacing: 14) {
-      AureliaSectionHeading(title: "Family Wishes", count: wishes.count)
-      Spacer()
+    AureliaPageHeader(title: "Wishes", count: wishes.count) {
       Button {
         Task { await loadWishes(reset: true, markSeen: true) }
       } label: {
         Label("Refresh", systemImage: "arrow.clockwise")
       }
-      .buttonStyle(.bordered)
+      .buttonStyle(AureliaSecondaryActionButtonStyle(compact: true))
       .disabled(isLoading)
     }
   }
 
   private var composerSection: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      HStack(spacing: 10) {
-        wishSearchField
-          .onSubmit { Task { await runSearch() } }
-          .accessibilityIdentifier("wishes-search-field")
-
-        Picker("Type", selection: $searchKindFilter) {
-          Text("Any Type").tag(Optional<MediaKind>.none)
-          Text("Movies").tag(Optional<MediaKind>.some(.movie))
-          Text("TV Series").tag(Optional<MediaKind>.some(.series))
-        }
-        .labelsHidden()
-        .frame(width: 120)
-
-        Button {
-          Task { await runSearch() }
-        } label: {
-          if isSearching {
-            ProgressView().controlSize(.small)
-          } else {
-            Text("Search")
+    AureliaSurface(radius: AureliaDesign.compactRadius, padding: 18) {
+      VStack(alignment: .leading, spacing: 14) {
+        ViewThatFits(in: .horizontal) {
+          HStack(spacing: 10) {
+            wishSearchField
+              .frame(minWidth: 260)
+              .layoutPriority(1)
+            composerControls
+          }
+          VStack(alignment: .leading, spacing: 10) {
+            wishSearchField
+            HStack(spacing: 10) {
+              composerControls
+              Spacer(minLength: 0)
+            }
           }
         }
-        .buttonStyle(AureliaPrimaryActionButtonStyle())
-        .disabled(
-          isSearching || searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        )
-        .accessibilityIdentifier("wishes-search-button")
 
-        if providerEnabled {
-          Button(showManualForm ? "Hide Manual Form" : "Add Manually") {
-            showManualForm.toggle()
-          }
-          .buttonStyle(.bordered)
+        if !providerEnabled || showManualForm {
+          manualComposer
+        } else {
+          wishNoteField
         }
-      }
 
-      if !providerEnabled || showManualForm {
-        manualComposer
-      } else {
-        TextField("Optional note for the family (e.g. director’s cut or season)", text: $wishNote)
-          .textFieldStyle(.roundedBorder)
-          .font(.callout)
-      }
-
-      if let searchResults {
-        searchResultsView(searchResults)
+        if let searchResults {
+          searchResultsView(searchResults)
+        }
       }
     }
-    .padding(18)
-    .background(
-      AureliaDesign.surface,
-      in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
   }
 
-  /// The look of AureliaSearchField, with focus so Cmd-F can reach it.
-  private var wishSearchField: some View {
-    HStack(spacing: 9) {
-      Image(systemName: "magnifyingglass")
-        .foregroundStyle(.secondary)
-      TextField("Search for a movie or TV series to wish…", text: $searchQuery)
-        .textFieldStyle(.plain)
-        .focused($searchFocused)
-      if !searchQuery.isEmpty {
-        Button {
-          searchQuery = ""
-        } label: {
-          Image(systemName: "xmark.circle.fill")
-            .foregroundStyle(.tertiary)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Clear Search")
+  @ViewBuilder
+  private var composerControls: some View {
+    Picker("Type", selection: $searchKindFilter) {
+      Text("Any Type").tag(Optional<MediaKind>.none)
+      Text("Movies").tag(Optional<MediaKind>.some(.movie))
+      Text("TV Series").tag(Optional<MediaKind>.some(.series))
+    }
+    .labelsHidden()
+    .fixedSize()
+
+    Button {
+      Task { await runSearch() }
+    } label: {
+      if isSearching {
+        ProgressView().controlSize(.small)
+      } else {
+        Text("Search")
       }
     }
-    .padding(.horizontal, 12)
-    .frame(height: 38)
-    .background(
-      AureliaDesign.raisedSurface, in: RoundedRectangle(cornerRadius: AureliaDesign.smallRadius)
+    .buttonStyle(AureliaPrimaryActionButtonStyle(compact: true))
+    .fixedSize()
+    .disabled(
+      isSearching || searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     )
+    .accessibilityIdentifier("wishes-search-button")
+
+    if providerEnabled {
+      Button(showManualForm ? "Hide Manual Form" : "Add Manually") {
+        showManualForm.toggle()
+      }
+      .buttonStyle(AureliaSecondaryActionButtonStyle(compact: true))
+      .fixedSize()
+    }
+  }
+
+  private var wishSearchField: some View {
+    AureliaSearchField(
+      prompt: "Search for a movie or TV series to wish…",
+      text: $searchQuery,
+      focus: $searchFocused,
+      identifier: "wishes-search-field"
+    ) {
+      Task { await runSearch() }
+    }
+  }
+
+  private var wishNoteField: some View {
+    HStack(spacing: 9) {
+      Image(systemName: "text.bubble")
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+      TextField("Optional note for the family (e.g. director’s cut or season)", text: $wishNote)
+        .textFieldStyle(.plain)
+        .font(.callout)
+    }
+    .padding(.horizontal, 14)
+    .frame(height: 36)
+    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
     .overlay {
-      RoundedRectangle(cornerRadius: AureliaDesign.smallRadius)
-        .stroke(AureliaDesign.hairline, lineWidth: 1)
+      RoundedRectangle(cornerRadius: 10)
+        .strokeBorder(AureliaDesign.hairline, lineWidth: 1)
     }
   }
 
@@ -244,7 +252,7 @@ struct WishesPage: View {
         Button("Add Wish") {
           Task { await submitManualWish() }
         }
-        .buttonStyle(AureliaPrimaryActionButtonStyle())
+        .buttonStyle(AureliaPrimaryActionButtonStyle(compact: true))
         .disabled(
           submittingKey == "manual"
             || manualTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -374,7 +382,7 @@ struct WishesPage: View {
           in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
     }
 
-    if let errorMessage {
+    if let errorMessage, !(loadFailed && wishes.isEmpty) {
       ErrorBanner(message: errorMessage, retry: loadRetry, retryDisabled: isLoading, inline: true)
     }
   }
@@ -394,14 +402,21 @@ struct WishesPage: View {
           .frame(maxWidth: .infinity, minHeight: 160)
           .accessibilityLabel("Loading family wishes")
       } else if wishes.isEmpty {
-        // A failed load shows its banner above with Try Again instead of an empty list.
-        if !loadFailed {
-          ContentUnavailableView(
-            "No Wishes Here",
+        if loadFailed, let errorMessage {
+          AureliaUnavailableView(
+            title: "Couldn’t Load Wishes",
+            systemImage: "exclamationmark.triangle",
+            message: errorMessage,
+            primaryAction: AureliaUnavailableAction(title: "Try Again") {
+              Task { await loadWishes(reset: true, markSeen: false) }
+            },
+            minHeight: 240)
+        } else {
+          AureliaUnavailableView(
+            title: "No Wishes Here",
             systemImage: "sparkles",
-            description: Text(emptyListMessage)
-          )
-          .frame(maxWidth: .infinity, minHeight: 220)
+            message: emptyListMessage,
+            minHeight: 240)
         }
       } else {
         VStack(spacing: 12) {

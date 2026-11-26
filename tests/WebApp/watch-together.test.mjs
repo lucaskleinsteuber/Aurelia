@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clockOffset, createWatchTogether, followSteps, partyNotice, partyPosition } from "../../src/Aurelia.Server/WebApp/js/watch-together.js";
+import { clockOffset, createWatchTogether, followSteps, measuredClockOffset, partyNotice, partyPosition } from "../../src/Aurelia.Server/WebApp/js/watch-together.js";
 
 // Watch Together in the browser with an invented party, server and player; nothing is played.
 const start = Date.parse("2026-11-07T20:00:00Z");
@@ -85,5 +85,30 @@ test("a remote title change opens once and the player moving on changes the part
   assert.equal(session.isChangingTitle, false);
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.ok(api.sent.some((body) => body.action === "ready"));
+  await session.leave();
+});
+
+test("waited long-poll responses do not skew the Watch Together clock offset", async () => {
+  assert.equal(measuredClockOffset("2026-11-07T20:00:20Z", start, start + 20_000, true), null);
+  assert.equal(measuredClockOffset("2026-11-07T20:00:20Z", start, start + 10_000, false), null);
+  assert.equal(measuredClockOffset("2026-11-07T20:00:00.200Z", start, start + 400, false), 0);
+
+  let clock = start;
+  const api = fakeApi(party({ playing: true, position: 10_000, revision: 1 }));
+  const session = createWatchTogether({ api, deviceName: "Chrome", now: () => clock });
+  const player = fakePlayer(10_000);
+  await session.join("party");
+  session.attach(player);
+  player.steps.length = 0;
+
+  // Simulate a 20s long-poll timeout where the server stamps serverTime at t0+20s.
+  const sent = clock;
+  clock = start + 20_000;
+  player.at = 30_000;
+  session.receive({
+    ...party({ playing: true, position: 10_000, revision: 1 }),
+    serverTime: "2026-11-07T20:00:20.000Z",
+  }, sent, false);
+  assert.deepEqual(player.steps, [], "a 20s long-poll must not cause a +10s forward jump");
   await session.leave();
 });

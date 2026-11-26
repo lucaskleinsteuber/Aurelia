@@ -265,10 +265,10 @@ public sealed partial class LiveConversionTests
         Assert.Equal(256, Assert.Single(MediaProbe.Parse(oversizedMetadata).Subtitles!).Title!.Length);
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task SpeechAudioStreamsOneTrackAsMonoPcmWithoutWritingFiles()
     {
-        if (Installed() is not { } maker) return;
+        var maker = FfmpegTestTools.RequireInstalled();
         var ffmpeg = Tools() ?? maker;
         var root = Path.Combine(TestPaths.CreateDataDirectory(), "Invented Speech Library");
         Directory.CreateDirectory(root);
@@ -332,13 +332,13 @@ public sealed partial class LiveConversionTests
         finally { Directory.Delete(Path.GetDirectoryName(root)!, recursive: true); }
     }
 
-    [Theory]
+    [FfmpegTheory]
     [InlineData("srt", ".mkv", "subrip")]
     [InlineData("ass", ".mkv", "ass")]
     [InlineData("mov_text", ".mp4", "mov_text")]
     public async Task EmbeddedSubtitlesUseTitleTimeAndTicketRulesWithoutWritingFiles(string codec, string extension, string expectedCodec)
     {
-        if (Installed() is not { } maker) return;
+        var maker = FfmpegTestTools.RequireInstalled();
         var ffmpeg = Tools() ?? maker;
         var root = Path.Combine(TestPaths.CreateDataDirectory(), "Invented Subtitle Library");
         Directory.CreateDirectory(root);
@@ -414,10 +414,10 @@ public sealed partial class LiveConversionTests
         finally { Directory.Delete(Path.GetDirectoryName(root)!, recursive: true); }
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task AnInventedMkvStreamsAsFragmentedMp4FromAnyPositionWithoutWritingFiles()
     {
-        if (Installed() is not { } maker) return;
+        var maker = FfmpegTestTools.RequireInstalled();
         var ffmpeg = Tools() ?? maker;
         var root = Path.Combine(TestPaths.CreateDataDirectory(), "Live Conversion");
         Directory.CreateDirectory(root);
@@ -467,10 +467,10 @@ public sealed partial class LiveConversionTests
         finally { Directory.Delete(Path.GetDirectoryName(root)!, recursive: true); }
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task ClosingTheConnectionEndsFfmpegAndStreamsKeepTheirTicketRules()
     {
-        if (Installed() is not { } maker) return;
+        var maker = FfmpegTestTools.RequireInstalled();
         var ffmpeg = Tools() ?? maker;
         var root = Path.Combine(TestPaths.CreateDataDirectory(), "Live Conversion Rights");
         Directory.CreateDirectory(root);
@@ -499,6 +499,7 @@ public sealed partial class LiveConversionTests
                 Assert.Equal(1, live.Running);
             }
             await WaitUntilAsync(() => live.Running == 0);
+            await WaitUntilAsync(() => FfmpegTestTools.ChildFfmpegProcessCount() == 0);
 
             using var kidRequest = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token,
                 new CreateUserRequest("kid", "another secure password", UserRole.User, ApiTestClient.TestPin));
@@ -545,6 +546,85 @@ public sealed partial class LiveConversionTests
         Assert.Equal("conversion_unavailable", (await ApiTestClient.ReadAsync<ApiProblem>(response)).Code);
     }
 
+    [Fact]
+    public async Task OversizedSidecarSubtitleReturns422InsteadOf500()
+    {
+        var root = Path.Combine(TestPaths.CreateDataDirectory(), "Sidecar Errors");
+        Directory.CreateDirectory(root);
+        var videoPath = Path.Combine(root, "Oversized Film.mkv");
+        var subtitlePath = Path.Combine(root, "Oversized Film.en.srt");
+        try
+        {
+            await File.WriteAllBytesAsync(videoPath, [1, 2, 3, 4]);
+            using (var fs = new FileStream(subtitlePath, FileMode.CreateNew))
+            {
+                fs.SetLength(SidecarSubtitles.MaximumFileBytes + 1024);
+            }
+            using var factory = Factory("off");
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var mediaId = await AddMediaAsync(factory, root, videoPath);
+            var playback = await CreatePlaybackAsync(client, owner.Token, mediaId);
+
+            using var request = ApiTestClient.Authorized(HttpMethod.Get, $"{playback.StreamPath}/subtitles/1000", owner.Token);
+            using var response = await client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+            var problem = await ApiTestClient.ReadAsync<ApiProblem>(response);
+            Assert.Equal("subtitle_too_large", problem.Code);
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(root)!, recursive: true); }
+    }
+
+    [FfmpegFact]
+    public async Task EmbeddedSubtitlesAreCachedInMemoryAndServedWithoutUsingAConversionSlot()
+    {
+        var maker = FfmpegTestTools.RequireInstalled();
+        var ffmpeg = Tools() ?? maker;
+        var root = Path.Combine(TestPaths.CreateDataDirectory(), "Embedded Subtitles Cache");
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "Captioned.mkv");
+        try
+        {
+            await MakeSubtitleMediaAsync(maker, path, "srt");
+            using var factory = Factory(ffmpeg);
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var mediaId = await AddMediaAsync(factory, root, path);
+            var playback = await CreatePlaybackAsync(client, owner.Token, mediaId);
+            var live = factory.Services.GetRequiredService<LiveConversionService>();
+
+            // First fetch extracts embedded track and caches it in memory.
+            using (var firstReq = ApiTestClient.Authorized(HttpMethod.Get, $"{playback.StreamPath}/subtitles/1", owner.Token))
+            using (var firstRes = await client.SendAsync(firstReq))
+            {
+                firstRes.EnsureSuccessStatusCode();
+                var text = await firstRes.Content.ReadAsStringAsync();
+                Assert.Contains("First cue", text, StringComparison.Ordinal);
+            }
+
+            // Second fetch hits in-memory cache even if every conversion slot is occupied.
+            var slots = new List<IDisposable>();
+            try
+            {
+                while (await live.EnterAsync(encodesVideo: false, CancellationToken.None) is { } held)
+                {
+                    slots.Add(held);
+                    if (slots.Count >= 16) break;
+                }
+                using var secondReq = ApiTestClient.Authorized(HttpMethod.Get, $"{playback.StreamPath}/subtitles/1", owner.Token);
+                using var secondRes = await client.SendAsync(secondReq);
+                secondRes.EnsureSuccessStatusCode();
+                var cachedText = await secondRes.Content.ReadAsStringAsync();
+                Assert.Contains("First cue", cachedText, StringComparison.Ordinal);
+            }
+            finally
+            {
+                foreach (var held in slots) held.Dispose();
+            }
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(root)!, recursive: true); }
+    }
+
     private static ProbedVideo Video(string codec, string? profile, int level, int width = 1920, int height = 1080,
         string? pixelFormat = "yuv420p", int bitDepth = 8, int index = 0) =>
         new(index, codec, profile, level, width, height, pixelFormat, bitDepth);
@@ -557,14 +637,7 @@ public sealed partial class LiveConversionTests
     /// An installed full ffmpeg with ffprobe beside it, which also invents the test media, or null
     /// to leave the stream tests out.
     /// </summary>
-    private static string? Installed()
-    {
-        var directories = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator)
-            .Concat(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]);
-        return directories.Where(directory => directory.Length > 0)
-            .Select(directory => Path.Combine(directory, "ffmpeg"))
-            .FirstOrDefault(candidate => File.Exists(candidate) && File.Exists(Path.Combine(Path.GetDirectoryName(candidate)!, "ffprobe")));
-    }
+    private static string? Installed() => FfmpegTestTools.Installed();
 
     private static AureliaServerFactory Factory(string ffmpeg) => new(configureServices: services =>
     {
@@ -696,15 +769,38 @@ public sealed partial class LiveConversionTests
     }
 
     /// <summary>
-    /// Video-like files in the system's temporary folders. Other programs on the computer (a
-    /// compiler, say) write there too, so only what ffmpeg could have written counts.
+    /// Video-like files anywhere beneath the system's temporary folders (recursive, skipping
+    /// inaccessible directories and symlinks). Other programs on the computer write there too, so
+    /// only what ffmpeg could have written counts (audit SRV-PLAY-010).
     /// </summary>
-    private static HashSet<string> TemporaryVideoFiles() =>
-        new[] { Path.GetTempPath(), "/tmp" }.Where(Directory.Exists)
-            .SelectMany(directory => Directory.EnumerateFiles(directory))
-            .Where(file => System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(file),
-                @"ffmpeg|ffprobe|\.(mp4|m4s|m4v|mov|mkv|ts|aac|h264|hevc)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-            .ToHashSet(StringComparer.Ordinal);
+    private static HashSet<string> TemporaryVideoFiles()
+    {
+        var options = new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            IgnoreInaccessible = true,
+            AttributesToSkip = FileAttributes.ReparsePoint,
+        };
+        var results = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var directory in new[] { Path.GetTempPath(), "/tmp" }.Where(Directory.Exists).Distinct(StringComparer.Ordinal))
+        {
+            try
+            {
+                foreach (var file in Directory.EnumerateFiles(directory, "*", options))
+                {
+                    if (System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(file),
+                        @"ffmpeg|ffprobe|\.(mp4|m4s|m4v|mov|mkv|ts|aac|h264|hevc)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                    {
+                        results.Add(file);
+                    }
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+        return results;
+    }
 
     private sealed record Box(string Type, int Start, int End)
     {

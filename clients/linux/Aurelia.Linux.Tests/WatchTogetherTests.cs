@@ -32,6 +32,9 @@ public sealed class WatchTogetherTests
         Assert.Equal([(WatchTogetherFollower.FollowStep.Seek, 42_000L), (WatchTogetherFollower.FollowStep.Pause, 42_000L)],
             WatchTogetherFollower.Steps(State(false, 42_000), later, 42_800, true));
         Assert.Equal(TimeSpan.FromSeconds(9), WatchTogetherFollower.Offset(Start.AddSeconds(10), Start, Start.AddSeconds(2)));
+        Assert.Null(WatchTogetherFollower.MeasuredOffset(Start.AddSeconds(20), Start, Start.AddSeconds(20), isLongPoll: true));
+        Assert.Null(WatchTogetherFollower.MeasuredOffset(Start.AddSeconds(10), Start, Start.AddSeconds(10), isLongPoll: false));
+        Assert.Equal(TimeSpan.Zero, WatchTogetherFollower.MeasuredOffset(Start.AddMilliseconds(200), Start, Start.AddMilliseconds(400), isLongPoll: false));
         Assert.Equal("Mia paused", WatchTogetherFollower.Notice(State(false, 0)));
         Assert.Equal("Mia started Quiet Orbit", WatchTogetherFollower.Notice(State(true, 0, action: "change")));
     }

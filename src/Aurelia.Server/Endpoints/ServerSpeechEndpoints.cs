@@ -1,6 +1,8 @@
 using Aurelia.Contracts;
+using Aurelia.Server.Data;
 using Aurelia.Server.Services;
 using Aurelia.Server.Services.Speech;
+using Microsoft.EntityFrameworkCore;
 
 namespace Aurelia.Server.Endpoints;
 
@@ -18,18 +20,33 @@ public static class ServerSpeechEndpoints
         {
             if (SpeechModelStore.Choices.All(choice => choice.Name != request.Name))
                 return Results.Json(new ApiProblem("invalid_speech_model", "Choose base, small or medium."), statusCode: StatusCodes.Status400BadRequest);
+            if (jobs.HasActiveJobs && models.Current is { } activeModel && !string.Equals(activeModel.Name, request.Name, StringComparison.Ordinal))
+                return Results.Json(new ApiProblem("speech_job_running", "Stop active speech jobs before changing the speech model."), statusCode: StatusCodes.Status409Conflict);
             models.StartDownload(request.Name);
             return Results.Ok(Settings(jobs, models));
         });
         server.MapDelete("/model", (SpeechJobService jobs, SpeechModelStore models) =>
         {
-            models.Remove();
+            if (jobs.HasActiveJobs)
+                return Results.Json(new ApiProblem("speech_job_running", "Stop active speech jobs before removing the speech model."), statusCode: StatusCodes.Status409Conflict);
+            try
+            {
+                models.Remove();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return Results.Json(new ApiProblem("speech_model_remove_failed", "The speech model could not be removed right now."), statusCode: StatusCodes.Status500InternalServerError);
+            }
             return Results.Ok(Settings(jobs, models));
         });
 
         var media = app.MapGroup("/api/v1/media/{mediaId:guid}/speech").RequireAuthorization("Administrator");
-        media.MapGet(string.Empty, (Guid mediaId, SpeechJobService jobs) =>
-            Results.Ok(new MediaSpeechResponse(jobs.Available, jobs.ModelReady, jobs.Status(mediaId))));
+        media.MapGet(string.Empty, async (Guid mediaId, AureliaDbContext database, SpeechJobService jobs, CancellationToken token) =>
+        {
+            if (!await database.MediaItems.AsNoTracking().AnyAsync(item => item.Id == mediaId, token))
+                return Results.Json(new ApiProblem("media_not_found", "The media item was not found."), statusCode: StatusCodes.Status404NotFound);
+            return Results.Ok(new MediaSpeechResponse(jobs.Available, jobs.ModelReady, jobs.Status(mediaId)));
+        });
         media.MapPost(string.Empty, async (Guid mediaId, StartSpeechJobRequest request, SpeechJobService jobs, CancellationToken token) =>
         {
             try

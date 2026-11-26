@@ -61,9 +61,8 @@ final class ArtworkLoader {
   func image(for artwork: ArtworkSummary, profile: StoredServerProfile, width: Int?)
     async throws -> NSImage
   {
-    let key =
-      Self.cacheKey(ArtworkVariantRequest.artwork(artwork, width: width), profile: profile)
-      as NSString
+    let variant = ArtworkVariantRequest.artwork(artwork, width: width)
+    let key = Self.cacheKey(variant, profile: profile) as NSString
     if let image = images.object(forKey: key) { return image }
     let data = try await data(for: artwork, profile: profile, width: width)
     if let image = images.object(forKey: key) { return image }
@@ -71,7 +70,18 @@ final class ArtworkLoader {
       Self.decode(data, width: width)
     }.value
     try Task.checkCancellation()
-    guard let decoded else { throw APIClientError.invalidResponse }
+    guard let decoded else {
+      // Evict undecodable bytes from memory and disk so a corrupt 200 payload is not pinned
+      // until the next artwork revision.
+      cache.removeObject(forKey: key)
+      if let diskCache, let revision = variant.revision {
+        let diskKey = ArtworkDiskCache.key(
+          serverID: profile.serverId, profileID: profile.user?.id, path: variant.path,
+          revision: revision)
+        Task.detached(priority: .utility) { diskCache.remove(forKey: diskKey) }
+      }
+      throw APIClientError.invalidResponse
+    }
     let image = NSImage(cgImage: decoded.image, size: .zero)
     images.setObject(image, forKey: key, cost: decoded.bytes)
     return image

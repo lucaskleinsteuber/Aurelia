@@ -161,10 +161,10 @@ public sealed class ServerSpeechTests
         }
     }
 
-    [Fact]
+    [FfmpegFact]
     public async Task AJobWritesSubtitlesFromSpeechAndStoresNothingElse()
     {
-        if (Installed() is not { } ffmpeg) return;
+        var ffmpeg = FfmpegTestTools.RequireInstalled();
         var parent = TestPaths.CreateDataDirectory();
         var root = Path.Combine(parent, "Invented Films");
         Directory.CreateDirectory(root);
@@ -244,6 +244,65 @@ public sealed class ServerSpeechTests
         finally
         {
             Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [FfmpegFact]
+    public async Task SpeechJobRunsDespiteBackgroundAnalysisSlotAndReportsKeepAwake()
+    {
+        var ffmpeg = FfmpegTestTools.RequireInstalled();
+        var parent = TestPaths.CreateDataDirectory();
+        var root = Path.Combine(parent, "Speech Priority");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var video = Path.Combine(root, "Priority Film (2024).mkv");
+            await EncodeAsync(ffmpeg, SyntheticAudio.Music(seed: 88, seconds: 20), video);
+            string? observedWorkState = null;
+            ServerWorkSignal? workSignal = null;
+            var recognizer = new ObservingRecognizer(() => observedWorkState = workSignal?.State);
+            using var factory = new AureliaServerFactory(configureServices: services =>
+            {
+                services.RemoveAll<LiveConversionService>();
+                services.AddSingleton(provider => new LiveConversionService(
+                    new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Aurelia:Ffmpeg"] = ffmpeg }).Build(),
+                    provider.GetRequiredService<ServerRuntimeOptions>(), NullLogger<LiveConversionService>.Instance));
+                services.RemoveAll<ISpeechRecognizer>();
+                services.AddSingleton<ISpeechRecognizer>(recognizer);
+            });
+            workSignal = factory.Services.GetRequiredService<ServerWorkSignal>();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", owner.Token);
+            var filmId = await AddFilmAsync(factory, root, video);
+            var models = Path.Combine(factory.DataDirectory, SpeechModelStore.FolderName);
+            Directory.CreateDirectory(models);
+            await File.WriteAllBytesAsync(Path.Combine(models, "ggml-base.bin"), [0x6c, 0x6d, 0x67, 0x67, 0, 0, 0, 0]);
+
+            // Hold a background analysis slot (like FileCheckService): speech must not starve or say pausedForPlayback.
+            var live = factory.Services.GetRequiredService<LiveConversionService>();
+            using var backgroundSlot = await live.EnterAsync(encodesVideo: false, CancellationToken.None, background: true);
+            Assert.NotNull(backgroundSlot);
+
+            using (var started = await client.PostAsJsonAsync($"/api/v1/media/{filmId}/speech", new StartSpeechJobRequest(SpeechJobKind.Create, "en"), ApiTestClient.JsonOptions))
+                Assert.Equal(HttpStatusCode.OK, started.StatusCode);
+
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await factory.Services.GetRequiredService<SpeechJobService>().RunNextAsync(timeout.Token);
+            var done = await client.GetFromJsonAsync<MediaSpeechResponse>($"/api/v1/media/{filmId}/speech", ApiTestClient.JsonOptions);
+            Assert.Equal(SpeechJobState.Done, done?.Job?.State);
+            Assert.Equal("keepawake", observedWorkState);
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    private sealed class ObservingRecognizer(Action onRecognize) : ISpeechRecognizer
+    {
+        public bool Available => true;
+        public Task<IReadOnlyList<SpeechWord>> RecognizeAsync(short[] samples, string language, string modelPath, CancellationToken token)
+        {
+            onRecognize();
+            return Task.FromResult<IReadOnlyList<SpeechWord>>([new SpeechWord("Hello.", 0.5, 1.5)]);
         }
     }
 

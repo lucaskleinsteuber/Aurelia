@@ -33,7 +33,7 @@ case "$(/usr/bin/lipo -archs "$candidate/Contents/MacOS/Aurelia")" in
   x86_64) arch=x64; xcode_arch=x86_64; runtime=osx-x64 ;;
   *) echo "Expected an app built for one architecture." >&2; exit 1 ;;
 esac
-name="Aurelia-$version-build-$build-macOS-$arch"
+name="Aurelia-$version-$build-macOS-$arch"
 output="$other_root/Releases/$name"
 [[ ! -e "$output" ]] || { echo "Release output already exists; refusing to overwrite it." >&2; exit 1; }
 mkdir -p "$other_root/Releases"

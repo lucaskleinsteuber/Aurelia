@@ -16,6 +16,27 @@ using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 
 var commandLine = ServerCommandLine.Parse(args);
+if (commandLine.Command == "help")
+{
+    Console.WriteLine(ServerCommandLine.UsageText);
+    Environment.ExitCode = 0;
+    return;
+}
+
+if (commandLine.Command == "version")
+{
+    Console.WriteLine($"Aurelia Server {ServerProductVersion.Current}");
+    Environment.ExitCode = 0;
+    return;
+}
+
+if (commandLine.Error is not null)
+{
+    Console.Error.WriteLine(commandLine.Error);
+    Environment.ExitCode = 2;
+    return;
+}
+
 if (commandLine.Command == "library")
 {
     Environment.ExitCode = await LibraryCommandClient.RunAsync(commandLine, CancellationToken.None);
@@ -60,6 +81,13 @@ if (commandLine.Command == "database")
 }
 
 var builder = WebApplication.CreateBuilder(args);
+if (commandLine.Command != "run")
+{
+    // Keep stdout clean for machine-readable command output (e.g. setup-owner JSON) by routing
+    // framework logs such as EF Core migration warnings to stderr.
+    builder.Services.Configure<Microsoft.Extensions.Logging.Console.ConsoleLoggerOptions>(options =>
+        options.LogToStandardErrorThreshold = LogLevel.Trace);
+}
 var runtime = ServerRuntimeOptions.Resolve(builder.Configuration, args);
 
 PrivateFilePermissions.CreatePrivateDirectory(runtime.DataDirectory);
@@ -182,6 +210,9 @@ builder.Services.AddSingleton<Aurelia.Server.Services.Hls.HlsSessionManager>();
 builder.Services.AddHostedService<Aurelia.Server.Services.Hls.HlsSessionSweeper>();
 builder.Services.AddSingleton<ScrubPreviewService>();
 if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<ScrubPreviewService>());
+// An unexpected failure in an optional background service must never take down the whole server (audit SRV-BG-004).
+builder.Services.Configure<HostOptions>(options =>
+    options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore);
 builder.Services.AddSingleton<SegmentAudioReader>();
 builder.Services.AddSingleton<Aurelia.Server.Services.Speech.SpeechModelStore>();
 builder.Services.AddSingleton<Aurelia.Server.Services.Speech.ISpeechRecognizer, Aurelia.Server.Services.Speech.WhisperRecognizer>();
@@ -329,7 +360,7 @@ builder.Services.AddRateLimiter(options =>
         await context.HttpContext.Response.WriteAsJsonAsync(new ApiProblem("rate_limited", "Too many requests. Try again shortly."), token);
     };
     options.AddPolicy("authentication", context => RateLimitPartition.GetFixedWindowLimiter(
-        context.Connection.RemoteIpAddress?.ToString() ?? "local",
+        ServerRequestGuard.AuthenticationPartitionKey(context),
         _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = 10,
@@ -339,7 +370,7 @@ builder.Services.AddRateLimiter(options =>
         }));
     // Between two servers during a move: a handful of calls per move; the code's own five tries count separately.
     options.AddPolicy("move", context => RateLimitPartition.GetFixedWindowLimiter(
-        context.Connection.RemoteIpAddress?.ToString() ?? "local",
+        ServerRequestGuard.AddressKey(context.Connection.RemoteIpAddress),
         _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = 20,
@@ -377,7 +408,10 @@ HostReadinessSignal.Register(
     Environment.GetEnvironmentVariable(HostReadinessSignal.EnvironmentVariableName));
 app.Use(async (context, next) =>
 {
-    if (!context.RequestServices.GetRequiredService<ServerRequestGuard>().Admit(context.Connection.RemoteIpAddress, ServerRequestGuard.IsPreviewStream(context.Request)))
+    if (!context.RequestServices.GetRequiredService<ServerRequestGuard>().Admit(
+        context.Connection.RemoteIpAddress,
+        ServerRequestGuard.IsPreviewStream(context.Request),
+        ServerRequestGuard.IsUserStateWrite(context.Request)))
     {
         context.Response.StatusCode = 429;
         context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("request_rate_limited", "warning", status: 429);
@@ -478,6 +512,16 @@ app.Use(async (context, next) =>
             await next(context);
         }
         else await next(context);
+        if (context.Response.StatusCode == StatusCodes.Status400BadRequest
+            && !context.Response.HasStarted
+            && string.IsNullOrEmpty(context.Response.ContentType)
+            && context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Items["Aurelia.FailureRecorded"] = true;
+            await context.Response.WriteAsJsonAsync(new ApiProblem(
+                "invalid_request",
+                "The request is missing required parameters or contains invalid values."));
+        }
         if (context.Items["Aurelia.AdministrationApproved"] is true && context.Response.StatusCode < 400)
             context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("owner_change_completed", "information", context.User.RequireUserId(), context.Response.StatusCode);
         if (securityChange is not null && context.Response.StatusCode < 400 && context.User.Identity?.IsAuthenticated == true)
@@ -485,7 +529,7 @@ app.Use(async (context, next) =>
                 securityTarget ?? (securityChange.Kind == "management_unlocked" ? "Server Password" : null),
                 securityChange.Kind == "profile_opened" ? securityChange.TargetId : null);
     }
-    catch (AccountException exception) when (!context.Response.HasStarted)
+    catch (ApiException exception) when (!context.Response.HasStarted)
     {
         // Expected proof handshakes and a closed administrative window are state
         // transitions, not authentication attacks. Record the precise code once.
@@ -498,6 +542,7 @@ app.Use(async (context, next) =>
                 SecurityTargets.Path(context.Request.Path.Value));
         context.Response.StatusCode = exception.StatusCode;
         if (exception.StatusCode == 429) context.Response.Headers.RetryAfter = exception.Code == "device_pairing_slow_down" ? "5" : "60";
+        else if (exception is PlaybackException && exception.StatusCode == StatusCodes.Status503ServiceUnavailable) context.Response.Headers.RetryAfter = "2";
         await context.Response.WriteAsJsonAsync(new ApiProblem(exception.Code, exception.Message));
     }
     catch (InvalidDataException) when (!context.Response.HasStarted)
@@ -516,13 +561,27 @@ app.Use(async (context, next) =>
         context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("request_body_rejected", "warning",
             context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, exception.StatusCode);
         context.Items["Aurelia.FailureRecorded"] = true;
-        await context.Response.WriteAsJsonAsync(exception.StatusCode == StatusCodes.Status413PayloadTooLarge
+        var problem = exception.StatusCode == StatusCodes.Status413PayloadTooLarge
             ? new ApiProblem("request_too_large", "The request is larger than the server accepts.")
-            : new ApiProblem("request_incomplete", "The request did not arrive completely. Try again."));
+            : exception.InnerException is JsonException
+                || exception.Message.Contains("parameter", StringComparison.OrdinalIgnoreCase)
+                || exception.Message.Contains("JSON", StringComparison.OrdinalIgnoreCase)
+                ? new ApiProblem("invalid_request", "The request is missing required parameters or contains invalid values.")
+                : new ApiProblem("request_incomplete", "The request did not arrive completely. Try again.");
+        await context.Response.WriteAsJsonAsync(problem);
     }
     catch (IOException) when (context.RequestAborted.IsCancellationRequested)
     {
         // The device went away mid-request; nothing failed on the server.
+    }
+    catch (Exception exception) when (!context.Response.HasStarted && ServerStorageErrors.IsStorageFull(exception,
+        context.RequestServices.GetRequiredService<ServerRuntimeOptions>().DataDirectory))
+    {
+        context.Response.StatusCode = StatusCodes.Status507InsufficientStorage;
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("storage_full", "error",
+            context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, StatusCodes.Status507InsufficientStorage);
+        context.Items["Aurelia.FailureRecorded"] = true;
+        await context.Response.WriteAsJsonAsync(new ApiProblem("storage_full", "The server's storage drive is full. Free disk space and try again."));
     }
     catch (IOException) when (!context.Response.HasStarted && (context.Request.Path.StartsWithSegments("/api/v1/server")
         || context.Request.Path.StartsWithSegments("/api/v1/media") || context.Request.Path.StartsWithSegments("/api/v1/libraries")))
@@ -560,6 +619,11 @@ app.MapSecurityEndpoints();
 
 try
 {
+    var hostReadinessNonce = Environment.GetEnvironmentVariable(HostReadinessSignal.EnvironmentVariableName);
+    if (commandLine.Command == "run")
+    {
+        HostReadinessSignal.SignalMigrating(Console.Out, hostReadinessNonce);
+    }
     await DatabaseInitializer.InitializeAsync(app.Services, CancellationToken.None);
 
     if (runtime.LanAccessEnabled && commandLine.Command == "run")
@@ -667,7 +731,20 @@ try
         Console.WriteLine($"Verification fingerprint: {tlsIdentity.DisplayFingerprint}");
     }
 
-    await app.RunAsync();
+    try
+    {
+        await app.RunAsync();
+    }
+    catch (Exception exception) when (HostReadinessSignal.IsAddressInUse(exception))
+    {
+        HostReadinessSignal.SignalPortInUse(
+            Console.Out,
+            hostReadinessNonce,
+            runtime.LanAccessEnabled ? runtime.LanHttpsPort : null);
+        Console.Error.WriteLine($"Aurelia Server could not bind its port because another program is already using it: {exception.Message}");
+        Environment.ExitCode = HostReadinessSignal.PortInUseExitCode;
+        return;
+    }
 }
 finally
 {

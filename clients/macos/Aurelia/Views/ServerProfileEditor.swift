@@ -126,8 +126,10 @@ struct ServerProfileEditor: View {
       }.scrollIndicators(.hidden).aureliaOverlayScrollbars()
       Divider()
       HStack(spacing: 10) {
-        Text("Each change is saved in turn; if one fails, the ones before it stay saved.")
-          .font(.caption).foregroundStyle(.secondary)
+        if !creating {
+          Text("Each change is saved in turn; if one fails, the ones before it stay saved.")
+            .font(.caption).foregroundStyle(.secondary)
+        }
         Spacer(minLength: 12)
         Button("Cancel") {
           clearPIN()
@@ -139,32 +141,32 @@ struct ServerProfileEditor: View {
           .keyboardShortcut(.defaultAction)
           .disabled(!canSave).accessibilityIdentifier("profile-editor-save")
       }.padding(16).accessibilityElement(children: .contain)
-    }.frame(minWidth: 560, idealWidth: 620, minHeight: 600, idealHeight: 700)
-      .frame(width: 620, height: 700)
-      .aureliaSettingRows()
-      .background(AureliaBackdrop())
-      .interactiveDismissDisabled(working)
-      .accessibilityElement(children: .contain)
-      .accessibilityIdentifier("profile-editor")
-      .task(id: model.administrationGeneration) {
-        if snapshot == nil { await load() }
-      }
-      .onChange(of: role) { _, updated in
-        if updated.canManageLibraries { pinProtected = true }
-      }
-      .onChange(of: pinProtected) { _, protected in
-        if !protected { clearPIN() }
-      }
-      .onChange(of: model.administrationGeneration) { _, _ in clearPIN() }
-      .onChange(of: model.profile?.sessionId) { _, _ in
-        clearPIN()
-        dismiss()
-      }
-      .onDisappear {
-        saveTask?.cancel()
-        saveTask = nil
-        clearPIN()
-      }
+    }
+    .aureliaSheetFrame(minWidth: 560, idealWidth: 620, minHeight: 480, idealHeight: 700)
+    .aureliaSettingRows()
+    .background(AureliaBackdrop())
+    .interactiveDismissDisabled(working)
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("profile-editor")
+    .task(id: model.administrationGeneration) {
+      if snapshot == nil { await load() }
+    }
+    .onChange(of: role) { _, updated in
+      if updated.canManageLibraries { pinProtected = true }
+    }
+    .onChange(of: pinProtected) { _, protected in
+      if !protected { clearPIN() }
+    }
+    .onChange(of: model.administrationGeneration) { _, _ in clearPIN() }
+    .onChange(of: model.profile?.sessionId) { _, _ in
+      clearPIN()
+      dismiss()
+    }
+    .onDisappear {
+      saveTask?.cancel()
+      saveTask = nil
+      clearPIN()
+    }
   }
 
   private var profileSection: some View {
@@ -185,7 +187,7 @@ struct ServerProfileEditor: View {
           Text("Administrator").tag(UserRole.admin)
           Text("Owner").tag(UserRole.owner)
         }.accessibilityIdentifier("profile-editor-role")
-        Toggle("Profile enabled", isOn: $enabled)
+        Toggle("Profile Enabled", isOn: $enabled)
           .accessibilityIdentifier("profile-editor-enabled")
         Text("Administrators manage their allowed content. Owners manage the whole server.")
           .font(.caption).foregroundStyle(.secondary)

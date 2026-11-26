@@ -23,7 +23,7 @@ codesign --force --sign - --entitlements "$run_root/entitlements.plist" "$run_ro
 python3 - "$run_root" <<'PY'
 import json,pathlib,subprocess,sys
 root=pathlib.Path(sys.argv[1])
-for mode in ('task','main-queue','immediate'):
+for mode in ('task','main-queue','immediate','system-logout'):
     receipt=root/(mode+'.json')
     subprocess.run([str(root/'Termination.app/Contents/MacOS/Termination'),mode,str(receipt)],check=True,timeout=10)
     result=json.loads(receipt.read_text())

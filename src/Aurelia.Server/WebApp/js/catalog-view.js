@@ -664,13 +664,14 @@ export function createCatalogView({
           const pending = artworkChanges[spec.key];
           if (!pending) continue;
           if (pending.kind === "remove" && isEdit) {
-            await api.deleteCollectionArtwork?.(saved.id, spec.key).catch(() => {});
+            await api.deleteCollectionArtwork?.(saved.id, spec.key);
           } else if (pending.uploadId) {
             await api.saveCollectionArtwork?.(saved.id, spec.key, { uploadId: pending.uploadId, crop: pending.crop });
           } else if (pending.file && typeof api.uploadCollectionEditorImage === "function") {
             const uploaded = await api.uploadCollectionEditorImage(saved.id, pending.file);
             await api.saveCollectionArtwork?.(saved.id, spec.key, { uploadId: uploaded.id, crop: pending.crop });
           }
+          delete artworkChanges[spec.key];
         }
         toast(isEdit ? `Updated “${name}”.` : `Created the collection “${name}”.`);
         sheet.close();
@@ -699,10 +700,24 @@ export function createCatalogView({
 
   async function openAddToCollectionDialog(item, seasonNumber = null) {
     dialog?.close();
-    let collectionsList = [];
+    const signal = current();
+    const collectionsList = [];
+    const seenIds = new Set();
     try {
-      collectionsList = (await api.collections({ limit: 100 })) ?? [];
+      for (let offset = 0, page = 0; page < 20; page++) {
+        const batch = (await api.collections({ offset, limit: PAGE_SIZE }, { signal })) ?? [];
+        if (signal.aborted) return;
+        for (const col of batch) {
+          if (col?.id && !seenIds.has(col.id)) {
+            seenIds.add(col.id);
+            collectionsList.push(col);
+          }
+        }
+        if (batch.length < PAGE_SIZE) break;
+        offset += batch.length;
+      }
     } catch (error) {
+      if (signal.aborted || error?.name === "AbortError") return;
       if (!handleError(error)) toast(`Couldn’t load collections: ${error.message}`);
       return;
     }

@@ -1,9 +1,8 @@
+import AppKit
 import SwiftUI
 
-extension EnvironmentValues {
-  // Native preferences remain authoritative in production. The opt-in DEBUG fixture
-  // exercises the same rendering branches without changing macOS preferences.
-  private var cinemaAccessibilityFixture: Bool {
+enum AureliaAccessibilityFixture {
+  static var enabled: Bool {
     #if DEBUG
       let environment = ProcessInfo.processInfo.environment
       return environment["AURELIA_UI_TEST_MODE"] == "library-admin"
@@ -12,6 +11,24 @@ extension EnvironmentValues {
     #else
       return false
     #endif
+  }
+}
+
+enum AureliaWindowAppearance {
+  static func name(increaseContrast: Bool) -> NSAppearance.Name {
+    increaseContrast ? .accessibilityHighContrastDarkAqua : .darkAqua
+  }
+
+  static func resolved(increaseContrast: Bool) -> NSAppearance? {
+    NSAppearance(named: name(increaseContrast: increaseContrast))
+  }
+}
+
+extension EnvironmentValues {
+  // Native preferences remain authoritative in production. The opt-in DEBUG fixture
+  // exercises the same rendering branches without changing macOS preferences.
+  private var cinemaAccessibilityFixture: Bool {
+    AureliaAccessibilityFixture.enabled
   }
 
   var aureliaReduceTransparency: Bool {

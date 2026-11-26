@@ -45,7 +45,7 @@ docker compose build --pull --no-cache && docker compose up -d
 ```
 
 builds the image again from the newest stable release. Accounts, library, progress and settings
-stay in the `aurelia-data` volume. `--build-arg AURELIA_BUILD=135` builds a particular release.
+stay in the `aurelia-data` volume. `--build-arg AURELIA_BUILD=175` builds a particular signed release (build 153 and newer; older unsigned builds are refused).
 
 ## Good to know
 

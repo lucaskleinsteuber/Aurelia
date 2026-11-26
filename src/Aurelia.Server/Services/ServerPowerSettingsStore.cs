@@ -74,6 +74,11 @@ public sealed partial class ServerPowerSettingsStore(ServerRuntimeOptions runtim
         var afterSleepTimer = request.AfterSleepTimer ?? current.AfterSleepTimer;
         if (request.WakeOnAccess == true && (ByApp || !WakeSupport().Contains('u', StringComparison.Ordinal)))
             throw new AccountException("wake_on_access_unavailable", "This computer's network card can't wake it when a device connects.", 400);
+        if (!ByApp && request.Mode is "sleep" or "shutdown"
+            && File.Exists(Path.Combine(runtime.DataDirectory, WakeSupportFileName))
+            && !WakeSupport().Contains('g', StringComparison.Ordinal))
+            throw new AccountException("wake_on_lan_unavailable",
+                "Wake-on-LAN is not available on this computer's network card (or ethtool is not installed). Choose Off or Stop Aurelia Server instead.", 400);
 
         var content = new StringBuilder()
             .Append("# What Aurelia Server does when unused, changed in the app or with `sudo aurelia sleep`.\n")

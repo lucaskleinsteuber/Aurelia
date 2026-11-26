@@ -11,6 +11,7 @@ Aurelia from source or write their own client.
 | [Getting started](GETTING_STARTED.md) | Which computer keeps the library, setting it up, adding media, connecting every device |
 | [Organizing your media](MEDIA_LIBRARY.md) | How to name folders and files, extras and trailers, subtitles, TMDB and OpenSubtitles keys, collections |
 | [Watching away from home](REMOTE_ACCESS.md) | Using Aurelia outside the home network with Tailscale or a WireGuard VPN (FRITZ!Box and others) |
+| [Family Wishes](WISHES.md) | Requesting movies and series not yet in the library, "Me Too" support and admin fulfillment |
 | [Troubleshooting](TROUBLESHOOTING.md) | Common problems and questions, from "the app finds no server" to stuttering playback |
 | [Privacy policy](PRIVACY.md) | What Aurelia stores, where, and what it never sends anywhere |
 
@@ -31,6 +32,7 @@ Aurelia from source or write their own client.
 | --- | --- |
 | [Aurelia Server on Linux](LINUX_SERVER.md) | One-line install on Ubuntu or Debian, the `aurelia` command, updates, power saving, media drives |
 | [Aurelia Server with Docker](DOCKER.md) | Running the server on a NAS or any Docker host |
+| [Moving to a new server](SERVER_MOVE.md) | Moving accounts, library, settings and paired devices to another computer without copying media |
 | [Backups and recovery](DATABASE_RECOVERY.md) | The daily database backup and how to restore it |
 | [Security model](SECURITY_MODEL.md) | Profiles, roles, PINs, pairing and what administrators can and cannot see |
 | [Screen time](SCREEN_TIME.md) | Bedtime, a daily limit and "one more episode" for children's profiles |
@@ -42,7 +44,7 @@ Aurelia from source or write their own client.
 | --- | --- |
 | [Building and verification](TRANSPORT_TESTING.md) | Building from source and running the checks |
 | [Distribution and updates](FREE_DISTRIBUTION.md) | Signing without the paid Apple program, Gatekeeper, how updates keep data |
-| [Linux update signing](LINUX_UPDATE_SIGNING.md) | Why Linux updates carry the owner's minisign signature |
+| [Update signing](LINUX_UPDATE_SIGNING.md) | Why Mac, Linux Desktop and Linux Server updates carry the owner's minisign signature |
 | [Client protocol](CLIENT_PROTOCOL.md) and [compatibility](CLIENT_COMPATIBILITY.md) | How the apps talk to the server, capabilities and versions |
 | [Linux app parity](LINUX_APP_PARITY.md) | Which Mac features the Linux app has and how each is verified |
 | [System callbacks](SYSTEM_CALLBACKS.md) | Threading rules for Apple framework callbacks in the Mac app |

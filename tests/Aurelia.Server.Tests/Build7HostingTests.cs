@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Net.Sockets;
 using Aurelia.Contracts;
 using Aurelia.Server.Services;
+using Microsoft.AspNetCore.Connections;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Xunit;
@@ -48,6 +50,26 @@ public sealed class Build7HostingTests
         lifetime.Stop();
 
         Assert.Equal(string.Empty, output.ToString());
+    }
+
+    [Fact]
+    public void HostReadinessSignalEmitsMigratingAndPortInUseMarkersAndDetectsAddressInUse()
+    {
+        using var output = new StringWriter();
+        const string nonce = "0123456789abcdefghijklmnopqrstuvwxyz_AB-CD";
+
+        HostReadinessSignal.SignalMigrating(output, nonce);
+        HostReadinessSignal.SignalPortInUse(output, nonce, 43111);
+        HostReadinessSignal.SignalPortInUse(output, "short", 43110);
+
+        Assert.Equal(
+            $"{HostReadinessSignal.MigratingMarkerPrefix}{nonce}{Environment.NewLine}"
+                + $"{HostReadinessSignal.PortInUseMarkerPrefix}{nonce}:43111{Environment.NewLine}",
+            output.ToString());
+
+        Assert.True(HostReadinessSignal.IsAddressInUse(new IOException("bind", new AddressInUseException("used"))));
+        Assert.True(HostReadinessSignal.IsAddressInUse(new SocketException((int)SocketError.AddressAlreadyInUse)));
+        Assert.False(HostReadinessSignal.IsAddressInUse(new IOException("disk error")));
     }
 
     [Fact]

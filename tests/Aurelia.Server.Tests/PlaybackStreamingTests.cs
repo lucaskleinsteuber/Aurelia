@@ -267,15 +267,17 @@ public sealed class PlaybackStreamingTests
             await AssertRangeAsync(client, playback.StreamPath, content, 4000, null, viewer.Token);
             await AssertSuffixRangeAsync(client, playback.StreamPath, content, 20, viewer.Token);
 
-            using (var invalidRequest = ApiTestClient.Authorized(
-                       HttpMethod.Get,
-                       playback.StreamPath,
-                       viewer.Token))
+            // RFC 9110 §14.2: syntactically invalid, non-bytes, and multi-range headers are ignored (200 OK).
+            foreach (var ignoredRange in new[] { "bytes=invalid", "items=0-9", "bytes=0-1,5-6" })
             {
-                invalidRequest.Headers.TryAddWithoutValidation("Range", "bytes=invalid");
-                using var invalidResponse = await ApiTestClient.SendAsync(client, invalidRequest);
-                Assert.Equal(HttpStatusCode.RequestedRangeNotSatisfiable, invalidResponse.StatusCode);
-                Assert.Equal($"bytes */{content.Length}", invalidResponse.Content.Headers.ContentRange?.ToString());
+                using var ignoredRequest = ApiTestClient.Authorized(
+                    HttpMethod.Get,
+                    playback.StreamPath,
+                    viewer.Token);
+                ignoredRequest.Headers.TryAddWithoutValidation("Range", ignoredRange);
+                using var ignoredResponse = await ApiTestClient.SendAsync(client, ignoredRequest);
+                Assert.Equal(HttpStatusCode.OK, ignoredResponse.StatusCode);
+                Assert.Equal(content, await ignoredResponse.Content.ReadAsByteArrayAsync());
             }
 
             using (var unsatisfiedRequest = RangeRequest(

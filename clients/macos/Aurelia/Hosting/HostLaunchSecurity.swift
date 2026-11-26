@@ -1,6 +1,8 @@
 import AppKit
+import CryptoKit
 import Darwin
 import Foundation
+import Security
 
 // Release preflight uses the real app/helper/API, but never the personal Keychain,
 // operating-mode preferences or a previously registered background service.
@@ -47,6 +49,7 @@ struct HostLaunchDescription: Codable, Equatable {
   let logDirectory: String?
   let serverName: String
   let lanPort: Int
+  var resetTestData: Bool? = nil
 }
 
 struct ValidatedHostLaunchPaths: Equatable {
@@ -135,11 +138,20 @@ enum HostBootstrapLocation {
     }
 
     let directory = container.appendingPathComponent(
-      "Library/Caches/Aurelia/Host", isDirectory: true)
-    try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-    try fileManager.setAttributes(
-      [.posixPermissions: 0o700], ofItemAtPath: directory.path)
-    return directory.standardizedFileURL
+      "Library/Caches/Aurelia/Host", isDirectory: true
+    ).standardizedFileURL
+    var metadata = stat()
+    let alreadyPrepared =
+      lstat(directory.path, &metadata) == 0
+      && (metadata.st_mode & S_IFMT) == S_IFDIR
+      && metadata.st_uid == getuid()
+      && (metadata.st_mode & 0o777) == 0o700
+    if !alreadyPrepared {
+      try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+      try fileManager.setAttributes(
+        [.posixPermissions: 0o700], ofItemAtPath: directory.path)
+    }
+    return directory
   }
 }
 
@@ -242,5 +254,175 @@ enum HostLaunchSecurity {
       let secret = String(bytes: bytes.prefix(count), encoding: .utf8)
     else { throw HostLaunchSecurityError.invalidSecretPipe }
     return secret
+  }
+
+  /// Removes orphaned per-launch handoff files (`launch-<pid>.json`, `launch-<pid>.pipe`) whose
+  /// owning process is no longer running, plus abandoned per-launch `<uuid>.json` rendezvous files
+  /// older than `staleRendezvousAge`, while preserving active and persistent background-service files.
+  static func pruneStaleHandoffFiles(
+    in directory: URL,
+    currentProcessID: Int32 = ProcessInfo.processInfo.processIdentifier,
+    now: Date = Date(),
+    staleRendezvousAge: TimeInterval = 3_600,
+    owner: uid_t = getuid(),
+    processIsAlive: (Int32) -> Bool = { pid in
+      pid > 0 && (kill(pid, 0) == 0 || errno != ESRCH)
+    }
+  ) {
+    let fileManager = FileManager.default
+    guard
+      let entries = try? fileManager.contentsOfDirectory(
+        at: directory, includingPropertiesForKeys: [.contentModificationDateKey], options: [])
+    else { return }
+    for entry in entries {
+      let name = entry.lastPathComponent
+      var metadata = stat()
+      guard lstat(entry.path, &metadata) == 0, metadata.st_uid == owner else { continue }
+      let fileType = metadata.st_mode & S_IFMT
+      if name.hasPrefix("launch-") {
+        if name.hasSuffix(".json"), fileType == S_IFREG,
+          let pid = Int32(name.dropFirst("launch-".count).dropLast(".json".count)),
+          pid != currentProcessID, !processIsAlive(pid)
+        {
+          try? fileManager.removeItem(at: entry)
+        } else if name.hasSuffix(".pipe"), fileType == S_IFIFO,
+          let pid = Int32(name.dropFirst("launch-".count).dropLast(".pipe".count)),
+          pid != currentProcessID, !processIsAlive(pid)
+        {
+          unlink(entry.path)
+        }
+      } else if name.hasSuffix(".json"), fileType == S_IFREG,
+        UUID(uuidString: String(name.dropLast(".json".count))) != nil
+      {
+        let modified =
+          (try? entry.resourceValues(forKeys: [.contentModificationDateKey]))?
+          .contentModificationDate
+          ?? Date(timeIntervalSince1970: TimeInterval(metadata.st_mtimespec.tv_sec))
+        if now.timeIntervalSince(modified) >= staleRendezvousAge {
+          try? fileManager.removeItem(at: entry)
+        }
+      }
+    }
+  }
+}
+
+/// Mutual HMAC-SHA256 authentication for the local helper control channel so the shared secret
+/// is never transmitted in plaintext over loopback TCP, and responses from rogue listeners are
+/// rejected before decoding.
+enum HostControlAuth {
+  static let nonceHeader = "X-Aurelia-Host-Nonce"
+  static let timestampHeader = "X-Aurelia-Host-Timestamp"
+  static let signatureHeader = "X-Aurelia-Host-Signature"
+  static let proofHeader = "X-Aurelia-Host-Proof"
+  static let maximumSkewSeconds: Int64 = 60
+
+  static func constantTimeEquals(_ lhs: String, _ rhs: String) -> Bool {
+    let left = Array(lhs.utf8)
+    let right = Array(rhs.utf8)
+    var difference: UInt8 = left.count == right.count ? 0 : 1
+    let count = min(left.count, right.count)
+    for index in 0..<count {
+      difference |= left[index] ^ right[index]
+    }
+    return difference == 0
+  }
+
+  static func makeNonce() throws -> String {
+    var bytes = [UInt8](repeating: 0, count: 16)
+    guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+      throw HostLaunchSecurityError.invalidSecretPipe
+    }
+    return bytes.map { String(format: "%02x", $0) }.joined()
+  }
+
+  static func requestSignature(
+    secret: String,
+    method: String,
+    action: String,
+    nonce: String,
+    timestamp: Int64,
+    body: Data
+  ) -> String {
+    let payload = "\(method)\n\(action)\n\(nonce)\n\(timestamp)\n\(sha256Hex(body))"
+    return hmacHex(secret: secret, message: payload)
+  }
+
+  static func responseProof(
+    secret: String,
+    nonce: String,
+    status: Int,
+    body: Data
+  ) -> String {
+    let payload = "response\n\(nonce)\n\(status)\n\(sha256Hex(body))"
+    return hmacHex(secret: secret, message: payload)
+  }
+
+  private static func sha256Hex(_ data: Data) -> String {
+    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+  }
+
+  private static func hmacHex(secret: String, message: String) -> String {
+    let key = SymmetricKey(data: Data(secret.utf8))
+    let mac = HMAC<SHA256>.authenticationCode(for: Data(message.utf8), using: key)
+    return mac.map { String(format: "%02x", $0) }.joined()
+  }
+}
+
+struct HostControlNonceReplayGuard: Sendable {
+  private var seen: [String: Int64] = [:]
+  private let maximumEntries = 512
+
+  mutating func accept(nonce: String, timestamp: Int64, now: Int64) -> Bool {
+    guard (16...64).contains(nonce.count),
+      nonce.allSatisfy({ $0.isASCII && ($0.isHexDigit || $0 == "-" || $0 == "_") }),
+      abs(now - timestamp) <= HostControlAuth.maximumSkewSeconds
+    else { return false }
+
+    let expiryCutoff = now - HostControlAuth.maximumSkewSeconds
+    seen = seen.filter { $0.value >= expiryCutoff }
+    guard seen[nonce] == nil else { return false }
+    if seen.count >= maximumEntries {
+      let oldest = seen.sorted { $0.value < $1.value }.prefix(seen.count - maximumEntries + 1)
+      for entry in oldest { seen.removeValue(forKey: entry.key) }
+    }
+    seen[nonce] = timestamp
+    return true
+  }
+}
+
+struct HostStartupErrorRecord: Codable, Equatable, Sendable {
+  static let fileName = "startup-error.json"
+  let category: String
+  let message: String
+  let recordedAt: Date
+
+  static func write(category: String, message: String, in directory: URL) {
+    let url = directory.appendingPathComponent(fileName)
+    let record = HostStartupErrorRecord(category: category, message: message, recordedAt: Date())
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    guard let data = try? encoder.encode(record) else { return }
+    try? data.write(to: url, options: [.atomic])
+    try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+  }
+
+  static func readRecent(from directory: URL, maxAge: TimeInterval = 30) -> HostStartupErrorRecord?
+  {
+    let url = directory.appendingPathComponent(fileName)
+    guard
+      (try? HostLaunchSecurity.validateConfigurationFile(
+        at: url.path, bootstrapDirectory: directory)) != nil,
+      let data = try? Data(contentsOf: url)
+    else { return nil }
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    guard let record = try? decoder.decode(HostStartupErrorRecord.self, from: data),
+      abs(Date().timeIntervalSince(record.recordedAt)) <= maxAge
+    else { return nil }
+    return record
+  }
+
+  static func clear(in directory: URL) {
+    try? FileManager.default.removeItem(at: directory.appendingPathComponent(fileName))
   }
 }

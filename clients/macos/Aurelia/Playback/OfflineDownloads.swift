@@ -252,6 +252,41 @@ final class OfflineDownloads: ObservableObject {
     save()
   }
 
+  /// Removes the downloaded file after trying to sync unsent offline progress to the server, or
+  /// retaining it in the durable progress outbox if the server cannot be reached right now.
+  func remove(
+    _ id: UUID,
+    profile: StoredServerProfile?,
+    outbox: PlaybackProgressOutbox = .shared,
+    fetchProgress: ((UUID) async throws -> PlaybackProgressResponse)? = nil,
+    updateProgress: (
+      (UUID, Int64, Int64, Bool, Int64, UUID) async throws -> PlaybackProgressResponse
+    )? = nil
+  ) async {
+    if let title = title(id), title.progressDirty, let profile,
+      title.serverId == profile.serverId, title.userId == profile.user?.id
+    {
+      let api = APIClient(profile: profile)
+      let synced = await syncTitleProgress(
+        id,
+        profile: profile,
+        fetchProgress: fetchProgress ?? { try await api.playbackProgress(mediaId: $0) },
+        updateProgress: updateProgress ?? {
+          mediaId, position, duration, finished, expectedRevision, mutationId in
+          try await api.updatePlaybackProgress(
+            mediaId: mediaId, positionMilliseconds: position, durationMilliseconds: duration,
+            isFinished: finished, expectedRevision: expectedRevision, clientMutationId: mutationId)
+        })
+      if !synced, let latest = self.title(id), latest.progressDirty, latest.durationMilliseconds > 0
+      {
+        outbox.enqueue(
+          media: latest.id, profile: profile, position: latest.positionMilliseconds,
+          duration: latest.durationMilliseconds, finished: latest.isCompleted)
+      }
+    }
+    remove(id)
+  }
+
   /// Gives downloads made before artwork and descriptions were kept their poster, backdrop and
   /// description, from the library the open profile sees.
   func completeDetails(profile: StoredServerProfile, catalog: [CatalogItemSummary]) async {
@@ -337,31 +372,74 @@ final class OfflineDownloads: ObservableObject {
 
   /// Sends offline progress for this profile when it is newer than what the server has.
   func syncProgress(profile: StoredServerProfile) async {
-    guard let userId = profile.user?.id else { return }
     let api = APIClient(profile: profile)
-    for title in titles
-    where title.progressDirty && title.serverId == profile.serverId
-      && title.userId == userId
-    {
-      do {
-        let server = try await api.playbackProgress(mediaId: title.id)
-        var revision = server.revision
-        if Self.offlineIsNewer(title, server: server) {
-          revision = try await api.updatePlaybackProgress(
-            mediaId: title.id, positionMilliseconds: title.positionMilliseconds,
-            durationMilliseconds: title.durationMilliseconds, isFinished: title.isCompleted,
-            expectedRevision: server.revision ?? 0, clientMutationId: UUID()
-          ).revision
-        }
-        if let index = titles.firstIndex(where: { $0.id == title.id }) {
+    await syncProgress(
+      profile: profile,
+      fetchProgress: { try await api.playbackProgress(mediaId: $0) },
+      updateProgress: { mediaId, position, duration, finished, expectedRevision, mutationId in
+        try await api.updatePlaybackProgress(
+          mediaId: mediaId, positionMilliseconds: position, durationMilliseconds: duration,
+          isFinished: finished, expectedRevision: expectedRevision, clientMutationId: mutationId)
+      })
+  }
+
+  func syncProgress(
+    profile: StoredServerProfile,
+    fetchProgress: (UUID) async throws -> PlaybackProgressResponse,
+    updateProgress: (UUID, Int64, Int64, Bool, Int64, UUID) async throws -> PlaybackProgressResponse
+  ) async {
+    guard let userId = profile.user?.id else { return }
+    let dirtyIDs =
+      titles
+      .filter { $0.progressDirty && $0.serverId == profile.serverId && $0.userId == userId }
+      .map(\.id)
+    for id in dirtyIDs {
+      _ = await syncTitleProgress(
+        id, profile: profile, fetchProgress: fetchProgress, updateProgress: updateProgress)
+    }
+  }
+
+  @discardableResult
+  func syncTitleProgress(
+    _ id: UUID,
+    profile: StoredServerProfile,
+    fetchProgress: (UUID) async throws -> PlaybackProgressResponse,
+    updateProgress: (UUID, Int64, Int64, Bool, Int64, UUID) async throws -> PlaybackProgressResponse
+  ) async -> Bool {
+    guard let userId = profile.user?.id,
+      let snapshot = titles.first(where: {
+        $0.id == id && $0.progressDirty && $0.serverId == profile.serverId && $0.userId == userId
+      })
+    else { return false }
+    do {
+      let server = try await fetchProgress(snapshot.id)
+      var revision = server.revision
+      if Self.offlineIsNewer(snapshot, server: server) {
+        revision = try await updateProgress(
+          snapshot.id, snapshot.positionMilliseconds, snapshot.durationMilliseconds,
+          snapshot.isCompleted, server.revision ?? 0, UUID()
+        ).revision
+      }
+      var cleared = false
+      if let index = titles.firstIndex(where: { $0.id == snapshot.id }) {
+        let current = titles[index]
+        let matchesSnapshot =
+          current.progressSavedAt == snapshot.progressSavedAt
+          && current.positionMilliseconds == snapshot.positionMilliseconds
+          && current.durationMilliseconds == snapshot.durationMilliseconds
+          && current.isCompleted == snapshot.isCompleted
+        if matchesSnapshot {
           titles[index].progressDirty = false
           titles[index].serverRevision = revision
+          cleared = true
         }
-      } catch {
-        // Tried again at the next refresh.
       }
+      save()
+      return cleared
+    } catch {
+      // Tried again at the next refresh.
+      return false
     }
-    save()
   }
 
   private func fetch(

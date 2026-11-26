@@ -51,84 +51,100 @@ public static partial class HlsEndpoints
     }
 
     private static Task<IResult> InitAsync(HttpContext context, string ticket, string step, int? audio, string? purpose, PlaybackService playback,
-        LiveConversionService live, CatalogMutationGate mutations, HlsSessionManager sessions, CancellationToken cancellationToken) =>
-        ServeAsync(context, ticket, step, audio, purpose, playback, live, mutations, sessions,
+        LiveConversionService live, CatalogMutationGate mutations, HlsSessionManager sessions, ScreenTimeService screenTime, CancellationToken cancellationToken) =>
+        ServeAsync(context, ticket, step, audio, purpose, playback, live, mutations, sessions, screenTime,
             (session, token) => session.InitAsync(token), cancellationToken);
 
     private static Task<IResult> SegmentAsync(HttpContext context, string ticket, string step, int segment, int? audio, string? purpose,
         PlaybackService playback, LiveConversionService live, CatalogMutationGate mutations, HlsSessionManager sessions,
-        CancellationToken cancellationToken) =>
-        ServeAsync(context, ticket, step, audio, purpose, playback, live, mutations, sessions,
+        ScreenTimeService screenTime, CancellationToken cancellationToken) =>
+        ServeAsync(context, ticket, step, audio, purpose, playback, live, mutations, sessions, screenTime,
             (session, token) => segment >= 0 && segment < session.SegmentCount ? session.SegmentAsync(segment, token) : Task.FromResult<byte[]?>(null),
             cancellationToken, segment);
 
     private static async Task<IResult> ServeAsync(HttpContext context, string ticket, string step, int? audio, string? purpose,
         PlaybackService playback, LiveConversionService live, CatalogMutationGate mutations, HlsSessionManager sessions,
-        Func<HlsSession, CancellationToken, Task<byte[]?>> read, CancellationToken cancellationToken, int? segment = null)
+        ScreenTimeService screenTime, Func<HlsSession, CancellationToken, Task<byte[]?>> read, CancellationToken cancellationToken, int? segment = null)
     {
         if (!StepName().IsMatch(step)) return QualityNotFound();
         // "download": an app keeps this copy ("converted-downloads-v1"); it yields to anyone who watches.
         if (purpose is not (null or "" or "playback" or "download"))
             return Problem("invalid_purpose", "The purpose must be playback or download.", StatusCodes.Status400BadRequest);
-        var (opened, problem) = await OpenAsync(context, ticket, audio, playback, live, mutations, cancellationToken);
-        if (opened is null) return problem!;
-        var lease = context.Items["Aurelia.StreamLease"] as ActiveStreamRegistry.Lease;
-        lease?.BindMedia(opened.Source.MediaId);
-        var key = new HlsSessionKey(context.User.RequireUserId(), context.User.RequireProfileSessionId(), opened.Source.MediaId, step, opened.Audio?.Index,
-            Download: purpose == "download");
-        HlsSession session;
-        try
+        if (purpose == "download")
         {
-            if (sessions.Find(key) is { } running)
+            try { await screenTime.RequireDownloadsAllowedAsync(context.User.RequireUserId(), cancellationToken); }
+            catch (PlaybackException exception) { return Problem(exception.Code, exception.Message, exception.StatusCode); }
+        }
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var (opened, problem) = await OpenAsync(context, ticket, audio, playback, live, mutations, cancellationToken);
+            if (opened is null) return problem!;
+            var lease = context.Items["Aurelia.StreamLease"] as ActiveStreamRegistry.Lease;
+            lease?.BindMedia(opened.Source.MediaId);
+            var key = new HlsSessionKey(context.User.RequireUserId(), context.User.RequireProfileSessionId(), opened.Source.MediaId, step, opened.Audio?.Index,
+                Download: purpose == "download");
+            HlsSession session;
+            try
             {
-                await opened.Source.Stream.DisposeAsync();
-                session = running;
-            }
-            else
-            {
-                if (StreamingLadder.Find(opened.Video, opened.Probe.BitRate, step) is not { } quality)
+                if (sessions.Find(key) is { } running && !running.IsDisposed)
                 {
                     await opened.Source.Stream.DisposeAsync();
-                    return QualityNotFound();
+                    session = running;
                 }
-                var toneMapping = opened.Video.IsHdr ? opened.Tools.ToneMapping : HdrToneMapping.Unavailable;
-                if (opened.Video.IsHdr && toneMapping == HdrToneMapping.Unavailable)
+                else
                 {
-                    await opened.Source.Stream.DisposeAsync();
-                    var unsupported = LiveHdr.Unsupported();
-                    return Problem(unsupported.Code, unsupported.Message, unsupported.StatusCode);
+                    if (StreamingLadder.Find(opened.Video, opened.Probe.BitRate, step) is not { } quality)
+                    {
+                        await opened.Source.Stream.DisposeAsync();
+                        return QualityNotFound();
+                    }
+                    var toneMapping = opened.Video.IsHdr ? opened.Tools.ToneMapping : HdrToneMapping.Unavailable;
+                    if (opened.Video.IsHdr && toneMapping == HdrToneMapping.Unavailable)
+                    {
+                        await opened.Source.Stream.DisposeAsync();
+                        var unsupported = LiveHdr.Unsupported();
+                        return Problem(unsupported.Code, unsupported.Message, unsupported.StatusCode);
+                    }
+                    try { LiveConversionService.EnsureInputMatchesHandle(opened.Source.Stream.SafeFileHandle, opened.Source.SourcePath); }
+                    catch
+                    {
+                        // The file is closed at once, not later by the finalizer (audit S-X8).
+                        await opened.Source.Stream.DisposeAsync();
+                        throw;
+                    }
+                    session = await sessions.AddAsync(sessions.Create(key, opened.Source.Stream, opened.Source.Stream, opened.Source.SourcePath,
+                        Path.GetFileName(opened.Source.SourcePath), opened.Duration, quality, opened.Video, opened.Audio, toneMapping, opened.Tools,
+                        opened.Probe.Container));
                 }
-                try { LiveConversionService.EnsureInputMatchesHandle(opened.Source.Stream.SafeFileHandle, opened.Source.SourcePath); }
-                catch
+                var data = await read(session, cancellationToken);
+                if (data is null)
                 {
-                    // The file is closed at once, not later by the finalizer (audit S-X8).
-                    await opened.Source.Stream.DisposeAsync();
-                    throw;
+                    return segment is { } index && (index < 0 || index >= session.SegmentCount)
+                        ? Problem("segment_not_found", "This segment is not part of the title.", StatusCodes.Status404NotFound)
+                        : Problem("conversion_failed", "The server couldn’t convert this part of the title.", StatusCodes.Status500InternalServerError);
                 }
-                session = await sessions.AddAsync(sessions.Create(key, opened.Source.Stream, opened.Source.Stream, opened.Source.SourcePath,
-                    Path.GetFileName(opened.Source.SourcePath), opened.Duration, quality, opened.Video, opened.Audio, toneMapping, opened.Tools));
+                lease?.MarkRead();
+                context.Response.Headers.CacheControl = "private, no-store";
+                context.Response.Headers.XContentTypeOptions = "nosniff";
+                return Results.Bytes(data, "video/mp4");
             }
-            var data = await read(session, cancellationToken);
-            if (data is null)
+            catch (Exception exception) when (exception is HlsSessionEndedException or ObjectDisposedException)
             {
-                return segment is { } index && (index < 0 || index >= session.SegmentCount)
-                    ? Problem("segment_not_found", "This segment is not part of the title.", StatusCodes.Status404NotFound)
-                    : Problem("conversion_failed", "The server couldn’t convert this part of the title.", StatusCodes.Status500InternalServerError);
+                // The session was swept or replaced concurrently; reopen once (revoked tickets return 404 on retry).
+                if (attempt == 0 && !cancellationToken.IsCancellationRequested) continue;
+                return Problem("hls_session_ended", "The adaptive stream session ended. Try again.", StatusCodes.Status409Conflict);
             }
-            lease?.MarkRead();
-            context.Response.Headers.CacheControl = "private, no-store";
-            context.Response.Headers.XContentTypeOptions = "nosniff";
-            return Results.Bytes(data, "video/mp4");
+            catch (HlsBusyException)
+            {
+                context.Response.Headers.RetryAfter = "5";
+                return Problem("conversion_busy", "The server is converting as many titles as it can. Try again shortly.", StatusCodes.Status429TooManyRequests);
+            }
+            catch (IOException)
+            {
+                return Problem("conversion_failed", "The server couldn’t read this title.", StatusCodes.Status500InternalServerError);
+            }
         }
-        catch (HlsBusyException)
-        {
-            context.Response.Headers.RetryAfter = "5";
-            return Problem("conversion_busy", "The server is converting as many titles as it can. Try again shortly.", StatusCodes.Status429TooManyRequests);
-        }
-        catch (IOException)
-        {
-            return Problem("conversion_failed", "The server couldn’t read this title.", StatusCodes.Status500InternalServerError);
-        }
+        return Problem("hls_session_ended", "The adaptive stream session ended. Try again.", StatusCodes.Status409Conflict);
     }
 
     /// <summary>Checks the ticket and opens the title like a stream read, then reads its header description.</summary>

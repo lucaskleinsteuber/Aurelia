@@ -103,6 +103,79 @@ struct ManagementLifecycleTests {
     #expect(model.administrationErrorMessage == nil)
   }
 
+  @Test func wrongServerPasswordDuringUnlockKeepsViewingSession() async {
+    let active = profile()
+    var endedSessions = 0
+    let model = AppModel(
+      store: InMemoryServerProfileStore(), initialProfile: active, profileSelectionEnabled: true,
+      profileSessionEnder: { _ in endedSessions += 1 },
+      managementUnlocker: { _, _ in
+        throw APIClientError.httpFailure(
+          status: 401, retryAfter: nil, code: "invalid_credentials",
+          message: "The Server Password is incorrect.")
+      })
+    let unlocked = await model.unlockManagement(password: "wrong-password")
+    for _ in 0..<20 { await Task.yield() }
+    #expect(!unlocked)
+    #expect(model.profile == active)
+    #expect(endedSessions == 0)
+    #expect(model.administrationErrorMessage == "The Server Password is incorrect.")
+  }
+
+  @Test func combinedMetadataJobTracksProgressAndErrorsAcrossAdministratorLibraries() throws {
+    let first = MetadataJobSummary(
+      id: UUID(), libraryId: UUID(), mediaId: nil, state: .failed,
+      itemsTotal: 10, itemsProcessed: 10, itemsMatched: 8, itemsNeedingReview: 1, itemsFailed: 1,
+      error: "Provider rate limited", createdAt: "2026-11-01T10:00:00Z",
+      startedAt: "2026-11-01T10:00:01Z", completedAt: "2026-11-01T10:00:10Z", itemsSkipped: 1)
+    let second = MetadataJobSummary(
+      id: UUID(), libraryId: UUID(), mediaId: nil, state: .running,
+      itemsTotal: 20, itemsProcessed: 5, itemsMatched: 4, itemsNeedingReview: 0, itemsFailed: 0,
+      error: nil, createdAt: "2026-11-01T10:00:02Z", startedAt: "2026-11-01T10:00:03Z",
+      completedAt: nil, itemsSkipped: 2)
+    let running = try #require(AppModel.combinedMetadataJob([first, second]))
+    #expect(running.state == .running)
+    #expect(running.itemsTotal == 30)
+    #expect(running.itemsProcessed == 15)
+    #expect(running.itemsMatched == 12)
+    #expect(running.itemsFailed == 1)
+    #expect(running.itemsSkipped == 3)
+    #expect(running.error == "Provider rate limited")
+
+    let secondDone = MetadataJobSummary(
+      id: second.id, libraryId: second.libraryId, mediaId: nil, state: .completed,
+      itemsTotal: 20, itemsProcessed: 20, itemsMatched: 20, itemsNeedingReview: 0, itemsFailed: 0,
+      error: nil, createdAt: second.createdAt, startedAt: second.startedAt,
+      completedAt: "2026-11-01T10:00:20Z", itemsSkipped: 0)
+    let finished = try #require(AppModel.combinedMetadataJob([first, secondDone]))
+    #expect(finished.state == .failed)
+    #expect(finished.error == "Provider rate limited")
+    #expect(finished.itemsMatched == 28)
+  }
+
+  @Test func offlinePresentationPreservesSeriesTrackScope() {
+    let seriesID = UUID()
+    let episodeID = UUID()
+    let offlineEpisode = OfflineTitle(
+      id: episodeID, serverId: UUID(), userId: UUID(), title: "Pilot", subtitle: "Series · S1 E1",
+      kind: "episode", fileName: "pilot.mkv", contentType: "video/x-matroska", bytes: 1_024,
+      downloadedAt: Date(), positionMilliseconds: 0, durationMilliseconds: 60_000,
+      isCompleted: false, progressSavedAt: nil, progressDirty: false, subtitles: [],
+      parentId: seriesID, parentTitle: "Series", seasonNumber: 1, episodeNumber: 1)
+    let presentation = AppModel.offlinePresentation(for: offlineEpisode)
+    #expect(presentation.trackScope == seriesID)
+    #expect(presentation.offlineID == episodeID)
+  }
+
+  @Test func macDeviceIdLoadsPersistedValueWithoutChangingIt() throws {
+    let suite = "Aurelia.DeviceIdTests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let created = AppModel.loadOrCreateMacDeviceId(defaults: defaults)
+    #expect(!created.isEmpty)
+    #expect(AppModel.loadOrCreateMacDeviceId(defaults: defaults) == created)
+  }
+
   private func profile(role: UserRole = .owner) -> StoredServerProfile {
     StoredServerProfile(
       serverId: UUID(), name: "Synthetic Server", baseURL: URL(string: "https://fixture.invalid")!,

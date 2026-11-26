@@ -118,10 +118,30 @@ public sealed class ServerEfficiencyTests
         Assert.True(guard.Admit(address));
 
         var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        context.Request.Method = Microsoft.AspNetCore.Http.HttpMethods.Get;
         context.Request.Path = "/api/v1/streams/ticket";
+        context.Request.Headers.Range = "bytes=0-65535";
         Assert.False(Aurelia.Server.Services.ServerRequestGuard.IsPreviewStream(context.Request));
         context.Request.Headers["X-Aurelia-Stream-Purpose"] = "Preview";
         Assert.True(Aurelia.Server.Services.ServerRequestGuard.IsPreviewStream(context.Request));
+        // HEAD on direct file stream with preview marker is allowed.
+        context.Request.Method = Microsoft.AspNetCore.Http.HttpMethods.Head;
+        context.Request.Headers.Remove("Range");
+        Assert.True(Aurelia.Server.Services.ServerRequestGuard.IsPreviewStream(context.Request));
+        // Unbounded GET or oversized range cannot bypass playback stream limits (audit SRV-PLAY-006).
+        context.Request.Method = Microsoft.AspNetCore.Http.HttpMethods.Get;
+        Assert.False(Aurelia.Server.Services.ServerRequestGuard.IsPreviewStream(context.Request));
+        context.Request.Headers.Range = "bytes=0-";
+        Assert.False(Aurelia.Server.Services.ServerRequestGuard.IsPreviewStream(context.Request));
+        context.Request.Headers.Range = $"bytes=0-{Aurelia.Server.Services.ServerRequestGuard.MaximumPreviewRangeBytes}";
+        Assert.False(Aurelia.Server.Services.ServerRequestGuard.IsPreviewStream(context.Request));
+        // Non-direct sub-routes (/live, /hls, /speech-audio, /subtitles) are never preview streams.
+        context.Request.Headers.Range = "bytes=0-65535";
+        foreach (var subRoute in new[] { "/api/v1/streams/ticket/live", "/api/v1/streams/ticket/hls/720p/0.m4s", "/api/v1/streams/ticket/speech-audio", "/api/v1/streams/ticket/subtitles/0" })
+        {
+            context.Request.Path = subRoute;
+            Assert.False(Aurelia.Server.Services.ServerRequestGuard.IsPreviewStream(context.Request));
+        }
         // The marker means nothing outside stream reads.
         context.Request.Path = "/api/v1/media";
         Assert.False(Aurelia.Server.Services.ServerRequestGuard.IsPreviewStream(context.Request));

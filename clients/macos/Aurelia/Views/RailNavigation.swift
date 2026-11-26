@@ -92,6 +92,8 @@ struct RailHoverRegion: NSViewRepresentable {
 }
 
 /// App-local native overlay scrollers. No global defaults or private SwiftUI classes.
+/// Applies immediately and tiles legacy scroll views so full-bleed heroes never open with a
+/// 17-point right-hand gutter reserved for a classic scrollbar.
 struct AureliaOverlayScrollbars: NSViewRepresentable {
   func makeNSView(context: Context) -> Probe { Probe() }
   func updateNSView(_ view: Probe, context: Context) { view.apply() }
@@ -100,21 +102,39 @@ struct AureliaOverlayScrollbars: NSViewRepresentable {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func viewDidMoveToWindow() {
       super.viewDidMoveToWindow()
+      applyImmediately()
       apply()
     }
 
+    override func layout() {
+      super.layout()
+      applyImmediately()
+    }
+
     func apply() {
+      applyImmediately()
       DispatchQueue.main.async { [weak self] in
-        guard let root = self?.window?.contentView else { return }
-        Self.configure(root)
+        self?.applyImmediately()
       }
+    }
+
+    private func applyImmediately() {
+      guard let root = window?.contentView else { return }
+      Self.configure(root)
     }
 
     private static func configure(_ view: NSView) {
       if let scroll = view as? NSScrollView {
-        scroll.scrollerStyle = .overlay
+        let changed = scroll.scrollerStyle != .overlay
+        if changed {
+          scroll.scrollerStyle = .overlay
+        }
         scroll.verticalScroller?.controlSize = .small
         scroll.horizontalScroller?.controlSize = .small
+        if changed {
+          scroll.tile()
+          scroll.needsLayout = true
+        }
       }
       for child in view.subviews { configure(child) }
     }

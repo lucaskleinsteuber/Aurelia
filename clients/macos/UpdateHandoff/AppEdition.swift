@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Which Aurelia this build is: the real app, or "Aurelia Test" — a separate app with its own bundle
@@ -27,8 +28,45 @@ enum AppEdition {
     return "B5N7JVK37J" + suffix
   }
   static let displayName = isTest ? "Aurelia Test" : "Aurelia"
+  static func serverDataFolderName(isTest: Bool) -> String {
+    isTest ? "Aurelia Test Server" : "Aurelia Server"
+  }
+  static func localPort(isTest: Bool) -> Int { isTest ? 43_120 : 43_110 }
+  static func defaultLanPort(isTest: Bool) -> Int { isTest ? 43_121 : 43_111 }
+
+  static let serverDataFolderName = serverDataFolderName(isTest: isTest)
+  static let localPort = localPort(isTest: isTest)
+  static let defaultLanPort = defaultLanPort(isTest: isTest)
+  static let localBaseURL = URL(string: "http://127.0.0.1:\(localPort)")!
+
   /// The launch agents of the bundled server host: "<identifier>.host.background" and ".host.login".
   static func agentName(startAtLogin: Bool) -> String {
     bundleIdentifier + (startAtLogin ? ".host.login" : ".host.background")
+  }
+}
+
+/// Removes only Aurelia Test's own server data and log folders, never the real app's "Aurelia Server".
+enum TestEditionServerReset {
+  private static let testFolderName = "Aurelia Test Server"
+
+  static func removeServerFolders(
+    home: URL,
+    isTest: Bool = AppEdition.isTest,
+    fileManager: FileManager = .default
+  ) {
+    guard isTest else { return }
+    let base = home.standardizedFileURL
+    let candidates = [
+      base.appendingPathComponent("Library/Application Support", isDirectory: true)
+        .appendingPathComponent(testFolderName),
+      base.appendingPathComponent("Library/Logs", isDirectory: true)
+        .appendingPathComponent(testFolderName),
+    ]
+    for url in candidates {
+      guard url.lastPathComponent == testFolderName else { continue }
+      var metadata = stat()
+      guard lstat(url.path, &metadata) == 0 else { continue }
+      try? fileManager.removeItem(at: url)
+    }
   }
 }

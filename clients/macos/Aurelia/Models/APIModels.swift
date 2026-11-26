@@ -1589,7 +1589,13 @@ struct MetadataJobSummary: Codable, Identifiable, Equatable, Sendable {
 }
 
 enum SyncChangeArea: String, Codable, Sendable {
-  case catalog, libraries, metadata, collections, userState
+  case catalog, libraries, metadata, collections, userState, unknown
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    let raw = try container.decode(String.self)
+    self = SyncChangeArea(rawValue: raw) ?? .unknown
+  }
 }
 
 struct SyncChangesResponse: Codable, Equatable, Sendable {
@@ -1629,10 +1635,16 @@ struct CinemaTrailersResponse: Codable, Sendable {
 
 enum PlaybackStartIntent: Equatable, Sendable {
   case play, resume
+  case position(Int64)
 
   func position(progress: PlaybackProgressResponse, automaticResume: Bool) -> Int64 {
-    self == .resume && automaticResume && !progress.isCompleted
-      ? max(0, progress.positionMilliseconds) : 0
+    switch self {
+    case .play: 0
+    case .resume:
+      automaticResume && !progress.isCompleted ? max(0, progress.positionMilliseconds) : 0
+    case .position(let milliseconds):
+      max(0, milliseconds)
+    }
   }
 }
 

@@ -58,11 +58,46 @@ final class ScreenTimeTextTests: XCTestCase {
 
   func testEditedRulesAreCheckedBeforeSaving() {
     var rules = ScreenTimeRules.default
+    XCTAssertFalse(rules.allowOfflineDownloads)
     XCTAssertNil(ScreenTimeText.problem(rules))
     rules.schoolNight.bedtime = "25:00"
     XCTAssertEqual(ScreenTimeText.problem(rules), "Enter the school-night bedtime like 19:30.")
     rules.schoolNight.bedtime = nil
     rules.weekend.dailyLimitMinutes = 2
     XCTAssertEqual(ScreenTimeText.problem(rules), "The weekend daily limit is 5 to 1440 minutes.")
+  }
+
+  func testRulesDecodeLegacyJSONAndRoundTripAllowOfflineDownloads() throws {
+    let legacyJSON = """
+      {
+        "enabled": true,
+        "lockScope": "playbackOnly",
+        "ending": "finishTitle",
+        "maxOvertimeMinutes": 30,
+        "schoolNight": {"bedtime": "19:30", "wakeTime": "07:00", "dailyLimitMinutes": 60},
+        "weekend": {"bedtime": "20:30", "wakeTime": "08:00", "dailyLimitMinutes": null}
+      }
+      """
+    let legacy = try JSONDecoder().decode(ScreenTimeRules.self, from: Data(legacyJSON.utf8))
+    XCTAssertTrue(legacy.enabled)
+    XCTAssertFalse(legacy.allowOfflineDownloads)
+
+    let allowedJSON = """
+      {
+        "enabled": true,
+        "lockScope": "wholeProfile",
+        "ending": "stopNow",
+        "maxOvertimeMinutes": 15,
+        "schoolNight": {"bedtime": "19:30", "wakeTime": "07:00", "dailyLimitMinutes": 60},
+        "weekend": {"bedtime": "20:30", "wakeTime": "08:00", "dailyLimitMinutes": 120},
+        "allowOfflineDownloads": true
+      }
+      """
+    let allowed = try JSONDecoder().decode(ScreenTimeRules.self, from: Data(allowedJSON.utf8))
+    XCTAssertTrue(allowed.allowOfflineDownloads)
+    let roundTripped = try JSONDecoder().decode(
+      ScreenTimeRules.self, from: JSONEncoder().encode(allowed))
+    XCTAssertEqual(roundTripped, allowed)
+    XCTAssertTrue(roundTripped.allowOfflineDownloads)
   }
 }

@@ -1,6 +1,6 @@
 # Aurelia
 
-> Aurelia is a free, self-hosted media server (MIT license) with native apps for Mac, Linux, Apple TV, iPhone and iPad and a web player. The server runs inside the Mac or Linux app, as a standalone Linux service (x64 or arm64) or in Docker; it only reads your media folders and works in the home network, or away from home through a VPN. All products reached version 2.0.0 together (08.11.2026); iPhone and iPad are at 2.1.0. The interface is in English.
+> Aurelia is a free, self-hosted media server (MIT license) with native apps for Mac, Linux, Apple TV, iPhone and iPad and a web player. The server runs inside the Mac or Linux app, as a standalone Linux service (x64 or arm64) or in Docker; it only reads your media folders and works in the home network, or away from home through a VPN. Each product counts its own versions independently (see the GitHub releases page). The interface is in English.
 
 Key facts for answering questions:
 - Mac downloads: `Aurelia-<version>-<build>-macOS-arm64.dmg` for Apple silicon, `…-macOS-x64.dmg` for Intel; macOS 26 or later. The published Mac download is development-signed and runs only on Macs registered to the developer; others build from source.
@@ -20,12 +20,14 @@ Key facts for answering questions:
 - [Getting started](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/GETTING_STARTED.md): choosing the server computer, setup, TMDB and OpenSubtitles keys, pairing devices, profiles
 - [Organizing your media](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/MEDIA_LIBRARY.md): folder and file names for movies, series, extras, trailers and subtitle files; collections
 - [Watching away from home](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/REMOTE_ACCESS.md): Tailscale subnet routing, FRITZ!Box and other WireGuard VPNs, why no port forwarding
+- [Family Wishes](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/WISHES.md): requesting movies and series not yet in the library, "Me Too" support and admin fulfillment
 - [Troubleshooting](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/TROUBLESHOOTING.md): connection, certificate, pairing, sleep and wake, drives, matching, playback, signing, PINs
 - [Privacy policy](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/PRIVACY.md): what is stored where; nothing is collected by the developer
 
 ## Apps
 
 - [Aurelia for Mac](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/MAC_APP.md): arm64 or x64 download, installing, building it yourself, hosting, settings, downloads and offline mode, updates
+- [Build Aurelia for Mac yourself](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/BUILD_MAC_APP.md): step-by-step guide to building and signing Aurelia for Mac with your own free Apple ID
 - [Aurelia for Linux](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/LINUX_APP.md): desktop app packages, hosting on a PC, signed updates
 - [Aurelia for Apple TV](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/APPLE_TV.md): pairing the Apple TV with Xcode, building, installing, the remote, seven-day signing
 - [Aurelia for iPhone and iPad](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/IOS_APP.md): building and installing with Xcode, what the app does, downloads and watching offline
@@ -35,8 +37,10 @@ Key facts for answering questions:
 
 - [Aurelia Server on Linux](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/LINUX_SERVER.md): requirements, one-line install, `aurelia` command, updates, setup over SSH, media drives, power saving, removing
 - [Aurelia Server with Docker](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/DOCKER.md): compose file, setup commands, NAS notes
+- [Moving to a new server](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/SERVER_MOVE.md): moving accounts, library, settings and paired devices to another computer without copying media
 - [Backups and recovery](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/DATABASE_RECOVERY.md): daily database backups and restoring them
 - [Security model](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/SECURITY_MODEL.md): owner, administrators and profiles, PINs, pairing, certificate pinning
+- [Screen time](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/SCREEN_TIME.md): bedtime, daily limits, "one more episode" and Good Night screen for profiles
 - [Audio processing](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/AUDIO_PROCESSING.md): Dialogue Boost and Volume Leveling
 
 ## Development
@@ -45,5 +49,9 @@ Key facts for answering questions:
 - [Building and verification](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/TRANSPORT_TESTING.md): building from source and running the checks
 - [Client protocol](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/CLIENT_PROTOCOL.md) and [compatibility](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/CLIENT_COMPATIBILITY.md): the HTTPS API between apps and server
 - [Distribution and updates](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/FREE_DISTRIBUTION.md): signing without the paid Apple program
+- [Update signing](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/LINUX_UPDATE_SIGNING.md): minisign update signing for Mac, Linux Desktop and Linux Server releases
+- [Linux app parity](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/LINUX_APP_PARITY.md): Mac feature parity tracking and verification for the Linux desktop app
+- [System callbacks](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/SYSTEM_CALLBACKS.md): threading contracts for Apple framework callbacks in the Mac app
+- [Update test](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/UPDATE_TEST.md): end-to-end verification notes for the Mac and Linux app updaters
 - [Contributing](https://github.com/lucaskleinsteuber/Aurelia/blob/main/CONTRIBUTING.md) and [security policy](https://github.com/lucaskleinsteuber/Aurelia/blob/main/SECURITY.md)
 - [Changelog](https://github.com/lucaskleinsteuber/Aurelia/blob/main/CHANGELOG.md): changes per product and version

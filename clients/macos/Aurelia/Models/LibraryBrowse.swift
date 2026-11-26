@@ -284,4 +284,15 @@ enum LibraryFindShortcutPolicy {
       && modifiers.intersection([.command, .control, .option, .shift]) == .command
       && !isRepeat && activeShellWindow && !blocked
   }
+
+  /// ⌘[ returns from a title, collection, or person detail page without injecting a hidden
+  /// duplicate Back button into the accessibility hierarchy.
+  static func consumesBack(
+    characters: String?, modifiers: NSEvent.ModifierFlags, isRepeat: Bool,
+    activeShellWindow: Bool, blocked: Bool, canGoBack: Bool
+  ) -> Bool {
+    canGoBack && characters == "["
+      && modifiers.intersection([.command, .control, .option, .shift]) == .command
+      && !isRepeat && activeShellWindow && !blocked
+  }
 }

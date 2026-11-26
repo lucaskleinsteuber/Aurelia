@@ -12,8 +12,8 @@ package=$(CDPATH= cd -- "${1:?Give the unpacked package folder.}" && pwd)
 exfat=false
 [ "${2:-}" = --exfat ] && exfat=true
 [ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo)." >&2; exit 1; }
-if [ -e /var/lib/aurelia/aurelia.db ]; then
-  echo "Aurelia is already set up here; this test only runs on a computer without Aurelia data." >&2
+if [ -e /var/lib/aurelia/aurelia.db ] || [ -e /opt/aurelia ]; then
+  echo "Aurelia is already installed or set up here; this test only runs on a clean computer." >&2
   exit 1
 fi
 
@@ -91,6 +91,15 @@ as_owner aurelia library scan --all >/dev/null || fail "the scan failed"
 [ "$(query "SELECT COUNT(*) FROM MediaItems WHERE SourcePath LIKE '$media/ext/%';")" -ge 1 ] || fail "the synthetic movie was not found"
 query "SELECT FileSystemIdentity FROM MediaItems WHERE SourcePath LIKE '$media/ext/%';" | grep -E '^linux:' >/dev/null \
   || fail "a file on ext4 has no lasting identity"
+
+# OS-level media read-only guard: even on a 0777 media folder, the service sandbox must forbid writes (audit LNX-PKG-014).
+mkdir -p "$media/write-check"
+chmod 0777 "$media/write-check"
+if systemd-run --wait --quiet -p User=aurelia -p Group=aurelia -p ProtectSystem=strict -p ReadWritePaths=/var/lib/aurelia \
+  /bin/sh -c "touch '$media/write-check/should-fail'" 2>/dev/null; then
+  fail "the aurelia service sandbox could write to a media folder"
+fi
+[ ! -e "$media/write-check/should-fail" ] || fail "a probe file was created in the media folder"
 
 if $exfat; then
   step "exFAT drive through /etc/fstab"
@@ -172,6 +181,15 @@ curl -ks --max-time 3 https://127.0.0.1:43111/api/v1/server/info >/dev/null || t
 for _ in $(seq 1 30); do aurelia status 2>/dev/null | has 'LAN access: enabled' && break; sleep 1; done
 aurelia status | has 'LAN access: enabled' || fail "a connecting device did not start Aurelia"
 ! systemctl is-active --quiet aurelia-start.socket || fail "the start socket stayed open next to Aurelia"
+# Verify aurelia-power-request.path consumes power-now automatically (audit LNX-PKG-014).
+systemctl is-active --quiet aurelia-power-request.path || fail "aurelia-power-request.path is not watching power-now"
+printf 'stop\n' | runuser -u aurelia -- /bin/sh -c 'cat > "$1"' sh /var/lib/aurelia/power-now
+for _ in $(seq 1 20); do [ ! -e /var/lib/aurelia/power-now ] && systemctl is-active --quiet aurelia-start.socket && break; sleep 0.5; done
+[ ! -e /var/lib/aurelia/power-now ] || fail "aurelia-power-request.path did not consume power-now"
+systemctl is-active --quiet aurelia-start.socket || fail "power-now stop did not activate aurelia-start.socket"
+curl -ks --max-time 3 https://127.0.0.1:43111/api/v1/server/info >/dev/null || true
+for _ in $(seq 1 30); do aurelia status 2>/dev/null | has 'LAN access: enabled' && break; sleep 1; done
+aurelia status | has 'LAN access: enabled' || fail "Aurelia did not restart after power-now stop"
 aurelia sleep off >/dev/null
 grep -Fx 'MODE=off' "$settings" >/dev/null || fail "power saving did not turn off"
 dry | has 'power saving is off' || fail "the power check ignored that it is off"
@@ -194,9 +212,7 @@ release=$media/release
 arch=$(cat "$package/ARCHITECTURE")
 installed_build=$(sed -n 's/.*(\([0-9][0-9]*\)).*/\1/p' /opt/aurelia/VERSION)
 next_build=$((installed_build + 1))
-# The stand-in release is signed with a throwaway key, at a build that needs a signature.
-first_signed_build=$(sed -n 's/^first_signed_build=//p' /usr/local/bin/aurelia)
-[ "$next_build" -ge "$first_signed_build" ] || next_build=$first_signed_build
+# Every server release must carry a signature (audit LNX-PKG-002); sign the stand-in with a throwaway key.
 . "$(dirname -- "$0")/synthetic-signing.sh"
 mkdir -p "$release/key"
 signing_key=$(synthetic_signing_key "$release/key")
@@ -208,9 +224,10 @@ cp -R "$package" "$release/$folder"
 echo "9.9.9 ($next_build)" > "$release/$folder/VERSION"
 tar -czf "$release/files/$archive" -C "$release" "$folder"
 rm -rf "${release:?}/$folder"
-# Like GitHub's list: a draft with a higher build must be ignored. $2 = unsigned leaves the
-# signature out.
+# Like GitHub's API: supports /releases/latest (200 or 404) and paginated /releases?per_page=100&page=N
+# (more than 100 entries when $3 = paged so paging is exercised too; audit LNX-PKG-014).
 offer() {
+  local mode=${3:-latest}
   jq -n --arg files http://127.0.0.1:43180/files --arg name "$1" --arg draft "Aurelia-Server-9.9.9-$((next_build + 5))-linux-$arch.tar.gz" '
     [ { draft: true, prerelease: false, assets: [ { name: $draft, url: "\($files)/\($draft)" },
         { name: "SHA256SUMS", url: "\($files)/SHA256SUMS" } ] },
@@ -221,9 +238,54 @@ offer() {
     jq '(.[1].assets) |= map(select(.name != "SHA256SUMS.minisig"))' "$release/repos/test/aurelia/releases" \
       > "$release/releases.unsigned" && mv "$release/releases.unsigned" "$release/repos/test/aurelia/releases"
   fi
+  if [ "$mode" = paged ]; then
+    rm -f "$release/repos/test/aurelia/latest"
+    # Pad 105 unrelated non-server releases before the server release so page 2 is required.
+    jq '[range(0; 105) | { draft: false, prerelease: true, assets: [] }] + .' "$release/repos/test/aurelia/releases" \
+      > "$release/releases.paged" && mv "$release/releases.paged" "$release/repos/test/aurelia/releases"
+  else
+    jq '.[1]' "$release/repos/test/aurelia/releases" > "$release/repos/test/aurelia/latest"
+  fi
 }
 offer "$archive"
-python3 -I -m http.server 43180 --bind 127.0.0.1 --directory "$release" >/dev/null 2>&1 &
+python3 -I - "$release" <<'PY' >/dev/null 2>&1 &
+import http.server, json, os, sys, urllib.parse
+root = sys.argv[1]
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=root, **kwargs)
+    def log_message(self, *args):
+        pass
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/repos/test/aurelia/releases/latest":
+            latest = os.path.join(root, "repos/test/aurelia/latest")
+            if not os.path.exists(latest):
+                self.send_error(404)
+                return
+            data = open(latest, "rb").read()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if parsed.path == "/repos/test/aurelia/releases":
+            qs = urllib.parse.parse_qs(parsed.query)
+            per_page = int(qs.get("per_page", ["100"])[0])
+            page = int(qs.get("page", ["1"])[0])
+            items = json.loads(open(os.path.join(root, "repos/test/aurelia/releases")).read())
+            start = max(0, (page - 1) * per_page)
+            data = json.dumps(items[start:start + per_page]).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        super().do_GET()
+http.server.ThreadingHTTPServer(("127.0.0.1", 43180), Handler).serve_forever()
+PY
 release_server=$!
 for _ in $(seq 1 20); do curl -fs http://127.0.0.1:43180/files/ >/dev/null && break; sleep 0.5; done
 # The root command honours the stand-in only where root allows it with this file.
@@ -268,7 +330,11 @@ grep -Fx 'STATE=idle' "$status" >/dev/null && grep -Fx "NEWEST_BUILD=$next_build
   || fail "the app is not told about the newer release"
 [ "$(cat /opt/aurelia/VERSION)" = "$before" ] || fail "a check requested in the app changed the installation"
 
-update --check | has "Newest:    Aurelia Server 9.9.9 ($next_build)" || fail "the check did not find the newer release"
+update --check | has "Newest:    Aurelia Server 9.9.9 ($next_build)" || fail "the check did not find the newer release via /releases/latest"
+# Also exercise list pagination beyond 100 entries when /releases/latest returns 404 (audit LNX-PKG-014).
+offer "$archive" "" paged
+update --check | has "Newest:    Aurelia Server 9.9.9 ($next_build)" || fail "the check did not find the newer release on page 2"
+offer "$archive"
 [ "$(cat /opt/aurelia/VERSION)" = "$before" ] || fail "checking for an update changed the installation"
 printf 'n\n' | update | has 'Nothing was changed' || fail "declining the update did not stop it"
 

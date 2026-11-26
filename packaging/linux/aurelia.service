@@ -1,6 +1,6 @@
 [Unit]
 Description=Aurelia media server
-After=network-online.target local-fs.target
+After=network-online.target local-fs.target remote-fs.target
 Wants=network-online.target
 # While Aurelia is stopped to save power, this socket waits for devices in its place.
 Conflicts=aurelia-start.socket
@@ -48,6 +48,12 @@ ProtectKernelLogs=yes
 ProtectHostname=yes
 RestrictNamespaces=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# Hardware video encoding needs GPU render/video devices only, never webcams (/dev/video*).
+DevicePolicy=closed
+DeviceAllow=char-drm rw
+DeviceAllow=char-nvidia-frontend rw
+DeviceAllow=char-nvidia-uvm rw
+DeviceAllow=char-nvidia-caps rw
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM

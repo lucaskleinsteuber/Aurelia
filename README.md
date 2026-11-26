@@ -88,8 +88,8 @@ your system **and processor**:
 
 | App | System | Download |
 | --- | --- | --- |
-| **Aurelia for Mac** | macOS 26, **Apple silicon** (M1 and newer) | `Aurelia-<version>-macOS-arm64.dmg` |
-| | macOS 26, **Intel** | `Aurelia-<version>-macOS-x64.dmg` |
+| **Aurelia for Mac** | macOS 26, **Apple silicon** (M1 and newer) | `Aurelia-<version>-<build>-macOS-arm64.dmg` |
+| | macOS 26, **Intel** | `Aurelia-<version>-<build>-macOS-x64.dmg` |
 | **Aurelia for Linux** (desktop app) | Ubuntu, Debian, Mint · **x64** / **arm64** | `…-amd64.deb` / `…-arm64.deb` |
 | | Fedora, openSUSE · **x64** / **arm64** | `…-x86_64.rpm` / `…-aarch64.rpm` |
 | | Arch, CachyOS, Manjaro · **x64** / **arm64** | `…-x86_64.pkg.tar.zst` / `…-aarch64.pkg.tar.zst` |
@@ -183,10 +183,12 @@ flowchart LR
 
 All apps reached **2.0.0** together. From here each app counts its own versions again, because
 a change in one app does not need a new version of the others; every
-[release page](../../releases) ends with the newest version and download of every app.
-Stable releases are the default. Test versions appear as **betas** (*Pre-release* on GitHub) only
-in apps that turned on *Beta updates* in Settings › Updates. Changes are listed in the
-[changelog](CHANGELOG.md).
+[release page](../../releases) ends with links to the current version of every product (for Mac,
+the newest beta; for Apple TV and iPhone & iPad, the build-from-source guide).
+For the Server and Linux desktop app, stable releases are the default and test versions appear as
+**betas** (*Pre-release* on GitHub) only when *Beta updates* is turned on in Settings › Updates
+(or `sudo aurelia update --beta on`). The Mac app ships as development-signed betas only, with
+*Beta updates* enabled by default. Changes are listed in the [changelog](CHANGELOG.md).
 
 ## Contributing and support
 

@@ -1,7 +1,7 @@
 // Aurelia in a web browser: sign-in with a code approved on the Mac, profiles, the library
 // and the player. The server serves this page, so every address here is its own.
 
-import { h, icon, clear } from "./dom.js";
+import { h, icon, clear, openPopupMenu, closePopupMenu, createSidebarResizeHandle } from "./dom.js";
 import { createApi, ApiError } from "./api.js";
 import { createCatalogView } from "./catalog-view.js";
 import * as logic from "./logic.js";
@@ -13,7 +13,7 @@ import { supportsSecurity } from "./security.js";
 import { createSecurityAlerts } from "./security-view.js";
 import { describeWishError, formatWishNotification, supportsWishes, wishBadgeCount, wishPosterUrl } from "./wishes.js";
 import { openWrapped, readyMonth, readyMonths, wrappedYears, monthIsNew, MONTHS } from "./wrapped.js";
-import { Player } from "./player.js";
+import { Player, loadPreferences, seekGlyph } from "./player.js";
 import { clockTime, closedLabel } from "./screen-time.js";
 import { LIVE_FEATURE } from "./live-logic.js";
 import { ADAPTIVE_FEATURE } from "./hls-logic.js";
@@ -21,8 +21,7 @@ import { createSettings } from "./settings.js";
 import { createSetupMove, movedNotice } from "./server-move-view.js";
 import { movedDestination } from "./server-move.js";
 import { adScene, cinemaActs, cinemaWanted, comingUp, curtain, nextAd, AD_SECONDS, CURTAIN_EARLIEST, CURTAIN_LONGEST_WAIT, CURTAIN_OPENING, LAST_AD_KEY, TRAILER_LONGEST_SECONDS, TRAILER_START_SECONDS } from "./cinema.js";
-import { loadPreferences } from "./player.js";
-import { applyAppearance, loadGeneral, sidebarShows, startPath, visibleTitles } from "./preferences.js";
+import { applyAppearance, loadGeneral, motionAllowed, sidebarShows, startPath, visibleTitles } from "./preferences.js";
 import { confirmSheet, openSheet } from "./sheet.js";
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -49,8 +48,17 @@ const cached = {
 };
 const root = document.getElementById("app");
 
+const loadedWebVersion = (() => {
+  try {
+    return new URL(import.meta.url).pathname.match(/^\/web\/v\/([^/]+)\//)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+})();
+
 const state = {
   server: null,
+  loadedVersion: null,
   profile: null,
   route: logic.parseRoute(location.pathname, location.search),
   renderToken: 0,
@@ -63,6 +71,7 @@ const state = {
   watchlistIds: new Set(),
   wishSummary: null,
   movedToken: null,
+  focusSearch: false,
 };
 
 // Settings › General: open on the chosen page when the app starts at Home.
@@ -96,6 +105,20 @@ async function start() {
   try {
     state.server = await api.serverInfo();
     state.offSince = null;
+    if (logic.serverVersionChanged({ loadedAssetVersion: loadedWebVersion, loadedServerVersion: state.loadedVersion, serverInfo: state.server })) {
+      const target = state.server?.webVersion ?? state.server?.version ?? "";
+      let alreadyTried = false;
+      try {
+        alreadyTried = Boolean(target) && sessionStorage.getItem("aurelia.reloadedVersion") === target;
+        if (!alreadyTried && target) sessionStorage.setItem("aurelia.reloadedVersion", target);
+      } catch { /* Proceed with a single reload attempt. */ }
+      if (!alreadyTried && typeof globalThis.location?.reload === "function") {
+        globalThis.location.reload();
+        return;
+      }
+    }
+    state.loadedVersion ??= state.server?.version ?? null;
+    try { sessionStorage.removeItem("aurelia.reloadedVersion"); } catch { /* Optional. */ }
     logic.rememberHosting(state.server?.hosting);
     document.title = state.server?.name && state.server.name !== "Aurelia" ? `Aurelia · ${state.server.name}` : "Aurelia";
   } catch (error) {
@@ -446,6 +469,15 @@ function showServerMoved(destination) {
 
 // MARK: Profiles
 
+function showProfilesError(error) {
+  render(screenFrame(emptyState(
+    "warning",
+    "Couldn’t Load Profiles",
+    error?.message || "The server couldn’t load profiles right now.",
+    h("button", { class: "primary-button", onclick: () => showProfiles() }, "Try Again"),
+  )));
+}
+
 async function showProfiles(note) {
   catalog.close();
   settings.closeEditors();
@@ -461,7 +493,8 @@ async function showProfiles(note) {
   } catch (error) {
     if (token !== state.renderToken) return;
     if (error instanceof ApiError && error.offline) return showServerOff();
-    return showPairing();
+    if (error instanceof ApiError && logic.sessionRefused(error.status, error.code)) return showPairing();
+    return showProfilesError(error);
   }
   if (token !== state.renderToken) return;
   const firstPin = picker.managementSetupRequired;
@@ -772,7 +805,9 @@ async function signOut() {
   } catch {
     // The cookies are cleared by the server's answer; without one, the next start asks again.
   }
+  closePopupMenu();
   state.profile = null;
+  markTabProfile(false);
   showPairing();
 }
 
@@ -809,7 +844,10 @@ async function sessionEnded() {
     showProfiles("Your profile session ended. Choose your profile again.");
   } catch (error) {
     if (error instanceof ApiError && error.offline) return showServerOff();
-    showPairing("This browser was signed out. Ask the owner for a new code.");
+    if (error instanceof ApiError && logic.sessionRefused(error.status, error.code)) {
+      return showPairing("This browser was signed out. Ask the owner for a new code.");
+    }
+    showProfilesError(error);
   }
 }
 
@@ -876,7 +914,10 @@ document.addEventListener("pointerover", (event) => {
   const id = link.getAttribute("href").slice("/title/".length).split(/[?#/]/)[0];
   if (!id || reads.has(`detail:${id}`)) return;
   prefetchTimer = setTimeout(() => {
-    prefetches.start(id, () => Promise.all([cached.detail(id).then((detail) => { warmBackdrop(detail); return detail; }), cached.playbackPlan(id).catch(() => null)]));
+    prefetches.start(id, () => cached.detail(id).then((detail) => {
+      warmBackdrop(detail);
+      return cached.playbackPlan(id).catch(() => null).then(() => detail);
+    }));
   }, event.pointerType === "touch" ? 0 : 90);
 }, { passive: true });
 
@@ -927,9 +968,31 @@ function shell(content) {
   const current = state.route.name === "person" || state.route.name === "title" || state.route.name === "collection" ? null : state.route.name;
   const layout = sidebarLayout();
   const frame = h("div", { class: `app-shell${layout.hidden ? " sidebar-hidden" : ""}` });
-  const closeDrawer = () => frame.classList.remove("drawer-open");
+  const page = h("main", { class: "page", id: "page", tabindex: "-1" }, content);
+  const skipLink = h("a", {
+    class: "skip-link",
+    href: "#page",
+    onclick: (event) => {
+      event.preventDefault();
+      const target = page.querySelector("h1") ?? page;
+      if (target !== page && !target.hasAttribute("tabindex")) target.tabIndex = -1;
+      target.focus();
+    },
+  }, "Skip to Content");
+  let drawerEscape = null;
+  const closeDrawer = ({ restoreFocus = false } = {}) => {
+    const wasOpen = frame.classList.contains("drawer-open");
+    frame.classList.remove("drawer-open");
+    page.inert = false;
+    show.setAttribute("aria-expanded", "false");
+    if (drawerEscape) {
+      document.removeEventListener("keydown", drawerEscape, true);
+      drawerEscape = null;
+    }
+    if (restoreFocus && wasOpen) show.focus();
+  };
   const item = ([name, label, href]) => h("a", { class: `sidebar-item${current === name ? " selected" : ""}`, href, "data-route": true,
-    "aria-current": current === name ? "page" : null, onclick: closeDrawer },
+    "aria-current": current === name ? "page" : null, onclick: () => closeDrawer() },
     icon(SIDEBAR_SYMBOLS[name] ?? "library", { size: 17 }), h("span", {}, label), name === "wishes" ? wishBadge() : null);
 
   const menu = h("div", { class: "profile-menu", role: "menu", hidden: true, "aria-label": "Profile" },
@@ -943,9 +1006,12 @@ function shell(content) {
   const outside = (event) => { if (!menu.contains(event.target) && event.target !== profileButton) closeMenu(); };
   const keys = (event) => {
     if (event.key === "Escape") { event.preventDefault(); closeMenu(); profileButton.focus(); }
-    else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    else if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
       event.preventDefault();
       const entries = [...menu.querySelectorAll(".menu-item")];
+      if (!entries.length) return;
+      if (event.key === "Home") return entries[0].focus();
+      if (event.key === "End") return entries[entries.length - 1].focus();
       const at = entries.indexOf(document.activeElement);
       entries[(at + (event.key === "ArrowDown" ? 1 : entries.length - 1)) % entries.length]?.focus();
     }
@@ -971,22 +1037,30 @@ function shell(content) {
     saveSidebarLayout({ ...sidebarLayout(), hidden });
   };
   const narrow = () => window.matchMedia?.("(max-width: 760px)")?.matches;
-  const hide = h("button", { class: "sidebar-toggle", "aria-label": "Hide Sidebar", title: "Hide Sidebar", onclick: () => setHidden(true) }, icon("sidebar", { size: 16 }));
+  const openDrawer = () => {
+    frame.classList.add("drawer-open");
+    page.inert = true;
+    show.setAttribute("aria-expanded", "true");
+    if (!drawerEscape) {
+      drawerEscape = (event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        closeDrawer({ restoreFocus: true });
+      };
+      document.addEventListener("keydown", drawerEscape, true);
+    }
+    sidebar.querySelector(".sidebar-item, button")?.focus();
+  };
+  const hide = h("button", { class: "sidebar-toggle", "aria-label": "Hide Sidebar", title: "Hide Sidebar",
+    onclick: () => (narrow() ? closeDrawer({ restoreFocus: true }) : setHidden(true)) }, icon("sidebar", { size: 16 }));
   const show = h("button", { class: "sidebar-toggle sidebar-show", "aria-label": "Show Sidebar", title: "Show Sidebar",
-    onclick: () => narrow() ? frame.classList.add("drawer-open") : setHidden(false) }, icon("sidebar", { size: 16 }));
-  // Dragging the sidebar's edge sets its width, as on the Mac.
-  const handle = h("div", { class: "sidebar-resize", role: "separator", "aria-orientation": "vertical", "aria-label": "Sidebar Width" });
-  handle.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    handle.setPointerCapture(event.pointerId);
-    const move = (moved) => document.documentElement.style.setProperty("--sidebar", `${Math.min(300, Math.max(210, Math.round(moved.clientX)))}px`);
-    const end = () => {
-      handle.removeEventListener("pointermove", move);
-      saveSidebarLayout({ ...sidebarLayout(), width: parseInt(getComputedStyle(document.documentElement).getPropertyValue("--sidebar"), 10) || 236 });
-    };
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", end, { once: true });
-    handle.addEventListener("pointercancel", end, { once: true });
+    "aria-expanded": "false",
+    onclick: () => (narrow() ? openDrawer() : setHidden(false)) }, icon("sidebar", { size: 16 }));
+  // Dragging or arrow-keying the sidebar's edge sets its width, as on the Mac.
+  const handle = createSidebarResizeHandle({
+    width: layout.width,
+    onPreview: (width) => document.documentElement.style.setProperty("--sidebar", `${width}px`),
+    onCommit: (width) => saveSidebarLayout({ ...sidebarLayout(), width }),
   });
   const sidebar = h("aside", { class: "sidebar", "aria-label": "Library" },
     h("div", { class: "sidebar-head" }, hide),
@@ -996,9 +1070,10 @@ function shell(content) {
       yours.map(item)),
     h("div", { class: "sidebar-foot" },
       h("div", { class: "menu-anchor", style: { flex: "1", minWidth: "0", display: "flex" } }, profileButton, menu),
-      h("a", { class: `sidebar-gear${state.route.name === "settings" ? " selected" : ""}`, href: "/settings", "data-route": true, "aria-label": "Settings", title: "Settings", onclick: closeDrawer }, icon("gear", { size: 17 }))),
+      h("a", { class: `sidebar-gear${state.route.name === "settings" ? " selected" : ""}`, href: "/settings", "data-route": true, "aria-label": "Settings", title: "Settings", onclick: () => closeDrawer() }, icon("gear", { size: 17 }))),
     handle);
-  frame.append(sidebar, h("div", { class: "sidebar-backdrop", onclick: closeDrawer }), show, h("main", { class: "page", id: "page" }, content));
+  window.addEventListener("aurelia:page", () => { closeDrawer(); closeMenu(); }, { once: true });
+  frame.append(skipLink, sidebar, h("div", { class: "sidebar-backdrop", onclick: () => closeDrawer({ restoreFocus: true }) }), show, page);
   return frame;
 }
 
@@ -1007,11 +1082,6 @@ function heroReady(content) {
   const art = content?.querySelector?.(".detail-hero img.hero-art, .hero img.hero-art");
   if (!art || art.classList.contains("loaded") || typeof art.decode !== "function") return Promise.resolve();
   return Promise.race([art.decode().catch(() => {}), new Promise((resolve) => setTimeout(resolve, 150))]);
-}
-
-/** Whether pages may move: the system's and this browser's Reduce Motion both keep them still. */
-function motionAllowed() {
-  return !window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches && document.body.dataset.heroMotion !== "reduced";
 }
 
 /** The horizontal rails' positions, so a page built again in place keeps them (audit L4). */
@@ -1091,7 +1161,15 @@ async function renderRoute({ quiet = false, restoreScroll = false, resetScroll =
     if (handleError(outcome.error)) return;
     // A quiet refresh that fails keeps the page as it was.
     if (quiet && root.querySelector("#page")) return;
-    content = emptyState("warning", "Couldn’t Load This Page", outcome.error.message, h("button", { class: "secondary-button", onclick: () => renderRoute() }, "Try Again"));
+    const problem = logic.routeErrorState(outcome.error);
+    content = emptyState(
+      problem.symbol,
+      problem.title,
+      problem.text,
+      problem.retryable
+        ? h("button", { class: "secondary-button", onclick: () => renderRoute() }, "Try Again")
+        : h("a", { class: "secondary-button", href: "/", "data-route": true }, "Back to Home"),
+    );
   }
   if (token !== state.renderToken || !content) {
     isRenderingRoute = false;
@@ -1116,7 +1194,25 @@ async function renderRoute({ quiet = false, restoreScroll = false, resetScroll =
   // Another settings page fades in where the last one was; the list stays still.
   if (inPlace) root.querySelector(".settings-content")?.classList.add("swap-in");
   isRenderingRoute = false;
-  if (route.name === "home" && !quiet && logic.tourPending(safeStorage())) setTimeout(() => startTour(), 600);
+  if (!quiet) {
+    if (route.name === "search" && state.focusSearch) {
+      state.focusSearch = false;
+      root.querySelector(".search .search-field")?.focus();
+    } else if (!inPlace) {
+      const pageEl = root.querySelector("#page");
+      if (pageEl && !pageEl.contains(document.activeElement)) {
+        const heading = pageEl.querySelector("h1");
+        if (heading) {
+          heading.tabIndex = -1;
+          heading.focus({ preventScroll: true });
+        } else {
+          pageEl.focus?.({ preventScroll: true });
+        }
+      }
+    }
+  }
+  const hasHomeTitles = Boolean(content.querySelector?.(".hero, .poster-card, .continue-card"));
+  if (route.name === "home" && hasHomeTitles && !quiet && logic.tourPending(safeStorage())) setTimeout(() => startTour(), 600);
   // The tab's title is set only for the page that is really shown (audit L13).
   const label = { home: "Home", library: "Library", watchlist: "Watchlist", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", history: "Watch History", statistics: "Statistics", settings: "Settings", "movie-night": "Movie Night", wishes: "Wishes", people: "People" }[route.name];
   const named = content.dataset?.pageTitle ?? label;
@@ -1277,8 +1373,19 @@ async function homeScreen() {
   if (favorites.length) sections.push(rail("Favorites", favorites.map((item) => posterCard(item))));
   if (recent.length) sections.push(rail("Recently Added", recent.map((item) => posterCard(item))));
   if (home.collections?.length) sections.push(rail("Collections", home.collections.map((collection) => collectionCard(collection)), "poster", "/collections"));
-  if (!hero && sections.length === 0)
-    return emptyState("search", "Nothing Here Yet", "Your library is empty or this profile has no titles. Add a library folder in Aurelia on your Mac.");
+  if (!hero && sections.length === 0) {
+    const empty = logic.homeEmptyState(state.profile);
+    return empty.kind === "owner"
+      ? emptyState(
+        "search",
+        empty.title,
+        empty.text,
+        h("div", { class: "button-row" },
+          h("a", { class: "primary-button", href: "/settings/library", "data-route": true }, "Add Storage Location…"),
+          h("a", { class: "secondary-button", href: "/welcome", "data-route": true }, "Setup Checklist")),
+      )
+      : emptyState("search", empty.title, empty.text);
+  }
   return h("div", { class: "home" }, hero ? heroBanner(hero) : null, h("div", { class: "sections" }, monthIsNew() ? monthlyWrappedLaunch({ compact: true }) : null, movieNight.homeStrip(), sections));
 }
 
@@ -1300,7 +1407,7 @@ function heroBanner(item) {
 
 function rail(title, cards, kind = "poster", allHref) {
   const track = h("div", { class: `rail-track ${kind}` }, cards);
-  const scrollBehavior = () => window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth";
+  const scrollBehavior = () => motionAllowed() ? "smooth" : "auto";
   const scroll = (direction) => track.scrollBy({ left: direction * track.clientWidth * 0.85, behavior: scrollBehavior() });
   return (h("section", { class: "rail" },
     h("div", { class: "section-header" }, h("h2", {}, title), h("span", { class: "count" }, String(cards.length)),
@@ -1417,44 +1524,38 @@ function menuOption(label, selected, action, disabled = false) {
     h("span", { class: "check-mark" }, selected ? icon("check", { size: 15 }) : null), label);
 }
 
-/** A small menu under its button; it closes on any click or Escape. */
+/** A small menu under its button; it closes on any click or Escape and navigates with arrow keys. */
 function openMenu(anchor, items) {
-  document.querySelector(".popup-menu")?.remove();
-  const menu = h("div", { class: "popup-menu profile-menu", role: "menu" }, items);
-  const box = anchor.getBoundingClientRect();
-  menu.style.top = `${box.bottom + window.scrollY + 8}px`;
-  menu.style.left = `${Math.max(12, Math.min(box.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - 260))}px`;
-  document.body.append(menu);
-  const close = () => {
-    menu.remove();
-    document.removeEventListener("click", close);
-    document.removeEventListener("keydown", escape, true);
-  };
-  // Esc closes only this menu, also over the player (audit X9): it is heard first and taken.
-  const escape = (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      close();
-      anchor.focus();
-    }
-  };
-  setTimeout(() => {
-    document.addEventListener("click", close);
-    document.addEventListener("keydown", escape, true);
-  }, 0);
-  menu.querySelector("[aria-checked=true], button:not(:disabled)")?.focus();
+  return openPopupMenu(anchor, items);
 }
 
 // MARK: Title details (the Mac app's detail page)
 
 async function titleScreen(id) {
-  // Parties are asked for together with the title, not after it (audit L5).
-  const [detail, plan, watchlistSnapshot, parties] = await Promise.all([
-    cached.detail(id),
+  // Parties and watchlist are asked for alongside the title, while playback-plan waits until the
+  // title is known to exist for this profile so invisible/missing titles don't trigger a second 404.
+  const detailRead = cached.detail(id);
+  const watchlistRead = cached.watchlist().catch(() => null);
+  const partiesRead = watchPartiesNow();
+  let detail;
+  try {
+    detail = await detailRead;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      const problem = logic.routeErrorState(error, { kind: "title" });
+      return emptyState(
+        problem.symbol,
+        problem.title,
+        problem.text,
+        h("a", { class: "secondary-button", href: "/", "data-route": true }, "Back to Home"),
+      );
+    }
+    throw error;
+  }
+  const [plan, watchlistSnapshot, parties] = await Promise.all([
     cached.playbackPlan(id).catch(() => null),
-    cached.watchlist().catch(() => null),
-    watchPartiesNow(),
+    watchlistRead,
+    partiesRead,
   ]);
   if (watchlistSnapshot?.mediaIds) state.watchlistIds = new Set(watchlistSnapshot.mediaIds);
   const item = detail.item;
@@ -1481,7 +1582,7 @@ async function titleScreen(id) {
         }
         const items = devices.map((device) => {
           return h("button", { class: "menu-item", onclick: () => {
-            document.querySelector(".popup-menu")?.remove();
+            closePopupMenu();
             startRemotePlayback(device, target, plan);
           }}, icon("airplay", { size: 16 }), device.deviceName);
         });
@@ -1632,7 +1733,7 @@ function hrail(cards, { label, className = "" } = {}) {
   const track = h("div", { class: `hrail-track ${className}`, role: "list", "aria-label": label }, cards);
   const back = h("button", { class: "rail-arrow back", "aria-label": `Scroll ${label} back`, hidden: true }, icon("back", { size: 18 }));
   const forward = h("button", { class: "rail-arrow forward", "aria-label": `Scroll ${label} forward`, hidden: true }, icon("forward", { size: 18 }));
-  const scrollBehavior = () => window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth";
+  const scrollBehavior = () => motionAllowed() ? "smooth" : "auto";
   const update = () => {
     back.hidden = track.scrollLeft <= 4;
     forward.hidden = track.scrollLeft + track.clientWidth >= track.scrollWidth - 4;
@@ -2151,7 +2252,7 @@ async function statisticsScreen() {
     yearContainer) : null;
   if (years.length) loadYear(years[0]);
 
-  container.append(
+  container.append(h("div", { class: "statistics-body" },
     summary,
     monthlyWrappedLaunch(),
     monthlyWrappedArchive(years),
@@ -2159,7 +2260,7 @@ async function statisticsScreen() {
     weeklySection ?? "",
     ranking("Most Watched", "Series count with all their episodes.", stats.topTitles) ?? "",
     ranking("Favorite Genres", "By the time you spent with them.", stats.topGenres) ?? "",
-    yearSection ?? "");
+    yearSection ?? ""));
   return container;
 }
 
@@ -2228,14 +2329,15 @@ function showMiniRemote(device, target) {
 
   let isPlaying = true;
   let currentPosition = 0;
-  let duration = (target.progress?.durationMilliseconds ? target.progress.durationMilliseconds / 1000 : 0) || 1;
+  let duration = (target.progress?.durationMilliseconds ? target.progress.durationMilliseconds / 1000 : 0)
+    || (target.runtimeMinutes ? target.runtimeMinutes * 60 : 0);
   let pollTimer = null;
 
   const titleEl = h("div", { class: "mini-remote-title" }, target.title);
   const deviceEl = h("div", { class: "mini-remote-device" }, icon("airplay", { size: 14 }), `Playing on ${device.deviceName}`);
   const playBtn = h("button", { class: "icon-button mini-remote-btn", "aria-label": "Pause" }, icon("pause", { size: 18 }));
-  const skipBackBtn = h("button", { class: "icon-button mini-remote-btn", "aria-label": "Back 10 Seconds" }, icon("previous", { size: 16 }));
-  const skipForwardBtn = h("button", { class: "icon-button mini-remote-btn", "aria-label": "Forward 10 Seconds" }, icon("next", { size: 16 }));
+  const skipBackBtn = h("button", { class: "icon-button mini-remote-btn", "aria-label": "Back 10 Seconds" }, seekGlyph(false, 10, 18));
+  const skipForwardBtn = h("button", { class: "icon-button mini-remote-btn", "aria-label": "Forward 10 Seconds" }, seekGlyph(true, 10, 18));
   const closeBtn = h("button", { class: "icon-button mini-remote-btn", "aria-label": "Stop Remote Playback" }, icon("delete", { size: 16 }));
 
   const progressSlider = h("input", {
@@ -2244,6 +2346,7 @@ function showMiniRemote(device, target) {
     min: "0",
     max: "1000",
     value: "0",
+    disabled: !(duration > 0),
     "aria-label": "Remote Playback Position",
   });
 
@@ -2276,6 +2379,7 @@ function showMiniRemote(device, target) {
   });
 
   progressSlider.addEventListener("change", async () => {
+    if (!(duration > 0)) return;
     try {
       const fraction = Number(progressSlider.value) / 1000;
       const seekPos = fraction * duration;
@@ -2325,6 +2429,7 @@ function showMiniRemote(device, target) {
         }
         if (status.durationSeconds && status.durationSeconds > 0) {
           duration = status.durationSeconds;
+          progressSlider.disabled = false;
           if (status.positionSeconds !== undefined && status.positionSeconds !== null) {
             currentPosition = status.positionSeconds;
             const fraction = Math.min(1, Math.max(0, currentPosition / duration));
@@ -2695,7 +2800,10 @@ document.addEventListener("keydown", (event) => {
     if (document.querySelector("dialog[open]")) return;
     event.preventDefault();
     if (state.route.name === "search") document.querySelector(".search .search-field")?.focus();
-    else navigate({ name: "search" });
+    else {
+      state.focusSearch = true;
+      navigate({ name: "search" });
+    }
     return;
   }
   if (event.key === "?" && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.altKey) {

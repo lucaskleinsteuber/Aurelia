@@ -1,5 +1,28 @@
 import SwiftUI
 
+/// Pure rules for OpenSubtitles language selection (between 1 and 5 languages).
+enum SubtitleLanguageSelection {
+  static let maximumCount = 5
+
+  static func canToggle(code: String, in selected: [String]) -> Bool {
+    if selected.contains(code) {
+      return selected.count > 1
+    }
+    return selected.count < maximumCount
+  }
+
+  static func toggled(code: String, in selected: [String]) -> [String]? {
+    guard canToggle(code: code, in: selected) else { return nil }
+    var updated = selected
+    if updated.contains(code) {
+      updated.removeAll { $0 == code }
+    } else {
+      updated.append(code)
+    }
+    return updated
+  }
+}
+
 /// Settings › Metadata: the server's OpenSubtitles setup. The owner enters a free API key, picks
 /// languages and may turn on automatic downloads; administrators see how it is set up.
 struct SubtitleDownloadSettingsSection: View {
@@ -12,6 +35,8 @@ struct SubtitleDownloadSettingsSection: View {
   @State private var errorText: String?
   @State private var loading = false
   @State private var loadError: String?
+  @State private var confirmingRemoveKey = false
+  @State private var confirmingRemoveAccount = false
 
   private var isOwner: Bool { model.profile?.user?.role == .owner }
 
@@ -47,6 +72,31 @@ struct SubtitleDownloadSettingsSection: View {
       .disabled(working)
     }
     .task(id: model.profile?.user?.id) { await load() }
+    .confirmationDialog(
+      "Remove the OpenSubtitles Key?",
+      isPresented: $confirmingRemoveKey,
+      titleVisibility: .visible
+    ) {
+      Button("Remove Key", role: .destructive) {
+        Task { await run { try await $0.removeSubtitleKey() } }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text(
+        "Subtitle downloads stop until you add a key again. Subtitles already downloaded stay.")
+    }
+    .confirmationDialog(
+      "Remove the OpenSubtitles Account?",
+      isPresented: $confirmingRemoveAccount,
+      titleVisibility: .visible
+    ) {
+      Button("Remove Account", role: .destructive) {
+        Task { await run { try await $0.removeSubtitleAccount() } }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("The key alone allows fewer downloads a day.")
+    }
   }
 
   private var setup: some View {
@@ -86,33 +136,41 @@ struct SubtitleDownloadSettingsSection: View {
     LabeledContent("Downloaded", value: "\(status.downloadedCount)")
     if isOwner {
       Toggle(
-        "Subtitle downloads",
+        "Search OpenSubtitles",
         isOn: Binding(
           get: { status.enabled },
           set: { on in Task { await save(request(status, enabled: on)) } })
       )
       .accessibilityIdentifier("subtitles-enabled")
-      Menu("Languages: \(status.languages.map(SubtitleLanguages.name).joined(separator: ", "))") {
-        ForEach(SubtitleLanguages.choices, id: \.self) { code in
-          let chosen = status.languages.contains(code)
-          Button {
-            var languages = status.languages
-            if chosen { languages.removeAll { $0 == code } } else { languages.append(code) }
-            guard !languages.isEmpty, languages.count <= 5 else { return }
-            Task { await save(request(status, languages: languages)) }
-          } label: {
-            if chosen {
-              Label(SubtitleLanguages.name(code), systemImage: "checkmark")
-            } else {
-              Text(SubtitleLanguages.name(code))
+      VStack(alignment: .leading, spacing: 4) {
+        Menu(
+          "Languages: \(status.languages.map(SubtitleLanguages.name).joined(separator: ", "))"
+        ) {
+          ForEach(SubtitleLanguages.choices, id: \.self) { code in
+            let chosen = status.languages.contains(code)
+            Button {
+              guard
+                let languages = SubtitleLanguageSelection.toggled(
+                  code: code, in: status.languages)
+              else { return }
+              Task { await save(request(status, languages: languages)) }
+            } label: {
+              if chosen {
+                Label(SubtitleLanguages.name(code), systemImage: "checkmark")
+              } else {
+                Text(SubtitleLanguages.name(code))
+              }
             }
+            .disabled(!SubtitleLanguageSelection.canToggle(code: code, in: status.languages))
           }
         }
+        .fixedSize()
+        .accessibilityIdentifier("subtitles-languages")
+        Text("Choose between one and five languages.")
+          .font(.caption).foregroundStyle(.secondary)
       }
-      .fixedSize()
-      .accessibilityIdentifier("subtitles-languages")
       Toggle(
-        "Download missing subtitles automatically",
+        "Download Subtitles for New Titles Automatically",
         isOn: Binding(
           get: { status.automatic },
           set: { on in Task { await save(request(status, automatic: on)) } })
@@ -123,18 +181,12 @@ struct SubtitleDownloadSettingsSection: View {
         "Every six hours the server looks for matched movies and episodes without subtitles in these languages, in the file or beside it. Each title is checked at most once a week."
       )
       .font(.caption).foregroundStyle(.secondary)
-      .fixedSize(horizontal: false, vertical: true)
+      .aureliaSettingsDescriptionWidth()
       Divider()
       account(status)
       Divider()
       Button("Remove API Key…", role: .destructive) {
-        guard
-          AureliaConfirm.ask(
-            "Remove the OpenSubtitles Key?",
-            "Subtitle downloads stop until you add a key again. Subtitles already downloaded stay.",
-            action: "Remove Key")
-        else { return }
-        Task { await run { try await $0.removeSubtitleKey() } }
+        confirmingRemoveKey = true
       }
       .accessibilityIdentifier("subtitles-remove-key")
     }
@@ -147,7 +199,9 @@ struct SubtitleDownloadSettingsSection: View {
       HStack {
         LabeledContent("Account", value: status.accountName ?? "Signed in")
         Spacer()
-        Button("Remove Account") { Task { await run { try await $0.removeSubtitleAccount() } } }
+        Button("Remove Account…", role: .destructive) {
+          confirmingRemoveAccount = true
+        }
       }
     } else {
       VStack(alignment: .leading, spacing: 8) {

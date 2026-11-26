@@ -41,6 +41,7 @@ struct AureliaApp: App {
             .receive(on: DispatchQueue.main)
         ) { _ in
           Task { await model.systemDidWake() }
+          AppUpdater.shared.checkInBackgroundIfDue()
         }
     }
     .defaultSize(width: 1_470, height: 956)
@@ -49,6 +50,7 @@ struct AureliaApp: App {
       CommandGroup(replacing: .appSettings) {
         Button("Settings…") { model.isSettingsPresented = true }
           .keyboardShortcut(",", modifiers: .command)
+          .disabled(!AppMenuCommandPolicy.canOpenSettings(isOfflineMode: model.offlineMode != nil))
       }
       CommandGroup(after: .appInfo) {
         Button("Check for Updates…") {
@@ -72,7 +74,14 @@ struct AureliaApp: App {
       CommandGroup(after: .newItem) {
         Button("Add Media…") { model.showMediaManager() }
           .keyboardShortcut("o", modifiers: .command)
-          .disabled(model.profile == nil || !model.canManageMedia)
+          .disabled(
+            !AppMenuCommandPolicy.canAddMedia(
+              hasProfile: model.profile != nil,
+              canManageMedia: model.canManageMedia,
+              isPlaying: model.playback != nil,
+              isInMovieNight: model.movieNightLaunch != nil,
+              isInWrapped: model.wrappedLaunch != nil,
+              isOfflineMode: model.offlineMode != nil))
       }
       CommandGroup(replacing: .help) {
         Button("Keyboard Shortcuts") {
@@ -81,6 +90,32 @@ struct AureliaApp: App {
         .keyboardShortcut("/", modifiers: .command)
       }
     }
+  }
+}
+
+/// Menu bar command gating so shortcuts either act visibly or stay disabled.
+enum AppMenuCommandPolicy {
+  static func canOpenSettings(isOfflineMode: Bool) -> Bool {
+    !isOfflineMode
+  }
+
+  static func canAddMedia(
+    hasProfile: Bool,
+    canManageMedia: Bool,
+    isPlaying: Bool,
+    isInMovieNight: Bool,
+    isInWrapped: Bool,
+    isOfflineMode: Bool
+  ) -> Bool {
+    hasProfile && canManageMedia && !isPlaying && !isInMovieNight && !isInWrapped && !isOfflineMode
+  }
+
+  static func settingsCoversFullWindowOverlay(
+    isPlaying: Bool,
+    isInMovieNight: Bool,
+    isInWrapped: Bool
+  ) -> Bool {
+    isPlaying || isInMovieNight || isInWrapped
   }
 }
 
@@ -98,16 +133,27 @@ enum WindowClosePreference {
 @MainActor
 final class AureliaAppDelegate: NSObject, NSApplicationDelegate {
   private let termination = ApplicationTerminationCoordinator()
+  private var powerOffObserver: NSObjectProtocol?
+  private var updateCheckTimer: Timer?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    powerOffObserver = NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.willPowerOffNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.termination.markSystemPowerOff() }
+    }
     WishNotificationCenter.shared.installDelegateIfNeeded {
       AppModel.active?.openWishes()
     }
     NSApplication.shared.activate()
-    Task {
-      await AppModel.active?.start()
-    }
     AppUpdater.shared.checkInBackgroundIfDue()
+    let timer = Timer.scheduledTimer(withTimeInterval: 3_600, repeats: true) { _ in
+      Task { @MainActor in AppUpdater.shared.checkInBackgroundIfDue() }
+    }
+    timer.tolerance = 300
+    updateCheckTimer = timer
   }
 
   func applicationShouldHandleReopen(
@@ -127,6 +173,7 @@ final class AureliaAppDelegate: NSObject, NSApplicationDelegate {
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     termination.request(
       shutdown: { await AppModel.active?.shutdown() },
-      terminate: { sender.terminate(nil) })
+      terminate: { sender.terminate(nil) },
+      reply: { sender.reply(toApplicationShouldTerminate: $0) })
   }
 }

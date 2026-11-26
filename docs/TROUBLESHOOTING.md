@@ -54,6 +54,12 @@ show as offline until it is back. On Linux, mount media drives permanently (for 
 `/etc/fstab`) so they are there after a restart; [Aurelia Server on Linux](LINUX_SERVER.md)
 shows how.
 
+**Aurelia on Mac says the server data folder is unavailable.** On a hosting Mac, the server stores
+its database and settings in `~/Library/Application Support/Aurelia Server` and its logs in
+`~/Library/Logs/Aurelia Server`. If you relocated that data folder with a symbolic link to an
+external drive, reconnect the drive and reopen Aurelia. If startup still fails, check available
+disk space on the drive and inspect `~/Library/Logs/Aurelia Server/server.log`.
+
 **Titles are not recognized or matched wrongly.** Check the names against
 [Organizing your media](MEDIA_LIBRARY.md), then scan again. Wrong matches can be fixed under
 *Review Matches* or with *Find Metadata Match…* on the title; your choice is kept.

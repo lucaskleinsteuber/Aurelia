@@ -12,8 +12,12 @@ public static class ServerManagementEndpoints
     {
         var server = app.MapGroup("/api/v1/server").RequireAuthorization("Owner");
         server.MapGet("/settings", (ServerConfigurationStore configuration) => configuration.Read());
-        server.MapGet("/capabilities", (NativeHostOperations operations) =>
-            new ServerManagementCapabilities(operations.Available, true, false, LinuxPackage.Platform, LinuxPackage.IsInstalled));
+        server.MapGet("/capabilities", async (NativeHostOperations operations, LiveConversionService live) =>
+        {
+            var tools = await live.ToolsAsync();
+            var transcoding = tools is not null && live.ChooseEncoder(tools) is not null;
+            return new ServerManagementCapabilities(operations.Available, true, transcoding, LinuxPackage.Platform, LinuxPackage.IsInstalled);
+        });
         server.MapGet("/operations/current", (NativeHostOperations operations, CancellationToken token) => operations.StatusAsync(token));
         server.MapGet("/hosting", (NativeHostOperations operations, CancellationToken token) => operations.HostingStatusAsync(token));
         // The Mac host restarts its server itself; the Linux package's systemd service restarts on request.
@@ -59,8 +63,21 @@ public static class ServerManagementEndpoints
         { formatVersion = 1, version = ServerProductVersion.Current, policy = new { configuration.Current.DeviceSessionDays, configuration.Current.GlobalStreamLimit, configuration.Current.UserStreamLimit }, events = diagnostics.Read(), performance = performance.Read() });
         server.MapGet("/backups", (DatabaseBackupService backups) => backups.ListBackups().OrderByDescending(value => value.CreatedAt).Select(value => new
         { name = Path.GetFileName(value.Path), kind = value.Kind.ToString().ToLowerInvariant(), value.CreatedAt, bytes = new FileInfo(value.Path).Length }));
-        server.MapPost("/backups/database", async (DatabaseBackupService backups, CancellationToken token) => new
-        { name = Path.GetFileName(await backups.CreateBackupAsync(DatabaseBackupKind.Manual, token)) });
+        server.MapPost("/backups/database", async (DatabaseBackupService backups, CancellationToken token) =>
+        {
+            try
+            {
+                return new { name = Path.GetFileName(await backups.CreateBackupAsync(DatabaseBackupKind.Manual, token)) };
+            }
+            catch (InvalidOperationException exception) when (exception.Message.Contains("already running", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new AccountException("backup_busy", "Another database backup or restore operation is already running.", StatusCodes.Status409Conflict);
+            }
+            catch (InvalidOperationException exception)
+            {
+                throw new AccountException("backup_unavailable", exception.Message, StatusCodes.Status409Conflict);
+            }
+        });
         server.MapPost("/backups/{name}/verify", async (string name, DatabaseBackupService backups, CancellationToken token) =>
         {
             var backup = backups.ListBackups().SingleOrDefault(value => Path.GetFileName(value.Path) == name)

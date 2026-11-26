@@ -28,27 +28,26 @@ struct AboutAureliaSections: View {
         }
       }
 
-      AureliaSettingsSection(
-        "What's New in This Version", symbol: "list.bullet.rectangle",
-        description:
-          "The changes in version \(updater.currentVersion). Every version is in the release notes on GitHub."
-      ) {
-        VStack(alignment: .leading, spacing: 8) {
-          if ReleaseNotes.current.isEmpty {
-            Text("No notes for this version.").foregroundStyle(.secondary)
-          }
-          ForEach(Array(ReleaseNotes.current.enumerated()), id: \.offset) { _, change in
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-              Text("•").foregroundStyle(.secondary)
-              Text(change).fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
+      if !ReleaseNotes.current.isEmpty {
+        AureliaSettingsSection(
+          "What's New in This Version", symbol: "list.bullet.rectangle",
+          description:
+            "The changes in version \(updater.currentVersion). Every version is in the release notes on GitHub."
+        ) {
+          VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(ReleaseNotes.current.enumerated()), id: \.offset) { _, change in
+              HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("•").foregroundStyle(.secondary)
+                Text(change).fixedSize(horizontal: false, vertical: true)
+                  .textSelection(.enabled)
+              }
             }
+            Link("All Release Notes on GitHub", destination: Self.releases)
+              .padding(.top, 4)
           }
-          Link("All Release Notes on GitHub", destination: Self.releases)
-            .padding(.top, 4)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .accessibilityIdentifier("about-whats-new")
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityIdentifier("about-whats-new")
       }
 
       // Seeing the introduction and tour again is for trying them out in the test edition; the
@@ -105,7 +104,12 @@ struct AboutAureliaSections: View {
       ) {
         VStack(alignment: .leading, spacing: 8) {
           Text(Self.repository.absoluteString).font(.callout).textSelection(.enabled)
-          Link("Open on GitHub", destination: Self.repository)
+          HStack(spacing: 16) {
+            Link("Open on GitHub", destination: Self.repository)
+            if ReleaseNotes.current.isEmpty {
+              Link("All Release Notes on GitHub", destination: Self.releases)
+            }
+          }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
       }
@@ -165,6 +169,11 @@ struct MacLicense: Identifiable {
           title: "FFmpeg (LGPL)", file: $0.appendingPathComponent("Server/ffmpeg/COPYING.LGPLv2.1"),
           source: URL(string: "https://ffmpeg.org/legal.html"))
       },
+      resources.map {
+        MacLicense(
+          title: "whisper.cpp (MIT)", file: $0.appendingPathComponent("Server/whisper/LICENSE"),
+          source: URL(string: "https://github.com/ggml-org/whisper.cpp"))
+      },
     ].compactMap { $0 }.filter { FileManager.default.fileExists(atPath: $0.file.path) }
   }
 
@@ -202,7 +211,7 @@ private struct MacLicenseSheet: View {
       }
     }
     .padding(22)
-    .frame(width: 720, height: 600)
+    .aureliaSheetFrame(minWidth: 560, idealWidth: 720, minHeight: 420, idealHeight: 600)
   }
 }
 

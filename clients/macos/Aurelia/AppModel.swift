@@ -181,6 +181,7 @@ final class AppModel: ObservableObject {
         await WishNotificationCenter.shared.notify(detailed)
       }
     }
+    guard isCurrent(generation), self.profile?.user?.id == sessionUserId else { return }
     wishSummary = next
   }
   @Published private(set) var hostSnapshot: NativeHostSnapshot = .stopped
@@ -199,15 +200,21 @@ final class AppModel: ObservableObject {
   private var remoteDeviceHeartbeatTask: Task<Void, Never>?
   private var remoteDeviceCommandTask: Task<Void, Never>?
   private var remoteDeviceStatusTask: Task<Void, Never>?
+  var hasActiveRemoteDeviceTasks: Bool {
+    remoteDeviceHeartbeatTask != nil || remoteDeviceCommandTask != nil
+      || remoteDeviceStatusTask != nil
+  }
   /// A seek sent to the remote player; status polls older than it would move the slider back.
   private var remoteSeekSentAt: Date?
 
-  var macDeviceId: String {
-    if let saved = UserDefaults.standard.string(forKey: "AureliaMacDeviceId") {
+  let macDeviceId: String
+
+  static func loadOrCreateMacDeviceId(defaults: UserDefaults = .standard) -> String {
+    if let saved = defaults.string(forKey: "AureliaMacDeviceId"), !saved.isEmpty {
       return saved
     }
     let newId = UUID().uuidString
-    UserDefaults.standard.set(newId, forKey: "AureliaMacDeviceId")
+    defaults.set(newId, forKey: "AureliaMacDeviceId")
     return newId
   }
   @Published private(set) var libraryDiscoveries: [LibraryDiscoverySummary] = []
@@ -282,9 +289,8 @@ final class AppModel: ObservableObject {
   private var hasStarted = false
   /// The offline mode: downloads only, without the server; see `openOfflineMode`.
   @Published private(set) var offlineMode: OfflineModeState?
-  /// Wrong offline PINs in a row, and until when the next try must wait.
-  private var offlinePINFailures = 0
-  @Published private(set) var offlinePINLockedUntil: Date?
+  /// Cached offline profile choices so SwiftUI bodies never hit Keychain on every render.
+  @Published private(set) var offlineProfileChoices: [OfflineProfileChoice] = []
   lazy var offlineProfileStore: any OfflineProfileStoring =
     Self.isTestProcess ? MemoryOfflineProfileStore() : KeychainOfflineProfileStore()
   private var hostPollTask: Task<Void, Never>?
@@ -302,6 +308,7 @@ final class AppModel: ObservableObject {
   private var inspectionGeneration = UUID()
   private let administrationFetcher:
     (@MainActor (StoredServerProfile) async throws -> AdministrationSnapshot)?
+  private let backgroundHostingDisabler: (@MainActor () async -> Void)?
 
   struct AdministrationSnapshot: Sendable {
     var libraries: [LibrarySummary] = []
@@ -412,6 +419,22 @@ final class AppModel: ObservableObject {
     scanStatusUnavailable = []
     syncStartTask?.cancel()
     syncStartTask = nil
+    stopRemoteDeviceTasks()
+    clearRemotePlaybackState()
+  }
+
+  private func clearRemotePlaybackState() {
+    remoteDeviceStatusTask?.cancel()
+    remoteDeviceStatusTask = nil
+    activeRemotePlayer = nil
+    remotePlaybackTitle = nil
+    remotePlaybackPosition = 0
+    remotePlaybackDuration = 0
+    isRemotePlaying = false
+    remoteSeekSentAt = nil
+  }
+
+  private func stopRemoteDeviceTasks() {
     remoteDeviceHeartbeatTask?.cancel()
     remoteDeviceHeartbeatTask = nil
     remoteDeviceCommandTask?.cancel()
@@ -467,12 +490,14 @@ final class AppModel: ObservableObject {
     )? = nil,
     initialLibraryCapabilities: Set<String> = [],
     libraryStateClientFactory: (@MainActor (StoredServerProfile) -> any LibraryStateServing)? = nil,
-    reconnectCoordinator: ServerReconnectCoordinator = ServerReconnectCoordinator()
+    reconnectCoordinator: ServerReconnectCoordinator = ServerReconnectCoordinator(),
+    backgroundHostingDisabler: (@MainActor () async -> Void)? = nil
   ) {
     self.store = store ?? Self.defaultStore
     self.serverHost = serverHost
     self.syncController = syncController
     self.reconnectCoordinator = reconnectCoordinator
+    self.backgroundHostingDisabler = backgroundHostingDisabler
     self.profileSelectionOverride = profileSelectionEnabled
     self.profileUnlocker = profileUnlocker
     self.profileSessionEnder = profileSessionEnder
@@ -484,6 +509,9 @@ final class AppModel: ObservableObject {
     self.libraryStateClientFactory = libraryStateClientFactory
     self.profile = initialProfile
     self.libraryCapabilities = initialLibraryCapabilities
+    self.macDeviceId = Self.loadOrCreateMacDeviceId(
+      defaults: Self.isTestProcess
+        ? (UserDefaults(suiteName: "AureliaTestDeviceId") ?? .standard) : .standard)
     let savedMode = UserDefaults.standard.string(forKey: Self.operatingModeKey)
       .flatMap(OperatingMode.init(rawValue:))
     self.operatingMode = savedMode
@@ -526,7 +554,7 @@ final class AppModel: ObservableObject {
     await PlaybackShutdownCoordinator.shared.shutdown()
     hostPollTask?.cancel()
     hostPollTask = nil
-    await serverHost.stop()
+    await serverHost.resetTestEditionServerData()
     for startAtLogin in [false, true] {
       try? await SMAppService.agent(
         plistName: AppEdition.agentName(startAtLogin: startAtLogin) + ".plist"
@@ -534,6 +562,8 @@ final class AppModel: ObservableObject {
       .unregister()
     }
     try? store.delete()
+    PasskeyStore.removeAll()
+    KeychainOfflineProfileStore().forgetAll()
     UserDefaults.standard.removePersistentDomain(forName: AppEdition.bundleIdentifier)
     UserDefaults.standard.synchronize()
     let files = FileManager.default
@@ -892,6 +922,7 @@ final class AppModel: ObservableObject {
     guard !isResting, operatingMode != .host, profile != nil else { return }
     isResting = true
     if playback != nil { dismissPlayback() }
+    if watchParty != nil { await leaveWatchTogether() }
     connectionStatus = nil
     await systemWillSleep()
     PinnedSessionPool.shared.removeAll()
@@ -1051,6 +1082,11 @@ final class AppModel: ObservableObject {
     hostPollTask?.cancel()
     hostPollTask = nil
     await serverHost.stop()
+    if let backgroundHostingDisabler {
+      await backgroundHostingDisabler()
+    } else if !Self.isTestProcess {
+      await BackgroundHostingController.disableAll()
+    }
     endTerminationProtection()
     hostSnapshot = .stopped
     operatingMode = .client
@@ -1086,7 +1122,7 @@ final class AppModel: ObservableObject {
       let authentication = try await APIClient.setupOwner(
         username: username,
         password: password,
-        deviceName: Host.current().localizedName ?? "Server Mac",
+        deviceName: AureliaDeviceName.current,
         bootstrapToken: bootstrapToken)
       guard connectionGeneration == generation, !Task.isCancelled else { return false }
       try await finishLocalAuthentication(
@@ -1133,9 +1169,9 @@ final class AppModel: ObservableObject {
       let authentication = try await APIClient.loginLocally(
         username: username,
         password: password,
-        deviceName: Host.current().localizedName ?? "Server Mac")
+        deviceName: AureliaDeviceName.current)
       guard connectionGeneration == generation, !Task.isCancelled else { return false }
-      let port = hostSnapshot.serverInfo?.lanHttpsPort ?? 43_111
+      let port = hostSnapshot.serverInfo?.lanHttpsPort ?? AppEdition.defaultLanPort
       try await finishLocalAuthentication(
         authentication, lanPort: port, restart: false, expectedGeneration: generation)
       return true
@@ -1420,7 +1456,17 @@ final class AppModel: ObservableObject {
       // The location is gone once the reset ran; artwork the server still has to clean up is its
       // own business and doesn't make the removal look failed (it keeps the location listed).
       libraries.removeAll { $0.id == id }
-      try await refresh()
+      do {
+        try await refresh()
+      } catch is CancellationError {
+        return
+      } catch {
+        if isCurrent(generation), isCurrentAdministration(administration) {
+          administrationErrorMessage =
+            "The storage location was removed, but the library list could not be refreshed: \(failureMessage(error))"
+        }
+        return
+      }
       if result.state != "completed" {
         administrationErrorMessage =
           "The storage location was removed. The server finishes cleaning up its artwork later"
@@ -1558,15 +1604,61 @@ final class AppModel: ObservableObject {
     }
   }
 
+  static func combinedMetadataJob(_ jobs: [MetadataJobSummary]) -> MetadataJobSummary? {
+    guard let last = jobs.last else { return nil }
+    guard jobs.count > 1 else { return last }
+    let state: MetadataJobState
+    if jobs.contains(where: { $0.state == .running }) {
+      state = .running
+    } else if jobs.contains(where: { $0.state == .queued }) {
+      state = .queued
+    } else if jobs.contains(where: { $0.state == .failed }) {
+      state = .failed
+    } else if jobs.contains(where: { $0.state == .interrupted }) {
+      state = .interrupted
+    } else if jobs.contains(where: { $0.state == .cancelled }) {
+      state = .cancelled
+    } else {
+      state = .completed
+    }
+    var seenErrors = Set<String>()
+    let errors = jobs.compactMap(\.error).map {
+      $0.trimmingCharacters(in: .whitespacesAndNewlines)
+    }.filter { !$0.isEmpty && seenErrors.insert($0).inserted }
+    let skippedValues = jobs.compactMap(\.itemsSkipped)
+    return MetadataJobSummary(
+      id: last.id,
+      libraryId: nil,
+      mediaId: nil,
+      state: state,
+      itemsTotal: jobs.reduce(0) { $0 + $1.itemsTotal },
+      itemsProcessed: jobs.reduce(0) { $0 + $1.itemsProcessed },
+      itemsMatched: jobs.reduce(0) { $0 + $1.itemsMatched },
+      itemsNeedingReview: jobs.reduce(0) { $0 + $1.itemsNeedingReview },
+      itemsFailed: jobs.reduce(0) { $0 + $1.itemsFailed },
+      error: errors.isEmpty ? nil : errors.joined(separator: "; "),
+      createdAt: jobs.first?.createdAt ?? last.createdAt,
+      startedAt: jobs.compactMap(\.startedAt).first,
+      completedAt: (state != .queued && state != .running)
+        ? jobs.compactMap(\.completedAt).last : nil,
+      mode: last.mode,
+      attempt: jobs.compactMap(\.attempt).max(),
+      nextAttemptAt: jobs.compactMap(\.nextAttemptAt).first,
+      waitReason: jobs.compactMap(\.waitReason).first,
+      itemsSkipped: skippedValues.isEmpty ? nil : skippedValues.reduce(0, +))
+  }
+
   func enrichLibrary() async {
     guard let profile, canManageStorage else { return }
     let generation = connectionGeneration
     let administration = administrationGeneration
     do {
       let client = APIClient(profile: profile)
+      var jobs: [MetadataJobSummary] = []
       if profile.user?.role == .owner {
         let job = try await currentAdministration { try await client.startMetadataJob() }
         guard isCurrent(generation) else { return }
+        jobs = [job]
         metadataJob = job
       } else {
         // Administrators can request only explicitly shared libraries, never a
@@ -1577,18 +1669,23 @@ final class AppModel: ObservableObject {
             try await client.startMetadataJob(libraryId: library.id)
           }
           guard isCurrent(generation) else { return }
-          metadataJob = job
+          jobs.append(job)
+          metadataJob = Self.combinedMetadataJob(jobs)
         }
       }
-      guard let jobID = metadataJob?.id else { return }
-      while metadataJob?.state == .queued || metadataJob?.state == .running {
+      guard !jobs.isEmpty else { return }
+      while jobs.contains(where: { !$0.isFinished }) {
         try await Task.sleep(for: .seconds(1))
         guard isCurrent(generation), isCurrentAdministration(administration) else { return }
-        let job = try await currentAdministration {
-          try await APIClient(profile: profile).metadataJob(id: jobID)
+        for index in jobs.indices where !jobs[index].isFinished {
+          let jobID = jobs[index].id
+          let updated = try await currentAdministration {
+            try await APIClient(profile: profile).metadataJob(id: jobID)
+          }
+          guard isCurrent(generation) else { return }
+          jobs[index] = updated
         }
-        guard isCurrent(generation) else { return }
-        metadataJob = job
+        metadataJob = Self.combinedMetadataJob(jobs)
       }
       if profile.user?.role == .owner {
         guard isCurrentAdministration(administration) else { return }
@@ -1662,8 +1759,9 @@ final class AppModel: ObservableObject {
     try await serverHost.hostingSettingsApplied(
       operationID: operation.id, permitted: !settings.backgroundEnabled || permitted)
     if settings.backgroundEnabled && permitted {
-      if !serverHost.isBackgroundService { try await serverHost.handoffToBackground() }
-      await startNativeHost()
+      let handedOff = !serverHost.isBackgroundService
+      if handedOff { try await serverHost.handoffToBackground() }
+      await startNativeHost(skipKickstart: handedOff)
     } else if !settings.backgroundEnabled {
       await serverHost.stop()
       await startNativeHost()
@@ -1761,7 +1859,7 @@ final class AppModel: ObservableObject {
       let paired = try await APIClient.pair(
         inspected: inspectedServer,
         code: normalizedCode,
-        deviceName: Host.current().localizedName ?? "Mac")
+        deviceName: AureliaDeviceName.current)
       guard connectionGeneration == generation, inspectionGeneration == inspection,
         !Task.isCancelled
       else { return false }
@@ -1891,7 +1989,7 @@ final class AppModel: ObservableObject {
     #endif
     // The library view can appear as soon as its saved profile is loaded.
     // Its task/activation must not supersede the initial coherent snapshot.
-    guard !isStarting, !isRecoveringLocalHost else { return }
+    guard !isResting, !isStarting, !isRecoveringLocalHost else { return }
     guard !requiresProfileSelection else { return }
     guard let profile else { return }
     let generation = connectionGeneration
@@ -2197,18 +2295,23 @@ final class AppModel: ObservableObject {
   ) async {
     guard let profile, canManageMedia else { return }
     let generation = connectionGeneration
+    let administration = administrationGeneration
     do {
-      let scan = try await APIClient(profile: profile).updateLibraryImportReview(
-        libraryId: review.libraryId,
-        reviewId: review.id,
-        action: action,
-        movieId: movieId)
-      guard isCurrent(generation) else { return }
+      let scan = try await currentAdministration {
+        try await APIClient(profile: profile).updateLibraryImportReview(
+          libraryId: review.libraryId,
+          reviewId: review.id,
+          action: action,
+          movieId: movieId)
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
       activeScans.append(scan)
       libraryImportReviews.removeAll { $0.id == review.id }
       startScanPolling()
     } catch {
-      if isCurrent(generation) { errorMessage = failureMessage(error) }
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
     }
   }
 
@@ -2780,14 +2883,28 @@ final class AppModel: ObservableObject {
   }
 
   func systemWillSleep() async {
+    await PlaybackShutdownCoordinator.shared.pauseForSystemSleep()
     reconnectTask?.cancel()
     reconnectTask = nil
     reconnectCoordinator.cancel()
+    serverWakeTask?.cancel()
+    serverWakeTask = nil
     hostPollTask?.cancel()
     hostPollTask = nil
+    homeRefreshTask?.cancel()
+    homeRefreshTask = nil
     scanPollTask?.cancel()
     scanPollTask = nil
     scanPollingRun = UUID()
+    syncStartTask?.cancel()
+    syncStartTask = nil
+    stopRemoteDeviceTasks()
+    browseWarmup?.cancel()
+    browseWarmup = nil
+    for task in detailPreparations.values { task.cancel() }
+    detailPreparations.removeAll()
+    for task in artworkPrefetch { task.cancel() }
+    artworkPrefetch.removeAll()
     await syncController.stop(runID: connectionGeneration)
   }
 
@@ -2801,6 +2918,11 @@ final class AppModel: ObservableObject {
     if operatingMode == .host { startHostPolling() }
     if !activeScans.isEmpty { startScanPolling() }
     await setApplicationActive(NSApplication.shared.isActive)
+    if !isResting, !requiresProfileSelection, profile != nil {
+      startRemoteDeviceService()
+      if let device = activeRemotePlayer { startRemoteStatusPolling(device: device) }
+      scheduleHomeRefresh()
+    }
     if operatingMode != .host, profile != nil { await refreshFromUI() }
   }
 
@@ -2940,25 +3062,27 @@ final class AppModel: ObservableObject {
   /// smaller copy the server converts when it offers one and the setting asks for it.
   func download(_ item: CatalogItemSummary) {
     guard let profile, item.kind == .movie || item.kind == .episode, item.isPlayable else { return }
+    let generation = connectionGeneration
+    let sessionId = profile.sessionId
     let preference =
       UserDefaults.standard.string(forKey: DownloadQualityPreference.key)
       ?? DownloadQualityPreference.ask
     guard libraryCapabilities.contains(ServerFeatureNames.convertedDownloads),
       preference != DownloadQualityPreference.original
     else {
-      startDownload(item)
+      startDownload(item, using: profile)
       return
     }
     Task {
       let options = try? await APIClient(profile: profile).downloadOptions(mediaId: item.id)
-      guard self.profile?.serverId == profile.serverId else { return }
+      guard isCurrent(generation), self.profile?.sessionId == sessionId else { return }
       switch DownloadQualityPreference.resolve(preference, options: options) {
-      case .original: startDownload(item)
+      case .original: startDownload(item, using: profile)
       case .ask:
         if let options { downloadChoice = PendingDownloadChoice(item: item, options: options) }
       case .converted(let quality):
         startDownload(
-          item, quality: quality, audio: options?.audioTrack,
+          item, using: profile, quality: quality, audio: options?.audioTrack,
           expectedBytes: options?.qualities.first { $0.id == quality }?.estimatedBytes)
       }
     }
@@ -2973,6 +3097,8 @@ final class AppModel: ObservableObject {
         && downloads.active[$0.id] == nil
     }
     guard let profile, let first = wanted.first else { return }
+    let generation = connectionGeneration
+    let sessionId = profile.sessionId
     let others = Array(wanted.dropFirst())
     let preference =
       UserDefaults.standard.string(forKey: DownloadQualityPreference.key)
@@ -2980,55 +3106,62 @@ final class AppModel: ObservableObject {
     guard libraryCapabilities.contains(ServerFeatureNames.convertedDownloads),
       preference != DownloadQualityPreference.original
     else {
-      for item in wanted { startDownload(item) }
+      for item in wanted { startDownload(item, using: profile) }
       return
     }
     Task {
       let options = try? await APIClient(profile: profile).downloadOptions(mediaId: first.id)
-      guard self.profile?.serverId == profile.serverId else { return }
+      guard isCurrent(generation), self.profile?.sessionId == sessionId else { return }
       switch DownloadQualityPreference.resolve(preference, options: options) {
       case .original:
-        for item in wanted { startDownload(item) }
+        for item in wanted { startDownload(item, using: profile) }
       case .ask:
         if let options {
           downloadChoice = PendingDownloadChoice(item: first, options: options, others: others)
         }
       case .converted(let quality):
         startDownload(
-          first, quality: quality, audio: options?.audioTrack,
+          first, using: profile, quality: quality, audio: options?.audioTrack,
           expectedBytes: options?.qualities.first { $0.id == quality }?.estimatedBytes)
-        await startDownloads(others, quality: quality)
+        await startDownloads(others, quality: quality, using: profile, generation: generation)
       }
     }
   }
 
   /// Starts further episodes in `quality`, or the nearest one the server offers for each; nil
   /// keeps their original files.
-  func startDownloads(_ items: [CatalogItemSummary], quality: String?) async {
-    guard let profile else { return }
+  func startDownloads(
+    _ items: [CatalogItemSummary], quality: String?,
+    using capturedProfile: StoredServerProfile? = nil,
+    generation capturedGeneration: UUID? = nil
+  ) async {
+    guard let profile = capturedProfile ?? self.profile else { return }
+    let generation = capturedGeneration ?? connectionGeneration
+    let sessionId = profile.sessionId
     for item in items {
+      guard isCurrent(generation), self.profile?.sessionId == sessionId else { return }
       guard let quality else {
-        startDownload(item)
+        startDownload(item, using: profile)
         continue
       }
       let options = try? await APIClient(profile: profile).downloadOptions(mediaId: item.id)
-      guard self.profile?.serverId == profile.serverId else { return }
+      guard isCurrent(generation), self.profile?.sessionId == sessionId else { return }
       if case .converted(let own) = DownloadQualityPreference.resolve(quality, options: options) {
         startDownload(
-          item, quality: own, audio: options?.audioTrack,
+          item, using: profile, quality: own, audio: options?.audioTrack,
           expectedBytes: options?.qualities.first { $0.id == own }?.estimatedBytes)
       } else {
-        startDownload(item)
+        startDownload(item, using: profile)
       }
     }
   }
 
   /// Starts a download in the chosen quality; nil keeps the original file.
   func startDownload(
-    _ item: CatalogItemSummary, quality: String? = nil, audio: Int? = nil,
-    expectedBytes: Int64? = nil
+    _ item: CatalogItemSummary, using capturedProfile: StoredServerProfile? = nil,
+    quality: String? = nil, audio: Int? = nil, expectedBytes: Int64? = nil
   ) {
-    guard let profile else { return }
+    guard let profile = capturedProfile ?? self.profile else { return }
     let subtitle =
       item.kind == .episode
       ? [
@@ -3041,6 +3174,14 @@ final class AppModel: ObservableObject {
       expectedBytes: expectedBytes)
   }
 
+  static func offlinePresentation(for title: OfflineTitle) -> PlaybackPresentation {
+    var presentation = PlaybackPresentation(
+      mediaId: title.id, title: title.title, subtitle: title.subtitle, startIntent: .resume,
+      trackScope: title.parentId)
+    presentation.offlineID = title.id
+    return presentation
+  }
+
   /// Plays a download from this Mac; it works while the server is asleep or out of reach.
   func playOffline(_ title: OfflineTitle) {
     // Only a download of the open profile plays, so no one bypasses another profile's PIN or
@@ -3049,10 +3190,7 @@ final class AppModel: ObservableObject {
       (offlineTitles + offlineModeTitles).contains(where: { $0.id == title.id })
     else { return }
     beginPlaybackIntent()
-    var presentation = PlaybackPresentation(
-      mediaId: title.id, title: title.title, subtitle: title.subtitle, startIntent: .resume)
-    presentation.offlineID = title.id
-    playback = presentation
+    playback = Self.offlinePresentation(for: title)
   }
 
   /// Downloads for the open profile only. While no profile is open nothing is offered: the
@@ -3085,10 +3223,13 @@ final class AppModel: ObservableObject {
     return OfflineDownloads.shared.titles.contains { $0.serverId == server }
   }
 
-  /// The profiles that have downloads on this Mac, with their offline card when they have
-  /// one. A profile without a card has not been opened here since offline mode exists.
-  var offlineProfileChoices: [OfflineProfileChoice] {
-    guard let server = offlineServerId else { return [] }
+  /// Loads the profiles that have downloads on this Mac once on demand so SwiftUI bodies do not
+  /// query Keychain on every render.
+  func refreshOfflineProfileChoices() {
+    guard let server = offlineServerId else {
+      offlineProfileChoices = []
+      return
+    }
     let cards = offlineProfileStore.cards(serverId: server)
     let owners = Set(OfflineDownloads.shared.titles.filter { $0.serverId == server }.map(\.userId))
     var choices = cards.filter { owners.contains($0.userId) }.map {
@@ -3097,7 +3238,13 @@ final class AppModel: ObservableObject {
     for owner in owners where !cards.contains(where: { $0.userId == owner }) {
       choices.append(OfflineProfileChoice(userId: owner, card: nil))
     }
-    return choices
+    offlineProfileChoices = choices
+  }
+
+  func offlinePINLockedUntil(for card: OfflineProfileCard, now: Date = Date()) -> Date? {
+    let current =
+      offlineProfileChoices.first(where: { $0.userId == card.userId })?.card ?? card
+    return current.lockedUntil(now: now)
   }
 
   /// The downloads the open offline profile sees.
@@ -3112,6 +3259,7 @@ final class AppModel: ObservableObject {
     guard canOfferOfflineMode, let server = offlineServerId else { return }
     stopLookingForServer()
     isSettingsPresented = false
+    refreshOfflineProfileChoices()
     if let open = profile, let user = open.user,
       open.isViewingSession || !usesProfileSelection,
       OfflineDownloads.shared.titles.contains(where: {
@@ -3132,23 +3280,25 @@ final class AppModel: ObservableObject {
     }
   }
 
-  /// Opens a profile's downloads offline. Returns false for a wrong PIN; after five wrong PINs
-  /// each further try waits, doubling up to five minutes.
+  /// Opens a profile's downloads offline. Runs PBKDF2 off the MainActor and persists per-card
+  /// lockout state in Keychain so restarting the app does not reset wrong-PIN throttling.
   @discardableResult
-  func openOfflineProfile(_ card: OfflineProfileCard, pin: String) -> Bool {
+  func openOfflineProfile(_ card: OfflineProfileCard, pin: String, now: Date = Date()) async -> Bool
+  {
     guard offlineMode != nil, card.serverId == offlineServerId else { return false }
-    if let until = offlinePINLockedUntil, until > Date() { return false }
-    guard card.accepts(pin) else {
-      offlinePINFailures += 1
-      if offlinePINFailures >= 5 {
-        let seconds = min(300.0, 30 * pow(2, Double(offlinePINFailures - 5)))
-        offlinePINLockedUntil = Date().addingTimeInterval(seconds)
-      }
-      return false
-    }
-    offlinePINFailures = 0
-    offlinePINLockedUntil = nil
-    offlineMode = .open(OfflineSession(card: card))
+    var currentCard =
+      offlineProfileChoices.first(where: { $0.userId == card.userId })?.card ?? card
+    if currentCard.lockedUntil(now: now) != nil { return false }
+    let cardSnapshot = currentCard
+    let accepted = await Task.detached(priority: .userInitiated) {
+      cardSnapshot.accepts(pin)
+    }.value
+    guard offlineMode != nil, currentCard.serverId == offlineServerId else { return false }
+    currentCard.recordPINAttempt(succeeded: accepted, now: now)
+    offlineProfileStore.remember(currentCard)
+    refreshOfflineProfileChoices()
+    guard accepted else { return false }
+    offlineMode = .open(OfflineSession(card: currentCard))
     return true
   }
 
@@ -3156,6 +3306,7 @@ final class AppModel: ObservableObject {
   func chooseOtherOfflineProfile() {
     guard offlineMode != nil else { return }
     if playback?.offlineID != nil { dismissPlayback() }
+    refreshOfflineProfileChoices()
     offlineMode = .choosingProfile
   }
 
@@ -3164,6 +3315,7 @@ final class AppModel: ObservableObject {
     guard offlineMode != nil else { return }
     if playback?.offlineID != nil { dismissPlayback() }
     offlineMode = nil
+    offlineProfileChoices = []
     // Opening Aurelia may still be on its first attempt; it shows its own progress.
     guard !isStarting else { return }
     await retryConnection()
@@ -3347,6 +3499,10 @@ final class AppModel: ObservableObject {
       )
     }
     try ProfilePickerProtocol.validate(formatVersion: response.formatVersion)
+    WakeOnLan.remember(
+      serverId: device.serverId,
+      wakeOnLanAddresses: response.wakeOnLanAddresses,
+      hosting: response.hosting)
     guard isCurrent(generation), profileSelectionGeneration == selection,
       profile?.isViewingSession != true, !Task.isCancelled
     else { throw CancellationError() }
@@ -3477,6 +3633,7 @@ final class AppModel: ObservableObject {
       let active = viewingProfile(response, device: device)
       acceptedProfile = active
       rememberForOffline(choice, pin: pin, serverId: device.serverId)
+      if deviceConnection == nil { deviceConnection = device }
       profile = active
       profileSelectionError = nil
       errorMessage = nil
@@ -3712,6 +3869,15 @@ final class AppModel: ObservableObject {
     wishPosterCache.clear()
     clearAdministrationState()
     artworkLoader.removeAll()
+    wrappedLaunch = nil
+    movieNightLaunch = nil
+    requestedMediaDetail = nil
+    requestedPersonDetail = nil
+    requestedDestination = nil
+    downloadChoice = nil
+    showingCollectionEditor = false
+    preselectedCollectionItem = nil
+    clearRemotePlaybackState()
     isMediaManagerPresented = false
     importPreviewLibrary = nil
     sceneNotesVersion &+= 1
@@ -3787,10 +3953,24 @@ final class AppModel: ObservableObject {
     }
     let current = profile
     let paired = deviceConnection
+    await leaveWatchTogether()
     if let server = paired?.serverId ?? current?.serverId {
       offlineProfileStore.forget(serverId: server)
+      PasskeyStore.removeAll(server: server)
     }
+    ArtworkDiskCache.standard?.removeAll()
+    wishPosterCache.clearDisk()
     offlineMode = nil
+    offlineProfileChoices = []
+    clearRemotePlaybackState()
+    wrappedLaunch = nil
+    movieNightLaunch = nil
+    requestedMediaDetail = nil
+    requestedPersonDetail = nil
+    requestedDestination = nil
+    downloadChoice = nil
+    showingCollectionEditor = false
+    preselectedCollectionItem = nil
     let retiredGeneration = connectionGeneration
     inspectionGeneration = UUID()
     profile = nil
@@ -3841,7 +4021,7 @@ final class AppModel: ObservableObject {
   }
 
   @discardableResult
-  private func startNativeHost() async -> Bool {
+  private func startNativeHost(skipKickstart: Bool = false) async -> Bool {
     guard !isRecoveringLocalHost else { return false }
     isRecoveringLocalHost = true
     defer { isRecoveringLocalHost = false }
@@ -3854,12 +4034,21 @@ final class AppModel: ObservableObject {
       serverInfo: nil)
     do {
       hostSnapshot = try await serverHost.start(
-        serverName: "Aurelia on \(Host.current().localizedName ?? "This Mac")")
+        serverName: "Aurelia on \(AureliaDeviceName.current)",
+        skipKickstart: skipKickstart)
       beginTerminationProtection()
-      // A live helper may still be starting Kestrel. Do not treat its first
-      // rendezvous response as proof that the saved account can load its library.
-      for _ in 0..<120 {
-        guard OperatingModePolicy.isAwaitingReadiness(hostSnapshot.state) else { break }
+      // A live helper may still be starting Kestrel or running a database migration after an
+      // update. Give normal startups 30 s and active database updates up to 10 minutes.
+      var idlePolls = 0
+      var totalPolls = 0
+      while OperatingModePolicy.isAwaitingReadiness(hostSnapshot.state) && totalPolls < 2_400 {
+        let isUpdatingDatabase =
+          hostSnapshot.message?.localizedCaseInsensitiveContains("Updating the database") == true
+        if !isUpdatingDatabase {
+          idlePolls += 1
+          if idlePolls >= 120 { break }
+        }
+        totalPolls += 1
         try await Task.sleep(for: .milliseconds(250))
         hostSnapshot = try await serverHost.status()
       }
@@ -3920,6 +4109,8 @@ final class AppModel: ObservableObject {
 
   private func scheduleHomeRefresh() {
     homeRefreshTask?.cancel()
+    homeRefreshTask = nil
+    guard !isResting else { return }
     guard let value = home?.recommendationChangesAt,
       let delay = HomeRefreshPolicy.delay(until: value)
     else { return }
@@ -4056,51 +4247,62 @@ final class AppModel: ObservableObject {
   }
 
   private func startScanPolling() {
-    guard canManageStorage, !activeScans.isEmpty else { return }
+    guard canManageStorage, !activeScans.isEmpty, let profile else { return }
     scanPollTask?.cancel()
     let run = UUID()
     scanPollingRun = run
     let generation = connectionGeneration
     let administration = administrationGeneration
     scanPollTask = Task { [weak self] in
-      guard let self, let profile = self.profile else { return }
-      while self.isCurrent(generation) && self.isCurrentAdministration(administration)
-        && !self.activeScans.isEmpty
+      while let model = self,
+        model.isCurrent(generation) && model.isCurrentAdministration(administration)
+          && !model.activeScans.isEmpty
       {
         do { try await Task.sleep(for: .seconds(1)) } catch { return }
-        let polledScans = self.activeScans
+        guard let polledScans = self?.activeScans else { return }
         let batch: ScanPollingBatch
         do {
-          batch = try await ScanPollingBatch.load(scans: polledScans) {
-            let id = $0
-            return try await self.currentAdministration {
+          batch = try await ScanPollingBatch.load(scans: polledScans) { [weak self] id in
+            guard let model = self else { throw CancellationError() }
+            return try await model.currentAdministration {
               try await APIClient(profile: profile).scan(id: id)
             }
           }
         } catch { return }
-        guard self.isCurrent(generation), self.isCurrentAdministration(administration),
-          self.scanPollingRun == run
+        guard let model = self,
+          model.isCurrent(generation), model.isCurrentAdministration(administration),
+          model.scanPollingRun == run
         else { return }
         let reconciled = batch.reconciled(
-          polledIDs: Set(polledScans.map(\.id)), current: self.activeScans)
-        self.activeScans = Self.uniqueScans(reconciled.active)
-        self.scanStatusUnavailable = reconciled.unavailable
+          polledIDs: Set(polledScans.map(\.id)), current: model.activeScans)
+        model.activeScans = Self.uniqueScans(reconciled.active)
+        model.scanStatusUnavailable = reconciled.unavailable
         if let failure = batch.definitiveFailure {
-          self.reportAdministrationFailure(failure)
-          self.scanPollTask = nil
+          model.reportAdministrationFailure(failure)
+          model.scanPollTask = nil
           return
         }
         if !reconciled.completed.isEmpty {
-          self.recentScans = Self.uniqueScans(reconciled.completed + self.recentScans)
+          model.recentScans = Self.uniqueScans(reconciled.completed + model.recentScans)
             .sorted { $0.createdAt > $1.createdAt }
-          try? await self.refresh()
-          await self.reloadAdministrationAfterScan()
+          do {
+            try await model.refresh()
+          } catch {
+            if let current = self,
+              current.isCurrent(generation), current.isCurrentAdministration(administration)
+            {
+              current.reportAdministrationFailure(error)
+            }
+          }
+          await self?.reloadAdministrationAfterScan()
         }
         if !reconciled.unavailable.isEmpty {
           do { try await Task.sleep(for: .seconds(4)) } catch { return }
         }
       }
-      if self.isCurrent(generation), self.scanPollingRun == run { self.scanPollTask = nil }
+      if let model = self, model.isCurrent(generation), model.scanPollingRun == run {
+        model.scanPollTask = nil
+      }
     }
   }
 
@@ -4129,60 +4331,69 @@ final class AppModel: ObservableObject {
       reconnectTask == nil, let current = profile
     else { return }
     let generation = connectionGeneration
+    let coordinator = reconnectCoordinator
     reconnectTask = Task { [weak self] in
-      guard let self else { return }
       do {
         // A server that went to sleep while Aurelia was open is woken first, with the progress
         // shown, instead of only looking for it at its address.
-        if self.canWakeCurrentServer {
-          _ = await self.ensureServerAwake(self.deviceConnection ?? current)
-          guard self.isCurrent(generation), !Task.isCancelled else { return }
+        if let wakeTarget = self.flatMap({
+          $0.canWakeCurrentServer ? ($0.deviceConnection ?? current) : nil
+        }) {
+          _ = await self?.ensureServerAwake(wakeTarget)
+          guard let model = self, model.isCurrent(generation), !Task.isCancelled else { return }
         }
         // Only looks for it from here: a server that stayed asleep is woken by Wake Server, not
         // by someone who merely moves the mouse or closes the window.
-        let inspected = try await self.reconnectCoordinator.reconnect(current, wakes: false)
-        guard self.isCurrent(generation) else { return }
-        let device = self.deviceConnection ?? current
+        let inspected = try await coordinator.reconnect(current, wakes: false)
+        guard let model = self, model.isCurrent(generation) else { return }
+        let device = model.deviceConnection ?? current
         guard !device.isViewingSession else { throw APIClientError.invalidResponse }
         let paired = device.changingAddress(inspected.baseURL, name: inspected.info.name)
-        try self.store.save(paired)
-        self.deviceConnection = paired
-        self.profile = current.changingAddress(inspected.baseURL, name: inspected.info.name)
+        try model.store.save(paired)
+        model.deviceConnection = paired
+        model.profile = current.changingAddress(inspected.baseURL, name: inspected.info.name)
         // Retire all captured old-address requests before publishing a fresh snapshot.
-        self.reconnectTask = nil
-        self.invalidateLibraryWork()
-        let resumedGeneration = self.connectionGeneration
+        model.reconnectTask = nil
+        model.invalidateLibraryWork()
+        let resumedGeneration = model.connectionGeneration
         do {
-          try await self.refresh(requireCompleteSnapshot: true)
-          guard self.isCurrent(resumedGeneration) else { return }
-          self.errorMessage = nil
-          self.profileSelectionError = nil
-          self.serverUnreachable = false
-          self.synchronizationErrorMessage = nil
-          self.startSync()
+          try await model.refresh(requireCompleteSnapshot: true)
+          guard let currentModel = self, currentModel.isCurrent(resumedGeneration) else { return }
+          currentModel.errorMessage = nil
+          currentModel.profileSelectionError = nil
+          currentModel.serverUnreachable = false
+          currentModel.synchronizationErrorMessage = nil
+          currentModel.startSync()
         } catch let failure as APIClientError where failure.httpStatus == 401 {
-          guard self.isCurrent(resumedGeneration) else { return }
-          if self.profile?.isViewingSession == true {
-            await self.switchWatchingProfile()
+          guard let currentModel = self, currentModel.isCurrent(resumedGeneration) else { return }
+          if currentModel.profile?.isViewingSession == true {
+            await currentModel.switchWatchingProfile()
           } else {
-            self.requireDevicePairing()
+            currentModel.requireDevicePairing()
           }
         } catch {
-          guard self.isCurrent(resumedGeneration) else { return }
-          self.errorMessage = self.failureMessage(error)
-          self.beginReconnectIfNeeded(after: error)
+          guard let currentModel = self, currentModel.isCurrent(resumedGeneration) else { return }
+          currentModel.errorMessage = currentModel.failureMessage(error)
+          currentModel.beginReconnectIfNeeded(after: error)
         }
       } catch is CancellationError {
       } catch {
-        guard self.isCurrent(generation) else { return }
-        self.reconnectTask = nil
-        self.errorMessage = self.failureMessage(error)
+        guard let model = self, model.isCurrent(generation) else { return }
+        model.reconnectTask = nil
+        model.errorMessage = model.failureMessage(error)
       }
     }
   }
 
   private func handleSessionFailure(_ error: Error) -> Bool {
     guard usesProfileSelection, let failure = error as? APIClientError else { return false }
+    // Credential-entry errors (wrong Server Password, PIN, or Touch ID verification) return 401
+    // with an explicit problem code; keep the active viewing/device session and show the error locally.
+    if failure.problemCode == "invalid_credentials" || failure.problemCode == "invalid_profile_pin"
+      || failure.problemCode == "passkey_invalid"
+    {
+      return false
+    }
     if failure.problemCode == "device_session_revoked"
       || (failure.httpStatus == 401 && profile?.isViewingSession != true)
     {
@@ -4203,6 +4414,10 @@ final class AppModel: ObservableObject {
     // Keep the saved credential until an explicit disconnect/replacement. A network
     // failure never erases it; a confirmed device rejection shows connection UI.
     guard usesProfileSelection else { return }
+    if let session = watchParty {
+      watchParty = nil
+      Task { await session.leave() }
+    }
     profileExpiryTask?.cancel()
     managementExpiryTask?.cancel()
     managementExpiresAt = nil
@@ -4705,6 +4920,8 @@ final class AppModel: ObservableObject {
     on device: RemotePlayerDevice, item: CatalogItemSummary, startPosition: Double = 0
   ) {
     guard let profile else { return }
+    let generation = connectionGeneration
+    let sessionId = profile.sessionId
     activeRemotePlayer = device
     remotePlaybackTitle = item.title
     remotePlaybackPosition = startPosition
@@ -4722,7 +4939,8 @@ final class AppModel: ObservableObject {
         )
       } catch {
         await MainActor.run {
-          self.stopRemotePlayback()
+          guard self.isCurrent(generation), self.profile?.sessionId == sessionId else { return }
+          self.clearRemotePlaybackState()
           self.errorMessage = self.failureMessage(error)
         }
       }
@@ -4735,42 +4953,59 @@ final class AppModel: ObservableObject {
     action: String, positionSeconds: Double? = nil, skipSeconds: Double? = nil
   ) {
     guard let profile, let device = activeRemotePlayer else { return }
+    let generation = connectionGeneration
+    let sessionId = profile.sessionId
+    let previousPlaying = isRemotePlaying
+    let previousPosition = remotePlaybackPosition
     if action == "pause" { isRemotePlaying = false }
     if action == "resume" { isRemotePlaying = true }
     if let pos = positionSeconds { remotePlaybackPosition = pos }
     if let skip = skipSeconds { remotePlaybackPosition = max(0, remotePlaybackPosition + skip) }
     if positionSeconds != nil || skipSeconds != nil { remoteSeekSentAt = Date() }
 
-    Task {
-      _ = try? await APIClient(profile: profile).sendPlayerCommand(
-        deviceId: device.deviceId,
-        action: action,
-        positionSeconds: positionSeconds,
-        skipSeconds: skipSeconds
-      )
+    Task { [weak self] in
+      guard let self else { return }
+      do {
+        _ = try await APIClient(profile: profile).sendPlayerCommand(
+          deviceId: device.deviceId,
+          action: action,
+          positionSeconds: positionSeconds,
+          skipSeconds: skipSeconds
+        )
+      } catch {
+        await MainActor.run {
+          guard self.isCurrent(generation), self.profile?.sessionId == sessionId else { return }
+          if action == "pause" || action == "resume" { self.isRemotePlaying = previousPlaying }
+          if positionSeconds != nil || skipSeconds != nil {
+            self.remotePlaybackPosition = previousPosition
+            self.remoteSeekSentAt = nil
+          }
+          self.errorMessage = self.failureMessage(error)
+        }
+      }
     }
   }
 
   func stopRemotePlayback() {
-    remoteDeviceStatusTask?.cancel()
-    remoteDeviceStatusTask = nil
-    if let device = activeRemotePlayer, let profile {
+    let device = activeRemotePlayer
+    let capturedProfile = profile
+    clearRemotePlaybackState()
+    if let device, let capturedProfile {
       Task {
-        _ = try? await APIClient(profile: profile).sendPlayerCommand(
+        _ = try? await APIClient(profile: capturedProfile).sendPlayerCommand(
           deviceId: device.deviceId, action: "stop")
       }
     }
-    activeRemotePlayer = nil
-    remotePlaybackTitle = nil
-    isRemotePlaying = false
   }
 
   private func startRemoteStatusPolling(device: RemotePlayerDevice) {
     remoteDeviceStatusTask?.cancel()
+    remoteDeviceStatusTask = nil
+    guard !isResting, profile != nil else { return }
     remoteDeviceStatusTask = Task { [weak self] in
       while !Task.isCancelled {
-        try? await Task.sleep(nanoseconds: 2_500_000_000)
-        guard let self, let profile = self.profile else { return }
+        do { try await Task.sleep(nanoseconds: 2_500_000_000) } catch { return }
+        guard let self, !self.isResting, let profile = self.profile else { return }
         do {
           let status = try await APIClient(profile: profile).playerStatus(deviceId: device.deviceId)
           await MainActor.run {
@@ -4793,17 +5028,25 @@ final class AppModel: ObservableObject {
 
   func startRemoteDeviceService() {
     remoteDeviceHeartbeatTask?.cancel()
+    remoteDeviceHeartbeatTask = nil
     remoteDeviceCommandTask?.cancel()
-    guard profile != nil else { return }
+    remoteDeviceCommandTask = nil
+    guard profile != nil, !isResting, !requiresProfileSelection else { return }
     let deviceId = macDeviceId
-    let deviceName = Host.current().localizedName ?? "Mac"
+    let deviceName = AureliaDeviceName.current
 
     remoteDeviceHeartbeatTask = Task { [weak self] in
       while !Task.isCancelled {
-        guard let self, let profile = self.profile else { return }
+        guard let self, !self.isResting, let profile = self.profile else { return }
+        let activeController = PlaybackShutdownCoordinator.shared.activeController
         let isPlaying = self.playback != nil
-        let mediaId = self.playback?.mediaId
-        let title = self.playback?.title
+        let mediaId = activeController?.presentation.mediaId ?? self.playback?.mediaId
+        let title = activeController?.presentation.title ?? self.playback?.title
+        let positionSeconds = activeController.map { Double($0.currentTimeMilliseconds) / 1_000.0 }
+        let durationSeconds = activeController.flatMap {
+          $0.durationMilliseconds > 0 ? Double($0.durationMilliseconds) / 1_000.0 : nil
+        }
+        let isPaused = activeController.map { !$0.isPlaying } ?? false
         let req = PlayerHeartbeatRequest(
           deviceId: deviceId,
           deviceName: deviceName,
@@ -4811,43 +5054,68 @@ final class AppModel: ObservableObject {
           isPlaying: isPlaying,
           mediaId: mediaId,
           title: title,
-          positionSeconds: nil,
-          durationSeconds: nil,
-          isPaused: false
+          positionSeconds: positionSeconds,
+          durationSeconds: durationSeconds,
+          isPaused: isPaused
         )
         _ = try? await APIClient(profile: profile).sendPlayerHeartbeat(req)
-        try? await Task.sleep(nanoseconds: 15_000_000_000)
+        do { try await Task.sleep(nanoseconds: 15_000_000_000) } catch { return }
       }
     }
 
     remoteDeviceCommandTask = Task { [weak self] in
+      var retryDelaySeconds: UInt64 = 2
       while !Task.isCancelled {
-        guard let self, let profile = self.profile else { return }
+        guard let self, !self.isResting, let profile = self.profile else { return }
         do {
           let commands = try await APIClient(profile: profile).pollPlayerCommands(
             deviceId: deviceId, waitMs: 10000)
+          retryDelaySeconds = 2
           for cmd in commands {
             self.handleIncomingRemoteCommand(cmd)
           }
+        } catch is CancellationError {
+          return
         } catch {
-          try? await Task.sleep(nanoseconds: 2_000_000_000)
+          guard !self.isResting, !Task.isCancelled else { return }
+          do { try await Task.sleep(nanoseconds: retryDelaySeconds * 1_000_000_000) } catch {
+            return
+          }
+          retryDelaySeconds = min(retryDelaySeconds * 2, 30)
         }
       }
     }
   }
 
-  private func handleIncomingRemoteCommand(_ command: RemotePlaybackCommand) {
+  func handleIncomingRemoteCommand(_ command: RemotePlaybackCommand) {
+    let controller = PlaybackShutdownCoordinator.shared.activeController
     switch command.action.lowercased() {
     case "play":
       if let mediaId = command.mediaId {
+        let intent: PlaybackStartIntent
+        if let pos = command.positionSeconds, pos > 0 {
+          intent = .position(Int64((pos * 1_000).rounded()))
+        } else {
+          intent = .play
+        }
         Task { @MainActor [weak self] in
           guard let self else { return }
-          self.startPlayback(
-            mediaId: mediaId,
-            title: "",
-            startIntent: (command.positionSeconds ?? 0) > 0 ? .resume : .play
-          )
+          self.startPlayback(mediaId: mediaId, title: "", startIntent: intent)
         }
+      } else {
+        _ = controller?.play()
+      }
+    case "resume":
+      _ = controller?.play()
+    case "pause":
+      _ = controller?.pause()
+    case "skip":
+      if let seconds = command.skipSeconds {
+        controller?.skip(seconds: Int64(seconds.rounded()))
+      }
+    case "seek":
+      if let pos = command.positionSeconds {
+        controller?.seek(to: Int64(max(0, pos * 1_000).rounded()))
       }
     case "stop":
       Task { @MainActor [weak self] in

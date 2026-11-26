@@ -693,17 +693,15 @@ private final class RelayUpstreamDelegate: NSObject, URLSessionDataDelegate,
     completionHandler:
       @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
   ) {
-    guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-      challenge.protectionSpace.host.caseInsensitiveCompare(allowedHost) == .orderedSame,
-      let trust = challenge.protectionSpace.serverTrust,
-      let fingerprint = try? ServerPublicKeyFingerprint.calculate(from: trust),
-      fingerprint.caseInsensitiveCompare(expectedFingerprint) == .orderedSame
+    guard
+      let credential = TLSTrustDelegate.evaluatePinnedServerTrust(
+        challenge, allowedHost: allowedHost, expectedFingerprint: expectedFingerprint)
     else {
       forwardingQueue.async { self.fail(.untrustedServer) }
       completionHandler(.cancelAuthenticationChallenge, nil)
       return
     }
-    completionHandler(.useCredential, URLCredential(trust: trust))
+    completionHandler(.useCredential, credential)
   }
 
   func urlSession(

@@ -18,4 +18,5 @@ public sealed class LibraryStateMutation
     public string Fingerprint { get; set; } = string.Empty;
     public string ResponseJson { get; set; } = string.Empty;
     public long AccessRevision { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

@@ -14,7 +14,6 @@ read_sleep_settings "$data/sleep-settings"
 
 device=$(ip -4 route show default | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
 [ -n "$device" ] || { echo "No network connection found." >&2; exit 1; }
-supports=$( { ethtool "$device" 2>/dev/null || true; } | awk -F': ' '/Supports Wake-on/ { print $2; exit }' | tr -cd 'pumbagsf')
 network=other
 if [ -e "/sys/class/net/$device/wireless" ] || [ -e "/sys/class/net/$device/phy80211" ]; then
   network=wifi
@@ -32,10 +31,21 @@ leave() {
 }
 # The card's wake letters as they are now ("d": nothing wakes it).
 leave_status() {
-  local now
-  now=$( { ethtool "$device" 2>/dev/null || true; } | awk -F': ' '/^[[:space:]]*Wake-on:/ { print $2; exit }' | tr -cd 'pumbagsfd')
+  local now=""
+  if command -v ethtool >/dev/null 2>&1; then
+    now=$( { ethtool "$device" 2>/dev/null || true; } | awk -F': ' '/^[[:space:]]*Wake-on:/ { print $2; exit }' | tr -cd 'pumbagsfd')
+  fi
   leave wake-on-lan-status "$(printf 'NETWORK=%s\nWAKE_ON=%s' "$network" "$now")"$'\n'
 }
+
+if ! command -v ethtool >/dev/null 2>&1; then
+  leave wake-on-lan-support $'\n'
+  leave_status
+  echo "ethtool is not installed; install it (sudo apt install ethtool) so Wake-on-LAN can be checked and enabled." >&2
+  exit 1
+fi
+
+supports=$( { ethtool "$device" 2>/dev/null || true; } | awk -F': ' '/Supports Wake-on/ { print $2; exit }' | tr -cd 'pumbagsf')
 leave wake-on-lan-support "$supports"$'\n'
 
 if [[ "$supports" != *g* ]]; then

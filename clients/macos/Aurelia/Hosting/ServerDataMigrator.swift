@@ -6,28 +6,52 @@ enum ServerDataMigrationError: Error, Equatable {
   case sqliteUnavailable
   case integrityCheckFailed
   case activationFailed
+  case destinationUnavailable
 }
 
 enum ServerDataMigrator {
   private static let legacyDatabaseName = "aurelia-home.db"
   private static let databaseName = "aurelia.db"
+  private static let stagingPrefix = ".Aurelia-Server-Migration-"
 
-  static func migrateBuild11IfNeeded(to destination: URL) throws {
-    guard destination.standardizedFileURL == defaultDestination else { return }
-    try migrateIfNeeded(from: legacySource, to: destination)
+  static func migrateBuild11IfNeeded(
+    to destination: URL,
+    isTest: Bool = AppEdition.isTest,
+    home: URL = FileManager.default.homeDirectoryForCurrentUser
+  ) throws {
+    guard !isTest, destination.standardizedFileURL == defaultDestination(in: home) else { return }
+    try migrateIfNeeded(from: legacySource(in: home), to: destination)
   }
 
   static func migrateIfNeeded(from source: URL, to destination: URL) throws {
     let fileManager = FileManager.default
     let canonicalDestination = destination.standardizedFileURL
+    cleanupAbandonedStagingDirectories(
+      in: canonicalDestination.deletingLastPathComponent(), fileManager: fileManager)
 
+    var destinationLinkMetadata = stat()
+    if lstat(canonicalDestination.path, &destinationLinkMetadata) == 0,
+      destinationLinkMetadata.st_mode & S_IFMT == S_IFLNK
+    {
+      var targetIsDirectory: ObjCBool = false
+      if fileManager.fileExists(atPath: canonicalDestination.path, isDirectory: &targetIsDirectory),
+        targetIsDirectory.boolValue
+      {
+        // The user relocated the server data folder via a symbolic link to an available directory
+        // (for example on an external drive). Leave it untouched instead of attempting Build 11
+        // migration or failing startup.
+        return
+      }
+      throw ServerDataMigrationError.destinationUnavailable
+    }
+
+    // Only migrate when the destination does not yet exist; an existing (even manually emptied)
+    // destination must never silently re-import legacy Build 11 data.
     if fileManager.fileExists(atPath: canonicalDestination.path) {
       guard isOwnedDirectory(canonicalDestination) else {
         throw ServerDataMigrationError.activationFailed
       }
-      guard try fileManager.contentsOfDirectory(atPath: canonicalDestination.path).isEmpty else {
-        return
-      }
+      return
     }
 
     let source = source.standardizedFileURL
@@ -42,7 +66,7 @@ enum ServerDataMigrator {
     else { throw ServerDataMigrationError.invalidSource }
 
     let staging = canonicalDestination.deletingLastPathComponent()
-      .appendingPathComponent(".Aurelia-Server-Migration-\(UUID().uuidString)", isDirectory: true)
+      .appendingPathComponent("\(stagingPrefix)\(UUID().uuidString)", isDirectory: true)
     do {
       try fileManager.createDirectory(
         at: staging,
@@ -66,9 +90,6 @@ enum ServerDataMigrator {
         destination: migratedDatabase)
       try validate(database: migratedDatabase)
       try applyPrivatePermissions(to: staging)
-      if fileManager.fileExists(atPath: canonicalDestination.path) {
-        try fileManager.removeItem(at: canonicalDestination)
-      }
       try fileManager.moveItem(at: staging, to: canonicalDestination)
     } catch {
       try? fileManager.removeItem(at: staging)
@@ -76,14 +97,31 @@ enum ServerDataMigrator {
     }
   }
 
-  private static var defaultDestination: URL {
-    FileManager.default.homeDirectoryForCurrentUser
+  private static func cleanupAbandonedStagingDirectories(
+    in parent: URL, fileManager: FileManager
+  ) {
+    guard
+      let entries = try? fileManager.contentsOfDirectory(
+        at: parent, includingPropertiesForKeys: nil, options: [])
+    else { return }
+    for entry in entries {
+      let name = entry.lastPathComponent
+      guard name.hasPrefix(stagingPrefix),
+        UUID(uuidString: String(name.dropFirst(stagingPrefix.count))) != nil,
+        isOwnedDirectory(entry)
+      else { continue }
+      try? fileManager.removeItem(at: entry)
+    }
+  }
+
+  private static func defaultDestination(in home: URL) -> URL {
+    home
       .appendingPathComponent("Library/Application Support/Aurelia Server", isDirectory: true)
       .standardizedFileURL
   }
 
-  private static var legacySource: URL {
-    FileManager.default.homeDirectoryForCurrentUser
+  private static func legacySource(in home: URL) -> URL {
+    home
       .appendingPathComponent("Library/Application Support/Aurelia Home Server", isDirectory: true)
       .standardizedFileURL
   }

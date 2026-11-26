@@ -68,8 +68,10 @@ final class LibraryBrowseUITests: XCTestCase {
       })
     let before = card.frame
     click(card, in: app)
-    XCTAssertTrue(app.buttons["play-media"].waitForExistence(timeout: 5))
+    let play = app.buttons["play-media"]
+    XCTAssertTrue(play.waitForExistence(timeout: 5))
     app.buttons["Back"].firstMatch.click()
+    XCTAssertTrue(play.waitForNonExistence(timeout: 5))
     XCTAssertTrue(card.waitForExistence(timeout: 5))
     XCTAssertEqual(card.frame.minY, before.minY, accuracy: 2)
     XCTAssertEqual(card.frame.minX, before.minX, accuracy: 2)

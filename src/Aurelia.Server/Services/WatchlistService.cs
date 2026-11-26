@@ -109,6 +109,104 @@ public sealed class WatchlistService(
         return new WatchlistItemStateResponse(mediaId, isWatchlisted);
     }
 
+    /// <summary>Moves every profile's watchlist entry from a merged copy to the kept copy.</summary>
+    public async Task ReplaceMediaIdAsync(Guid sourceId, Guid targetId, CancellationToken cancellationToken)
+    {
+        if (sourceId == targetId)
+        {
+            return;
+        }
+
+        var directory = WatchlistDirectory();
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
+
+        var updatedUsers = new List<Guid>();
+        foreach (var file in Directory.EnumerateFiles(directory, "*.json"))
+        {
+            var stem = Path.GetFileNameWithoutExtension(file);
+            if (!Guid.TryParseExact(stem, "N", out var userId))
+            {
+                continue;
+            }
+
+            var gate = GateForUser(userId);
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                var entries = await ReadEntriesCoreAsync(userId, cancellationToken);
+                var sourceIndex = entries.FindIndex(entry => entry.MediaId == sourceId);
+                if (sourceIndex < 0)
+                {
+                    continue;
+                }
+
+                var sourceEntry = entries[sourceIndex];
+                var targetIndex = entries.FindIndex(entry => entry.MediaId == targetId);
+                if (targetIndex >= 0)
+                {
+                    var existing = entries[targetIndex];
+                    if (sourceEntry.AddedAt > existing.AddedAt)
+                    {
+                        entries[targetIndex] = existing with { AddedAt = sourceEntry.AddedAt };
+                    }
+                    entries.RemoveAt(sourceIndex);
+                }
+                else
+                {
+                    entries[sourceIndex] = sourceEntry with { MediaId = targetId };
+                }
+
+                await WriteEntriesCoreAsync(userId, entries, cancellationToken);
+                updatedUsers.Add(userId);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+
+        if (updatedUsers.Count > 0)
+        {
+            var now = timeProvider.GetUtcNow();
+            foreach (var userId in updatedUsers)
+            {
+                database.SyncChanges.Add(new SyncChange
+                {
+                    Area = SyncChangeArea.UserState,
+                    UserId = userId,
+                    MediaItemId = targetId,
+                    CreatedAt = now,
+                });
+            }
+            await database.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>Removes the deleted profile's persisted watchlist file, if present.</summary>
+    public async Task DeleteUserAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var gate = GateForUser(userId);
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var path = WatchlistFilePath(userId);
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     private async Task<List<StoredWatchlistEntry>> ReadEntriesAsync(Guid userId, CancellationToken cancellationToken)
     {
         var gate = GateForUser(userId);

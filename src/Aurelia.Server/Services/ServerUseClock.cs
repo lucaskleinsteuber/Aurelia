@@ -82,7 +82,7 @@ public sealed class ServerUseClock(ServerRuntimeOptions runtime, TimeProvider cl
         try
         {
             PrivateFilePermissions.CreatePrivateDirectory(runtime.DataDirectory);
-            File.WriteAllText(UsePath, now.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture));
+            PrivateFilePermissions.WritePrivateText(UsePath, now.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture));
             return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)

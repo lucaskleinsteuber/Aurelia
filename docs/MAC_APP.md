@@ -207,13 +207,25 @@ folders (see [Organizing your media](MEDIA_LIBRARY.md)).
 
 ## Updates
 
-The app checks the GitHub releases once a day (*Settings › Updates*). It downloads the disk image
-for its own processor, checks it against the release's checksums and Apple's code signature,
-replaces only the app and starts it again; the library, profiles and settings stay. Turn on
-**Beta updates** to receive test versions before they become stable.
+The app checks GitHub releases at launch and once a day while running (*Settings › Updates*).
+Automatic updates require Aurelia to be installed at `/Applications/Aurelia.app` (not run from a
+disk image, Downloads, or another folder). It downloads the disk image for its own processor, checks
+it against the release's signed checksums and Apple's code signature, replaces only the app and
+starts it again; the library, profiles and settings stay. If this Mac hosts your server, the server
+stops briefly while the update installs.
+
+Aurelia for Mac is currently published only as beta versions (development-signed for Macs registered
+to the developer's Apple account), so **Beta updates** is enabled by default and should stay on to
+receive updates; there are no stable Mac versions yet.
 
 ## Removing Aurelia
 
-Quit Aurelia and move it from Applications to the Trash. Your media is never touched. The library
-database and settings stay in the app's container in your Library folder, so a reinstall picks up
-where you left off.
+If this Mac hosts your library, first open *Settings › Power* in Aurelia and switch background
+hosting to **Only while Aurelia is running** so the background server stops and its login item is
+removed. Then quit Aurelia and move it from Applications to the Trash. Your media is never touched.
+
+The server database and settings stay in `~/Library/Application Support/Aurelia Server`, server
+logs in `~/Library/Logs/Aurelia Server`, and app preferences in your Library container folders
+(`~/Library/Containers/com.lucas.aurelia.media` and the host App Group folder under
+`~/Library/Group Containers/`), so a reinstall picks up where you left off. Delete those folders as
+well if you want a completely clean removal.

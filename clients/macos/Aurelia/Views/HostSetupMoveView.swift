@@ -41,7 +41,7 @@ struct HostSetupMoveView: View {
           .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
-    .frame(width: 620, height: 600)
+    .aureliaSheetFrame(minWidth: 540, idealWidth: 620, minHeight: 440, idealHeight: 600)
     .onAppear { browser.start() }
     .onDisappear { browser.stop() }
     .task { await poll() }

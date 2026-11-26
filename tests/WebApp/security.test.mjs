@@ -3,8 +3,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  newDeviceNote, remoteUnlockState, securityDeviceLine, securityEventText, securityEventsQuery, securityKind, supportsSecurity,
-  unansweredDevices
+  deviceConfirmationDetails, deviceConfirmationMessage, newDeviceNote, remoteUnlockState, securityDeviceLine,
+  securityEventText, securityEventsQuery, securityKind, supportsSecurity, unansweredDevices
 } from "../../src/Aurelia.Server/WebApp/js/security.js";
 import { createSecurityAlerts, remoteUnlockPanel, securitySection } from "../../src/Aurelia.Server/WebApp/js/security-view.js";
 import { installDOM, all, button, flush } from "./dom-fixture.mjs";
@@ -165,4 +165,45 @@ test("new-device notes appear for the owner and leave after That Was Me", async 
   assert.deepEqual(calls, ["ack d1"]);
   assert.equal(note.isConnected, false);
   alerts.stop();
+});
+
+test("device sign-out confirmation identifies identical browser names and URL-encodes the session id", async (t) => {
+  installDOM(t);
+  assert.equal(
+    deviceConfirmationDetails({ userName: "Owner", platform: "Web", ipAddress: "192.0.2.40", lastSeenAt: "2026-11-13T10:01:00Z" }, () => "Nov 13"),
+    "Owner · Web · 192.0.2.40 · Last used Nov 13",
+  );
+  assert.equal(
+    deviceConfirmationMessage({ ipAddress: "192.0.2.40" }, "It needs a new code."),
+    "192.0.2.40. It needs a new code.",
+  );
+  assert.equal(deviceConfirmationMessage({}, "It needs a new code."), "It needs a new code.");
+
+  const calls = [];
+  const api = {
+    securitySettings: async () => ({ securityLogDays: 90, requirePasskeysForAdministrators: false }),
+    securityDevices: async () => [device({ id: "sess/42?x=1", deviceName: "Chrome on Mac", platform: "Web", ipAddress: "192.0.2.99", isNew: false })],
+    blockedDevices: async () => [],
+    approvedIfAsked: async (path, options) => { calls.push({ path, method: options.method }); },
+  };
+  const app = { toast: () => {}, handleError: () => false };
+  const kit = {
+    section: (title, _symbol, _description, ...children) => { const element = document.createElement("section"); element.append(title, ...children.filter(Boolean)); return element; },
+    row: (label, control) => { const element = document.createElement("div"); element.append(label, control); return element; },
+    value: (shown) => { const element = document.createElement("span"); element.textContent = shown; return element; },
+    select: () => document.createElement("select"),
+  };
+  const element = securitySection({ api, app, kit, refresh: () => {} });
+  document.body.append(element);
+  await flush();
+
+  button(element, "Sign Out…").click();
+  await flush();
+  const sheet = document.body.children.at(-1);
+  assert.match(text(sheet), /Sign Out “Chrome on Mac”\?/);
+  assert.match(text(sheet), /192\.0\.2\.99/);
+  assert.match(text(sheet), /Last used /);
+  button(sheet, "Sign Out").click();
+  await flush();
+  assert.deepEqual(calls, [{ path: "/api/v1/auth/sessions/sess%2F42%3Fx%3D1", method: "DELETE" }]);
 });

@@ -404,13 +404,8 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
         return FilenameMetadataParser.Series(path).Title;
     }
 
-    private static string NormalizeRelativePath(string path)
-    {
-        return path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
-            .Trim(Path.DirectorySeparatorChar)
-            .Normalize(NormalizationForm.FormKC)
-            .ToUpperInvariant();
-    }
+    private static string NormalizeRelativePath(string path) =>
+        MediaPath.NormalizeRelative(path);
 
     private static List<ExistingImportAssignment> ValidateAssignments(
         string rootPath, IReadOnlyList<ExistingImportAssignment> assignments)
@@ -1021,7 +1016,7 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
                 continue;
             }
 
-            var identity = FilenameMetadataParser.Episode(file.Path, season);
+            var identity = FilenameMetadataParser.Episode(file.Path, season, seriesItem.DetectedTitle);
             if (!identity.Season.HasValue || !identity.Episode.HasValue)
             {
                 if (!allowImplicitEpisodes)
@@ -1216,6 +1211,7 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
     {
         var files = new List<ScannedFile>();
         var issues = new List<ScanDiscoveryIssue>();
+        var skippedSymlinks = 0;
         var pending = new Stack<DirectoryInfo>();
         pending.Push(new DirectoryInfo(rootPath));
 
@@ -1242,10 +1238,12 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
             foreach (var entry in entries)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                bool isSymlink;
                 bool shouldSkip;
                 try
                 {
-                    shouldSkip = ShouldSkip(entry);
+                    isSymlink = (entry.Attributes & FileAttributes.ReparsePoint) != 0;
+                    shouldSkip = isSymlink || ShouldSkip(entry);
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
                 {
@@ -1258,6 +1256,7 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
 
                 if (shouldSkip)
                 {
+                    if (isSymlink) skippedSymlinks++;
                     continue;
                 }
 
@@ -1293,6 +1292,16 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
                         file.FullName));
                 }
             }
+        }
+
+        if (skippedSymlinks > 0)
+        {
+            issues.Add(new ScanDiscoveryIssue(
+                "symbolic_link_skipped",
+                skippedSymlinks == 1
+                    ? "1 symbolic link was skipped because Aurelia does not follow symbolic links."
+                    : $"{skippedSymlinks} symbolic links were skipped because Aurelia does not follow symbolic links.",
+                rootPath));
         }
 
         return new EnumerationResult(

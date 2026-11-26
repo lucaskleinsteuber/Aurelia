@@ -35,7 +35,7 @@ struct MediaManagerView: View {
         }
       }
     )
-    .frame(width: 800, height: 720)
+    .aureliaSheetFrame(minWidth: 620, idealWidth: 800, minHeight: 480, idealHeight: 720)
     .sheet(isPresented: $choosesServerFolder) {
       ServerFolderPicker { path in
         if !drafts.contains(where: { $0.path == path }) {

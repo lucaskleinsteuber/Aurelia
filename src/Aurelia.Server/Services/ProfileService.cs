@@ -9,7 +9,8 @@ namespace Aurelia.Server.Services;
 
 public sealed class ProfileService(AureliaDbContext database, IPasswordHasher<ServerUser> hasher,
     CredentialAttemptGuard passwords, ProfilePinAttemptGuard pins, ProfileSessionStore sessions,
-    CatalogMutationGate mutations, ActiveStreamRegistry streams, ScreenTimeService? screenTime = null)
+    CatalogMutationGate mutations, ActiveStreamRegistry streams, ScreenTimeService? screenTime = null,
+    ServerRuntimeOptions? runtime = null)
 {
     public async Task<ProfilePickerResponse> PickerAsync(CancellationToken token)
     {
@@ -21,8 +22,13 @@ public sealed class ProfileService(AureliaDbContext database, IPasswordHasher<Se
             for (var index = 0; index < profiles.Count; index++)
                 if (profiles[index].Role == UserRole.User && await screenTime.ProfileClosedUntilAsync(profiles[index].Id, token) is { } until)
                     profiles[index] = profiles[index] with { ClosedUntil = until };
+        var hosting = runtime is null ? null : ServerHosting.Kind(runtime);
+        var wakeOnLan = runtime is not null && runtime.LanAccessEnabled && !ServerHosting.ByApp(hosting!)
+            ? WakeOnLan.LocalAddresses()
+            : null;
         return new(2, "1.5.1", !await database.AdministrationCredentials.AnyAsync(token),
-            profiles.OrderBy(profile => profile.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
+            profiles.OrderBy(profile => profile.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
+            wakeOnLan, hosting);
     }
 
     /// <summary>A whole-profile screen time lock keeps a children's profile closed until its wake time.</summary>
@@ -167,7 +173,8 @@ public sealed class ProfileService(AureliaDbContext database, IPasswordHasher<Se
     {
         var name = (request.Username ?? "").Trim().Normalize(NormalizationForm.FormKC);
         // Only the owner signs in with a name (set up elsewhere); a profile name just has to be visible.
-        if (name.Length is < 1 or > 64 || name.Any(char.IsControl))
+        if (name.Length is < 1 or > 64 || TextInputValidation.HasForbiddenControlCharacters(name)
+            || !TextInputValidation.HasVisibleCharacter(name))
             throw new AccountException("invalid_username", "The profile name must contain 1 to 64 visible characters.", 400);
         if (!Enum.IsDefined(request.Role)) throw new AccountException("invalid_role", "Choose a valid profile role.", 400);
         var protection = request.PinProtectionEnabled ?? (request.Role != UserRole.User || request.Pin is not null);
@@ -175,9 +182,19 @@ public sealed class ProfileService(AureliaDbContext database, IPasswordHasher<Se
             throw new AccountException("pin_required_for_role", "Owner and Admin profiles must use a PIN.", 400);
         if (protection) ValidatePin(request.Pin);
         else if (request.Pin is not null) throw new AccountException("invalid_pin_format", "Do not send a PIN for an unprotected profile.", 400);
-        var mode = request.AccessMode ?? (request.Role == UserRole.Owner ? ProfileAccessMode.EntireLibrary : ProfileAccessMode.SelectedTitles);
         ValidateAgeLimit(request.AgeLimit, request.Role);
-        if (request.AgeLimit is not null) mode = ProfileAccessMode.EntireLibrary;
+        if (request.AgeLimit is not null
+            && ((request.AccessMode is not null && request.AccessMode != ProfileAccessMode.EntireLibrary)
+                || request.TitleIds is { Count: > 0 }))
+        {
+            throw new AccountException(
+                "invalid_profile_access",
+                "A profile with an age limit always uses entire-library access and cannot combine with selected titles.",
+                400);
+        }
+        var mode = request.AgeLimit is not null
+            ? ProfileAccessMode.EntireLibrary
+            : request.AccessMode ?? (request.Role == UserRole.Owner ? ProfileAccessMode.EntireLibrary : ProfileAccessMode.SelectedTitles);
         var displayName = request.DisplayName is null ? null : ValidName(request.DisplayName);
         if (request.PictureKey is not null && !ProfilePictures.IsBuiltin(request.PictureKey))
             throw new AccountException("invalid_profile_picture", "Choose one of the built-in pictures.", 400);
@@ -467,7 +484,8 @@ public sealed class ProfileService(AureliaDbContext database, IPasswordHasher<Se
     private static string ValidName(string name)
     {
         var clean = (name ?? "").Trim().Normalize(NormalizationForm.FormKC);
-        if (clean.Length is < 1 or > 40 || clean.Any(char.IsControl))
+        if (clean.Length is < 1 or > 40 || TextInputValidation.HasForbiddenControlCharacters(clean)
+            || !TextInputValidation.HasVisibleCharacter(clean))
             throw new AccountException("invalid_profile_name", "The name must contain 1 to 40 visible characters.", 400);
         return clean;
     }

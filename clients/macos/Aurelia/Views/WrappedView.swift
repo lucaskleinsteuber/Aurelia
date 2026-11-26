@@ -9,6 +9,23 @@ extension Color {
   }
 }
 
+/// Pure presentation state for Wrapped so loading, empty slides, error, and active slide are all
+/// explicit and always closable.
+enum WrappedDisplayState: Equatable {
+  case loading
+  case empty
+  case failed(String)
+  case slide(Int)
+
+  static func resolve(wrapped: YearWrapped?, index: Int, error: String?) -> Self {
+    if let error { return .failed(error) }
+    guard let wrapped else { return .loading }
+    guard !wrapped.slides.isEmpty else { return .empty }
+    let clamped = min(max(0, index), wrapped.slides.count - 1)
+    return .slide(clamped)
+  }
+}
+
 /// Wrapped: a year, or one month, as slides over the whole window, like a story. Each slide runs
 /// for six seconds; a click on the right or the right arrow moves on, on the left goes back,
 /// holding or Space pauses, and Escape closes. In a wide window the poster stands beside the
@@ -26,12 +43,18 @@ struct WrappedStoryView: View {
   @FocusState private var focused: Bool
 
   var body: some View {
-    let slide = wrapped?.slides.indices.contains(index) == true ? wrapped?.slides[index] : nil
-    let accent = WrappedStory.accent(slide?.accent ?? "night")
+    let display = WrappedDisplayState.resolve(wrapped: wrapped, index: index, error: error)
+    let activeSlide: WrappedSlide? =
+      if case .slide(let at) = display, wrapped?.slides.indices.contains(at) == true {
+        wrapped?.slides[at]
+      } else {
+        nil
+      }
+    let accent = WrappedStory.accent(activeSlide?.accent ?? "night")
     GeometryReader { geometry in
       ZStack {
         Color(wrappedHex: accent.field)
-        if let poster = slide?.poster {
+        if let poster = activeSlide?.poster {
           AuthenticatedArtwork(artwork: poster, symbol: "photo")
             .blur(radius: 60)
             .opacity(0.28)
@@ -39,19 +62,42 @@ struct WrappedStoryView: View {
             .id("backdrop-\(index)")
             .transition(.opacity)
         }
-        if let slide {
-          content(slide, accent: accent, size: geometry.size)
-          controls(count: wrapped?.slides.count ?? 0, accent: accent)
-        } else if let error {
-          VStack(spacing: 16) {
-            Text("Wrapped didn't load.").font(.largeTitle.weight(.black))
-            Text(error).multilineTextAlignment(.center)
-            Button("Close") { close() }.buttonStyle(AureliaPrimaryActionButtonStyle())
+        switch display {
+        case .slide:
+          if let activeSlide {
+            content(activeSlide, accent: accent, size: geometry.size)
+            controls(count: wrapped?.slides.count ?? 0, accent: accent)
           }
+        case .failed(let message):
+          AureliaUnavailableView(
+            title: "Wrapped Couldn't Load",
+            systemImage: "exclamationmark.triangle",
+            message: message,
+            primaryAction: AureliaUnavailableAction(title: "Try Again") {
+              Task { await load(force: true) }
+            },
+            secondaryAction: AureliaUnavailableAction(title: "Close", prominent: false) {
+              close()
+            }
+          )
           .padding(28)
-        } else {
+        case .empty:
+          AureliaUnavailableView(
+            title: "Nothing to Wrap Yet",
+            systemImage: "sparkles",
+            message: "Watch a few movies or episodes first, then come back for your story.",
+            primaryAction: AureliaUnavailableAction(title: "Close") { close() }
+          )
+          .padding(28)
+        case .loading:
           ProgressView().controlSize(.large).tint(.white)
+            .accessibilityLabel("Loading Wrapped")
         }
+      }
+      .overlay(alignment: .topTrailing) {
+        closeButton
+          .padding(.trailing, 10)
+          .padding(.top, 4)
       }
       .frame(width: geometry.size.width, height: geometry.size.height)
     }
@@ -75,8 +121,23 @@ struct WrappedStoryView: View {
       held.toggle()
       return .handled
     }
-    .task { await load() }
+    .task { await load(force: false) }
     .task(id: "\(index)-\(held)-\(wrapped != nil)") { await run() }
+  }
+
+  private var closeButton: some View {
+    Button {
+      close()
+    } label: {
+      Image(systemName: "xmark")
+        .font(.headline)
+        .frame(width: AureliaDesign.minimumControlSize, height: AureliaDesign.minimumControlSize)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(AureliaPressableButtonStyle())
+    .keyboardShortcut(.cancelAction)
+    .accessibilityLabel("Close Wrapped")
+    .accessibilityIdentifier("wrapped-close")
   }
 
   private func content(_ slide: WrappedSlide, accent: WrappedStory.Accent, size: CGSize)
@@ -196,19 +257,11 @@ struct WrappedStoryView: View {
           }
           .frame(height: 3)
         }
-        Button {
-          close()
-        } label: {
-          Image(systemName: "xmark").font(.headline).frame(width: 44, height: 44).contentShape(
-            Rectangle())
-        }
-        .buttonStyle(AureliaPressableButtonStyle())
-        .keyboardShortcut(.cancelAction)
-        .accessibilityLabel("Close Wrapped")
       }
-      // Room on the left for the window's own buttons.
+      // Room on the left for the window's own buttons and on the right for the persistent close button.
+      .frame(height: AureliaDesign.minimumControlSize)
       .padding(.leading, 84)
-      .padding(.trailing, 10)
+      .padding(.trailing, 60)
       .padding(.top, 4)
       HStack(spacing: 0) {
         Color.clear.contentShape(Rectangle())
@@ -268,10 +321,18 @@ struct WrappedStoryView: View {
     if !Task.isCancelled { go(forward: true) }
   }
 
-  private func load() async {
-    guard wrapped == nil, let client = model.profileClient() else { return }
+  private func load(force: Bool = false) async {
+    if !force && wrapped != nil { return }
+    error = nil
+    guard let client = model.profileClient() else {
+      error = "Sign in to a profile to view Wrapped."
+      return
+    }
     do {
       wrapped = try await client.wrapped(year: launch.year, month: launch.month)
+      index = 0
+      progress = 0
+    } catch is CancellationError {
     } catch {
       self.error = error.localizedDescription
     }

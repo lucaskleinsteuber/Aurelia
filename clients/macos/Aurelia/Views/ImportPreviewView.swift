@@ -141,7 +141,7 @@ struct ImportPreviewView: View {
       Divider()
       footer
     }
-    .frame(minWidth: 820, idealWidth: 980, minHeight: 600, idealHeight: 760)
+    .aureliaSheetFrame(minWidth: 820, idealWidth: 980, minHeight: 520, idealHeight: 760)
     .background(AureliaBackdrop())
     .task { if !isPreviewFixture { await analyze() } }
     .sheet(isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
@@ -190,9 +190,16 @@ struct ImportPreviewView: View {
 
   private func counts(_ counts: ImportPreviewCounts) -> some View {
     HStack(spacing: 18) {
-      Text("\(counts.files) files")
-      Text("\(counts.movies) movies · \(counts.series) series · \(counts.episodes) episodes")
-      Text("\(counts.extras) extras · \(counts.trailers) trailers")
+      Text(AureliaCountText.format(counts.files, singular: "file"))
+      Text(
+        "\(AureliaCountText.format(counts.movies, singular: "movie")) · "
+          + "\(AureliaCountText.format(counts.series, singular: "series", plural: "series")) · "
+          + "\(AureliaCountText.format(counts.episodes, singular: "episode"))"
+      )
+      Text(
+        "\(AureliaCountText.format(counts.extras, singular: "extra")) · "
+          + "\(AureliaCountText.format(counts.trailers, singular: "trailer"))"
+      )
       Spacer()
       if counts.errors > 0 {
         // Import stays off while errors remain; this says why and leads to them.
@@ -252,7 +259,7 @@ struct ImportPreviewView: View {
       if let item = node.item {
         if let season = item.seasonNumber { Text("S\(season)").font(.caption.monospaced()) }
         if let episode = item.episodeNumber { Text("E\(episode)").font(.caption.monospaced()) }
-        Text(item.kind?.rawValue.capitalized ?? item.status.rawValue.capitalized)
+        Text(item.kind?.displayName ?? ReadableState.text(item.status.rawValue))
           .font(.caption).foregroundStyle(
             item.status == .pending || item.status == .error ? Color.orange : .secondary)
         Button {
@@ -520,7 +527,7 @@ struct ImportAssignmentEditor: View {
     ) {
       form
     }
-    .frame(width: 610, height: 630)
+    .aureliaSheetFrame(minWidth: 520, idealWidth: 610, minHeight: 420, idealHeight: 630)
   }
 
   private var form: some View {
@@ -547,7 +554,7 @@ struct ImportAssignmentEditor: View {
                     || $0.relativePath == parentPath)
               }
             ) { target in
-              Text("\(target.title) · \(target.kind.rawValue.capitalized)").tag(
+              Text("\(target.title) · \(target.kind.displayName)").tag(
                 Optional(target.relativePath))
             }
           }.accessibilityIdentifier("import-assignment-parent")

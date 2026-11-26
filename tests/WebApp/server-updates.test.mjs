@@ -13,7 +13,7 @@ const installedDOM = new WeakSet();
 function fixture(t, { initialStatus = initial, api: override = {}, current = () => true } = {}) {
   if (!installedDOM.has(t)) { installDOM(t); installedDOM.add(t); }
   const timers = new Map(), delays = [], calls = [], sessions = [];
-  let token = 0, unlocks = 0;
+  let token = 0, unlocks = 0, reloads = 0;
   const api = {
     serverUpdates: async (options) => { calls.push(["status", options]); return initial; },
     checkForUpdates: async (options) => { calls.push(["check", options]); return status("checking"); },
@@ -21,12 +21,12 @@ function fixture(t, { initialStatus = initial, api: override = {}, current = () 
     ...override,
   };
   const component = createServerUpdates({ api, initial: initialStatus, isCurrent: current,
-    onLocked: () => { unlocks++; }, onSessionEnded: (error) => sessions.push(error),
+    onLocked: () => { unlocks++; }, onSessionEnded: (error) => sessions.push(error), onReload: () => { reloads++; },
     schedule: (work, delay) => { delays.push(delay); const id = ++token; timers.set(id, work); return id; }, cancel: (id) => timers.delete(id),
   });
   document.body.append(component.element);
   t.after(() => component.close());
-  return { component, calls, timers, delays, sessions, get unlocks() { return unlocks; }, get dialog() { return document.body.querySelector("dialog"); },
+  return { component, calls, timers, delays, sessions, get unlocks() { return unlocks; }, get reloads() { return reloads; }, get dialog() { return document.body.querySelector("dialog"); },
     async tick() { const entry = timers.entries().next().value; assert.ok(entry, "An update poll should be scheduled"); timers.delete(entry[0]); entry[1](); await flush(); },
   };
 }
@@ -76,6 +76,8 @@ test("restart outages retain progress and success reports the installed version 
   } } });
   await f.tick(); assert.match(f.component.element.textContent, /Waiting to reconnect/); assert.equal(f.timers.size, 1);
   await f.tick(); assert.match(f.component.element.textContent, /now running 1\.15\.0 \(102\)/);
+  button(f.component.element, "Reload Aurelia").click();
+  assert.equal(f.reloads, 1);
   assert.equal(f.timers.size, 0); assert.equal(f.calls.length, 0);
 });
 
@@ -83,6 +85,7 @@ test("idle without a changed installed version is not reported as an installed u
   const f = fixture(t, { initialStatus: status("installing") });
   await f.tick(); assert.match(f.component.element.textContent, /The update was not installed/);
   assert.doesNotMatch(f.component.element.textContent, /now running/); assert.equal(f.timers.size, 0);
+  assert.equal(all(f.component.element).some((node) => node.textContent === "Reload Aurelia"), false);
 });
 
 test("an updater failure stays visible and does not retry the install", async (t) => {

@@ -43,6 +43,8 @@ struct ArtworkDiskCacheTests {
     #expect(cache.data(forKey: "entry-0") == nil)
     #expect(cache.data(forKey: "entry-1") == nil)
     #expect(cache.data(forKey: "entry-3") != nil)
+    cache.removeAll()
+    #expect(cache.data(forKey: "entry-3") == nil)
   }
 
   @Test

@@ -29,9 +29,17 @@ export function followSteps(state, serverNow, localPosition, localPlaying) {
 }
 
 /** The server's clock minus this one, assuming the answer was written halfway through the request. */
+export const MAX_CLOCK_MEASUREMENT_RTT_MS = 4000;
 export function clockOffset(serverTime, sent, received) {
   const server = Date.parse(serverTime);
   return Number.isFinite(server) ? server - (sent + (received - sent) / 2) : 0;
+}
+
+/** Measures clock offset only on short immediate responses, ignoring waited long-polls. */
+export function measuredClockOffset(serverTime, sent, received, isLongPoll) {
+  if (isLongPoll || received - sent > MAX_CLOCK_MEASUREMENT_RTT_MS) return null;
+  const server = Date.parse(serverTime);
+  return Number.isFinite(server) ? server - (sent + (received - sent) / 2) : null;
 }
 
 export function partyNotice(state) {
@@ -69,7 +77,8 @@ export function createWatchTogether({ api, deviceName, now = () => Date.now(), o
   const changed = () => onChange(session);
 
   function receive(next, sent, mine) {
-    offset = clockOffset(next.serverTime, sent, now());
+    const measured = measuredClockOffset(next.serverTime, sent, now(), !mine);
+    if (measured !== null) offset = measured;
     if (mine) own.add(next.revision);
     // Answers can arrive out of order; an older state never undoes a newer one.
     if (state && state.id === next.id && next.revision < state.revision) return;

@@ -58,4 +58,65 @@ import Testing
     #expect(!draft.isDirty)
     #expect(draft.value == saved)
   }
+
+  @Test func settingsErrorBannerDeduplicatesPageAndSectionErrors() {
+    #expect(
+      SettingsErrorBannerPolicy.topError(
+        category: .server, administrationError: "The server could not be reached.",
+        modelError: "Fallback error") == "The server could not be reached.")
+    #expect(
+      SettingsErrorBannerPolicy.topError(
+        category: .updates, administrationError: "The server could not be reached.",
+        modelError: "Model error") == nil)
+    #expect(
+      SettingsErrorBannerPolicy.topError(
+        category: .general, administrationError: "   ", modelError: "Offline") == "Offline")
+
+    #expect(
+      !SettingsErrorBannerPolicy.shouldShowSectionError(
+        "The server could not be reached.",
+        pageAdministrationError: "The server could not be reached.",
+        pageModelError: nil))
+    #expect(
+      SettingsErrorBannerPolicy.shouldShowSectionError(
+        "Backup directory is read-only.",
+        pageAdministrationError: "The server could not be reached.",
+        pageModelError: nil))
+    #expect(
+      !SettingsErrorBannerPolicy.shouldShowSectionError(
+        nil, pageAdministrationError: nil, pageModelError: nil))
+  }
+
+  @Test func playbackPickerNormalizationSnapsLegacyValuesToMenuChoices() {
+    #expect(SettingsChoiceNormalization.autoHideDelay(3.0) == 3.0)
+    #expect(SettingsChoiceNormalization.autoHideDelay(4.2) == 5.0)
+    #expect(SettingsChoiceNormalization.autoHideDelay(0.5) == 2.0)
+    #expect(SettingsChoiceNormalization.autoHideDelay(20.0) == 8.0)
+
+    #expect(SettingsChoiceNormalization.seekInterval(15) == 15)
+    #expect(SettingsChoiceNormalization.seekInterval(12) == 10)
+    #expect(SettingsChoiceNormalization.seekInterval(18) == 20)
+    #expect(SettingsChoiceNormalization.seekInterval(90) == 60)
+  }
+
+  @Test func subtitleLanguageSelectionEnforcesOneToFiveBounds() {
+    #expect(!SubtitleLanguageSelection.canToggle(code: "en", in: ["en"]))
+    #expect(SubtitleLanguageSelection.toggled(code: "en", in: ["en"]) == nil)
+
+    let five = ["en", "de", "fr", "es", "it"]
+    #expect(!SubtitleLanguageSelection.canToggle(code: "ja", in: five))
+    #expect(SubtitleLanguageSelection.toggled(code: "ja", in: five) == nil)
+    #expect(SubtitleLanguageSelection.canToggle(code: "fr", in: five))
+    #expect(SubtitleLanguageSelection.toggled(code: "fr", in: five) == ["en", "de", "es", "it"])
+    #expect(SubtitleLanguageSelection.toggled(code: "de", in: ["en"]) == ["en", "de"])
+  }
+
+  @Test func stateLabelsAvoidCamelCaseCapitalizedArtifacts() {
+    #expect(AureliaStateLabels.hostState(.setupRequired) == "Setup Required")
+    #expect(AureliaStateLabels.hostState(.running) == "Running")
+    #expect(AureliaStateLabels.libraryAvailability(.error) == "Access Error")
+    #expect(AureliaStateLabels.libraryAvailability(.available) == "Available")
+    #expect(AureliaStateLabels.userRole(.admin) == "Administrator")
+    #expect(AureliaStateLabels.userRole(.owner) == "Owner")
+  }
 }

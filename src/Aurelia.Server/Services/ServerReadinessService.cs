@@ -14,8 +14,11 @@ public sealed class ServerReadinessService(
     ServerConfigurationStore configuration,
     DatabaseBackupService backups,
     ServerDiagnosticsStore diagnostics,
-    TimeProvider clock) : BackgroundService
+    TimeProvider clock,
+    ILogger<ServerReadinessService>? logger = null) : BackgroundService
 {
+    private static readonly Action<ILogger, Exception?> RefreshFailed = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(4422, nameof(RefreshFailed)), "Server readiness probe paused after an unexpected failure.");
     private readonly SemaphoreSlim sampleGate = new(1, 1);
     private ReadinessSample sample = new(new("starting", [], clock.GetUtcNow()), 0, 0, null);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -37,7 +40,15 @@ public sealed class ServerReadinessService(
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                if (lifetime.ApplicationStarted.IsCancellationRequested) await RefreshAsync(stoppingToken);
+                try
+                {
+                    if (lifetime.ApplicationStarted.IsCancellationRequested) await RefreshAsync(stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    if (logger is not null) RefreshFailed(logger, exception);
+                }
                 // A healthy server is checked less often; problems are rechecked sooner.
                 var interval = Current.State switch { "starting" => 1, "ready" => 30, _ => 15 };
                 await Task.Delay(TimeSpan.FromSeconds(interval), clock, stoppingToken);

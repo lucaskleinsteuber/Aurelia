@@ -28,8 +28,8 @@ public sealed class SceneNoteService(AureliaDbContext database, CatalogMutationG
         if (note is null)
         {
             if (request.Revision != 0) throw Missing();
-            // A guessed ID owned by another profile must not be reused or disclose its contents.
-            if (await database.SceneNotes.IgnoreQueryFilters().AnyAsync(note => note.Id == id, token)) throw Conflict();
+            // Note IDs are scoped per profile (composite PK UserId + Id), so another profile's UUID
+            // never conflicts or discloses its existence.
             note = new SceneNote { Id = id, UserId = userId, MediaItemId = mediaId };
             database.SceneNotes.Add(note);
         }

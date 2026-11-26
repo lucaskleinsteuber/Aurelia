@@ -40,6 +40,7 @@ private struct OfflineProfileChooser: View {
   @State private var choice: OfflineProfileCard?
   @State private var pin = ""
   @State private var error: String?
+  @State private var verifying = false
   @FocusState private var pinFocused: Bool
 
   var body: some View {
@@ -132,6 +133,7 @@ private struct OfflineProfileChooser: View {
       }
       .buttonStyle(AureliaCardButtonStyle())
       .help("Choose another profile")
+      .accessibilityLabel("Choose Another Profile")
       VStack(spacing: 6) {
         Text(card.name).font(.title2.weight(.semibold))
         Text("Enter your PIN").font(.callout).foregroundStyle(.secondary)
@@ -140,6 +142,7 @@ private struct OfflineProfileChooser: View {
         SecureField("PIN", text: $pin)
           .textFieldStyle(.plain).font(.system(size: 20, weight: .medium, design: .rounded))
           .multilineTextAlignment(.center)
+          .focusEffectDisabled()
           .focused($pinFocused)
           .onSubmit { submit(card) }
           .onChange(of: pin) { _, value in
@@ -157,15 +160,14 @@ private struct OfflineProfileChooser: View {
             .background(Circle().fill(pin.isEmpty ? Color.white.opacity(0.12) : Color.white))
         }
         .buttonStyle(AureliaPressableButtonStyle())
-        .disabled(pin.isEmpty)
+        .disabled(pin.isEmpty || verifying)
         .accessibilityLabel("Open Profile")
       }
       .padding(.leading, 20).padding(.trailing, 8)
       .frame(width: 280, height: 52)
-      .background(Capsule().fill(.ultraThinMaterial))
-      .overlay { Capsule().strokeBorder(.white.opacity(0.16)) }
+      .aureliaGlass(in: Capsule())
       TimelineView(.periodic(from: .now, by: 1)) { context in
-        if let until = model.offlinePINLockedUntil, until > context.date {
+        if let until = model.offlinePINLockedUntil(for: card), until > context.date {
           Text(
             "Too many wrong PINs. Try again in \(Int(until.timeIntervalSince(context.date).rounded(.up))) s."
           )
@@ -189,16 +191,22 @@ private struct OfflineProfileChooser: View {
     if card.pinProtected {
       choice = card
     } else {
-      model.openOfflineProfile(card, pin: "")
+      Task { _ = await model.openOfflineProfile(card, pin: "") }
     }
   }
 
   private func submit(_ card: OfflineProfileCard) {
-    guard !pin.isEmpty else { return }
-    if !model.openOfflineProfile(card, pin: pin) {
-      error = ProfilePIN.incorrect
-      pin = ""
-      pinFocused = true
+    guard !pin.isEmpty, !verifying else { return }
+    let entered = pin
+    verifying = true
+    Task {
+      let ok = await model.openOfflineProfile(card, pin: entered)
+      verifying = false
+      if !ok {
+        error = ProfilePIN.incorrect
+        pin = ""
+        pinFocused = true
+      }
     }
   }
 
@@ -317,7 +325,7 @@ private struct OfflineLibraryView: View {
     }
     .padding(.horizontal, 20)
     .padding(.vertical, 10)
-    .background(.ultraThinMaterial, in: Capsule())
+    .aureliaGlass(in: Capsule())
     .padding(.top, 12)
     .padding(.horizontal, 80)
   }
@@ -420,6 +428,7 @@ private struct OfflinePosterCard: View {
   let title: OfflineTitle
   @State private var hovering = false
   @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @Environment(\.aureliaContrast) private var contrast
 
   var body: some View {
     VStack(alignment: .leading, spacing: 9) {
@@ -435,7 +444,9 @@ private struct OfflinePosterCard: View {
       .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous))
       .overlay {
         RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
-          .stroke(hovering ? .white.opacity(0.35) : AureliaDesign.hairline, lineWidth: 1)
+          .stroke(
+            AureliaDesign.cardStroke(for: contrast, hovering: hovering),
+            lineWidth: AureliaDesign.strokeWidth(for: contrast, hovering: hovering))
       }
       Text(title.title).font(.headline).lineLimit(1).frame(width: 154, alignment: .leading)
       Text(title.year.map(String.init) ?? "Movie").font(.caption).foregroundStyle(.secondary)
@@ -454,6 +465,7 @@ private struct OfflineLandscapeCard: View {
   let title: OfflineTitle
   @State private var hovering = false
   @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @Environment(\.aureliaContrast) private var contrast
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -471,7 +483,9 @@ private struct OfflineLandscapeCard: View {
       .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous))
       .overlay {
         RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
-          .stroke(hovering ? .white.opacity(0.35) : AureliaDesign.hairline, lineWidth: 1)
+          .stroke(
+            AureliaDesign.cardStroke(for: contrast, hovering: hovering),
+            lineWidth: AureliaDesign.strokeWidth(for: contrast, hovering: hovering))
       }
       if let label = title.episodeLabel {
         Text(label).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -579,11 +593,12 @@ private struct OfflineTitleDetail: View {
     .background(AureliaDesign.canvas)
     .confirmationDialog("Remove \(title.title)?", isPresented: $confirmingRemoval) {
       Button("Remove Download", role: .destructive) {
-        downloads.remove(title.id)
+        let profile = model.profile
+        Task { await downloads.remove(title.id, profile: profile) }
         dismiss()
       }
     } message: {
-      Text("The copy on this Mac is deleted. The title stays on the server.")
+      Text(OfflineTitleText.removalMessage(for: title, hasServerProfile: model.profile != nil))
     }
   }
 }
@@ -606,5 +621,15 @@ enum OfflineTitleText {
     }
     if title.progressDirty { parts.append("Progress not yet on the server") }
     return parts.joined(separator: " · ")
+  }
+
+  static func removalMessage(for title: OfflineTitle, hasServerProfile: Bool) -> String {
+    let base = "The copy on this Mac is deleted. The title stays on the server."
+    guard title.progressDirty else { return base }
+    if hasServerProfile {
+      return "\(base) Aurelia will try to sync your offline watch progress before removing it."
+    }
+    return
+      "\(base) Offline watch progress has not been synced to the server yet and will be lost if you remove this download while offline."
   }
 }

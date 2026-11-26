@@ -95,7 +95,9 @@ automatic relaunch, and the new app remaining alive after the installer exits.
 It uses no automated input, personal App Group, server, library or media. The approved
 run on 03.11.2026 passed these synthetic checks. The owner-operated 131 → 132
 installation also succeeded on 03.11.2026, as confirmed by the owner and the
-installer status for build 132. The main repository was returned to private.
+installer status for build 132. After that historical test the main repository was
+temporarily returned to private; as noted at the top of this document, the owner
+later made it public permanently.
 
 The Aurelia menu’s Check for Updates command is available before profile unlock
 and while the server is unreachable. Local update settings skip server administration

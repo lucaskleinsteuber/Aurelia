@@ -28,7 +28,7 @@ final class ProfileManagementUITests: XCTestCase {
     create.click()
     let name = app.textFields["profile-editor-name"]
     XCTAssertTrue(name.waitForExistence(timeout: 8))
-    let protected = app.checkBoxes["profile-editor-pin-protection"].value
+    let protected = app.switches["profile-editor-pin-protection"].value
     XCTAssertTrue(protected as? Int == 0 || protected as? String == "0")
     XCTAssertFalse(app.secureTextFields["profile-editor-pin"].exists)
     XCTAssertFalse(app.secureTextFields["management-password"].exists)
@@ -58,7 +58,7 @@ final class ProfileManagementUITests: XCTestCase {
     XCTAssertTrue(role.exists)
     role.click()
     app.menuItems["Administrator"].click()
-    let protection = app.checkBoxes["profile-editor-pin-protection"]
+    let protection = app.switches["profile-editor-pin-protection"]
     XCTAssertFalse(protection.isEnabled)
     XCTAssertTrue(app.secureTextFields["profile-editor-pin"].exists)
     XCTAssertFalse(app.buttons["profile-editor-save"].isEnabled)

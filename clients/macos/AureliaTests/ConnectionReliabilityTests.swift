@@ -100,15 +100,30 @@ struct ConnectionReliabilityTests {
     let profile = syntheticProfile()
     let model = AppModel(store: FailingDisconnectStore(profile: profile), initialProfile: profile)
     guard model.operatingMode != .host else { return }
+    model.startRemoteDeviceService()
+    #expect(model.hasActiveRemoteDeviceTasks)
     await model.enterRest()
     #expect(model.isResting)
+    #expect(!model.hasActiveRemoteDeviceTasks)
     #expect(model.playback == nil)
     #expect(model.connectionStatus == nil)
     // Nothing a view might trigger meanwhile reaches the server.
     await model.refreshFromUI()
+    await model.refreshHome()
     await model.reloadWatchingProfiles()
+    model.startRemoteDeviceService()
+    #expect(!model.hasActiveRemoteDeviceTasks)
     #expect(model.errorMessage == nil)
     #expect(model.isResting)
+  }
+
+  @Test func systemSleepStopsRemoteDeviceTasks() async {
+    let profile = syntheticProfile()
+    let model = AppModel(store: FailingDisconnectStore(profile: profile), initialProfile: profile)
+    model.startRemoteDeviceService()
+    #expect(model.hasActiveRemoteDeviceTasks)
+    await model.systemWillSleep()
+    #expect(!model.hasActiveRemoteDeviceTasks)
   }
 
   @Test func aSignInKeptInTheLoginKeychainMovesToTheDataProtectionKeychain() throws {
@@ -324,4 +339,170 @@ struct PinnedHostMatchingTests {
     #expect(!TLSTrustDelegate.sameHost("fd00::5", "fd00::6"))
     #expect(!TLSTrustDelegate.sameHost("", ""))
   }
+
+  @Test func unknownSyncChangeAreasDecodeTolerantlyAndTriggerFullRefresh() throws {
+    let payload = Data(
+      """
+      {"cursor":12,"resetRequired":false,"changedAreas":["catalog","futureArea"],"changedMediaIds":[]}
+      """.utf8)
+    let response = try JSONDecoder().decode(SyncChangesResponse.self, from: payload)
+    #expect(response.changedAreas == [.catalog, .unknown])
+    let onlyFuture = SyncChangesResponse(
+      cursor: 13, resetRequired: false, changedAreas: [.unknown], changedMediaIds: [])
+    let plan = SyncRefreshPlan(onlyFuture)
+    #expect(plan.fullCatalog)
+    #expect(plan.collections)
+    #expect(plan.home)
+  }
+
+  @Test func repeatedSyncDecodeFailuresReportVisibleError() async throws {
+    let failures = FailureBox()
+    let controller = LibrarySyncController(
+      fetchChanges: { _, _, _, _ in throw APIClientError.invalidResponse },
+      delay: { _ in try await Task.sleep(for: .milliseconds(1)) })
+    let profile = StoredServerProfile(
+      serverId: UUID(), name: "Synthetic", baseURL: URL(string: "https://fixture.invalid")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64), token: "test-only",
+      sessionId: UUID(), expiresAt: "2099-01-01T00:00:00Z")
+    await controller.start(
+      profile: profile,
+      onFailure: { error in await failures.append(error) },
+      onChanges: { _ in })
+    for _ in 0..<400 {
+      if await failures.count > 0 { break }
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    await controller.stop()
+    #expect(await failures.first == .invalidResponse)
+  }
+
+  @Test func backupUploadResourceTimeoutScalesForLargeFiles() {
+    #expect(APIClient.backupUploadResourceTimeout(fileSize: 10 * 1_024 * 1_024) == 600)
+    let fourGiB: Int64 = 4 * 1_024 * 1_024 * 1_024
+    #expect(APIClient.backupUploadResourceTimeout(fileSize: fourGiB) > 10_000)
+  }
+
+  @Test func keychainMigrationPrefersNewerModificationDate() {
+    let older = Date(timeIntervalSince1970: 1_700_000_000)
+    let newer = Date(timeIntervalSince1970: 1_700_001_000)
+    #expect(AureliaKeychain.shouldOverwriteExisting(legacyModified: newer, existingModified: older))
+    #expect(
+      !AureliaKeychain.shouldOverwriteExisting(legacyModified: older, existingModified: newer))
+    #expect(
+      !AureliaKeychain.shouldOverwriteExisting(legacyModified: newer, existingModified: newer))
+    #expect(AureliaKeychain.shouldOverwriteExisting(legacyModified: newer, existingModified: nil))
+    #expect(!AureliaKeychain.shouldOverwriteExisting(legacyModified: nil, existingModified: older))
+  }
+
+  @Test func requestURLValidationRejectsSchemeDowngradesAndForeignOrigins() throws {
+    let base = URL(string: "https://server.local:43111")!
+    let valid = try APIClient.validatedRequestURL(baseURL: base, path: "/api/v1/catalog")
+    #expect(valid.absoluteString == "https://server.local:43111/api/v1/catalog")
+
+    #expect(throws: APIClientError.invalidAddress) {
+      _ = try APIClient.validatedRequestURL(baseURL: base, path: "https://evil.invalid:43111/api")
+    }
+    #expect(throws: APIClientError.invalidAddress) {
+      _ = try APIClient.validatedRequestURL(baseURL: base, path: "//evil.invalid/api")
+    }
+    #expect(throws: APIClientError.invalidAddress) {
+      _ = try APIClient.validatedRequestURL(baseURL: base, path: "https://server.local:8443/api")
+    }
+    #expect(throws: APIClientError.insecureAddress) {
+      _ = try APIClient.validatedRequestURL(baseURL: base, path: "http://server.local:43111/api")
+    }
+
+    let loopback = URL(string: "http://127.0.0.1:43110")!
+    let allowedLoopback = try APIClient.validatedRequestURL(
+      baseURL: loopback, path: "/api/v1/setup/owner", requiresHTTPS: false)
+    #expect(allowedLoopback.absoluteString == "http://127.0.0.1:43110/api/v1/setup/owner")
+    #expect(throws: APIClientError.insecureAddress) {
+      _ = try APIClient.validatedRequestURL(
+        baseURL: loopback, path: "/api/v1/catalog", requiresHTTPS: true)
+    }
+  }
+
+  @Test func inspectValidationDistinguishesLanDisabledFromIdentityMismatch() throws {
+    let fingerprint = String(repeating: "A", count: 64)
+    let lanOffInfo = ServerInfoResponse(
+      serverId: UUID(), name: "Home", version: "2.30.0", isSetup: true,
+      lanAccessEnabled: false, lanHttpsPort: 43_111, publicKeyFingerprint: fingerprint,
+      displayFingerprint: nil)
+    let remote = URL(string: "https://192.168.1.10:43111")!
+    #expect(throws: APIClientError.lanAccessDisabled) {
+      _ = try APIClient.validateInspection(
+        baseURL: remote, info: lanOffInfo, capturedFingerprint: fingerprint)
+    }
+    #expect(throws: APIClientError.serverIdentityMismatch) {
+      _ = try APIClient.validateInspection(
+        baseURL: remote, info: lanOffInfo, capturedFingerprint: String(repeating: "B", count: 64))
+    }
+    let local = URL(string: "https://127.0.0.1:43111")!
+    let inspected = try APIClient.validateInspection(
+      baseURL: local, info: lanOffInfo, capturedFingerprint: fingerprint)
+    #expect(inspected.publicKeyFingerprint == fingerprint)
+  }
+
+  @Test func offlineProfileStoreMatchesAllAccountsForServerRegardlessOfPayload() {
+    let serverA = UUID()
+    let serverB = UUID()
+    let accounts = [
+      "\(serverA.uuidString).\(UUID().uuidString)",
+      "\(serverA.uuidString).corrupt-entry",
+      "\(serverB.uuidString).\(UUID().uuidString)",
+      "unrelated",
+    ]
+    let matched = KeychainOfflineProfileStore.matchingAccounts(accounts, serverId: serverA)
+    #expect(matched.count == 2)
+    #expect(matched.allSatisfy { $0.hasPrefix(serverA.uuidString + ".") })
+  }
+
+  @MainActor
+  @Test func corruptCachedArtworkIsEvictedSoNextImageLoadRefetches() async throws {
+    let dir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("AureliaCorruptArtwork-\(UUID().uuidString)", isDirectory: true)
+    let diskCache = ArtworkDiskCache(directory: dir, byteLimit: 1_024 * 1_024)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let profile = syntheticProfile()
+    let id = UUID()
+    let art = ArtworkSummary(
+      id: id, kind: .poster, path: "/api/v1/artwork/\(id.uuidString.lowercased())",
+      contentType: "image/png", contentLength: 16, revision: 5)
+    let variant = ArtworkVariantRequest.artwork(art, width: 640)
+    let diskKey = ArtworkDiskCache.key(
+      serverID: profile.serverId, profileID: profile.user?.id, path: variant.path, revision: 5)
+    diskCache.store(Data("not-a-valid-image".utf8), forKey: diskKey)
+    #expect(diskCache.data(forKey: diskKey) != nil)
+
+    var fetchCount = 0
+    let loader = ArtworkLoader(diskCache: diskCache) { _, _ in
+      fetchCount += 1
+      return Data("still-invalid".utf8)
+    }
+    do {
+      _ = try await loader.image(for: art, profile: profile, width: 640)
+      Issue.record("Corrupt artwork must fail to decode.")
+    } catch let error as APIClientError {
+      #expect(error == .invalidResponse)
+    }
+    #expect(fetchCount == 0)
+    for _ in 0..<200 {
+      if diskCache.data(forKey: diskKey) == nil { break }
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(diskCache.data(forKey: diskKey) == nil)
+    // Next attempt refetches from server instead of staying stuck on corrupt cached bytes.
+    do {
+      _ = try await loader.image(for: art, profile: profile, width: 640)
+    } catch {}
+    #expect(fetchCount == 1)
+  }
+}
+
+private actor FailureBox {
+  private var items: [APIClientError] = []
+  func append(_ error: APIClientError) { items.append(error) }
+  var count: Int { items.count }
+  var first: APIClientError? { items.first }
 }

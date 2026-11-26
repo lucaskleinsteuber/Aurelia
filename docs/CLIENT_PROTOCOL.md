@@ -50,8 +50,9 @@ descendants. Selected-title administrators cannot run storage-wide operations.
 Retain persistent identifiers across cosmetic product renames so stored
 connections and data remain available; never migrate Aurelia Classic data.
 
-Personal scene notes use `GET /api/v1/media/{id}/notes` and revisioned
-`PUT/DELETE .../notes/{noteId}`. New notes use a client UUID and revision zero;
+Personal scene notes use `GET /api/v1/media/{id}/notes`, `PUT /api/v1/media/{id}/notes/{noteId}`
+and `DELETE /api/v1/media/{id}/notes/{noteId}?revision={revision}` (the `revision` query
+parameter is required on delete). New notes use a client UUID and revision zero;
 stale changes return `409 scene_note_conflict`. Preserve the draft on conflict.
 Notes belong only to the active profile and retain stable media identity when
 storage is offline. They are database records, never embedded video edits.
@@ -243,7 +244,10 @@ segment and no temporary file.
    stream started at 600 seconds reports positions from about 600 on (repackaging starts at
    the key frame at or before that point). To seek outside what has arrived, close the stream
    and open a new one at the target. A stream counts against the device's stream limit like a
-   direct one and ends with its ticket, session or profile. The server runs at most three
+   direct one. Revoking a playback ticket rejects any further requests with that ticket and ends
+   the title's HLS session once no other active ticket for that title remains in the profile
+   session; an already-running direct or `/live` stream ends with its profile session, profile or
+   title so clients can renew tickets seamlessly during playback. The server runs at most three
    conversions at once, at most one of them re-encoding the picture on the processor (three
    on a video chip, see [Video chips](#video-chips)), and answers `429 conversion_busy` with
    `Retry-After` beyond that.
@@ -254,8 +258,10 @@ segment and no temporary file.
    which the server keeps in its data folder (`Subtitles/`), never beside the media. All of them are
    listed by `GET {streamPath}/subtitles` with `isSidecar: true`. The response is `text/vtt; charset=utf-8`, private and uncached. SubRip (`.srt`),
    ASS/SSA (`.ass`, `.ssa`), `mov_text`, WebVTT (`.vtt`) and plain text are supported and converted
-   in-memory; bitmap tracks (`.sub`/`.idx`) return `422 subtitle_not_supported`. All converted text
-   subtitles are capped at 5 MB in memory with an LRU cache; no converted files are ever written to disk.
+   in-memory; bitmap tracks (`.sub`/`.idx`) return `422 subtitle_not_supported`. Sidecar and
+   downloaded subtitle files are capped at 5 MB and extracted embedded tracks at 8 MB; converted
+   WebVTT tracks up to 2 MB are kept in a bounded in-memory LRU cache (up to 100 tracks / 32 MB)
+   and no converted files are ever written to disk.
 
 Reading paces the conversion: when the player stops reading, ffmpeg waits. Closing the
 connection ends ffmpeg. PQ/HLG pictures re-encoded to H.264 are tone- and gamut-mapped to SDR
@@ -306,8 +312,10 @@ kept in memory only, for as long as someone plays them, and are never written an
 A session per profile session, title, quality and sound track runs one ffmpeg that converts
 ahead of the player (up to 15 segments or 96 MB) and pauses there. A segment it has not reached
 starts it again at that segment (a seek). Another quality of the same title makes the first one
-stop converting. A session ends a minute after its last request, or at once with its user,
-profile session or title; at most six run at a time (`429 conversion_busy` beyond that). A
+stop converting. A session ends a minute after its last request, or at once when its last active
+playback ticket, user, profile session or title is revoked; at most six run at a time (at most four
+per user; yielded or finished qualities are reclaimed first so switching qualities never blocks
+another title, with `429 conversion_busy` beyond that). A
 title without a known length answers `422 stream_length_unknown`, a quality the title does not
 have `404 stream_quality_not_found`.
 
@@ -752,8 +760,9 @@ When a player's sleep timer expires, `POST /api/v1/playback/sleep-timer-ended` n
 A player that can take commands announces itself while it is open:
 
 - `POST /api/v1/devices/player/heartbeat` with `deviceId` (at most 128 characters, chosen by
-  the client and kept per installation), `deviceName`, `clientType` (`mac`, `tvos`, `ios`,
-  `web`), `isPlaying`, `isPaused`, `mediaId`, `title`, `positionSeconds`, `durationSeconds`.
+  the client and kept per installation), `deviceName`, `clientType` (`macos`, `linux`, `tvos`,
+  `ios`, `web`; older clients may send `mac`), `isPlaying`, `isPaused`, `mediaId`, `title`,
+  `positionSeconds`, `durationSeconds`.
   The first paired device that claims a `deviceId` owns it: another device sending the same id
   while it is active gets `409 device_id_in_use`. Players not heard from for 45 seconds are no
   longer offered; after ten minutes they are forgotten.
@@ -765,6 +774,66 @@ A player that can take commands announces itself while it is open:
   after 60 seconds, and switching the player's profile drops any still queued.
 - `GET /api/v1/devices/player/commands?deviceId={id}&waitMs={ms}` waits up to 15 seconds for
   the player's commands. Only the device that registered the player may read them.
+
+## Further routes
+
+In addition to the flows detailed above, clients use these routes:
+
+### Playback planning, watch state and watchlist (viewer)
+
+- `GET /api/v1/media/{id}/playback-plan` resolves the next playable target (for example the
+  current or next episode of a series), the up-next `queue`, `action` and
+  `continueWatchingEligible`.
+- `GET /api/v1/media/{id}/watch-state[?scope=&seasonNumber=]` and
+  `PUT /api/v1/media/{id}/watch-state` read or mark watched state for a title, season or series.
+- `PUT /api/v1/media/{id}/continue-watching` hides a title from or restores it to the profile's
+  Continue Watching rail.
+- `GET /api/v1/watchlist` reads the profile's revisioned Watchlist;
+  `PUT /api/v1/media/{id}/watchlist` with `{ isWatchlisted }` adds or removes a title.
+
+### Scrub previews (`scrub-previews-v1`)
+
+- `GET/PUT/DELETE /api/v1/server/scrub-previews` (owner) reads or updates timeline preview
+  generation settings and deletes generated preview frames.
+- `GET /api/v1/media/{id}/scrub-previews` and `GET/HEAD /api/v1/media/{id}/scrub-previews/{seconds}`
+  (viewer) return the title's preview manifest and serve individual JPEG scrub frames.
+
+### Library browsing, scanning, import previews and mutations (administrator)
+
+- `GET /api/v1/libraries/folders[?path=]` browses directories on the server when adding a storage
+  location.
+- `POST/GET /api/v1/libraries/{id}/scans`, `POST/GET /api/v1/libraries/scans` and
+  `GET/DELETE /api/v1/scans/{id}` start, list, inspect or cancel library scans.
+- `POST /api/v1/libraries/{id}/import-preview`,
+  `GET /api/v1/libraries/{id}/import-preview/{previewId}/items[?offset=&limit=&filter=]`,
+  `PUT /api/v1/libraries/{id}/import-preview/{previewId}/assignments`,
+  `POST /api/v1/libraries/{id}/import-preview/{previewId}/confirm` and
+  `GET /api/v1/libraries/{id}/import-assignments` analyze a folder before importing, edit
+  classifications or matches, confirm the import and read saved assignments.
+- `GET /api/v1/libraries/{id}/exclusions` and `DELETE /api/v1/libraries/{id}/exclusions/{excludedId}`
+  list or restore paths excluded when titles were removed from the library.
+- `GET /api/v1/library-operations/{id}` polls asynchronous library mutations (such as title removal
+  or library reset).
+
+### Metadata jobs (administrator)
+
+- `POST/GET /api/v1/metadata/jobs`, `GET/DELETE /api/v1/metadata/jobs/{id}` and
+  `POST /api/v1/metadata/jobs/{id}/retry` start, list, inspect, cancel or retry metadata refresh
+  jobs.
+
+### Server administration and user access (owner unless noted)
+
+- `GET/PUT /api/v1/server/settings` reads or updates host policy settings (device session lifetime,
+  global and per-user stream limits).
+- `GET /api/v1/server/hosting` reports background and login hosting status when Aurelia for Mac or
+  Aurelia for Linux hosts the server.
+- `GET /api/v1/server/users` lists household profiles with their roles and storage grants.
+- `GET /api/v1/server/health/performance` (administrator) and
+  `DELETE /api/v1/server/health/performance` (owner) read or reset server performance counters.
+- `GET/PUT /api/v1/users/{id}/titles` reads or updates per-title access grants for a restricted
+  profile (complementing `GET/PUT /api/v1/users/{id}/profile`).
+- `POST /api/v1/local/owner-pin` (local loopback recovery only, rate-limited) resets the owner's
+  viewing PIN directly from the server computer.
 
 ## Minimum new-client acceptance
 

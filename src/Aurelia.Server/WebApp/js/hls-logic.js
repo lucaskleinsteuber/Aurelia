@@ -164,3 +164,10 @@ export function qualityLabel(quality, variants = []) {
   const variant = variants.find((candidate) => candidate.id === quality);
   return variant ? `${variant.id} · ${(rate(variant) / 1_000_000).toFixed(1)} Mbit/s` : quality;
 }
+
+/** Delay in milliseconds to wait after HTTP 429, clamped to a short pause. */
+export function retryAfterDelayMs(header, fallbackMs = 2000) {
+  const seconds = Number.parseFloat(String(header ?? "").trim());
+  if (!Number.isFinite(seconds) || seconds <= 0) return fallbackMs;
+  return Math.min(15_000, Math.max(500, Math.round(seconds * 1000)));
+}

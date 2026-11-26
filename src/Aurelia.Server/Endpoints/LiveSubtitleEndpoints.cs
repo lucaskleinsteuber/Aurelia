@@ -96,10 +96,7 @@ public static partial class LiveConversionEndpoints
                 var position = index - SubtitleDownloadService.DownloadedTrackBase;
                 if (position >= downloaded.Count || downloads.SubtitlePath(source.MediaId, downloaded[position].Id) is not { } path)
                     return Problem("invalid_subtitle_track", "The subtitle track was not found.", StatusCodes.Status404NotFound);
-                var converted = await SidecarSubtitles.ReadAsWebVttAsync(path, cancellationToken);
-                context.Response.Headers.CacheControl = "private, no-store";
-                context.Response.Headers.XContentTypeOptions = "nosniff";
-                return Results.Bytes(converted, "text/vtt; charset=utf-8");
+                return await ReadSidecarAsync(context, path, cancellationToken, downloaded[position].Language);
             }
 
             // Sidecar subtitle stream indices are mapped to 1000+
@@ -114,10 +111,7 @@ public static partial class LiveConversionEndpoints
                 if (!sidecar.Supported)
                     return Problem("subtitle_not_supported", "Bitmap subtitles are not supported in this browser.", StatusCodes.Status422UnprocessableEntity);
 
-                var content = await SidecarSubtitles.ReadAsWebVttAsync(sidecar.FilePath, cancellationToken);
-                context.Response.Headers.CacheControl = "private, no-store";
-                context.Response.Headers.XContentTypeOptions = "nosniff";
-                return Results.Bytes(content, "text/vtt; charset=utf-8");
+                return await ReadSidecarAsync(context, sidecar.FilePath, cancellationToken, sidecar.Language);
             }
 
             // Embedded subtitle stream
@@ -128,6 +122,13 @@ public static partial class LiveConversionEndpoints
             if (track is null) return Problem("invalid_subtitle_track", "The subtitle track was not found.", StatusCodes.Status404NotFound);
             if (!LiveSubtitles.CanConvert(track.Codec))
                 return Problem("subtitle_not_supported", "Bitmap subtitles are not supported in this browser.", StatusCodes.Status422UnprocessableEntity);
+
+            if (live.TryGetCachedSubtitles(file, source.SourcePath, track.Index) is { } cachedEmbedded)
+            {
+                context.Response.Headers.CacheControl = "private, no-store";
+                context.Response.Headers.XContentTypeOptions = "nosniff";
+                return Results.Bytes(cachedEmbedded, "text/vtt; charset=utf-8");
+            }
 
             using var slot = await live.EnterAsync(encodesVideo: false, cancellationToken);
             if (slot is null)
@@ -144,6 +145,30 @@ public static partial class LiveConversionEndpoints
         {
             if (exception.StatusCode == StatusCodes.Status503ServiceUnavailable) context.Response.Headers.RetryAfter = "2";
             return Problem(exception.Code, exception.Message, exception.StatusCode);
+        }
+    }
+
+    private static async Task<IResult> ReadSidecarAsync(HttpContext context, string path, CancellationToken cancellationToken, string? language = null)
+    {
+        try
+        {
+            var content = await SidecarSubtitles.ReadAsWebVttAsync(path, cancellationToken, language);
+            context.Response.Headers.CacheControl = "private, no-store";
+            context.Response.Headers.XContentTypeOptions = "nosniff";
+            return Results.Bytes(content, "text/vtt; charset=utf-8");
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return Problem("invalid_subtitle_track", "The subtitle track was not found.", StatusCodes.Status404NotFound);
+        }
+        catch (InvalidOperationException)
+        {
+            return Problem("subtitle_too_large", "This subtitle track is too large to open in a browser.", StatusCodes.Status422UnprocessableEntity);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            context.Response.Headers.RetryAfter = "2";
+            return Problem("media_unavailable", "The subtitle file could not be read.", StatusCodes.Status503ServiceUnavailable);
         }
     }
 }

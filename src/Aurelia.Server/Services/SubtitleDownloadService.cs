@@ -243,7 +243,7 @@ public sealed partial class SubtitleDownloadService(
             throw;
         }
         quota.Update(file.Remaining, file.ResetsAt);
-        var text = SidecarSubtitles.DecodeText(file.Content);
+        var text = SidecarSubtitles.DecodeText(file.Content, language);
         if (!text.Contains("-->", StringComparison.Ordinal))
             throw new MetadataException("subtitle_unreadable", "The downloaded file is not a subtitle.", StatusCodes.Status422UnprocessableEntity);
         var cleanRelease = release is null ? null : new string(release.Where(character => !char.IsControl(character)).Take(200).ToArray());
@@ -347,10 +347,12 @@ public sealed partial class SubtitleDownloadService(
 }
 
 /// <summary>Runs the automatic subtitle download a few minutes after start and then every six hours.</summary>
-public sealed class SubtitleAutoDownloader(IServiceScopeFactory scopes) : BackgroundService
+public sealed class SubtitleAutoDownloader(IServiceScopeFactory scopes, ILogger<SubtitleAutoDownloader>? logger = null) : BackgroundService
 {
     private static readonly TimeSpan StartDelay = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan Interval = TimeSpan.FromHours(6);
+    private static readonly Action<ILogger, Exception?> PassFailed = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(4414, nameof(PassFailed)), "Automatic subtitle download paused after an unexpected failure.");
     public const int DownloadsPerRun = 25;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -369,6 +371,10 @@ public sealed class SubtitleAutoDownloader(IServiceScopeFactory scopes) : Backgr
                     catch (Exception exception) when (exception is MetadataException or IOException or DbUpdateException)
                     {
                         // A failed pass is tried again at the next interval.
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        if (logger is not null) PassFailed(logger, exception);
                     }
                 }
                 await Task.Delay(Interval, stoppingToken);

@@ -20,23 +20,72 @@ public static class EncryptedBackupContainer
     // deliberately bounded before parsing them during restore validation.
     public static long MaximumEntryBytes(string name) => name == "aurelia.db" ? MaximumBytes
         : name.StartsWith("Artwork/", StringComparison.Ordinal) ? EditorArtworkStore.MaximumUploadBytes
+        : name.StartsWith("Subtitles/", StringComparison.Ordinal) ? 4 * 1_048_576
         : name == MoveManifestName ? 16 * 1_048_576 : 1_048_576;
 
     /// <summary>The storage locations and sample files of a move bundle (docs/SERVER_MOVE.md); never restored as state.</summary>
     public const string MoveManifestName = "move.json";
 
     public static bool AllowedName(string? name) => name is "aurelia.db" or "server-settings.json" or "server-certificate.pem"
-        or "server-private-key.pem" or "metadata-settings.json" or "Secrets/tmdb-token" or MoveManifestName
+        or "server-private-key.pem" or "metadata-settings.json" or "security-settings.json" or "subtitle-settings.json"
+        or "Secrets/tmdb-token" or "Secrets/opensubtitles-key" or "Secrets/opensubtitles-account"
+        or "Subtitles/automatic.json" or MoveManifestName
         || (name is not null && name.StartsWith("DataProtectionKeys/key-", StringComparison.Ordinal) && name.EndsWith(".xml", StringComparison.Ordinal)
-            && Guid.TryParseExact(name["DataProtectionKeys/key-".Length..^4], "D", out _)) || ArtworkName(name);
+            && Guid.TryParseExact(name["DataProtectionKeys/key-".Length..^4], "D", out _))
+        || ArtworkName(name)
+        || WatchlistName(name)
+        || SubtitleName(name);
 
     private static bool ArtworkName(string? name)
     {
         if (name is null || !name.StartsWith("Artwork/", StringComparison.Ordinal)) return false;
+        if (CollectionArtworkName(name)) return true;
         var file = name[8..];
         var stem = file.EndsWith(".original.png", StringComparison.Ordinal) ? file[..^13]
             : file.EndsWith(".png", StringComparison.Ordinal) ? file[..^4] : "";
         return Guid.TryParseExact(stem, "N", out _);
+    }
+
+    private static bool CollectionArtworkName(string name)
+    {
+        const string prefix = "Artwork/Collections/";
+        if (!name.StartsWith(prefix, StringComparison.Ordinal)) return false;
+        var file = name[prefix.Length..];
+        if (file.Contains('/') || file.Contains('\\')) return false;
+        if (file.EndsWith("-original.png", StringComparison.Ordinal))
+            return Guid.TryParseExact(file[..^13], "N", out _);
+        if (file.EndsWith(".png", StringComparison.Ordinal) && file.Length == 36)
+            return Guid.TryParseExact(file[..32], "N", out _);
+        var revisionIndex = file.IndexOf("-r", StringComparison.Ordinal);
+        if (revisionIndex == 32 && Guid.TryParseExact(file[..32], "N", out _))
+        {
+            var dot = file.IndexOf('.', revisionIndex + 2);
+            if (dot > revisionIndex + 2
+                && file[(revisionIndex + 2)..dot].All(char.IsAsciiHexDigit)
+                && file[dot..] is ".png" or ".jpg" or ".webp")
+                return true;
+        }
+        return false;
+    }
+
+    private static bool WatchlistName(string? name)
+    {
+        const string prefix = "Watchlist/";
+        if (name is null || !name.StartsWith(prefix, StringComparison.Ordinal) || !name.EndsWith(".json", StringComparison.Ordinal)) return false;
+        return Guid.TryParseExact(name[prefix.Length..^5], "N", out _);
+    }
+
+    private static bool SubtitleName(string? name)
+    {
+        const string prefix = "Subtitles/";
+        if (name is null || !name.StartsWith(prefix, StringComparison.Ordinal)) return false;
+        var remainder = name[prefix.Length..];
+        var slash = remainder.IndexOf('/');
+        if (slash != 32 || !Guid.TryParseExact(remainder[..32], "N", out _)) return false;
+        var file = remainder[33..];
+        if (file.Contains('/') || file.Contains('\\')) return false;
+        return file == "index.json"
+            || (file.EndsWith(".srt", StringComparison.Ordinal) && Guid.TryParseExact(file[..^4], "N", out _));
     }
 
     public static Task<BackupManifest> EncryptAsync(string directory, IReadOnlyList<string> names, Guid serverId,

@@ -251,7 +251,12 @@ export function openTrimEditor({ api, item, part, times, canPreview, onSaved }) 
 
   (async () => {
     try {
-      source = await api.createPlayback(item.id);
+      const created = await api.createPlayback(item.id);
+      if (!sheet.isConnected) {
+        api.revokePlayback(created.id).catch(() => {});
+        return;
+      }
+      source = created;
       duration = source.progress?.durationMilliseconds ?? 0;
       if (triesDirectPlay(source.contentType)) {
         video.src = source.streamPath;
@@ -260,11 +265,13 @@ export function openTrimEditor({ api, item, part, times, canPreview, onSaved }) 
           video.addEventListener("error", resolve, { once: true });
           setTimeout(resolve, 8000);
         });
+        if (!sheet.isConnected) return;
         if (Number.isFinite(video.duration) && video.duration > 0 && !video.error) {
           duration = Math.round(video.duration * 1000);
           video.hidden = false;
         } else video.removeAttribute("src");
       }
+      if (!sheet.isConnected) return;
       if (!(duration > 0)) throw new Error("The episode’s length isn’t known yet. Play it once, then try again.");
       picture.querySelector(".trim-loading")?.remove();
       span = segmentTrimSpan(part, duration, intro ? times.introStartMilliseconds : times.creditsStartMilliseconds, times.introEndMilliseconds);

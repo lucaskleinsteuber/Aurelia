@@ -33,6 +33,8 @@ test("assignments offer only sensible kinds and check what each needs", () => {
   assert.deepEqual(importChoicesFor([items[2]]).map(([value]) => value), ["movie", "episode", "extra", "trailer", "ignore"]);
   assert.deepEqual(importChoicesFor([items[0]]).map(([value]) => value), ["movie", "series", "extra", "trailer", "ignore"]);
   assert.equal(importEditorStart([items[2]]).choice, "extra", "an unknown file starts as an extra");
+  assert.equal(importEditorStart([{ relativePath: "Unreadable", isDirectory: true, kind: null, status: "error" }]).choice, "ignore", "an error folder defaults to ignore");
+  assert.equal(importEditorStart([{ relativePath: "MysteryFolder", isDirectory: true, kind: null, status: "pending" }]).choice, "movie", "an unknown folder defaults to movie");
   const form = { choice: "episode", parentPath: "Invented Show", entireSeries: false, season: "1", episode: "7", category: "", title: " Bonus Episode " };
   assert.deepEqual(importAssignmentChanges([items[2]], form, targets), [{
     relativePath: "Invented Show/bonus.mkv", isDirectory: false, kind: "episode", parentRelativePath: "Invented Show",
@@ -75,8 +77,9 @@ test("the preview is analyzed, a file is assigned and the recognized items are i
     confirmImportPreview: async (_library, _preview, revision) => calls.push(`confirm ${revision}`),
   };
   const toasts = [];
+  let savedRefreshes = 0;
   const app = { api, state: { profile: { id: "owner", role: "owner" } }, toast: (text) => toasts.push(text), handleError: () => false };
-  const editors = createManagementEditors({ ...app, onSaved: () => {} });
+  const editors = createManagementEditors({ ...app, onSaved: () => { savedRefreshes += 1; editors.close(); } });
   t.after(() => editors.close());
   let done = 0;
   createImportPreview({ api, app, kit: editors.kit }).open({ id: "lib", name: "Invented Media", path: "/srv/invented", importPreviewRequired: true }, { onDone: () => done++ });
@@ -94,10 +97,44 @@ test("the preview is analyzed, a file is assigned and the recognized items are i
   all(sheet).find((node) => node.tagName === "FORM").dispatchEvent(new Event("submit", { cancelable: true }));
   await flush();
   assert.equal(sheet.open, false);
+  assert.equal(preview.open, true, "saving a nested assignment keeps the Import Preview open");
+  assert.equal(savedRefreshes, 0, "saving a nested assignment must not trigger Settings navigation");
   button(preview, "Import Recognized Items").click();
   await flush();
   assert.deepEqual(calls, ["analyze lib", "assign 1 Invented Show/bonus.mkv=extra", "confirm 2"]);
   assert.deepEqual(toasts, ["Importing Invented Media…"]);
   assert.equal(done, 1);
   assert.equal(preview.open, false);
+});
+
+test("import preview explains error blocks and folder editor never appends literal null", async (t) => {
+  installDOM(t);
+  const errorFolder = { relativePath: "Unreadable", title: "Unreadable", kind: null, status: "error", reason: "Permission denied", isDirectory: true };
+  const summary = {
+    previewId: "p-err",
+    revision: "1",
+    counts: { ...counts, errors: 1 },
+    issues: [{ message: "Unreadable: Permission denied" }],
+    targets,
+  };
+  const api = {
+    analyzeImport: async () => summary,
+    importPreviewItems: async () => ({ summary, items: [errorFolder], totalCount: 1 }),
+    importAssignments: async () => ({ revision: "1", assignments: [] }),
+  };
+  const app = { api, state: { profile: { id: "owner", role: "owner" } }, toast: () => {}, handleError: () => false };
+  const editors = createManagementEditors({ ...app, onSaved: () => {} });
+  t.after(() => editors.close());
+  createImportPreview({ api, app, kit: editors.kit }).open({ id: "lib", name: "Broken", path: "/srv/broken", importPreviewRequired: true });
+  await flush();
+  const preview = document.body.children.at(-1);
+  assert.match(preview.textContent, /1 error/);
+  assert.match(preview.textContent, /must be resolved or ignored before importing/);
+  assert.equal(button(preview, "Import Recognized Items").disabled, true);
+  const row = all(preview).find((node) => node.className?.startsWith?.("import-row"));
+  button(row, "Edit").click();
+  const sheet = document.body.children.at(-1);
+  assert.doesNotMatch(sheet.textContent, /\bnull\b/);
+  const [kind] = all(sheet).filter((node) => node.tagName === "SELECT");
+  assert.equal(kind.value, "ignore");
 });

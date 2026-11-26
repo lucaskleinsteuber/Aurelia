@@ -165,4 +165,41 @@ struct TVWatchTogetherTests {
     try await Task.sleep(for: .milliseconds(200))
     #expect(api.commands.map(\.action).contains("ready"))
   }
+
+  @Test func longPollResponsesDoNotSkewClockOffset() {
+    #expect(
+      TVWatchTogetherClock.measuredOffset(
+        serverTime: "2026-11-07T20:00:20+00:00", sent: Self.start,
+        received: Self.start.addingTimeInterval(20), isLongPoll: true) == nil)
+    #expect(
+      TVWatchTogetherClock.measuredOffset(
+        serverTime: "2026-11-07T20:00:10+00:00", sent: Self.start,
+        received: Self.start.addingTimeInterval(10), isLongPoll: false) == nil)
+    #expect(
+      TVWatchTogetherClock.measuredOffset(
+        serverTime: "2026-11-07T20:00:00.200+00:00", sent: Self.start,
+        received: Self.start.addingTimeInterval(0.4), isLongPoll: false) == 0)
+
+    var clock = Self.start
+    let api = API(answer: Self.state(playing: true, position: 10_000, revision: 1))
+    let player = Player()
+    player.watchPosition = 10_000
+    let session = TVWatchTogetherSession(api: api, deviceName: "Apple TV", now: { clock })
+    session.attach(player)
+    session.receive(
+      Self.state(playing: true, position: 10_000, revision: 1), sent: clock, own: true)
+    player.steps.removeAll()
+
+    let pollSent = clock
+    clock = Self.start.addingTimeInterval(20)
+    player.watchPosition = 30_000
+    let polled = TVWatchPartyState(
+      id: Self.state(playing: true, position: 10_000, revision: 1).id, mediaId: Self.film,
+      title: "Invented Film", isPlaying: true, isWaiting: false, positionMilliseconds: 10_000,
+      updatedAt: "2026-11-07T20:00:00.0000000+00:00",
+      serverTime: "2026-11-07T20:00:20.0000000+00:00", revision: 1, members: [], lastAction: nil,
+      lastActionBy: nil)
+    session.receive(polled, sent: pollSent, own: false)
+    #expect(player.steps.isEmpty)
+  }
 }

@@ -4,6 +4,8 @@ import { Player } from "../../src/Aurelia.Server/WebApp/js/player.js";
 import { ApiError } from "../../src/Aurelia.Server/WebApp/js/api.js";
 import { closedLabel, goodNight, isScreenTimeCode, noMoreTitles, rulesFromForm, sameRules, todaySummary, DEFAULT_SCREEN_TIME }
   from "../../src/Aurelia.Server/WebApp/js/screen-time.js";
+import { screenTimeSection } from "../../src/Aurelia.Server/WebApp/js/screen-time-view.js";
+import { h } from "../../src/Aurelia.Server/WebApp/js/dom.js";
 import { installDOM } from "./dom-fixture.mjs";
 
 // Local times so the expected clock does not depend on the test machine's time zone.
@@ -35,12 +37,43 @@ test("the editor's fields become rules, with a clear message for a wrong value",
     schoolNight: { bedtime: "19:30", wakeTime: "07:00", limit: "60" }, weekend: { bedtime: "", wakeTime: "08:00", limit: "" } };
   const { rules } = rulesFromForm(form);
   assert.deepEqual(rules, { enabled: true, lockScope: "wholeProfile", ending: "stopNow", maxOvertimeMinutes: 15,
-    schoolNight: { bedtime: "19:30", wakeTime: "07:00", dailyLimitMinutes: 60 }, weekend: { bedtime: null, wakeTime: "08:00", dailyLimitMinutes: null } });
+    schoolNight: { bedtime: "19:30", wakeTime: "07:00", dailyLimitMinutes: 60 }, weekend: { bedtime: null, wakeTime: "08:00", dailyLimitMinutes: null },
+    allowOfflineDownloads: false });
+  assert.equal(DEFAULT_SCREEN_TIME.allowOfflineDownloads, false);
+  const { rules: withDownloads } = rulesFromForm({ ...form, allowOfflineDownloads: true });
+  assert.equal(withDownloads.allowOfflineDownloads, true);
+  assert.equal(sameRules(rules, withDownloads), false);
+  assert.equal(sameRules(withDownloads, structuredClone(withDownloads)), true);
   assert.match(rulesFromForm({ ...form, schoolNight: { ...form.schoolNight, bedtime: "25:00" } }).error, /school-night bedtime/);
   assert.match(rulesFromForm({ ...form, weekend: { ...form.weekend, limit: "2" } }).error, /weekend daily limit/);
   assert.match(rulesFromForm({ ...form, overtime: "500" }).error, /run over/);
   assert.equal(sameRules(rules, structuredClone(rules)), true);
   assert.equal(sameRules(rules, DEFAULT_SCREEN_TIME), false);
+});
+
+test("screenTimeSection defaults allowOfflineDownloads to false and collects toggle changes", (t) => {
+  installDOM(t);
+  const kit = {
+    input: (value, attrs = {}) => {
+      const element = h("input", attrs);
+      if (attrs.type === "checkbox") element.checked = Boolean(attrs.checked);
+      else element.value = value;
+      return element;
+    },
+    field: (label, control, help) => h("label", {}, h("span", {}, label), control, help ? h("span", {}, help) : null),
+    choice: (options, selected) => {
+      const select = h("select", {}, ...options.map(([value, text]) => h("option", { value }, text)));
+      select.value = selected;
+      return select;
+    },
+    button: (label, onClick) => h("button", { type: "button", onclick: onClick }, label),
+  };
+  const section = screenTimeSection(kit, { rules: { ...DEFAULT_SCREEN_TIME, enabled: true } });
+  assert.equal(section.collect().rules.allowOfflineDownloads, false);
+  const checkboxes = section.element.querySelectorAll('input[type="checkbox"]');
+  assert.equal(checkboxes.length, 2);
+  checkboxes[1].checked = true;
+  assert.equal(section.collect().rules.allowOfflineDownloads, true);
 });
 
 function endedPlayer(t, status, options = {}) {

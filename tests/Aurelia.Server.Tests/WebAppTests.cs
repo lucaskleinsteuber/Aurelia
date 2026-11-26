@@ -263,7 +263,7 @@ public sealed class WebAppTests
         {
             Assert.Equal(HttpStatusCode.NoContent, paired.StatusCode);
             Assert.Empty(await paired.Content.ReadAsStringAsync());
-            AssertProtected(CookieJar.Header(paired, "aurelia_device"));
+            AssertProtected(CookieJar.Header(paired, "__Host-aurelia_device"));
         }
         using (var picker = await cookies.SendAsync(browser, Web(HttpMethod.Get, "/api/v1/profiles", "device")))
             Assert.Equal(HttpStatusCode.OK, picker.StatusCode);
@@ -273,6 +273,7 @@ public sealed class WebAppTests
             new RedeemPairingCodeRequest(code.Code, "Replay"))))
         {
             Assert.Equal(HttpStatusCode.Unauthorized, replay.StatusCode);
+            Assert.False(other.Has("__Host-aurelia_device"));
             Assert.False(other.Has("aurelia_device"));
         }
     }
@@ -302,6 +303,7 @@ public sealed class WebAppTests
         using (var pending = await cookies.SendAsync(browser, Web(HttpMethod.Post, "/api/v1/web/pairing/status", "device")))
         {
             Assert.Equal(DeviceAuthorizationState.Pending, (await ApiTestClient.ReadAsync<WebPairingStatusResponse>(pending)).State);
+            Assert.False(cookies.Has("__Host-aurelia_device"));
             Assert.False(cookies.Has("aurelia_device"));
         }
 
@@ -323,7 +325,7 @@ public sealed class WebAppTests
             done.EnsureSuccessStatusCode();
             Assert.DoesNotContain("token", await done.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
             Assert.Equal(DeviceAuthorizationState.Approved, (await ApiTestClient.ReadAsync<WebPairingStatusResponse>(done)).State);
-            var device = CookieJar.Header(done, "aurelia_device");
+            var device = CookieJar.Header(done, "__Host-aurelia_device");
             AssertProtected(device);
             Assert.Contains("expires=", device, StringComparison.OrdinalIgnoreCase);
             Assert.True(CookieJar.Deleted(done, "aurelia_pairing"));
@@ -345,6 +347,7 @@ public sealed class WebAppTests
             new UnlockProfileRequest("9999"))))
         {
             Assert.Equal(HttpStatusCode.Unauthorized, wrongPin.StatusCode);
+            Assert.False(cookies.Has("__Host-aurelia_profile"));
             Assert.False(cookies.Has("aurelia_profile"));
         }
         using (var unlocked = await cookies.SendAsync(browser, Web(HttpMethod.Post, $"/api/v1/web/profiles/{session.User.Id}/unlock", "device",
@@ -353,7 +356,7 @@ public sealed class WebAppTests
             unlocked.EnsureSuccessStatusCode();
             Assert.DoesNotContain("token", await unlocked.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
             Assert.Equal("lucas", (await ApiTestClient.ReadAsync<WebProfileResponse>(unlocked)).User.Username);
-            var profile = CookieJar.Header(unlocked, "aurelia_profile");
+            var profile = CookieJar.Header(unlocked, "__Host-aurelia_profile");
             AssertProtected(profile);
             Assert.DoesNotContain("expires=", profile, StringComparison.OrdinalIgnoreCase); // Ends with the browser.
         }
@@ -369,8 +372,8 @@ public sealed class WebAppTests
         using (var signedOut = await cookies.SendAsync(browser, Web(HttpMethod.Post, "/api/v1/web/sign-out", "device")))
         {
             Assert.Equal(HttpStatusCode.NoContent, signedOut.StatusCode);
-            Assert.True(CookieJar.Deleted(signedOut, "aurelia_device"));
-            Assert.True(CookieJar.Deleted(signedOut, "aurelia_profile"));
+            Assert.True(CookieJar.Deleted(signedOut, "__Host-aurelia_device"));
+            Assert.True(CookieJar.Deleted(signedOut, "__Host-aurelia_profile"));
         }
         // Copies of the old cookies no longer work anywhere.
         using (var picker = await stale.SendAsync(browser, Web(HttpMethod.Get, "/api/v1/profiles", "device")))
@@ -411,6 +414,7 @@ public sealed class WebAppTests
         using var status = await cookies.SendAsync(browser, Web(HttpMethod.Post, "/api/v1/web/pairing/status", "device"));
         Assert.Equal(DeviceAuthorizationState.Denied, (await ApiTestClient.ReadAsync<WebPairingStatusResponse>(status)).State);
         Assert.True(CookieJar.Deleted(status, "aurelia_pairing"));
+        Assert.False(cookies.Has("__Host-aurelia_device"));
         Assert.False(cookies.Has("aurelia_device"));
         using (var again = await cookies.SendAsync(browser, Web(HttpMethod.Post, "/api/v1/web/pairing/status", "device")))
             Assert.Equal(HttpStatusCode.NotFound, again.StatusCode);
@@ -463,6 +467,10 @@ public sealed class WebAppTests
                 Assert.NotEqual(HttpStatusCode.Unauthorized, draft.StatusCode);
             using (var discard = await cookies.SendAsync(browser, new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/media/{mediaId}/editor/uploads/{Guid.NewGuid()}")))
                 Assert.Equal(HttpStatusCode.Unauthorized, discard.StatusCode);
+            using (var collectionDraft = await cookies.SendAsync(browser, new HttpRequestMessage(HttpMethod.Get, $"/api/v1/collections/{Guid.NewGuid()}/editor/uploads/{Guid.NewGuid()}")))
+                Assert.NotEqual(HttpStatusCode.Unauthorized, collectionDraft.StatusCode);
+            using (var collectionDiscard = await cookies.SendAsync(browser, new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/collections/{Guid.NewGuid()}/editor/uploads/{Guid.NewGuid()}")))
+                Assert.Equal(HttpStatusCode.Unauthorized, collectionDiscard.StatusCode);
             // Changing data with only the cookie is refused.
             var save = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/media/{mediaId}/progress")
             {
@@ -474,7 +482,7 @@ public sealed class WebAppTests
             using (var ended = await cookies.SendAsync(browser, Web(HttpMethod.Post, "/api/v1/web/profile/end", "profile")))
             {
                 Assert.Equal(HttpStatusCode.NoContent, ended.StatusCode);
-                Assert.True(CookieJar.Deleted(ended, "aurelia_profile"));
+                Assert.True(CookieJar.Deleted(ended, "__Host-aurelia_profile"));
             }
             // Without a profile the device cookie alone opens no stream.
             using (var live = await cookies.SendAsync(browser, new HttpRequestMessage(HttpMethod.Get, playback.StreamPath + "/live")))
@@ -501,6 +509,7 @@ public sealed class WebAppTests
             Assert.Equal("text/html", page.Content.Headers.ContentType?.MediaType);
             var policy = Assert.Single(page.Headers.GetValues("Content-Security-Policy"));
             Assert.Contains("script-src 'self'", policy, StringComparison.Ordinal);
+            Assert.Contains("img-src 'self' data: blob:", policy, StringComparison.Ordinal);
             Assert.Contains("frame-ancestors 'none'", policy, StringComparison.Ordinal);
             Assert.DoesNotContain("unsafe", policy, StringComparison.Ordinal);
             Assert.True(page.Headers.CacheControl?.NoCache);

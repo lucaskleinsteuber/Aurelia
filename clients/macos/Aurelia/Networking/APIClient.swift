@@ -4,6 +4,7 @@ import CryptoKit
 enum APIClientError: LocalizedError, Equatable {
   case invalidAddress
   case insecureAddress
+  case lanAccessDisabled
   case invalidResponse
   case supersededSnapshot
   case serverIdentityMismatch
@@ -52,6 +53,8 @@ enum APIClientError: LocalizedError, Equatable {
       "Enter a valid server address."
     case .insecureAddress:
       "Aurelia requires an HTTPS server address."
+    case .lanAccessDisabled:
+      "Local network access is turned off on this server. Enable LAN access in the server's settings to connect from another device."
     case .invalidResponse:
       "The server returned an invalid response."
     case .supersededSnapshot:
@@ -126,12 +129,22 @@ struct APIClient: Sendable {
       trustMode: .inspect,
       timeout: timeout)
     let info = try decode(ServerInfoResponse.self, from: data)
-    guard let fingerprint = delegate.capturedFingerprint,
-      fingerprint.caseInsensitiveCompare(info.publicKeyFingerprint ?? "") == .orderedSame,
-      info.lanAccessEnabled || baseURL.host == "127.0.0.1" || baseURL.host == "localhost"
-        || baseURL.host == "::1"
+    return try validateInspection(
+      baseURL: baseURL, info: info, capturedFingerprint: delegate.capturedFingerprint)
+  }
+
+  static func validateInspection(
+    baseURL: URL, info: ServerInfoResponse, capturedFingerprint: String?
+  ) throws -> InspectedServer {
+    guard let fingerprint = capturedFingerprint,
+      fingerprint.caseInsensitiveCompare(info.publicKeyFingerprint ?? "") == .orderedSame
     else {
       throw APIClientError.serverIdentityMismatch
+    }
+    let host = baseURL.host?.lowercased()
+    guard info.lanAccessEnabled || host == "127.0.0.1" || host == "localhost" || host == "::1"
+    else {
+      throw APIClientError.lanAccessDisabled
     }
     return InspectedServer(
       baseURL: baseURL,
@@ -174,7 +187,7 @@ struct APIClient: Sendable {
     let body = try JSONEncoder().encode(
       SetupOwnerRequest(username: username, password: password, deviceName: deviceName))
     let (data, _, _) = try await request(
-      baseURL: URL(string: "http://127.0.0.1:43110")!,
+      baseURL: AppEdition.localBaseURL,
       path: "/api/v1/setup/owner",
       method: "POST",
       token: nil,
@@ -192,7 +205,7 @@ struct APIClient: Sendable {
     let body = try JSONEncoder().encode(
       LoginRequest(username: username, password: password, deviceName: deviceName))
     let (data, _, _) = try await request(
-      baseURL: URL(string: "http://127.0.0.1:43110")!,
+      baseURL: AppEdition.localBaseURL,
       path: "/api/v1/auth/login",
       method: "POST",
       token: nil,
@@ -245,15 +258,6 @@ struct APIClient: Sendable {
   }
   func disconnectPairedDevice() async throws {
     _ = try await perform(path: "/api/v1/device", method: "DELETE")
-  }
-  func changeProfilePIN(current: String, new: String) async throws {
-    struct Payload: Encodable {
-      let currentPin: String
-      let newPin: String
-    }
-    _ = try await perform(
-      path: "/api/v1/profile/pin", method: "PUT",
-      body: JSONEncoder().encode(Payload(currentPin: current, newPin: new)))
   }
   func resetProfilePIN(id: UUID, pin: String) async throws {
     struct Payload: Encodable { let pin: String }
@@ -2377,8 +2381,6 @@ struct APIClient: Sendable {
       path: "/api/v1/server/operations/\(id.uuidString)/confirm", method: "POST")
   }
   func exportEncryptedServerBackup(passphrase: String, to destination: URL) async throws {
-    let access = destination.startAccessingSecurityScopedResource()
-    defer { if access { destination.stopAccessingSecurityScopedResource() } }
     struct Request: Encodable { let passphrase: String }
     struct Response: Decodable { let id: UUID }
     let result = try Self.decode(
@@ -2386,31 +2388,7 @@ struct APIClient: Sendable {
       from: await perform(
         path: "/api/v1/server/backups/export", method: "POST",
         body: JSONEncoder().encode(Request(passphrase: passphrase)), timeout: 300))
-    defer {
-      Task {
-        _ = try? await self.perform(
-          path: "/api/v1/server/backups/transfers/\(result.id.uuidString)", method: "DELETE")
-      }
-    }
-    let url = profile.baseURL.appendingPathComponent(
-      "api/v1/server/backups/transfers/\(result.id.uuidString)")
-    var request = URLRequest(url: url)
-    request.setValue("Bearer \(profile.token)", forHTTPHeaderField: "Authorization")
-    let delegate = TLSTrustDelegate(
-      mode: .pinned(profile.publicKeyFingerprint), allowedHost: profile.baseURL.host ?? "")
-    let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
-    defer { session.invalidateAndCancel() }
-    let (temporary, response) = try await session.download(for: request)
-    defer { try? FileManager.default.removeItem(at: temporary) }
-    try Task.checkCancellation()
-    guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-      throw APIClientError.invalidResponse
-    }
-    if FileManager.default.fileExists(atPath: destination.path) {
-      _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)
-    } else {
-      try FileManager.default.moveItem(at: temporary, to: destination)
-    }
+    try await downloadTransfer(id: result.id, to: destination)
   }
   // MARK: Moving to a new server (docs/SERVER_MOVE.md)
 
@@ -2481,34 +2459,113 @@ struct APIClient: Sendable {
       body: JSONEncoder().encode(Request(path: path, force: force)), timeout: 60)
   }
 
+  static func backupUploadResourceTimeout(fileSize: Int64) -> TimeInterval {
+    // Allow 4 GiB uploads over slow Wi-Fi (~2 Mbit/s) while request timeout still catches stalls.
+    max(600, TimeInterval(max(0, fileSize)) / 262_144)
+  }
+
+  private func makeTransferRequest(
+    path: String, method: String, approval: String? = nil, timeout: TimeInterval = 60
+  ) throws -> URLRequest {
+    guard let url = URL(string: path, relativeTo: profile.baseURL)?.absoluteURL else {
+      throw APIClientError.invalidAddress
+    }
+    var request = URLRequest(url: url)
+    request.httpMethod = method
+    request.timeoutInterval = timeout
+    request.cachePolicy = .reloadIgnoringLocalCacheData
+    request.setValue("Bearer \(profile.token)", forHTTPHeaderField: "Authorization")
+    request.setValue(
+      AureliaInstallation.identifier(), forHTTPHeaderField: "X-Aurelia-Installation")
+    request.setValue(AureliaInstallation.clientHeader, forHTTPHeaderField: "X-Aurelia-Client")
+    if let approval {
+      request.setValue(approval, forHTTPHeaderField: "X-Aurelia-Approval")
+    }
+    return request
+  }
+
+  private func approveAction(path: String, method: String, payloadHash: String) async throws
+    -> String
+  {
+    struct Confirmation: Encodable {
+      let action: String
+      let payloadHash: String
+    }
+    struct Approval: Decodable { let token: String }
+    let confirmation = Confirmation(
+      action: try AdministrationRequestExecutor.action(
+        baseURL: profile.baseURL, path: path, method: method),
+      payloadHash: payloadHash)
+    let (data, _, _) = try await Self.request(
+      baseURL: profile.baseURL, path: "/api/v1/management/approval", method: "POST",
+      token: profile.token, body: JSONEncoder().encode(confirmation),
+      trustMode: .pinned(profile.publicKeyFingerprint))
+    return try Self.decode(Approval.self, from: data).token
+  }
+
+  private static func fileSHA256Hex(at file: URL) throws -> String {
+    let handle = try FileHandle(forReadingFrom: file)
+    defer { try? handle.close() }
+    var hasher = SHA256()
+    while true {
+      let chunk = try handle.read(upToCount: 1_048_576) ?? Data()
+      if chunk.isEmpty { break }
+      hasher.update(data: chunk)
+    }
+    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+  }
+
   /// Downloads a backup or moving-file transfer and removes it from the server afterwards.
   private func downloadTransfer(id: UUID, to destination: URL) async throws {
     let access = destination.startAccessingSecurityScopedResource()
     defer { if access { destination.stopAccessingSecurityScopedResource() } }
+    let path = "/api/v1/server/backups/transfers/\(id.uuidString)"
     defer {
       Task {
-        _ = try? await self.perform(
-          path: "/api/v1/server/backups/transfers/\(id.uuidString)", method: "DELETE")
+        _ = try? await self.perform(path: path, method: "DELETE")
       }
     }
-    var request = URLRequest(
-      url: profile.baseURL.appendingPathComponent(
-        "api/v1/server/backups/transfers/\(id.uuidString)"))
-    request.setValue("Bearer \(profile.token)", forHTTPHeaderField: "Authorization")
-    let delegate = TLSTrustDelegate(
-      mode: .pinned(profile.publicKeyFingerprint), allowedHost: profile.baseURL.host ?? "")
-    let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
-    defer { session.invalidateAndCancel() }
-    let (temporary, response) = try await session.download(for: request)
-    defer { try? FileManager.default.removeItem(at: temporary) }
-    try Task.checkCancellation()
-    guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-      throw APIClientError.invalidResponse
-    }
-    if FileManager.default.fileExists(atPath: destination.path) {
-      _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)
-    } else {
-      try FileManager.default.moveItem(at: temporary, to: destination)
+    let emptyHash = SHA256.hash(data: Data()).map { String(format: "%02x", $0) }.joined()
+    _ = try await AdministrationRequestExecutor.execute { proof in
+      let request = try makeTransferRequest(path: path, method: "GET", approval: proof, timeout: 60)
+      let delegate = TLSTrustDelegate(
+        mode: .pinned(profile.publicKeyFingerprint), allowedHost: profile.baseURL.host ?? "")
+      let configuration = URLSessionConfiguration.ephemeral
+      configuration.urlCache = nil
+      configuration.httpCookieStorage = nil
+      configuration.timeoutIntervalForRequest = 60
+      configuration.timeoutIntervalForResource = 7_200
+      let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+      defer { session.invalidateAndCancel() }
+      let temporary: URL
+      let response: URLResponse
+      do {
+        (temporary, response) = try await session.download(for: request)
+      } catch {
+        if delegate.didRejectTrust { throw APIClientError.serverIdentityMismatch }
+        throw error
+      }
+      defer { try? FileManager.default.removeItem(at: temporary) }
+      try Task.checkCancellation()
+      guard let http = response as? HTTPURLResponse else {
+        throw APIClientError.invalidResponse
+      }
+      guard http.statusCode == 200 else {
+        let errorData =
+          (try? FileHandle(forReadingFrom: temporary).read(upToCount: 16_384)) ?? Data()
+        throw Self.responseError(
+          status: http.statusCode,
+          retryAfter: http.value(forHTTPHeaderField: "Retry-After"),
+          data: errorData)
+      }
+      if FileManager.default.fileExists(atPath: destination.path) {
+        _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)
+      } else {
+        try FileManager.default.moveItem(at: temporary, to: destination)
+      }
+      return Data()
+    } approve: {
+      try await approveAction(path: path, method: "GET", payloadHash: emptyHash)
     }
   }
 
@@ -2528,22 +2585,46 @@ struct APIClient: Sendable {
     guard size > 0, Int64(size) <= 4 * 1024 * 1024 * 1024 else {
       throw APIClientError.invalidResponse
     }
-    var request = URLRequest(
-      url: profile.baseURL.appendingPathComponent("api/v1/server/backups/uploads/\(id.uuidString)"))
-    request.httpMethod = "PUT"
-    request.setValue("Bearer \(profile.token)", forHTTPHeaderField: "Authorization")
-    request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-    request.setValue("\(size)", forHTTPHeaderField: "Content-Length")
-    let delegate = TLSTrustDelegate(
-      mode: .pinned(profile.publicKeyFingerprint), allowedHost: profile.baseURL.host ?? "")
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.timeoutIntervalForResource = 600
-    let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
-    defer { session.invalidateAndCancel() }
-    let (_, response) = try await session.upload(for: request, fromFile: file)
-    try Task.checkCancellation()
-    guard (response as? HTTPURLResponse)?.statusCode == 204 else {
-      throw APIClientError.invalidResponse
+    let uploadPath = "/api/v1/server/backups/uploads/\(id.uuidString)"
+    let resourceTimeout = Self.backupUploadResourceTimeout(fileSize: Int64(size))
+    _ = try await AdministrationRequestExecutor.execute { proof in
+      var request = try makeTransferRequest(
+        path: uploadPath, method: "PUT", approval: proof, timeout: 60)
+      request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+      request.setValue("\(size)", forHTTPHeaderField: "Content-Length")
+      let delegate = TLSTrustDelegate(
+        mode: .pinned(profile.publicKeyFingerprint), allowedHost: profile.baseURL.host ?? "")
+      let configuration = URLSessionConfiguration.ephemeral
+      configuration.urlCache = nil
+      configuration.httpCookieStorage = nil
+      configuration.timeoutIntervalForRequest = 60
+      configuration.timeoutIntervalForResource = resourceTimeout
+      let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+      defer { session.invalidateAndCancel() }
+      let data: Data
+      let response: URLResponse
+      do {
+        (data, response) = try await session.upload(for: request, fromFile: file)
+      } catch {
+        if delegate.didRejectTrust { throw APIClientError.serverIdentityMismatch }
+        throw error
+      }
+      try Task.checkCancellation()
+      guard let http = response as? HTTPURLResponse else {
+        throw APIClientError.invalidResponse
+      }
+      guard http.statusCode == 204 else {
+        throw Self.responseError(
+          status: http.statusCode,
+          retryAfter: http.value(forHTTPHeaderField: "Retry-After"),
+          data: data)
+      }
+      return Data()
+    } approve: {
+      let hash = try await Task.detached(priority: .utility) {
+        try Self.fileSHA256Hex(at: file)
+      }.value
+      return try await approveAction(path: uploadPath, method: "PUT", payloadHash: hash)
     }
     struct Restore: Encodable {
       let uploadId: UUID
@@ -2643,6 +2724,42 @@ struct APIClient: Sendable {
     }
   #endif
 
+  /// Resolves `path` against `baseURL` and refuses any path that changes scheme, host, or port,
+  /// adds credentials, or downgrades an authenticated/pinned request away from HTTPS.
+  static func validatedRequestURL(baseURL: URL, path: String, requiresHTTPS: Bool = true) throws
+    -> URL
+  {
+    guard let baseHost = baseURL.host, !baseHost.isEmpty,
+      let baseScheme = baseURL.scheme?.lowercased(),
+      let url = URL(string: path, relativeTo: baseURL)?.absoluteURL,
+      let resolvedScheme = url.scheme?.lowercased(),
+      let resolvedHost = url.host
+    else {
+      throw APIClientError.invalidAddress
+    }
+    guard resolvedHost.caseInsensitiveCompare(baseHost) == .orderedSame,
+      url.port == baseURL.port,
+      url.user == nil,
+      url.password == nil
+    else {
+      throw APIClientError.invalidAddress
+    }
+    guard resolvedScheme == baseScheme else {
+      throw resolvedScheme == "http"
+        ? APIClientError.insecureAddress : APIClientError.invalidAddress
+    }
+    if resolvedScheme == "https" {
+      return url
+    }
+    let normalizedHost = resolvedHost.lowercased()
+    let isLoopback =
+      normalizedHost == "127.0.0.1" || normalizedHost == "localhost" || normalizedHost == "::1"
+    if !requiresHTTPS && resolvedScheme == "http" && isLoopback {
+      return url
+    }
+    throw APIClientError.insecureAddress
+  }
+
   private static func request(
     baseURL: URL,
     path: String,
@@ -2654,9 +2771,13 @@ struct APIClient: Sendable {
     timeout: TimeInterval = 15,
     allowedStatuses: Set<Int> = []
   ) async throws -> (Data, HTTPURLResponse, TLSTrustDelegate) {
-    guard let host = baseURL.host,
-      let url = URL(string: path, relativeTo: baseURL)?.absoluteURL
-    else {
+    let requiresHTTPS: Bool
+    switch trustMode {
+    case .pinned: requiresHTTPS = true
+    case .inspect: requiresHTTPS = token != nil
+    }
+    let url = try validatedRequestURL(baseURL: baseURL, path: path, requiresHTTPS: requiresHTTPS)
+    guard let host = url.host else {
       throw APIClientError.invalidAddress
     }
     let delegate: TLSTrustDelegate

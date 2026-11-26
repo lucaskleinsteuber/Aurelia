@@ -3,6 +3,7 @@ using Aurelia.Contracts;
 using Aurelia.Server.Authentication;
 using Aurelia.Server.Data;
 using Aurelia.Server.Services;
+using Aurelia.Server.Services.Hls;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
 
@@ -66,9 +67,11 @@ public static partial class LiveConversionEndpoints
 
     /// <summary>The original's size and the smaller qualities a download can be converted to.</summary>
     private static async Task<IResult> DownloadOptionsAsync(
+        HttpContext context,
         Guid mediaId,
         AureliaDbContext database,
         LiveConversionService live,
+        ScreenTimeService screenTime,
         CancellationToken cancellationToken)
     {
         // The catalog's access rules filter this lookup, as for a playback ticket.
@@ -81,6 +84,7 @@ public static partial class LiveConversionEndpoints
             return Problem("media_not_playable", "This media item is a container and cannot be played directly.", StatusCodes.Status409Conflict);
         try
         {
+            await screenTime.RequireDownloadsAllowedAsync(context.User.RequireUserId(), cancellationToken);
             var file = MediaFileAccess.OpenRead(media);
             await using var stream = file.Stream;
             if (await live.ToolsAsync() is not { } tools)
@@ -106,6 +110,7 @@ public static partial class LiveConversionEndpoints
         string? video,
         PlaybackService playback,
         LiveConversionService live,
+        HlsSessionManager hlsSessions,
         CatalogMutationGate mutations,
         ILogger<LiveConversionService> logger,
         CancellationToken cancellationToken)
@@ -188,14 +193,27 @@ public static partial class LiveConversionEndpoints
                 return Problem("invalid_conversion", "This sound track has to be converted.", StatusCodes.Status400BadRequest);
         }
 
-        using var slot = await live.EnterAsync(encodeVideo.Value, cancellationToken);
-        if (slot is null)
+        IDisposable? slot;
+        if (encodeVideo.Value)
+        {
+            using (hlsSessions.WaitForPlace())
+            {
+                if (live.VideoPlacesTaken) await hlsSessions.PauseDownloadAsync();
+                slot = await live.EnterAsync(encodesVideo: true, cancellationToken);
+            }
+        }
+        else
+        {
+            slot = await live.EnterAsync(encodesVideo: false, cancellationToken);
+        }
+        using var slotLease = slot;
+        if (slotLease is null)
         {
             context.Response.Headers.RetryAfter = "5";
             return Problem("conversion_busy", "The server is converting as many titles as it can. Try again shortly.", StatusCodes.Status429TooManyRequests);
         }
 
-        var options = new LiveStreamOptions(startSeconds, picture, chosen?.Kind, sound, copyAudio.Value, toneMapping, chosen?.Chip);
+        var options = new LiveStreamOptions(startSeconds, picture, chosen?.Kind, sound, copyAudio.Value, toneMapping, chosen?.Chip, Container: probe.Container);
         var process = live.Start(tools.Ffmpeg, LiveConversionPlanner.Arguments(LiveConversionService.InputPath(file, source.SourcePath), options));
         var errors = LiveConversionService.ReadTailAsync(process.StandardError);
         var output = process.StandardOutput.BaseStream;

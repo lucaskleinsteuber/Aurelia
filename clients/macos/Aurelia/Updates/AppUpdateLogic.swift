@@ -257,17 +257,89 @@ enum AppUpdateLogic {
   /// The beta channel reads GitHub's release list: the Mac release with the highest build,
   /// pre-releases included. Linux and server releases in the same list have other tags and are
   /// passed over.
-  static func newestRelease(fromList data: Data, repository: String? = nil) throws -> AppRelease {
+  static func newestReleaseIfPresent(fromList data: Data, repository: String? = nil) throws
+    -> AppRelease?
+  {
     guard let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
       throw AppUpdateError.invalidRelease
     }
     let releases = list.compactMap {
       try? validatedRelease($0, allowsBeta: true, repository: repository)
     }
-    guard let newest = releases.max(by: { $0.build < $1.build }) else {
-      throw AppUpdateError.invalidRelease
+    return releases.max(by: { $0.build < $1.build })
+  }
+
+  static func newestRelease(fromList data: Data, repository: String? = nil) throws -> AppRelease {
+    guard let newest = try newestReleaseIfPresent(fromList: data, repository: repository) else {
+      throw AppUpdateError.noMacRelease
     }
     return newest
+  }
+
+  /// Extracts a validated GitHub API next-page URL from an HTTP `Link` response header.
+  static func nextPageURL(fromLinkHeader header: String?, repository: String) -> URL? {
+    guard let header, !header.isEmpty, isRepository(repository) else { return nil }
+    let expectedPath = "/repos/\(repository.lowercased())/releases"
+    for entry in header.split(separator: ",") {
+      let parts = entry.split(separator: ";").map { $0.trimmingCharacters(in: .whitespaces) }
+      guard parts.count >= 2,
+        parts.dropFirst().contains(where: {
+          let lower = $0.lowercased()
+          return lower == #"rel="next""# || lower == "rel=next"
+        }),
+        let raw = parts.first, raw.hasPrefix("<"), raw.hasSuffix(">")
+      else { continue }
+      let address = String(raw.dropFirst().dropLast())
+      guard let url = URL(string: address), isHTTPS(url),
+        url.host?.lowercased() == "api.github.com",
+        url.path.lowercased() == expectedPath,
+        let query = url.query, !query.isEmpty
+      else { continue }
+      return url
+    }
+    return nil
+  }
+
+  enum InstallLocationIssue: Equatable, Sendable {
+    case translocated
+    case outsideApplications(String)
+
+    var message: String {
+      switch self {
+      case .translocated:
+        "Aurelia is running from a temporary macOS security location (App Translocation). Quit Aurelia, move it to the Applications folder, open it from there, and try updating again."
+      case .outsideApplications:
+        "Automatic updates only work when Aurelia is installed at /Applications/Aurelia.app. Move Aurelia to Applications and open it from there to update."
+      }
+    }
+  }
+
+  static func installLocationIssue(bundlePath: String) -> InstallLocationIssue? {
+    let standardized = URL(fileURLWithPath: bundlePath).standardizedFileURL.path
+    if standardized == "/Applications/Aurelia.app" { return nil }
+    if standardized.contains("/AppTranslocation/") { return .translocated }
+    return .outsideApplications(standardized)
+  }
+
+  static func installRestartNote(downloadBytes: Int64?, isHostingLocally: Bool) -> String {
+    let base = "Aurelia will reopen after installing the update. \(downloadSizeText(downloadBytes))"
+    guard isHostingLocally else { return base }
+    return
+      "\(base) Your server on this Mac will stop for about a minute while the update installs, so anyone watching will be interrupted."
+  }
+
+  /// Explains why automatic update checks are unavailable in Test Edition or local builds.
+  static func unavailableCheckNotice(isTestEdition: Bool) -> (title: String, message: String) {
+    if isTestEdition {
+      return (
+        "Updates Are Disabled in Aurelia Test",
+        "Aurelia Test does not update itself so it cannot replace the regular Aurelia app. Build or install a newer test copy to update it."
+      )
+    }
+    return (
+      "Automatic Updates Aren't Available",
+      "This copy of Aurelia was built locally without a GitHub release feed. Build it again to update."
+    )
   }
 
   static func release(in data: Data, beta: Bool, repository: String? = nil) throws -> AppRelease {

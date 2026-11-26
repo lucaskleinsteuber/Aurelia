@@ -93,7 +93,8 @@ public sealed class ScreenTimeService(AureliaDbContext database, TimeProvider cl
     }
 
     public static ScreenTimeRules ToRules(ScreenTimeRule row) => new(row.Enabled, row.LockScope, row.Ending, row.MaxOvertimeMinutes,
-        new(row.SchoolBedtime, row.SchoolWakeTime, row.SchoolLimitMinutes), new(row.WeekendBedtime, row.WeekendWakeTime, row.WeekendLimitMinutes));
+        new(row.SchoolBedtime, row.SchoolWakeTime, row.SchoolLimitMinutes), new(row.WeekendBedtime, row.WeekendWakeTime, row.WeekendLimitMinutes),
+        row.AllowOfflineDownloads);
 
     private static DayState ToState(ScreenTimeDay? day) => day is null ? new()
         : new(day.WatchedSeconds, day.ExtraMinutes, day.BedtimeLifted, day.OneMoreTitleGranted, day.OneMoreTitleUsed, day.LimitReachedAt);
@@ -157,6 +158,14 @@ public sealed class ScreenTimeService(AureliaDbContext database, TimeProvider cl
         if (day.LimitReachedAt is null && RuleFor(rules, date).DailyLimitMinutes is { } limit
             && day.WatchedSeconds >= (limit + day.ExtraMinutes) * 60)
             day.LimitReachedAt = now;
+    }
+
+    /// <summary>Refuses offline downloads when screen time is active unless the owner allowed them for this profile.</summary>
+    public async Task RequireDownloadsAllowedAsync(Guid userId, CancellationToken token)
+    {
+        if (await ActiveRulesAsync(userId, token) is { AllowOfflineDownloads: false })
+            throw new PlaybackException(ScreenTimeCodes.DownloadsDisabled,
+                "Offline downloads are disabled while screen time is active for this profile.", 403);
     }
 
     /// <summary>
@@ -262,6 +271,7 @@ public sealed class ScreenTimeService(AureliaDbContext database, TimeProvider cl
         row.MaxOvertimeMinutes = rules.MaxOvertimeMinutes;
         (row.SchoolBedtime, row.SchoolWakeTime, row.SchoolLimitMinutes) = (Clean(rules.SchoolNight.Bedtime), rules.SchoolNight.WakeTime, rules.SchoolNight.DailyLimitMinutes);
         (row.WeekendBedtime, row.WeekendWakeTime, row.WeekendLimitMinutes) = (Clean(rules.Weekend.Bedtime), rules.Weekend.WakeTime, rules.Weekend.DailyLimitMinutes);
+        row.AllowOfflineDownloads = rules.AllowOfflineDownloads;
         row.Revision++;
         Changed(userId);
         await database.SaveChangesAsync(token);

@@ -460,10 +460,10 @@ public sealed class ScrubPreviewService : BackgroundService
             return false;
         }
 
-        OpenMediaFile file;
+        OpenMediaFile? openFile;
         try
         {
-            file = MediaFileAccess.OpenRead(media);
+            openFile = MediaFileAccess.OpenRead(media);
         }
         catch (PlaybackException)
         {
@@ -471,92 +471,127 @@ public sealed class ScrubPreviewService : BackgroundService
             return Failed();
         }
 
-        await using var stream = file.Stream;
-        var modifiedTicks = file.LastModified.UtcTicks;
-        EnsureFreshStamp(media.Id, file.Length, modifiedTicks, current.IntervalSeconds);
-
-        if (HasStripOnDisk(media.Id, file.Length, modifiedTicks, current.IntervalSeconds))
-            return true;
-
-        var checkedPath = Path.GetFullPath(media.SourcePath);
-        MediaProbeResult probe;
         try
         {
-            probe = await live.ProbeAsync(tools, file, checkedPath, media.Id, cancellationToken);
-        }
-        catch (PlaybackException)
-        {
-            return Failed();
-        }
+            var fileLength = openFile.Length;
+            var modifiedTicks = openFile.LastModified.UtcTicks;
+            EnsureFreshStamp(media.Id, fileLength, modifiedTicks, current.IntervalSeconds);
 
-        if (probe.Video is not { } video) return Failed();
-        var durationSeconds = Math.Max(1, (int)Math.Round(probe.DurationSeconds ?? 1));
-        var interval = EffectiveInterval(durationSeconds, current.IntervalSeconds);
-        var buckets = new List<int>();
-        for (var second = 0; second < durationSeconds && buckets.Count < MaximumStripFrames; second += interval)
-            buckets.Add(second);
-        if (buckets.Count == 0) buckets.Add(0);
+            if (HasStripOnDisk(media.Id, fileLength, modifiedTicks, current.IntervalSeconds))
+                return true;
 
-        var frames = new List<(int Seconds, byte[] Data)>(buckets.Count);
-        Interlocked.Increment(ref activeGenerating);
-        try
-        {
-            foreach (var bucket in buckets)
+            var checkedPath = Path.GetFullPath(media.SourcePath);
+            MediaProbeResult probe;
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                probe = await live.ProbeAsync(tools, openFile, checkedPath, media.Id, cancellationToken, lowPriority: true);
+            }
+            catch (PlaybackException)
+            {
+                return Failed();
+            }
+
+            if (probe.Video is not { } video) return Failed();
+            var durationSeconds = Math.Max(1, (int)Math.Round(probe.DurationSeconds ?? 1));
+            var interval = EffectiveInterval(durationSeconds, current.IntervalSeconds);
+            var buckets = new List<int>();
+            for (var second = 0; second < durationSeconds && buckets.Count < MaximumStripFrames; second += interval)
+                buckets.Add(second);
+            if (buckets.Count == 0) buckets.Add(0);
+
+            var frames = new List<(int Seconds, byte[] Data)>(buckets.Count);
+            Interlocked.Increment(ref activeGenerating);
+            try
+            {
+                foreach (var bucket in buckets)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (Volatile.Read(ref generationEpoch) != epoch || Volatile.Read(ref modeCode) == 0)
+                        return false;
+
+                    if (IsBusyWithPlayback())
+                    {
+                        // Release the media handle while pausing for playback so external drives can
+                        // eject cleanly and deleted/replaced files are not held open (audit SRV-PLAY-008).
+                        if (openFile is not null)
+                        {
+                            await openFile.Stream.DisposeAsync();
+                            openFile = null;
+                        }
+                        await WaitWhilePlaybackBusyAsync(cancellationToken);
+                    }
+
+                    if (TryGetFromMemory(media.Id, fileLength, modifiedTicks, interval, bucket, out var existing))
+                    {
+                        frames.Add((bucket, existing));
+                        continue;
+                    }
+
+                    if (openFile is null)
+                    {
+                        try
+                        {
+                            openFile = MediaFileAccess.OpenRead(media);
+                        }
+                        catch (PlaybackException)
+                        {
+                            InvalidateMedia(media.Id);
+                            return Failed();
+                        }
+                        if (openFile.Length != fileLength || openFile.LastModified.UtcTicks != modifiedTicks)
+                        {
+                            InvalidateMedia(media.Id);
+                            return false;
+                        }
+                    }
+
+                    var seekSeconds = SnapshotSecond(bucket, interval, durationSeconds);
+                    var data = await ExtractSingleFrameAsync(tools, openFile.Stream, checkedPath, seekSeconds, video.Index, cancellationToken, idlePriority: true);
+                    if (data is not null)
+                    {
+                        CacheInMemory(media.Id, fileLength, modifiedTicks, interval, bucket, data);
+                        frames.Add((bucket, data));
+                    }
+
+                    if (framePause > TimeSpan.Zero)
+                        await Task.Delay(framePause, cancellationToken);
+                }
+
                 if (Volatile.Read(ref generationEpoch) != epoch || Volatile.Read(ref modeCode) == 0)
                     return false;
+                if (frames.Count == 0) return Failed();
 
-                await WaitWhilePlaybackBusyAsync(cancellationToken);
-
-                if (TryGetFromMemory(media.Id, file.Length, modifiedTicks, interval, bucket, out var existing))
+                // Verify the source file was not modified or removed while frames were being extracted.
+                var latestInfo = new FileInfo(checkedPath);
+                if (!latestInfo.Exists || latestInfo.Length != fileLength || latestInfo.LastWriteTimeUtc.Ticks != modifiedTicks)
                 {
-                    frames.Add((bucket, existing));
-                    continue;
+                    InvalidateMedia(media.Id);
+                    return false;
                 }
 
-                var seekSeconds = SnapshotSecond(bucket, interval, durationSeconds);
-                var data = await ExtractSingleFrameAsync(tools, stream, checkedPath, seekSeconds, video.Index, cancellationToken, idlePriority: true);
-                if (data is not null)
-                {
-                    CacheInMemory(media.Id, file.Length, modifiedTicks, interval, bucket, data);
-                    frames.Add((bucket, data));
-                }
-
-                if (framePause > TimeSpan.Zero)
-                    await Task.Delay(framePause, cancellationToken);
+                if (!await WriteStripFileAsync(
+                    media.Id,
+                    fileLength,
+                    modifiedTicks,
+                    current.IntervalSeconds,
+                    interval,
+                    durationSeconds,
+                    frames,
+                    capBytes,
+                    mayPushOthersOut: !background,
+                    cancellationToken))
+                    return Failed();
+                failedTitles.TryRemove(media.Id, out _);
+                return true;
             }
-
-            if (Volatile.Read(ref generationEpoch) != epoch || Volatile.Read(ref modeCode) == 0)
-                return false;
-            if (frames.Count == 0) return Failed();
-
-            // Verify the source file was not modified or removed while frames were being extracted.
-            var latestInfo = new FileInfo(checkedPath);
-            if (!latestInfo.Exists || latestInfo.Length != file.Length || latestInfo.LastWriteTimeUtc.Ticks != modifiedTicks)
+            finally
             {
-                InvalidateMedia(media.Id);
-                return false;
+                Interlocked.Decrement(ref activeGenerating);
             }
-
-            if (!await WriteStripFileAsync(
-                media.Id,
-                file.Length,
-                modifiedTicks,
-                current.IntervalSeconds,
-                interval,
-                durationSeconds,
-                frames,
-                capBytes,
-                mayPushOthersOut: !background,
-                cancellationToken))
-                return Failed();
-            failedTitles.TryRemove(media.Id, out _);
-            return true;
         }
         finally
         {
-            Interlocked.Decrement(ref activeGenerating);
+            if (openFile is not null) await openFile.Stream.DisposeAsync();
         }
     }
 
@@ -701,7 +736,7 @@ public sealed class ScrubPreviewService : BackgroundService
         }
     }
 
-    private bool IsBusyWithPlayback() => streams.PlaybackCount > 0 || live.Running > 0;
+    private bool IsBusyWithPlayback() => streams.PlaybackCount > 0 || live.RunningForPlayback > 0;
 
     private async Task WaitWhilePlaybackBusyAsync(CancellationToken cancellationToken)
     {
@@ -760,11 +795,10 @@ public sealed class ScrubPreviewService : BackgroundService
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(FrameTimeout);
-        using var process = live.Start(ffmpeg, arguments, lowPriority: true);
+        using var process = live.Start(ffmpeg, arguments, lowPriority: true, backgroundIo: idlePriority);
         if (idlePriority)
         {
-            try { process.PriorityClass = ProcessPriorityClass.Idle; }
-            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            BackgroundPriority.ApplyToProcess(process, idle: true);
         }
         var errors = LiveConversionService.ReadTailAsync(process.StandardError);
         using var stopOnAbort = timeout.Token.Register(() => LiveConversionService.Kill(process));

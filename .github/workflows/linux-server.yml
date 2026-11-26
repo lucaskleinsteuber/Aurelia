@@ -42,6 +42,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg >/dev/null
       - name: Verify formatting, build, and tests on Linux
+        env:
+          AURELIA_REQUIRE_FFMPEG: "1"
         run: |
           dotnet tool restore
           dotnet restore Aurelia.slnx
@@ -59,13 +61,10 @@ jobs:
           stage="$RUNNER_TEMP/Aurelia-Server-linux-x64"
           dotnet publish src/Aurelia.Server/Aurelia.Server.csproj --configuration Release --runtime linux-x64 \
             --self-contained true -p:DebugType=none --output "$stage/server"
-          cp packaging/linux/install.sh packaging/linux/aurelia packaging/linux/aurelia.service \
-            packaging/linux/aurelia-autosleep packaging/linux/aurelia-sleep-settings packaging/linux/aurelia-autosleep.service \
-            packaging/linux/aurelia-autosleep.timer packaging/linux/aurelia-wake-on-lan \
-            packaging/linux/aurelia-wake-on-lan.service packaging/linux/aurelia-start.socket \
-            packaging/linux/aurelia-start.service packaging/linux/aurelia-update-request.path \
-            packaging/linux/aurelia-update-request.service packaging/linux/aurelia-update-check.timer \
-            packaging/linux/aurelia-update-check.service "$stage/"
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            cp "packaging/linux/$file" "$stage/"
+          done < packaging/linux/PACKAGE_FILES
           mkdir -p "$stage/notices"
           echo "ci (0)" > "$stage/VERSION"
           echo x64 > "$stage/ARCHITECTURE"

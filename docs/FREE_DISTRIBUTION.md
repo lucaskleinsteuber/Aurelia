@@ -65,6 +65,13 @@ AURELIA_SIGNING_IDENTITY=<matching-Apple-Development-SHA-1> \
 zsh scripts/build-macos-release.sh
 ```
 
+Setting `AURELIA_TEST_EDITION=1` builds **Aurelia Test** (a side-by-side test edition with its own
+bundle identifier, App Group, Keychain entry and launch agents, no self-updates, and Reset App Data
+in Settings), which automatically uses `profileless-development`. When `AURELIA_SIGNING_IDENTITY`
+is unset in `profileless-development` mode, `build-macos-release.sh` selects the first valid
+*Apple Development* identity in the Keychain matching `AURELIA_TEAM_ID`; set
+`AURELIA_SIGNING_IDENTITY` explicitly if you have multiple identities or want to pin one.
+
 Find available identities with `security find-identity -v -p codesigning`. The
 identity must belong to the existing signing team; no profile is selected or
 embedded in this mode. The script checks the actual signing team and certificate
@@ -122,9 +129,12 @@ membership gives one-year profiles.
 was built from (`build-macos-release.sh` writes it into `AureliaUpdateRepository` in the
 app's Info.plist; builds made in Xcode have none and cannot update). The repository is public,
 so updates check and download anonymously; the app has no GitHub token setting. The app
-also looks at launch when at least 24 hours have passed since its last successful check.
+also looks at launch and periodically while running (including after wake) when at least 24 hours
+have passed since its last successful check.
 *Settings › Updates › Check for updates automatically* is on by default; turning it off stops
-background checks. *Check for Updates…* in the Aurelia menu opens *Settings › Updates* and
+background checks. Automatic updates require Aurelia to be installed at `/Applications/Aurelia.app`
+with write permission to `/Applications` (a translocated copy in Downloads or another folder cannot
+replace itself). *Check for Updates…* in the Aurelia menu opens *Settings › Updates* and
 checks there; its answer shows on that page instead of in dialogs.
 
 Once an update is chosen (*Install and Restart* in the offer of a background check, or
@@ -141,9 +151,7 @@ recent releases instead of the latest one, so it also finds pre-releases.
 
 Every Mac release has one disk image per processor, `Aurelia-<version>-<build>-macOS-arm64.dmg`
 (Apple silicon) and `…-macOS-x64.dmg` (Intel), each with only its own server runtime, VLCKit and
-ffmpeg slice. The updater downloads the image named for the architecture it was built for. The
-updater of version 1.34 asks for `…-macOS-universal.dmg`; the first releases from 2.0.0 on also
-carry the Apple silicon image under that name, because 1.34 ran only on Apple silicon Macs.
+ffmpeg slice. The updater downloads the image named for the architecture it was built for.
 
 The update dialog shows the new version and the disk image's published download size.
 Release notes are available on GitHub. *Later*
@@ -151,11 +159,14 @@ dismisses the offer; *Skip This Version* remembers that version on this Mac and 
 its automatic offers, including another build of the same version. Future versions are
 still offered. A manual check also offers skipped versions, so they can still be installed.
 
-The app downloads the release's disk image and `SHA256SUMS` and checks the image against its
-checksum. Disk images stream directly to a private download folder while SHA-256 is calculated;
+The app downloads the release's `SHA256SUMS` and `SHA256SUMS.minisig`, verifies the minisign
+legacy signature against the owner's embedded public key with CryptoKit (see
+[LINUX_UPDATE_SIGNING.md](LINUX_UPDATE_SIGNING.md)), and only then downloads the disk image and
+checks it against its checksum in `SHA256SUMS`. Without a valid signature nothing is installed.
+Disk images stream directly to a private download folder while SHA-256 is calculated;
 they are not buffered in memory. Files are downloaded through their API asset address on
 `api.github.com` or the public GitHub download URL. Release descriptions and checksum lists
-are limited to 2 MiB and 1 MiB, and images to 2 GiB. Downloads have an overall time limit, reject
+are limited to 3 MiB and 1 MiB, and images to 2 GiB. Downloads have an overall time limit, reject
 HTML and oversized or incomplete responses, and remove partial files after failures. Consumed images
 and their empty managed UUID folders are also removed after installation failures, including the
 diagnostic no-relaunch path. Cleanup preserves unexpected files and rejects linked download folders.

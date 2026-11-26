@@ -7,7 +7,8 @@ namespace Aurelia.Server.Services;
 
 public sealed class LibraryService(
     AureliaDbContext database,
-    LibraryScanScheduler scanQueue)
+    LibraryScanScheduler scanQueue,
+    ServerRuntimeOptions? runtime = null)
 {
     public async Task<IReadOnlyList<LibrarySummary>> ListAsync(CancellationToken cancellationToken)
     {
@@ -32,6 +33,12 @@ public sealed class LibraryService(
         var derivedName = new DirectoryInfo(path).Name;
         var name = ValidateName(string.IsNullOrWhiteSpace(request.Name) ? derivedName : request.Name);
         var normalizedPath = MediaPath.Normalize(path);
+        if (runtime is not null && MediaPath.Overlaps(MediaPath.Normalize(runtime.DataDirectory), normalizedPath))
+        {
+            throw BadRequest(
+                "library_overlaps_server_data",
+                "A storage location cannot contain or be inside Aurelia Server's data folder.");
+        }
         var existingLibraries = await database.LibraryRoots
             .ToListAsync(cancellationToken);
         var overlaps = existingLibraries
@@ -446,33 +453,6 @@ public sealed class LibraryService(
             cancellationToken);
     }
 
-    public async Task RemoveAsync(Guid libraryId, CancellationToken cancellationToken)
-    {
-        var library = await RequireLibraryAsync(libraryId, cancellationToken);
-        var hasActiveScan = await database.LibraryScans.AnyAsync(
-            scan => scan.LibraryRootId == libraryId
-                && (scan.State == LibraryScanState.Queued
-                    || scan.State == LibraryScanState.Running
-                    || scan.State == LibraryScanState.WaitingForStorage),
-            cancellationToken);
-        if (hasActiveScan)
-        {
-            throw new LibraryException(
-                "library_scan_active",
-                "The library cannot be removed while a scan is active.",
-                StatusCodes.Status409Conflict);
-        }
-
-        await database.MediaItems
-            .Where(item => item.LibraryRootId == libraryId && item.ParentId != null)
-            .ExecuteDeleteAsync(cancellationToken);
-        await database.MediaItems
-            .Where(item => item.LibraryRootId == libraryId)
-            .ExecuteDeleteAsync(cancellationToken);
-        database.LibraryRoots.Remove(library);
-        await database.SaveChangesAsync(cancellationToken);
-    }
-
     public async Task<LibraryScanSummary> StartScanAsync(
         Guid libraryId,
         CancellationToken cancellationToken)
@@ -493,6 +473,12 @@ public sealed class LibraryService(
         var library = await RequireLibraryAsync(libraryId, cancellationToken);
         if (library.ImportPreviewRequired)
             throw new LibraryException("import_preview_required", "Review and confirm the first import before starting a scan.", 409);
+        // DYN-LIFE-005: if a scan is waiting for storage and the drive is back, resume it immediately instead of returning 409.
+        if (trigger == LibraryScanTrigger.Manual
+            && await TryResumeWaitingScanOnManualRequestAsync(library, cancellationToken) is { } resumed)
+        {
+            return resumed;
+        }
         if (!await TryReserveScanAsync(libraryId, cancellationToken))
         {
             throw ScanAlreadyActive();
@@ -732,24 +718,58 @@ public sealed class LibraryService(
         return name;
     }
 
-    private static string NormalizeRelativePath(string path)
+    private async Task<LibraryScanSummary?> TryResumeWaitingScanOnManualRequestAsync(
+        LibraryRoot library,
+        CancellationToken cancellationToken)
     {
-        return path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
-            .Trim(Path.DirectorySeparatorChar)
-            .Normalize(NormalizationForm.FormKC)
-            .ToUpperInvariant();
+        var waiting = await database.LibraryScans
+            .Where(candidate => candidate.LibraryRootId == library.Id
+                && candidate.State == LibraryScanState.WaitingForStorage
+                && !candidate.CancelRequestedAt.HasValue)
+            .OrderBy(candidate => candidate.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (waiting is null) return null;
+
+        var directory = new DirectoryInfo(library.Path);
+        if (!directory.Exists || directory.LinkTarget is not null || StorageMounts.IsDetached(library.Path))
+        {
+            return null;
+        }
+
+        waiting.State = LibraryScanState.Queued;
+        waiting.Error = null;
+        waiting.LeaseExpiresAt = null;
+        waiting.Trigger = LibraryScanTrigger.Manual;
+        library.Availability = LibraryAvailability.Available;
+        library.LastError = null;
+        await database.SaveChangesAsync(cancellationToken);
+        scanQueue.ReserveExisting(library.Id);
+        scanQueue.Pulse();
+        return ToSummary(waiting, []);
     }
+
+    private static string NormalizeRelativePath(string path) =>
+        MediaPath.NormalizeRelative(path);
 
     private static string ValidateDirectory(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value) || !Path.IsPathFullyQualified(value))
+        if (string.IsNullOrWhiteSpace(value)
+            || value.Contains('\0', StringComparison.Ordinal)
+            || !Path.IsPathFullyQualified(value))
         {
             throw BadRequest(
                 "invalid_library_path",
                 "The library path must be an absolute directory path.");
         }
 
-        var path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(value));
+        string path;
+        try { path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(value)); }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw BadRequest(
+                "invalid_library_path",
+                "The library path must be an absolute directory path.");
+        }
         var directory = new DirectoryInfo(path);
         if (!directory.Exists || directory.LinkTarget is not null)
         {

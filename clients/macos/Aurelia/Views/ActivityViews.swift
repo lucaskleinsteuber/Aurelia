@@ -18,7 +18,8 @@ struct SettingsActivityView: View {
       }
       .pickerStyle(.segmented)
       .labelsHidden()
-      .frame(width: 240)
+      .frame(width: 240, alignment: .leading)
+      .fixedSize()
       .accessibilityIdentifier("activity-page")
       Group {
         switch page {

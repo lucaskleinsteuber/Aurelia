@@ -134,11 +134,12 @@ public sealed class PresentationService(
     public async Task<CinemaTrailersResponse> CinemaTrailersAsync(
         Guid userId, Guid mediaId, int count, CancellationToken cancellationToken)
     {
+        if (count is < 0 or > MaximumCinemaTrailers)
+            throw new MetadataException("invalid_trailer_count", $"Count must be between 0 and {MaximumCinemaTrailers}.", StatusCodes.Status400BadRequest);
         // Only a film the profile can see has a pre-show; extras, trailers and episodes don't.
         if (!await database.MediaItems.AsNoTracking()
             .AnyAsync(item => item.Id == mediaId && item.Kind == MediaKind.Movie, cancellationToken))
             throw new MetadataException("media_not_found", "The film was not found.", StatusCodes.Status404NotFound);
-        count = Math.Clamp(count, 0, MaximumCinemaTrailers);
         if (count == 0) return new CinemaTrailersResponse([]);
         var candidates = await database.MediaItems.AsNoTracking()
             .Where(item => item.Kind == MediaKind.Trailer && item.ParentId != null && item.ParentId != mediaId
@@ -802,9 +803,10 @@ public sealed class PresentationService(
 
     private async Task ApplyCollectionAsync(MediaCollectionRecord collection, SaveCollectionRequest request, CancellationToken cancellationToken)
     {
-        var name = request.Name.Trim();
-        if (name.Length is < 1 or > 512)
-            throw new MetadataException("invalid_collection", "A collection needs a name between 1 and 512 characters.", StatusCodes.Status400BadRequest);
+        var name = request.Name?.Trim() ?? string.Empty;
+        if (name.Length is < 1 or > 512 || TextInputValidation.HasForbiddenControlCharacters(name)
+            || !TextInputValidation.HasVisibleCharacter(name))
+            throw new MetadataException("invalid_collection", "A collection needs a name between 1 and 512 visible characters.", StatusCodes.Status400BadRequest);
 
         if (request.Overview is not null)
         {

@@ -70,8 +70,16 @@ enum SidebarPreferences {
     .downloads,
   ]
 
-  static func loadOrder() -> [LibraryDestination] {
-    guard let saved = UserDefaults.standard.string(forKey: GeneralPreferenceKeys.sidebarItemOrder)
+  private static let legacyVisibilityKeys: [(key: String, destination: LibraryDestination)] = [
+    ("AureliaShowMoviesInSidebar", .movies),
+    ("AureliaShowSeriesInSidebar", .tvShows),
+    ("AureliaShowWatchlistInSidebar", .watchlist),
+    ("AureliaShowCollectionsInSidebar", .collections),
+  ]
+
+  static func loadOrder(defaults: UserDefaults = .standard) -> [LibraryDestination] {
+    migrateLegacyVisibilityIfNeeded(defaults: defaults)
+    guard let saved = defaults.string(forKey: GeneralPreferenceKeys.sidebarItemOrder)
     else {
       return defaultOrder
     }
@@ -90,42 +98,68 @@ enum SidebarPreferences {
     return destinations
   }
 
-  static func saveOrder(_ order: [LibraryDestination]) {
+  static func saveOrder(_ order: [LibraryDestination], defaults: UserDefaults = .standard) {
     let raw = order.map(\.rawValue).joined(separator: ",")
-    UserDefaults.standard.set(raw, forKey: GeneralPreferenceKeys.sidebarItemOrder)
-    bumpRevision()
+    defaults.set(raw, forKey: GeneralPreferenceKeys.sidebarItemOrder)
+    bumpRevision(defaults: defaults)
   }
 
   /// History and Statistics live in Settings › Activity; they join the sidebar only when
   /// someone turns them on in the sidebar settings.
   static let hiddenByDefault: Set<LibraryDestination> = [.history, .statistics]
 
-  static func isVisible(_ destination: LibraryDestination) -> Bool {
+  /// Migrates the pre-modular sidebar visibility switches once so hidden sections stay hidden.
+  static func migrateLegacyVisibilityIfNeeded(defaults: UserDefaults = .standard) {
+    var migrated = false
+    for entry in legacyVisibilityKeys {
+      guard defaults.object(forKey: entry.key) != nil else { continue }
+      let modernKey = "AureliaSidebarShow_\(entry.destination.rawValue)"
+      if defaults.object(forKey: modernKey) == nil {
+        defaults.set(defaults.bool(forKey: entry.key), forKey: modernKey)
+      }
+      defaults.removeObject(forKey: entry.key)
+      migrated = true
+    }
+    if migrated {
+      bumpRevision(defaults: defaults)
+    }
+  }
+
+  static func isVisible(_ destination: LibraryDestination, defaults: UserDefaults = .standard)
+    -> Bool
+  {
+    migrateLegacyVisibilityIfNeeded(defaults: defaults)
     let key = "AureliaSidebarShow_\(destination.rawValue)"
-    if UserDefaults.standard.object(forKey: key) == nil {
+    if defaults.object(forKey: key) == nil {
       return !hiddenByDefault.contains(destination)
     }
-    return UserDefaults.standard.bool(forKey: key)
+    return defaults.bool(forKey: key)
   }
 
-  static func setVisible(_ destination: LibraryDestination, isVisible: Bool) {
+  static func setVisible(
+    _ destination: LibraryDestination, isVisible: Bool, defaults: UserDefaults = .standard
+  ) {
+    migrateLegacyVisibilityIfNeeded(defaults: defaults)
     let key = "AureliaSidebarShow_\(destination.rawValue)"
-    UserDefaults.standard.set(isVisible, forKey: key)
-    bumpRevision()
+    defaults.set(isVisible, forKey: key)
+    bumpRevision(defaults: defaults)
   }
 
-  static func resetToDefaults() {
-    UserDefaults.standard.removeObject(forKey: GeneralPreferenceKeys.sidebarItemOrder)
+  static func resetToDefaults(defaults: UserDefaults = .standard) {
+    defaults.removeObject(forKey: GeneralPreferenceKeys.sidebarItemOrder)
     for dest in defaultOrder {
-      UserDefaults.standard.removeObject(forKey: "AureliaSidebarShow_\(dest.rawValue)")
+      defaults.removeObject(forKey: "AureliaSidebarShow_\(dest.rawValue)")
     }
-    bumpRevision()
+    for entry in legacyVisibilityKeys {
+      defaults.removeObject(forKey: entry.key)
+    }
+    bumpRevision(defaults: defaults)
   }
 
-  private static func bumpRevision() {
-    let current = UserDefaults.standard.integer(
+  private static func bumpRevision(defaults: UserDefaults = .standard) {
+    let current = defaults.integer(
       forKey: GeneralPreferenceKeys.sidebarVisibilityRevision)
-    UserDefaults.standard.set(current + 1, forKey: GeneralPreferenceKeys.sidebarVisibilityRevision)
+    defaults.set(current + 1, forKey: GeneralPreferenceKeys.sidebarVisibilityRevision)
   }
 }
 
@@ -133,13 +167,10 @@ enum GeneralPreferenceKeys {
   static let defaultStartScreen = "AureliaDefaultStartScreen"
   static let sidebarItemOrder = "AureliaSidebarItemOrder"
   static let sidebarVisibilityRevision = "AureliaSidebarVisibilityRevision"
+  static let sidebarWidth = "AureliaSidebarWidth"
   static let posterSize = "AureliaPosterSize"
   static let showWatchedInRows = "AureliaShowWatchedInRows"
   static let reduceHeroMotion = "AureliaReduceHeroMotion"
-  static let showMoviesInSidebar = "AureliaShowMoviesInSidebar"
-  static let showSeriesInSidebar = "AureliaShowSeriesInSidebar"
-  static let showWatchlistInSidebar = "AureliaShowWatchlistInSidebar"
-  static let showCollectionsInSidebar = "AureliaShowCollectionsInSidebar"
   static let hideOfflineTitles = "AureliaHideOfflineTitles"
   static let wishNotificationsEnabled = "AureliaWishNotificationsEnabled"
   static let wishNotificationsPrompted = "AureliaWishNotificationsPrompted"

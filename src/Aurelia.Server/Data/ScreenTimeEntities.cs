@@ -17,6 +17,7 @@ public sealed class ScreenTimeRule
     public string? WeekendBedtime { get; set; }
     public string WeekendWakeTime { get; set; } = "08:00";
     public int? WeekendLimitMinutes { get; set; }
+    public bool AllowOfflineDownloads { get; set; }
     public long Revision { get; set; }
 }
 

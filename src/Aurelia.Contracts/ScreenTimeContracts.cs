@@ -22,10 +22,11 @@ public sealed record ScreenTimeDayRule(string? Bedtime, string WakeTime, int? Da
 /// Saturday evenings; a day runs from one wake time to the next and takes the rules of its evening.
 /// </summary>
 public sealed record ScreenTimeRules(bool Enabled, ScreenTimeLockScope LockScope, ScreenTimeEnding Ending,
-    int MaxOvertimeMinutes, ScreenTimeDayRule SchoolNight, ScreenTimeDayRule Weekend)
+    int MaxOvertimeMinutes, ScreenTimeDayRule SchoolNight, ScreenTimeDayRule Weekend,
+    bool AllowOfflineDownloads = false)
 {
     public static ScreenTimeRules Default { get; } = new(false, ScreenTimeLockScope.PlaybackOnly, ScreenTimeEnding.FinishTitle, 30,
-        new("19:30", "07:00", null), new("20:30", "08:00", null));
+        new("19:30", "07:00", null), new("20:30", "08:00", null), false);
 }
 
 /// <summary>What the parents allowed for today only; it ends at the next wake time.</summary>
@@ -61,4 +62,6 @@ public static class ScreenTimeCodes
     public const string Limit = "screen_time_limit";
     /// <summary>The whole profile is closed until its wake time; contains "profile" so older clients end the profile session.</summary>
     public const string ProfileClosed = "profile_screen_time_closed";
+    /// <summary>Offline downloads are disabled while screen time is active for this profile.</summary>
+    public const string DownloadsDisabled = "screen_time_downloads_disabled";
 }

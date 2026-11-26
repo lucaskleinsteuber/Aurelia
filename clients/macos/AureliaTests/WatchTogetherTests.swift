@@ -27,6 +27,18 @@ struct WatchTogetherTests {
         serverTime: "2026-11-07T20:00:10+00:00", sent: start, received: start.addingTimeInterval(2))
     )
     #expect(offset == 9)
+    #expect(
+      WatchTogetherClock.measuredOffset(
+        serverTime: "2026-11-07T20:00:20+00:00", sent: start,
+        received: start.addingTimeInterval(20), isLongPoll: true) == nil)
+    #expect(
+      WatchTogetherClock.measuredOffset(
+        serverTime: "2026-11-07T20:00:10+00:00", sent: start,
+        received: start.addingTimeInterval(10), isLongPoll: false) == nil)
+    #expect(
+      WatchTogetherClock.measuredOffset(
+        serverTime: "2026-11-07T20:00:00.200+00:00", sent: start,
+        received: start.addingTimeInterval(0.4), isLongPoll: false) == 0)
   }
 
   @Test

@@ -14,6 +14,8 @@ struct ProfilePickerView: View {
   @State private var failedAttempts = 0
   @FocusState private var pinFocused: Bool
   @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @Environment(\.aureliaContrast) private var contrast
+  @Environment(\.aureliaReduceTransparency) private var reduceTransparency
 
   private var isSubmitting: Bool { unlockTask != nil || model.isSelectingProfile }
 
@@ -91,27 +93,31 @@ struct ProfilePickerView: View {
           }
         } label: {
           let asleep = ScreenTimeText.closedLabel(profile.closedUntil)
+          let unavailable = profile.needsPinSetup || asleep != nil
           VStack(spacing: 12) {
-            ProfileAvatar(profile: profile)
-              .opacity(asleep == nil ? 1 : 0.45)
-              .saturation(asleep == nil ? 1 : 0.4)
-            HStack(spacing: 5) {
-              Text(profile.name).font(.headline).lineLimit(2)
-                .multilineTextAlignment(.center)
-              if profile.pinProtectionEnabled || profile.needsPinSetup {
-                Image(systemName: "lock.fill")
-                  .font(.system(size: 10, weight: .semibold))
-                  .foregroundStyle(.secondary)
+            VStack(spacing: 12) {
+              ProfileAvatar(profile: profile)
+                .opacity(asleep == nil ? 1 : 0.65)
+                .saturation(asleep == nil ? 1 : 0.4)
+              HStack(spacing: 5) {
+                Text(profile.name).font(.headline).lineLimit(2)
+                  .multilineTextAlignment(.center)
+                if profile.pinProtectionEnabled || profile.needsPinSetup {
+                  Image(systemName: "lock.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(AureliaDesign.mutedText(for: contrast))
+                }
               }
+              .frame(height: 44, alignment: .top)
             }
-            .frame(height: 44, alignment: .top)
+            .opacity(unavailable ? AureliaDesign.disabledOpacity(for: contrast) : 1)
             if profile.needsPinSetup {
               // Not a button: the owner sets the PIN in Settings › Profiles and Devices.
-              Text("Needs a PIN from the owner").font(.caption).foregroundStyle(.secondary)
+              profileStatusBadge(text: "Needs a PIN from the owner")
             }
             // Screen time closes a children's profile until its wake time.
             if let asleep {
-              Label(asleep, systemImage: "moon.fill").font(.caption).foregroundStyle(.secondary)
+              profileStatusBadge(text: asleep, systemImage: "moon.fill")
             }
           }
           .frame(width: CenteredProfileLayout.entryWidth)
@@ -119,7 +125,7 @@ struct ProfilePickerView: View {
           .contentShape(Rectangle())
           .aureliaRiseIn(index + 1)
         }
-        .buttonStyle(ProfileAvatarButtonStyle())
+        .buttonStyle(ProfileAvatarButtonStyle(dimWhenDisabled: false))
         .disabled(profile.needsPinSetup || profile.closedUntil != nil || isSubmitting)
         .accessibilityLabel(profile.name)
         .accessibilityValue(
@@ -196,12 +202,42 @@ struct ProfilePickerView: View {
     }
   }
 
+  /// High-contrast status pill kept at full opacity even when its profile card is dimmed.
+  private func profileStatusBadge(text: String, systemImage: String? = nil) -> some View {
+    let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+    return Group {
+      if let systemImage {
+        Label(text, systemImage: systemImage)
+      } else {
+        Text(text)
+      }
+    }
+    .font(.footnote.weight(.medium))
+    .foregroundStyle(.white.opacity(contrast == .increased ? 0.98 : 0.90))
+    .multilineTextAlignment(.center)
+    .lineLimit(2)
+    .fixedSize(horizontal: false, vertical: true)
+    .padding(.horizontal, 10)
+    .padding(.vertical, 5)
+    .background {
+      shape.fill(Color.black.opacity(reduceTransparency ? 0.88 : 0.62))
+    }
+    .clipShape(shape)
+    .overlay {
+      shape.strokeBorder(
+        AureliaDesign.cardStroke(for: contrast),
+        lineWidth: AureliaDesign.strokeWidth(for: contrast))
+    }
+    .frame(width: 158)
+  }
+
   /// A rounded field with a confirm arrow, like the macOS login window.
   private func pinField(_ choice: WatchingProfile) -> some View {
     HStack(spacing: 8) {
       SecureField("PIN", text: $pin)
         .textFieldStyle(.plain).font(.system(size: 20, weight: .medium, design: .rounded))
         .multilineTextAlignment(.center)
+        .focusEffectDisabled()
         .focused($pinFocused).disabled(isSubmitting)
         .accessibilityLabel("Profile PIN").accessibilityIdentifier("profile-pin")
         .onSubmit { submit(choice) }
@@ -230,13 +266,18 @@ struct ProfilePickerView: View {
     .padding(.trailing, 8)
     .frame(width: 280, height: 52)
     .background {
-      Capsule().fill(.ultraThinMaterial)
-      Capsule().fill(Color.black.opacity(0.25))
+      if reduceTransparency {
+        Capsule().fill(AureliaDesign.raisedSurface)
+      } else {
+        Capsule().fill(.ultraThinMaterial)
+        Capsule().fill(Color.black.opacity(0.25))
+      }
     }
+    .clipShape(Capsule())
     .overlay {
       Capsule().strokeBorder(
-        pinFocused ? Color.accentColor : Color.white.opacity(0.16),
-        lineWidth: pinFocused ? 2 : 1)
+        pinFocused ? Color.accentColor : AureliaDesign.controlBorder(for: contrast),
+        lineWidth: pinFocused ? 2 : AureliaDesign.strokeWidth(for: contrast))
     }
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("profile-pin-container")
@@ -379,9 +420,11 @@ private struct ProfileAvatar: View {
 
 /// Profiles lift with a white ring on hover, like Apple's profile pickers.
 private struct ProfileAvatarButtonStyle: ButtonStyle {
+  var dimWhenDisabled = true
   @State private var hovering = false
   @Environment(\.isEnabled) private var isEnabled
   @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @Environment(\.aureliaContrast) private var contrast
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
@@ -395,7 +438,7 @@ private struct ProfileAvatarButtonStyle: ButtonStyle {
       .scaleEffect(
         reduceMotion ? 1 : (configuration.isPressed ? 0.96 : (hovering && isEnabled ? 1.05 : 1))
       )
-      .opacity(isEnabled ? 1 : 0.55)
+      .opacity(isEnabled || !dimWhenDisabled ? 1 : AureliaDesign.disabledOpacity(for: contrast))
       .animation(
         reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.72), value: hovering
       )

@@ -34,7 +34,12 @@ struct ServerManagementView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 20) {
-      if let error {
+      if let error,
+        SettingsErrorBannerPolicy.shouldShowSectionError(
+          error,
+          pageAdministrationError: model.administrationErrorMessage,
+          pageModelError: model.errorMessage)
+      {
         ErrorBanner(
           message: error, retry: { Task { await reload() } }, retryDisabled: loading, inline: true)
       }
@@ -171,6 +176,8 @@ struct ServerManagementView: View {
         ServerMoveSection(client: client)
       }
     }
+    .disabled(status == nil && configuration == nil)
+    .opacity(status == nil && configuration == nil ? 0.5 : 1)
   }
 
   private var profiles: some View {
@@ -187,7 +194,7 @@ struct ServerManagementView: View {
             VStack(alignment: .leading, spacing: 4) {
               Text(access.user.shownName).font(.headline)
               Text(
-                "\(access.user.role.rawValue.capitalized) · \(access.isEnabled ? "Enabled" : "Disabled")"
+                "\(AureliaStateLabels.userRole(access.user.role)) · \(access.isEnabled ? "Enabled" : "Disabled")"
               )
               .font(.caption).foregroundStyle(.secondary)
               HStack(spacing: 10) {
@@ -426,7 +433,7 @@ private struct ServerLinuxNetworkBox: View {
     ) {
       VStack(alignment: .leading, spacing: 10) {
         LabeledContent(
-          "Home network access", value: configuration.active.lanAccessEnabled ? "On" : "Off")
+          "Home Network Access", value: configuration.active.lanAccessEnabled ? "On" : "Off")
         LabeledContent("Port", value: "\(configuration.active.lanHttpsPort)")
         Text(
           "A Linux server's network access is set up on the server itself with `sudo aurelia setup`."

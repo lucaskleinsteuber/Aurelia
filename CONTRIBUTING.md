@@ -31,7 +31,8 @@ The repository holds:
 | `scripts` | Building, testing and releasing | Shell |
 | `tests` | Server and browser app tests | C# / JavaScript |
 
-[`AGENTS.md`](AGENTS.md) holds the full project rules (for people and for AI coding assistants).
+[`CLAUDE.md`](CLAUDE.md) holds the full project rules for the repository; [`SUBAGENTS.md`](SUBAGENTS.md)
+(referenced by [`AGENTS.md`](AGENTS.md)) holds the rules for other AI coding assistants.
 The most important ones:
 
 - Media files are only ever read. Never write next to them, and never store converted video.

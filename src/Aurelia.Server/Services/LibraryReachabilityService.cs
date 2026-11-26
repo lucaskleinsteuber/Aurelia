@@ -58,6 +58,9 @@ public sealed class LibraryReachabilityService(AureliaDbContext database)
 
 public sealed class LibraryReachabilityWorker(IServiceScopeFactory scopes, ILogger<LibraryReachabilityWorker> logger) : BackgroundService
 {
+    private static readonly Action<ILogger, Exception?> LoopFailed = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(4418, nameof(LoopFailed)), "Library reachability probe paused after an unexpected failure.");
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var recovery = new StorageRecovery(logger, "library reachability");
@@ -67,12 +70,22 @@ public sealed class LibraryReachabilityWorker(IServiceScopeFactory scopes, ILogg
             // 5 seconds (one path lookup each), all of them every 25 seconds.
             for (var tick = 0; !stoppingToken.IsCancellationRequested; tick++)
             {
-                var missingOnly = tick % 5 != 0;
-                await recovery.RunAsync(async () =>
+                try
                 {
-                    await using var scope = scopes.CreateAsyncScope();
-                    await scope.ServiceProvider.GetRequiredService<LibraryReachabilityService>().RefreshAsync(missingOnly, stoppingToken);
-                }, stoppingToken);
+                    var missingOnly = tick % 5 != 0;
+                    await recovery.RunAsync(async () =>
+                    {
+                        await using var scope = scopes.CreateAsyncScope();
+                        await scope.ServiceProvider.GetRequiredService<LibraryReachabilityService>().RefreshAsync(missingOnly, stoppingToken);
+                    }, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    LoopFailed(logger, exception);
+                    await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+                    continue;
+                }
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
             }
         }

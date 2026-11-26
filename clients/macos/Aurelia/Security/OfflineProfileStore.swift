@@ -1,5 +1,6 @@
 import CommonCrypto
 import Foundation
+import OSLog
 import Security
 
 /// What the offline mode needs to open a profile's downloads while the server is out of reach:
@@ -15,8 +16,31 @@ struct OfflineProfileCard: Codable, Equatable, Identifiable, Sendable {
   var salt: Data?
   var check: Data?
   var rememberedAt: Date
+  var failedPinAttempts: Int? = nil
+  var pinLockedUntil: Date? = nil
 
   var id: UUID { userId }
+
+  /// Active lockout deadline for this profile card, if too many wrong PINs were entered.
+  func lockedUntil(now: Date = Date()) -> Date? {
+    guard let until = pinLockedUntil, until > now else { return nil }
+    return until
+  }
+
+  /// Updates persisted per-card PIN lockout state (persisted in Keychain across app restarts).
+  mutating func recordPINAttempt(succeeded: Bool, now: Date = Date()) {
+    if succeeded {
+      failedPinAttempts = 0
+      pinLockedUntil = nil
+      return
+    }
+    let failures = (failedPinAttempts ?? 0) + 1
+    failedPinAttempts = failures
+    if failures >= 5 {
+      let seconds = min(300.0, 30 * pow(2, Double(failures - 5)))
+      pinLockedUntil = now.addingTimeInterval(seconds)
+    }
+  }
 
   /// Whether this PIN opens the profile offline. A profile without a PIN opens without one.
   func accepts(_ pin: String) -> Bool {
@@ -77,6 +101,7 @@ protocol OfflineProfileStoring: Sendable {
 }
 
 struct KeychainOfflineProfileStore: OfflineProfileStoring {
+  private static let logger = Logger(subsystem: "com.lucas.aurelia.media", category: "security")
   static let productionService =
     AppEdition.isTest
     ? "com.lucas.aurelia.media.test.offline-profiles.v1"
@@ -86,6 +111,37 @@ struct KeychainOfflineProfileStore: OfflineProfileStoring {
 
   init(service: String = productionService) {
     self.service = service
+  }
+
+  static func matchingAccounts(_ accounts: [String], serverId: UUID) -> [String] {
+    let prefix = serverId.uuidString + "."
+    return accounts.filter { $0.hasPrefix(prefix) }
+  }
+
+  private func storedAccounts(serverId: UUID) -> [String] {
+    var collected = Set<String>()
+    let baseList: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecReturnAttributes as String: true,
+      kSecMatchLimit as String: kSecMatchLimitAll,
+      kSecAttrSynchronizable as String: false,
+    ]
+    let queries: [[String: Any]] =
+      AureliaKeychain.usesDataProtection
+      ? [AureliaKeychain.item(baseList), AureliaKeychain.loginKeychain(baseList)]
+      : [AureliaKeychain.item(baseList)]
+    for query in queries {
+      var result: CFTypeRef?
+      guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+        let items = result as? [[String: Any]]
+      else { continue }
+      let accounts = items.compactMap { $0[kSecAttrAccount as String] as? String }
+      for account in Self.matchingAccounts(accounts, serverId: serverId) {
+        collected.insert(account)
+      }
+    }
+    return Array(collected)
   }
 
   func cards(serverId: UUID) -> [OfflineProfileCard] {
@@ -103,8 +159,8 @@ struct KeychainOfflineProfileStore: OfflineProfileStoring {
     guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
       let items = result as? [[String: Any]]
     else { return [] }
-    let accounts = items.compactMap { $0[kSecAttrAccount as String] as? String }
-      .filter { $0.hasPrefix(serverId.uuidString + ".") }
+    let accounts = Self.matchingAccounts(
+      items.compactMap { $0[kSecAttrAccount as String] as? String }, serverId: serverId)
     return accounts.compactMap { account -> Data? in
       var one = AureliaKeychain.item(baseQuery(account: account))
       one[kSecReturnData as String] = true
@@ -130,14 +186,38 @@ struct KeychainOfflineProfileStore: OfflineProfileStoring {
     if status == errSecItemNotFound {
       var item = base
       item.merge(attributes) { _, new in new }
-      SecItemAdd(item as CFDictionary, nil)
+      let addStatus = SecItemAdd(item as CFDictionary, nil)
+      if addStatus != errSecSuccess {
+        Self.logger.error(
+          "Failed to store offline profile card in Keychain (OSStatus \(addStatus, privacy: .public))."
+        )
+      }
+    } else if status != errSecSuccess {
+      Self.logger.error(
+        "Failed to update offline profile card in Keychain (OSStatus \(status, privacy: .public)).")
     }
   }
 
   func forget(serverId: UUID) {
-    for card in cards(serverId: serverId) {
-      AureliaKeychain.delete(baseQuery(account: Self.account(card)))
+    AureliaKeychain.migrate(service: service)
+    // Remove every Keychain account belonging to this server even if its stored JSON is corrupt
+    // or from an incompatible schema and fails to decode.
+    for account in storedAccounts(serverId: serverId) {
+      let status = AureliaKeychain.delete(baseQuery(account: account))
+      if status != errSecSuccess && status != errSecItemNotFound {
+        Self.logger.error(
+          "Failed to delete offline profile card from Keychain (OSStatus \(status, privacy: .public))."
+        )
+      }
     }
+  }
+
+  func forgetAll() {
+    AureliaKeychain.delete([
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service,
+      kSecAttrSynchronizable as String: false,
+    ])
   }
 
   private func baseQuery(account: String) -> [String: Any] {

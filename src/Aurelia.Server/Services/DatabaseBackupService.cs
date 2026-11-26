@@ -41,7 +41,7 @@ public sealed class DatabaseBackupService(
     /// Scheduled backups run only when the server is idle. Active playback streams
     /// or active live conversions defer scheduled runs to the next maintenance interval.
     /// </summary>
-    public bool IsServerBusy => isBusy?.Invoke() ?? ((activeStreams?.PlaybackCount > 0) || (liveConversions?.Running > 0));
+    public bool IsServerBusy => isBusy?.Invoke() ?? ((activeStreams?.PlaybackCount > 0) || (liveConversions?.RunningForPlayback > 0));
 
     public async Task<string> CreateBackupAsync(
         DatabaseBackupKind kind,
@@ -309,13 +309,24 @@ public sealed class DatabaseBackupService(
             throw new InvalidOperationException("Aurelia database does not exist yet.");
         }
 
+        EnsurePrivateBackupDirectory();
+        var requiredBytes = new FileInfo(runtime.DatabasePath).Length
+            + (File.Exists(runtime.DatabasePath + "-wal") ? new FileInfo(runtime.DatabasePath + "-wal").Length : 0L)
+            + 1_048_576L;
+        if (ServerStorageErrors.AvailableFreeSpace(BackupDirectory) is { } availableBytes && availableBytes < requiredBytes)
+        {
+            throw new AccountException(
+                "storage_full",
+                "There is not enough free disk space on the server drive to create a database backup.",
+                StatusCodes.Status507InsufficientStorage);
+        }
+
         var sourceVerification = await VerifyAsync(runtime.DatabasePath, cancellationToken);
         if (!sourceVerification.IsValid)
         {
             throw new InvalidOperationException($"Source database failed verification: {sourceVerification.Message}");
         }
 
-        EnsurePrivateBackupDirectory();
         var stamp = DateTimeOffset.UtcNow.ToString("yyyyMMdd'T'HHmmssfff'Z'", System.Globalization.CultureInfo.InvariantCulture);
         var finalPath = Path.Combine(BackupDirectory, $"{BackupPrefix}{KindName(kind)}-{stamp}.db");
         var temporaryPath = finalPath + $".{Guid.NewGuid():N}.tmp";
@@ -340,6 +351,8 @@ public sealed class DatabaseBackupService(
             {
                 File.Delete(temporaryPath);
             }
+            DeleteDatabaseSidecar(temporaryPath + "-wal");
+            DeleteDatabaseSidecar(temporaryPath + "-shm");
         }
     }
 
@@ -475,6 +488,9 @@ public sealed class DatabaseBackupService(
             await destination.OpenAsync(cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             source.BackupDatabase(destination);
+            await using var journalCommand = destination.CreateCommand();
+            journalCommand.CommandText = "PRAGMA journal_mode = DELETE;";
+            await journalCommand.ExecuteNonQueryAsync(cancellationToken);
         }
     }
 

@@ -20,7 +20,7 @@ export function createManagementEditors(app) {
   const dialogs = new Set();
   const metadataExtras = createMetadataExtras({ api, app, kit: { input, field, choice, button } });
 
-  function editor(title, saveLabel, onSave) {
+  function editor(title, saveLabel, onSave, { refresh = true } = {}) {
     const profileID = state.profile?.id;
     const controller = new AbortController();
     const body = h("div", { class: "editor-body" });
@@ -29,7 +29,7 @@ export function createManagementEditors(app) {
     const discard = h("div", { class: "button-row", hidden: true });
     const cancel = button(saveLabel ? "Cancel" : "Close", requestClose);
     const save = h("button", { type: "submit", class: "primary-button", disabled: true }, saveLabel);
-    const form = h("form", { class: "editor-form" }, body, message, unlock, discard,
+    const form = h("form", { class: "editor-form", novalidate: true }, body, message, unlock, discard,
       h("div", { class: "button-row end editor-actions" }, cancel, saveLabel ? save : null));
     const dialog = h("dialog", { class: "sheet settings-editor", "aria-label": title }, h("h2", {}, title), form);
     let busy = false;
@@ -38,7 +38,7 @@ export function createManagementEditors(app) {
     let ready = false;
     let valid = true;
     const alive = () => !controller.signal.aborted && profileID === state.profile?.id && dialog.isConnected;
-    const finish = () => { dialog.close(); app.onSaved?.(); };
+    const finish = () => { dialog.close(); if (refresh) app.onSaved?.(); };
     const setBusy = (value, cancellable = true) => {
       busy = value;
       canCancel = !value || cancellable;
@@ -102,7 +102,10 @@ export function createManagementEditors(app) {
       } catch (error) {
         if (!alive() || error?.name === "AbortError") return;
         if (error.code === "management_locked") showUnlock(() => run(work, { complete, cancellable }));
-        else if (error.offline || !app.handleError(error)) message.textContent = error.message;
+        else if (error.offline || !app.handleError(error)) {
+          message.textContent = error.message;
+          message.scrollIntoView?.({ block: "nearest" });
+        }
       } finally {
         if (alive()) setBusy(false);
       }
@@ -185,6 +188,7 @@ export function createManagementEditors(app) {
     let snapshot = null;
     let ageSnapshot = null;
     let collect;
+    let markInvalidName = () => {};
     let collectAge = () => null;
     const agesOffered = Boolean(state.server?.capabilities?.includes("age-limits-v1"));
     const screenTimeOffered = Boolean(state.server?.capabilities?.includes(SCREEN_TIME_CAPABILITY));
@@ -209,7 +213,12 @@ export function createManagementEditors(app) {
     // Save, not created a second time (audit S9).
     let createdId = null;
     const context = editor(existing ? "Edit Profile" : "Create Profile", existing ? "Save" : "Create Profile", async ({ signal }) => {
-      const body = profilePayload(snapshot, collect());
+      const draft = collect();
+      if (!existing) {
+        const trimmed = String(draft.username ?? "").trim();
+        if (trimmed.length < 3 || trimmed.length > 64) markInvalidName();
+      }
+      const body = profilePayload(snapshot, draft);
       const age = agesOffered ? collectAge() : undefined;
       const screen = screenTimeOffered ? collectScreenTime() : null;
       if (screen?.error) throw new Error(screen.error);
@@ -248,6 +257,11 @@ export function createManagementEditors(app) {
       clear(context.body);
       const user = snapshot?.user;
       const name = input(user?.username ?? "", { minlength: 3, maxlength: 64, required: true, disabled: Boolean(existing) });
+      name.addEventListener("input", () => name.setAttribute("aria-invalid", "false"));
+      markInvalidName = () => {
+        name.setAttribute("aria-invalid", "true");
+        name.focus?.();
+      };
       const role = choice([["user", "User"], ["admin", "Administrator"], ["owner", "Owner"]], user?.role ?? "user");
       const enabled = input("", { type: "checkbox", checked: snapshot?.isEnabled ?? true });
       const protection = input("", { type: "checkbox", checked: user?.pinProtectionEnabled ?? false });
@@ -268,9 +282,9 @@ export function createManagementEditors(app) {
       const child = input("", { type: "checkbox", checked: ageSnapshot?.ageLimit != null });
       const ageChoice = choice([[0, "Under 6 · FSK 0"], [6, "6 to 11 · up to FSK 6"], [12, "12 to 15 · up to FSK 12"], [16, "16 or 17 · up to FSK 16"]],
         ageSnapshot?.ageLimit ?? 6);
-      const ageField = field("Age", ageChoice, "Only titles up to this FSK rating show. Titles without a rating stay hidden until you allow them on the Mac.");
+      const ageField = field("Age", ageChoice, "Only titles up to this FSK rating show. Titles without a rating stay hidden until you set a rating in Edit Metadata or allow them for this profile.");
       const childSection = agesOffered ? h("div", {}, h("h3", {}, "Children's Profile"),
-        field("Children's Profile", child, "A profile for a child: it sees only titles for its age."), ageField) : null;
+        field("Limit by age rating", child, "A profile for a child: it sees only titles for its age."), ageField) : null;
       const screen = screenTimeOffered && !screenTimeFailed ? screenTimeSection({ input, field, choice, button }, screenTime,
         existing ? { grant: async (body) => (screenTimeSnapshot = await api.grantScreenTime(existing.user.id, body)) } : {}) : null;
       const screenNote = screenTimeFailed ? h("p", { class: "error-text" }, "The screen time couldn’t be read, so it stays as it is. Open the profile again to change it.") : null;

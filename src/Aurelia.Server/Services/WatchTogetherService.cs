@@ -164,7 +164,7 @@ public sealed class WatchTogetherService(TimeProvider clock)
                         throw new PlaybackException("invalid_party_command", "Choose a title for the party.", StatusCodes.Status400BadRequest);
                     party.MediaId = media;
                     party.Title = Bounded(title, "Untitled");
-                    party.PositionMilliseconds = request.PositionMilliseconds ?? 0;
+                    party.PositionMilliseconds = Math.Max(0, request.PositionMilliseconds ?? 0);
                     party.UpdatedAt = now;
                     party.IsPlaying = true;
                     // Everyone loads the new title; the party starts together once all are ready.

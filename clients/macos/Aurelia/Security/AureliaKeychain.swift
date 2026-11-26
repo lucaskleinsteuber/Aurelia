@@ -17,7 +17,7 @@ enum AureliaKeychain {
   static let usesDataProtection: Bool = {
     let probe: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: "com.lucas.aurelia.media.keychain-probe",
+      kSecAttrService as String: AppEdition.bundleIdentifier + ".keychain-probe",
       kSecAttrAccount as String: UUID().uuidString,
       kSecUseDataProtectionKeychain as String: true,
     ]
@@ -56,6 +56,15 @@ enum AureliaKeychain {
     return query
   }
 
+  /// When migrating from the login keychain finds an existing data protection item, keep
+  /// whichever entry was modified more recently so a fresh pairing made under a profileless build
+  /// is never discarded in favor of an older token.
+  static func shouldOverwriteExisting(legacyModified: Date?, existingModified: Date?) -> Bool {
+    guard let legacyModified else { return false }
+    guard let existingModified else { return true }
+    return legacyModified > existingModified
+  }
+
   /// Moves this service's items from the login keychain, once per launch.
   static func migrate(
     service: String, accessible: CFString = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
@@ -76,6 +85,7 @@ enum AureliaKeychain {
     // The login keychain refuses data together with "all matches", so each item is read alone.
     for attributes in items {
       guard let account = attributes[kSecAttrAccount as String] as? String else { continue }
+      let legacyModified = attributes[kSecAttrModificationDate as String] as? Date
       let legacy: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: service,
@@ -93,8 +103,33 @@ enum AureliaKeychain {
       copy[kSecValueData as String] = value
       copy[kSecAttrAccessible as String] = accessible
       let added = SecItemAdd(copy as CFDictionary, nil)
-      // A copy stored by an earlier, interrupted move is newer than the old item.
-      if added == errSecSuccess || added == errSecDuplicateItem {
+      if added == errSecSuccess {
+        SecItemDelete(loginKeychain(legacy) as CFDictionary)
+      } else if added == errSecDuplicateItem {
+        var existingQuery = item(legacy)
+        existingQuery[kSecAttrSynchronizable as String] = false
+        existingQuery[kSecReturnAttributes as String] = true
+        existingQuery[kSecMatchLimit as String] = kSecMatchLimitOne
+        var existingResult: CFTypeRef?
+        let existingStatus = SecItemCopyMatching(existingQuery as CFDictionary, &existingResult)
+        let existingModified =
+          (existingResult as? [String: Any])?[kSecAttrModificationDate as String] as? Date
+        if existingStatus == errSecSuccess,
+          shouldOverwriteExisting(
+            legacyModified: legacyModified, existingModified: existingModified)
+        {
+          var target = item(legacy)
+          target[kSecAttrSynchronizable as String] = false
+          let updateAttributes: [String: Any] = [
+            kSecValueData as String: value,
+            kSecAttrAccessible as String: accessible,
+          ]
+          let updated = SecItemUpdate(target as CFDictionary, updateAttributes as CFDictionary)
+          guard updated == errSecSuccess else {
+            _ = lock.withLock { keptInLoginKeychain.insert(service) }
+            return
+          }
+        }
         SecItemDelete(loginKeychain(legacy) as CFDictionary)
       } else {
         // Not moved: this service keeps using the login keychain for this launch.

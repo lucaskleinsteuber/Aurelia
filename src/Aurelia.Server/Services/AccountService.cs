@@ -20,7 +20,8 @@ public sealed class AccountService(
     PairingCodeAttemptGuard pairingAttempts,
     IHttpContextAccessor http,
     SecurityLog securityLog,
-    SecurityAlertSignal securityAlerts)
+    SecurityAlertSignal securityAlerts,
+    WatchlistService? watchlist = null)
 {
     private static readonly TimeSpan PairingCodeLifetime = TimeSpan.FromMinutes(5);
 
@@ -164,6 +165,10 @@ public sealed class AccountService(
         database.Users.Remove(target);
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        if (watchlist is not null)
+        {
+            await watchlist.DeleteUserAsync(targetId, cancellationToken);
+        }
         streams.RevokeUser(targetId);
         profiles.RevokeUser(targetId);
     }
@@ -253,6 +258,11 @@ public sealed class AccountService(
         Guid currentSessionId,
         CancellationToken cancellationToken)
     {
+        if (!await database.Users.AsNoTracking().AnyAsync(user => user.Id == userId, cancellationToken))
+        {
+            throw NotFound("user_not_found", "The user was not found.");
+        }
+
         return await database.DeviceSessions
             .AsNoTracking()
             .Where(session => session.UserId == userId)
@@ -406,6 +416,8 @@ public sealed class AccountService(
         if (actor.Role != UserRole.Owner) throw Forbidden();
         var target = await database.Users.Include(user => user.LibraryGrants).SingleOrDefaultAsync(user => user.Id == targetId, cancellationToken)
             ?? throw NotFound("user_not_found", "The user was not found.");
+        if (target.AgeLimit is not null)
+            throw new AccountException("age_limit_active", "Remove the profile's age limit before switching to legacy library grants.", 409);
         if (target.Role == UserRole.Owner && target.IsEnabled && !request.IsEnabled
             && await database.Users.CountAsync(user => user.Role == UserRole.Owner && user.IsEnabled, cancellationToken) <= 1)
             throw new AccountException("last_owner_required", "The final active owner cannot be disabled.", 409);
@@ -462,7 +474,8 @@ public sealed class AccountService(
     private static string ValidateUsername(string? value)
     {
         var username = (value ?? string.Empty).Trim().Normalize(NormalizationForm.FormKC);
-        if (username.Length is < 3 or > 64 || username.Any(char.IsControl))
+        if (username.Length is < 3 or > 64 || TextInputValidation.HasForbiddenControlCharacters(username)
+            || !TextInputValidation.HasVisibleCharacter(username))
         {
             throw new AccountException(
                 "invalid_username",
@@ -495,7 +508,8 @@ public sealed class AccountService(
     private static string ValidateDeviceName(string? value)
     {
         var deviceName = (value ?? string.Empty).Trim().Normalize(NormalizationForm.FormKC);
-        if (deviceName.Length is < 1 or > 128 || deviceName.Any(char.IsControl))
+        if (deviceName.Length is < 1 or > 128 || TextInputValidation.HasForbiddenControlCharacters(deviceName)
+            || !TextInputValidation.HasVisibleCharacter(deviceName))
         {
             throw new AccountException(
                 "invalid_device_name",

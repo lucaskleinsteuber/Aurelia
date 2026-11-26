@@ -94,3 +94,35 @@ test("the setup form takes the server's code however it is typed and checks the 
   assert.deepEqual(logic.parseRoute("/welcome", ""), { name: "welcome" });
   assert.equal(logic.routePath({ name: "welcome" }), "/welcome");
 });
+
+test("profile picture labels, home empty states and 404 route errors provide human-readable guidance", () => {
+  assert.equal(logic.pictureSymbolLabel("gamecontroller"), "Game Controller");
+  assert.equal(logic.pictureSymbolLabel("star"), "Star");
+  assert.equal(logic.picturePaletteLabel("blue"), "Blue");
+  for (const symbol of logic.PICTURE_SYMBOLS) assert.match(logic.pictureSymbolLabel(symbol), /^[A-Z]/);
+  for (const palette of logic.PICTURE_PALETTES) assert.match(logic.picturePaletteLabel(palette), /^[A-Z]/);
+
+  const ownerEmpty = logic.homeEmptyState({ role: "owner" });
+  assert.equal(ownerEmpty.kind, "owner");
+  assert.match(ownerEmpty.text, /Add a storage location/);
+  assert.doesNotMatch(ownerEmpty.text, /Mac/);
+
+  const kidEmpty = logic.homeEmptyState({ role: "user", ageLimit: 12 });
+  assert.equal(kidEmpty.kind, "child");
+  assert.match(kidEmpty.text, /age ratings|allow titles/i);
+  assert.doesNotMatch(kidEmpty.text, /Mac|storage location/i);
+
+  const viewerEmpty = logic.homeEmptyState({ role: "user", ageLimit: null });
+  assert.equal(viewerEmpty.kind, "viewer");
+  assert.doesNotMatch(viewerEmpty.text, /Mac/);
+
+  const titleNotFound = logic.routeErrorState({ status: 404, message: "Not found." }, { kind: "title" });
+  assert.equal(titleNotFound.title, "Title Not Found");
+  assert.equal(titleNotFound.retryable, false);
+
+  const pageNotFound = logic.routeErrorState({ status: 404, message: "Missing." });
+  assert.equal(pageNotFound.retryable, false);
+
+  const serverError = logic.routeErrorState({ status: 500, message: "Server error." });
+  assert.equal(serverError.retryable, true);
+});

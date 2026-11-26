@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using Aurelia.Server.Services.FileChecks;
 
 namespace Aurelia.Server.Services.Speech;
 
@@ -16,6 +17,19 @@ public interface ISpeechRecognizer
     /// in memory and never written to a file.
     /// </summary>
     Task<IReadOnlyList<SpeechWord>> RecognizeAsync(short[] samples, string language, string modelPath, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Recognizes words while suspending the recognizer process whenever <paramref name="shouldPause"/>
+    /// reports active playback (audit SRV-BG-009).
+    /// </summary>
+    Task<IReadOnlyList<SpeechWord>> RecognizeAsync(
+        short[] samples,
+        string language,
+        string modelPath,
+        Func<bool>? shouldPause,
+        Action<bool>? onPausedChanged,
+        CancellationToken cancellationToken) =>
+        RecognizeAsync(samples, language, modelPath, cancellationToken);
 }
 
 /// <summary>
@@ -23,9 +37,10 @@ public interface ISpeechRecognizer
 /// priority, reading one stretch of sound as WAV from its standard input and writing the words
 /// with their times to its standard output. Nothing is written to disk.
 /// </summary>
-public sealed partial class WhisperRecognizer(ILogger<WhisperRecognizer> logger) : ISpeechRecognizer
+public sealed partial class WhisperRecognizer(ILogger<WhisperRecognizer> logger, ServerRuntimeOptions? runtime = null) : ISpeechRecognizer
 {
     private readonly Lazy<string?> program = new(() => Locate(null));
+    private readonly string? quietDirectory = runtime is null ? null : Path.Combine(runtime.DataDirectory, "Converter");
 
     public bool Available => Program is not null;
 
@@ -61,29 +76,27 @@ public sealed partial class WhisperRecognizer(ILogger<WhisperRecognizer> logger)
         return Candidates().FirstOrDefault(File.Exists);
     }
 
-    public async Task<IReadOnlyList<SpeechWord>> RecognizeAsync(short[] samples, string language, string modelPath, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<SpeechWord>> RecognizeAsync(short[] samples, string language, string modelPath, CancellationToken cancellationToken) =>
+        RecognizeAsync(samples, language, modelPath, shouldPause: null, onPausedChanged: null, cancellationToken);
+
+    public async Task<IReadOnlyList<SpeechWord>> RecognizeAsync(
+        short[] samples,
+        string language,
+        string modelPath,
+        Func<bool>? shouldPause,
+        Action<bool>? onPausedChanged,
+        CancellationToken cancellationToken)
     {
         if (Program is not { } path) throw new InvalidOperationException("whisper.cpp is not installed.");
-        var start = new ProcessStartInfo(path)
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8,
-        };
-        foreach (var argument in Arguments(modelPath, language, Threads())) start.ArgumentList.Add(argument);
-        if (!OperatingSystem.IsWindows())
-        {
-            start.Environment.Clear();
-            start.Environment["PATH"] = "/usr/bin:/bin";
-        }
+        var start = BuildStartInfo(path, modelPath, language, Threads(), quietDirectory);
         using var process = Process.Start(start) ?? throw new InvalidOperationException("whisper.cpp did not start.");
-        try { process.PriorityClass = ProcessPriorityClass.Idle; }
-        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception) { }
-        using var stop = cancellationToken.Register(() => { try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { } });
+        BackgroundPriority.ApplyToProcess(process, idle: true);
+        using var stop = cancellationToken.Register(() =>
+        {
+            ProcessPause.Resume(process);
+            try { process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { }
+        });
         var output = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var errors = process.StandardError.ReadToEndAsync(cancellationToken);
         try
@@ -92,12 +105,12 @@ public sealed partial class WhisperRecognizer(ILogger<WhisperRecognizer> logger)
             {
                 await input.WriteAsync(Wav(samples), cancellationToken);
             }
-            await process.WaitForExitAsync(cancellationToken);
+            await WaitForExitWithPauseAsync(process, shouldPause, onPausedChanged, TimeSpan.FromSeconds(2), cancellationToken);
         }
         catch (IOException) when (!cancellationToken.IsCancellationRequested)
         {
             // The program ended early; its exit code and messages say why.
-            await process.WaitForExitAsync(cancellationToken);
+            await WaitForExitWithPauseAsync(process, shouldPause, onPausedChanged, TimeSpan.FromSeconds(2), cancellationToken);
         }
         var text = await output;
         if (process.ExitCode != 0)
@@ -107,6 +120,108 @@ public sealed partial class WhisperRecognizer(ILogger<WhisperRecognizer> logger)
             throw new InvalidOperationException("The speech recognizer stopped with an error.");
         }
         return Parse(text);
+    }
+
+    /// <summary>
+    /// Waits for a running recognizer process while suspending it via SIGSTOP whenever playback is
+    /// active and resuming via SIGCONT once playback stops (audit SRV-BG-009).
+    /// </summary>
+    internal static async Task WaitForExitWithPauseAsync(
+        Process process,
+        Func<bool>? shouldPause,
+        Action<bool>? onPausedChanged,
+        TimeSpan pollInterval,
+        CancellationToken cancellationToken)
+    {
+        if (shouldPause is null || !ProcessPause.Supported)
+        {
+            await process.WaitForExitAsync(cancellationToken);
+            return;
+        }
+
+        var suspended = false;
+        try
+        {
+            while (!process.HasExited)
+            {
+                var pauseNow = shouldPause();
+                if (pauseNow && !suspended)
+                {
+                    if (ProcessPause.Suspend(process))
+                    {
+                        suspended = true;
+                        onPausedChanged?.Invoke(true);
+                    }
+                }
+                else if (!pauseNow && suspended)
+                {
+                    ProcessPause.Resume(process);
+                    suspended = false;
+                    onPausedChanged?.Invoke(false);
+                }
+
+                using var tick = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                tick.CancelAfter(pollInterval);
+                try { await process.WaitForExitAsync(tick.Token); }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+            }
+        }
+        finally
+        {
+            if (suspended)
+            {
+                ProcessPause.Resume(process);
+                onPausedChanged?.Invoke(false);
+            }
+        }
+    }
+
+    /// <summary>Builds the isolated process configuration for whisper-cli, matching ffmpeg's read-only converter directory.</summary>
+    internal static ProcessStartInfo BuildStartInfo(string program, string modelPath, string language, int threads, string? quietDirectory)
+    {
+        var start = new ProcessStartInfo(program)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+        };
+        foreach (var argument in Arguments(modelPath, language, threads)) start.ArgumentList.Add(argument);
+        if (!string.IsNullOrEmpty(quietDirectory))
+        {
+            EnsureQuietDirectory(quietDirectory);
+            if (Directory.Exists(quietDirectory)) start.WorkingDirectory = quietDirectory;
+        }
+        if (!OperatingSystem.IsWindows())
+        {
+            start.Environment.Clear();
+            start.Environment["PATH"] = "/usr/bin:/bin";
+            if (!string.IsNullOrEmpty(quietDirectory))
+            {
+                start.Environment["HOME"] = quietDirectory;
+                start.Environment["TMPDIR"] = quietDirectory;
+            }
+        }
+        return start;
+    }
+
+    private static void EnsureQuietDirectory(string directory)
+    {
+        try
+        {
+            if (Directory.Exists(directory) && new DirectoryInfo(directory).LinkTarget is not null)
+                return;
+            if (!Directory.Exists(directory))
+                Directory.CreateDirectory(directory);
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     /// <summary>One word per line with its own times, in the given language, without a translation.</summary>

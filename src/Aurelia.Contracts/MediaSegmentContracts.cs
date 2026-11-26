@@ -74,7 +74,7 @@ public sealed record MediaSegmentSettingsResponse(
     int MoviesPendingCount = 0);
 
 /// <param name="UsePictures">Null keeps the current choice.</param>
-public sealed record UpdateMediaSegmentSettingsRequest(bool Enabled, bool? UsePictures = null);
+public sealed record UpdateMediaSegmentSettingsRequest([property: System.Text.Json.Serialization.JsonRequired] bool Enabled, bool? UsePictures = null);
 
 /// <summary>One series' detection state for the owner's overview.</summary>
 public sealed record MediaSegmentSeriesStatus(

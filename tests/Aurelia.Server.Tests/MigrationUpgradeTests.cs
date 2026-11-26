@@ -212,6 +212,38 @@ public sealed class MigrationUpgradeTests
         finally { SqliteConnection.ClearAllPools(); Directory.Delete(root, true); }
     }
 
+    [Fact]
+    public async Task ScreenTimeOfflineDownloadsMigrationDefaultsExistingRulesToFalse()
+    {
+        var root = TestPaths.CreateDataDirectory();
+        Directory.CreateDirectory(root);
+        var options = new DbContextOptionsBuilder<AureliaDbContext>()
+            .UseSqlite($"Data Source={Path.Combine(root, "aurelia.db")};Pooling=False").Options;
+        try
+        {
+            await using var database = new AureliaDbContext(options);
+            await database.Database.GetService<IMigrator>().MigrateAsync("20261124002543_AuditSchemaHardening");
+            var userId = Guid.NewGuid();
+            await database.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO Users (Id, Username, NormalizedUsername, PasswordHash, Role, CreatedAt, IsEnabled, AccessMode, AccessRevision, PinProtectionEnabled, ProfileRevision)
+                VALUES ({userId}, 'Child', 'CHILD', 'unchanged-password-hash', 'User', 1, 1, 'EntireLibrary', 1, 0, 1);
+                """);
+            await database.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO ScreenTimeRules (UserId, Enabled, LockScope, Ending, MaxOvertimeMinutes, SchoolBedtime, SchoolWakeTime, SchoolLimitMinutes, WeekendBedtime, WeekendWakeTime, WeekendLimitMinutes, Revision)
+                VALUES ({userId}, 1, 'PlaybackOnly', 'FinishTitle', 30, '19:30', '07:00', 60, '20:30', '08:00', NULL, 2);
+                """);
+
+            await database.Database.MigrateAsync();
+
+            Assert.False(database.Database.HasPendingModelChanges());
+            var rule = await database.ScreenTimeRules.AsNoTracking().SingleAsync(candidate => candidate.UserId == userId);
+            Assert.True(rule.Enabled);
+            Assert.False(rule.AllowOfflineDownloads);
+            Assert.Equal(2, rule.Revision);
+        }
+        finally { SqliteConnection.ClearAllPools(); Directory.Delete(root, true); }
+    }
+
     private static async Task<long> ScalarAsync(AureliaDbContext database, string sql)
     {
         var connection = database.Database.GetDbConnection();

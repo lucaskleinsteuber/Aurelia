@@ -6,6 +6,7 @@
 final class SpeechAudioReader: NSObject, URLSessionDataDelegate, @unchecked Sendable {
   static let pauseAbove = 8 * 1024 * 1024
   static let resumeBelow = 2 * 1024 * 1024
+  static let maxErrorBodyBytes = 64 * 1024
 
   private let request: URLRequest
   private let fingerprint: String
@@ -46,13 +47,13 @@ final class SpeechAudioReader: NSObject, URLSessionDataDelegate, @unchecked Send
 
   /// The consumer took `count` bytes: the transfer goes on once little is left waiting.
   func consumed(_ count: Int) {
-    let resume = lock.withLock {
+    let taskToResume: URLSessionDataTask? = lock.withLock {
       waiting = max(0, waiting - count)
-      guard paused, waiting < Self.resumeBelow else { return false }
+      guard paused, waiting < Self.resumeBelow else { return nil }
       paused = false
-      return true
+      return task
     }
-    if resume { task?.resume() }
+    taskToResume?.resume()
   }
 
   func stop() {
@@ -67,16 +68,14 @@ final class SpeechAudioReader: NSObject, URLSessionDataDelegate, @unchecked Send
       @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) ->
       Void
   ) {
-    guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-      challenge.protectionSpace.host.caseInsensitiveCompare(host) == .orderedSame,
-      let trust = challenge.protectionSpace.serverTrust,
-      let presented = try? ServerPublicKeyFingerprint.calculate(from: trust),
-      presented.caseInsensitiveCompare(fingerprint) == .orderedSame
+    guard
+      let credential = TLSTrustDelegate.evaluatePinnedServerTrust(
+        challenge, allowedHost: host, expectedFingerprint: fingerprint)
     else {
       completionHandler(.cancelAuthenticationChallenge, nil)
       return
     }
-    completionHandler(.useCredential, URLCredential(trust: trust))
+    completionHandler(.useCredential, credential)
   }
 
   func urlSession(
@@ -97,17 +96,22 @@ final class SpeechAudioReader: NSObject, URLSessionDataDelegate, @unchecked Send
   }
 
   func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-    let (continuation, status, pause) = lock.withLock {
-      waiting += data.count
-      let pause = !paused && waiting > Self.pauseAbove
-      if pause { paused = true }
-      return (self.continuation, self.status, pause)
-    }
-    // An error answer is collected for its message instead of being read as sound.
-    guard status == 200 else {
-      lock.withLock { errorBody.append(data) }
-      return
-    }
+    let (continuation, status, pause): (AsyncThrowingStream<Data, Error>.Continuation?, Int, Bool) =
+      lock.withLock {
+        if self.status != 200 {
+          // An error answer is collected up to a fixed cap for its message instead of as sound.
+          let remaining = Self.maxErrorBodyBytes - errorBody.count
+          if remaining > 0 {
+            errorBody.append(data.prefix(remaining))
+          }
+          return (nil, self.status, false)
+        }
+        waiting += data.count
+        let pause = !paused && waiting > Self.pauseAbove
+        if pause { paused = true }
+        return (self.continuation, self.status, pause)
+      }
+    guard status == 200 else { return }
     continuation?.yield(data)
     if pause { dataTask.suspend() }
   }

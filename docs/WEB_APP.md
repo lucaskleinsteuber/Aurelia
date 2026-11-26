@@ -229,8 +229,8 @@ Release Year or Title). Its page shows the watched progress and plays the whole 
 order. Smart lists fill themselves by rules (genre, decade, rating, watch state, date added, text);
 *Save as Collection* copies a film series or universe into an editable collection, and
 administrators manage shared collections.
-**Watch History** and **Statistics** in the profile menu show only your own profile's viewing.
-When the server advertises `wishes-v1`, **Family Wishes** (`/wishes`, `js/wishes.js`, `js/wishes-view.js`, tested in `tests/WebApp/wishes.test.mjs`) shows open, fulfilled and declined wishes with a sidebar badge (`openCount + newlyFulfilledCount` for administrators, `newlyFulfilledCount` for viewers), server-proxied TMDB search, manual fallback, `"Me Too"` voting, `"Your wish is here"` / `"New wish"` status updates, and a bounded LRU blob-URL poster cache.
+**Watch History** and **Statistics** in the sidebar under **Yours** show only your own profile's viewing.
+When the server advertises `wishes-v1`, **Family Wishes** (`/wishes`, `js/wishes.js`, `js/wishes-view.js`, tested in `tests/WebApp/wishes.test.mjs`) shows open, fulfilled and declined wishes with a sidebar badge (`openCount + newlyFulfilledCount` for administrators, `newlyFulfilledCount` for viewers), server-proxied TMDB search, manual fallback, `"Me Too"` voting, `"Your wish is here"` / `"New wish"` status updates, and server-proxied posters (`/api/v1/wishes/poster`) with a bounded LRU cache of failed poster URLs.
 
 ## Settings
 
@@ -416,7 +416,7 @@ party. The rules live in `js/watch-together.js` and are tested in
 
 ## Movie Night and Wrapped
 
-**Movie Night** (`/movie-night`, from Home or the profile menu) lets anyone at home swipe on a
+**Movie Night** (`/movie-night`, from Home or the sidebar under **Yours**) lets anyone at home swipe on a
 phone, Android included: right for yes, left for nope, or the buttons and arrow keys. The lobby's
 *Tonight's program* card lets the host choose movies or also shows, a genre, an era (2020s,
 2010s, 2000s, older) and a length (up to 1 h 40 m or 2 h 10 m) right there. The match

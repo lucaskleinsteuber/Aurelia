@@ -82,7 +82,54 @@ enum PlaybackLanguage {
   static func track(in tracks: [PlaybackTrack], for language: String) -> PlaybackTrack? {
     guard choices.contains(language) else { return nil }
     let matching = tracks.filter { matches($0.preference.language, language) }
-    return matching.first { !$0.title.localizedCaseInsensitiveContains("forced") } ?? matching.first
+    return matching.first { !isForcedSubtitle($0) } ?? matching.first
+  }
+
+  static func isForcedSubtitle(_ track: PlaybackTrack) -> Bool {
+    track.title.localizedCaseInsensitiveContains("forced")
+  }
+
+  static func sameLanguage(_ lhs: String?, _ rhs: String?) -> Bool {
+    guard let lhs, let rhs else { return false }
+    let left = normalizedCode(lhs)
+    let right = normalizedCode(rhs)
+    guard !left.isEmpty, !right.isEmpty else { return false }
+    if left == right { return true }
+    for group in aliases.values where group.contains(left) && group.contains(right) {
+      return true
+    }
+    return false
+  }
+
+  private static func normalizedCode(_ code: String) -> String {
+    code.split(whereSeparator: { $0 == "-" || $0 == "_" }).first.map { $0.lowercased() } ?? ""
+  }
+
+  /// When a series remembers subtitles "Off", regular subtitles stay disabled while preserving
+  /// forced subtitles for foreign-language passages in the active audio language (or the file's
+  /// own forced default when audio has no language tag).
+  static func forcedSubtitleTrackWhenOff(
+    subtitleTracks: [PlaybackTrack],
+    currentSubtitleID: Int32?,
+    audioTracks: [PlaybackTrack],
+    currentAudioID: Int32?
+  ) -> PlaybackTrack? {
+    let forcedTracks = subtitleTracks.filter { isForcedSubtitle($0) }
+    guard !forcedTracks.isEmpty else { return nil }
+    let activeAudioLanguage =
+      currentAudioID
+      .flatMap { id in audioTracks.first(where: { $0.id == id })?.preference.language }
+      ?? audioTracks.first?.preference.language
+    let currentForced = currentSubtitleID.flatMap { id in
+      forcedTracks.first(where: { $0.id == id })
+    }
+    if let activeAudioLanguage, !normalizedCode(activeAudioLanguage).isEmpty {
+      if let currentForced, sameLanguage(currentForced.preference.language, activeAudioLanguage) {
+        return currentForced
+      }
+      return forcedTracks.first { sameLanguage($0.preference.language, activeAudioLanguage) }
+    }
+    return currentForced
   }
 }
 
@@ -238,6 +285,14 @@ extension PlaybackPreferences {
   /// Settings saved before a newer option existed keep their values; the new option starts off.
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
+    let decodedVolumeLeveling: VolumeLeveling? =
+      if container.contains(.volumeLeveling),
+        (try? container.decodeNil(forKey: .volumeLeveling)) != true
+      {
+        (try? container.decode(VolumeLeveling.self, forKey: .volumeLeveling)) ?? .off
+      } else {
+        nil
+      }
     self.init(
       automaticResume: try container.decode(Bool.self, forKey: .automaticResume),
       defaultPlaybackRate: try container.decode(Double.self, forKey: .defaultPlaybackRate),
@@ -257,9 +312,9 @@ extension PlaybackPreferences {
         String.self, forKey: .defaultAudioLanguage) ?? "original",
       defaultSubtitleLanguage: try container.decodeIfPresent(
         String.self, forKey: .defaultSubtitleLanguage) ?? "off",
-      dialogueBoost: try container.decodeIfPresent(DialogueBoost.self, forKey: .dialogueBoost)
+      dialogueBoost: (try? container.decodeIfPresent(DialogueBoost.self, forKey: .dialogueBoost))
         ?? .off,
-      volumeLeveling: try container.decodeIfPresent(VolumeLeveling.self, forKey: .volumeLeveling),
+      volumeLeveling: decodedVolumeLeveling,
       fillsScreen: try container.decodeIfPresent(Bool.self, forKey: .fillsScreen) ?? false,
       cinemaMode: try container.decodeIfPresent(Bool.self, forKey: .cinemaMode) ?? false,
       cinemaAds: try container.decodeIfPresent(Bool.self, forKey: .cinemaAds) ?? true,

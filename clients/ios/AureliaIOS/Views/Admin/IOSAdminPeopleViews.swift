@@ -806,6 +806,13 @@ private struct IOSAdminScreenTimeForm: View {
             Text("The Whole Profile").tag("wholeProfile")
           }
         }
+        Section {
+          Toggle("Allow Offline Downloads", isOn: $rules.allowOfflineDownloads)
+        } footer: {
+          Text(
+            "Off by default so offline downloads cannot bypass bedtime or daily limits. Existing downloads stay on devices."
+          )
+        }
       }
       Section {
         if let status = value.status {

@@ -58,7 +58,15 @@ public sealed class MediaLibraryScannerTests
             Assert.Equal(movie.SourcePath, extra.ParentSourcePath);
             var trailer = Assert.Single(result.Items, item => item.Kind == MediaKind.Trailer);
             Assert.Equal(string.Empty, trailer.Category);
-            Assert.Empty(result.Issues);
+            if (!OperatingSystem.IsWindows())
+            {
+                var issue = Assert.Single(result.Issues);
+                Assert.Equal("symbolic_link_skipped", issue.Code);
+            }
+            else
+            {
+                Assert.Empty(result.Issues);
+            }
         }
         finally
         {

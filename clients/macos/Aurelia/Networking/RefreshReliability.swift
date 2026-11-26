@@ -13,6 +13,7 @@ struct SyncRefreshPlan: Equatable {
     // without affected IDs still need an authorized coherent snapshot.
     fullCatalog =
       changes.resetRequired || areas.contains(.catalog) || areas.contains(.libraries)
+      || areas.contains(.unknown)
       || ids.count > 32
       || (ids.isEmpty && (areas.contains(.metadata) || areas.contains(.userState)))
     collections = fullCatalog || areas.contains(.collections)

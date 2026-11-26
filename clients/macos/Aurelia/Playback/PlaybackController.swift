@@ -201,6 +201,9 @@ final class PlaybackController: ObservableObject {
   @Published var volume: Double = 1
   @Published var isMuted = false
   @Published var errorMessage: String?
+  /// Non-fatal playback notice (e.g. unavailable audio filter or ticket renewal retry) shown
+  /// without interrupting playback, blocking auto-hide, or hiding Up Next / Skip Intro.
+  @Published private(set) var noticeMessage: String?
   @Published private(set) var recoveryMessage: String?
   @Published private(set) var recoveryCause: PlaybackRecoveryCause?
   @Published private(set) var progressMessage: String?
@@ -266,6 +269,9 @@ final class PlaybackController: ObservableObject {
     try await Task.sleep(for: .seconds(delay))
   }
   private var nextItemTask: Task<Void, Never>?
+  private var noticeClearTask: Task<Void, Never>?
+  private var sidecarSubtitleTask: Task<Void, Never>?
+  private var sidecarSubtitleURLs: [URL] = []
   private var activityToken: NSObjectProtocol?
   private var recoveryTask: Task<Void, Never>?
   private var watchdogTask: Task<Void, Never>?
@@ -274,7 +280,7 @@ final class PlaybackController: ObservableObject {
   private var wantsPlayback = false
   private var pauseRequestPending = false
   private var recovering = false
-  private var endHandled = false
+  @Published private(set) var endHandled = false
   // Queue navigation also retires engine callbacks; it is not proof of a natural media end.
   private var naturalEndReached = false
   private var lastMovementAt = Date()
@@ -466,6 +472,9 @@ final class PlaybackController: ObservableObject {
     engine.onUpdate = { [weak self] in self?.engineUpdated() }
     engine.onEnded = { [weak self] in self?.engineEnded() }
     engine.onError = { [weak self] message in self?.engineFailed(message) }
+    engine.onConfigurationError = { [weak self] message in
+      self?.engineConfigurationFailed(message)
+    }
   }
 
   func attachVideoView(_ view: NSView) {
@@ -696,12 +705,25 @@ final class PlaybackController: ObservableObject {
   func setDialogueBoost(_ mode: DialogueBoost) -> Bool {
     let result = engine.applyDialogueBoost(mode)
     guard result != .unavailable else {
-      errorMessage = "Dialogue Boost is unavailable in this VLC installation."
+      showNotice("Dialogue Boost is unavailable in this VLC installation.", clearAfter: 5)
       return false
     }
     PlaybackPreferencesStore.shared.preferences.dialogueBoost = mode
     if result == .reloadRequired { reopenForAudioChange() }
     return true
+  }
+
+  private func showNotice(_ text: String, clearAfter seconds: TimeInterval? = nil) {
+    noticeClearTask?.cancel()
+    noticeClearTask = nil
+    noticeMessage = text
+    if let seconds {
+      noticeClearTask = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(seconds))
+        guard !Task.isCancelled, let self, self.noticeMessage == text else { return }
+        self.noticeMessage = nil
+      }
+    }
   }
 
   /// Opens the current title again at the same position, for example after Volume Leveling changed:
@@ -721,6 +743,10 @@ final class PlaybackController: ObservableObject {
     hasPreparedCurrentItem = true
     engine.trackScope = presentation.trackScope
     engine.load(url: url, startAt: position)
+    guard !stopped, !terminalFailure, !authorizationFailed else { return }
+    for subURL in sidecarSubtitleURLs {
+      engine.addSubtitleSlave(url: subURL)
+    }
     openedAtResume = engine.opensAtStartPosition && position > 0
     engine.volume = volume
     engine.isMuted = isMuted
@@ -765,7 +791,10 @@ final class PlaybackController: ObservableObject {
   func setVolume(_ value: Double) {
     volume = min(max(value, 0), 1)
     engine.volume = volume
-    if volume > 0 { isMuted = false }
+    if volume > 0, isMuted || engine.isMuted {
+      isMuted = false
+      engine.isMuted = false
+    }
   }
 
   func setVideoFill(_ fills: Bool, size: CGSize) {
@@ -881,6 +910,23 @@ final class PlaybackController: ObservableObject {
     }
   }
 
+  /// Pauses playback and flushes recent progress before macOS sleeps so audio does not resume
+  /// unexpectedly on wake.
+  func pauseForSystemSleep(flushTimeout: TimeInterval = 2) async {
+    guard !stopped else { return }
+    let hadPlaybackIntent = wantsPlayback || isPlaying
+    if canPause {
+      _ = pause()
+    } else {
+      wantsPlayback = false
+      endPlaybackActivity()
+      enqueueProgressSave(isFinished: naturalEndReached)
+    }
+    if hadPlaybackIntent || progressOutbox.pendingCount(profile: client.profile) > 0 {
+      await progressOutbox.flush(for: flushTimeout)
+    }
+  }
+
   func shutdown(saveProgress: Bool = true) async {
     lifecycleID = UUID()
     await stopCurrentPlayback(saveProgress: saveProgress)
@@ -913,6 +959,12 @@ final class PlaybackController: ObservableObject {
     sleepGoodNightTask = nil
     nextItemTask?.cancel()
     nextItemTask = nil
+    noticeClearTask?.cancel()
+    noticeClearTask = nil
+    noticeMessage = nil
+    sidecarSubtitleTask?.cancel()
+    sidecarSubtitleTask = nil
+    sidecarSubtitleURLs = []
     endPlaybackActivity()
 
     showsStartScreen = false
@@ -1018,17 +1070,29 @@ final class PlaybackController: ObservableObject {
     (engine as? VLCPlaybackEngine)?.additionalMediaOptions = streamingQuality.vlcOptions
     engine.load(
       url: streamingQuality.playbackURL(for: localURL), startAt: resumePositionMilliseconds)
+    guard !stopped, !terminalFailure, !authorizationFailed else { return }
     openedAtResume = engine.opensAtStartPosition && resumePositionMilliseconds > 0
     playbackURL = localURL
     startPreviewRelay(from: sourceURL)
-    Task { [weak self] in
-      guard let self, let relay = self.relay else { return }
-      if let tracks = try? await self.client.streamSubtitles(ticket: source.id) {
+    sidecarSubtitleTask?.cancel()
+    sidecarSubtitleURLs = []
+    let sidecarGeneration = loadID
+    let sidecarTicketID = source.id
+    let sidecarRelay = relay
+    sidecarSubtitleTask = Task { [weak self] in
+      guard let self else { return }
+      if let tracks = try? await self.client.streamSubtitles(ticket: sidecarTicketID) {
+        guard !Task.isCancelled, !self.stopped, self.loadID == sidecarGeneration,
+          self.activePlayback?.id == sidecarTicketID, self.relay === sidecarRelay
+        else { return }
+        var resolved: [URL] = []
         for track in tracks where track.isSidecar && track.supported {
-          if let subURL = relay.subtitleURL(index: track.index) {
+          if let subURL = sidecarRelay.subtitleURL(index: track.index) {
+            resolved.append(subURL)
             self.engine.addSubtitleSlave(url: subURL)
           }
         }
+        self.sidecarSubtitleURLs = resolved
       }
     }
     engine.volume = volume
@@ -1390,6 +1454,40 @@ final class PlaybackController: ObservableObject {
     recoverPlayback(cause: .decoderError)
   }
 
+  /// Non-retryable engine setup failures (such as a missing VLC audio filter module) surface
+  /// their concrete guidance immediately instead of looping through recovery attempts.
+  private func engineConfigurationFailed(_ message: String) {
+    guard !stopped, !authorizationFailed, !terminalFailure, !endHandled else { return }
+    recoveryTask?.cancel()
+    recoveryTask = nil
+    recovering = false
+    recoveryMessage = nil
+    watchdogTask?.cancel()
+    watchdogTask = nil
+    renewalTask?.cancel()
+    renewalTask = nil
+    sidecarSubtitleTask?.cancel()
+    sidecarSubtitleTask = nil
+    stopPreviewRelay()
+    endPlaybackActivity()
+    relay?.stop()
+    relay = nil
+    playbackURL = nil
+    wantsPlayback = false
+    isPlaying = false
+    isPreparing = false
+    showsStartScreen = false
+    terminalFailure = true
+    errorMessage = message
+    if let active = activePlayback {
+      activePlayback = nil
+      let ticketID = active.id
+      playbackIDs.remove(ticketID)
+      Task { await self.revokeTickets([ticketID]) }
+    }
+    record(.failureObserved, cause: .decoderError, phase: .playback)
+  }
+
   private func enqueueProgressSave(isFinished: Bool) {
     let position = currentTimeMilliseconds
     let duration = durationMilliseconds
@@ -1548,7 +1646,7 @@ final class PlaybackController: ObservableObject {
         guard !stopped, !authorizationFailed, !terminalFailure, !Task.isCancelled,
           loadID == generation, activePlayback?.id == renewed.id
         else { return }
-        if let notice, errorMessage == notice { errorMessage = nil }
+        if let notice, noticeMessage == notice { noticeMessage = nil }
         scheduleRenewal(for: renewed)
         return
       } catch {
@@ -1564,7 +1662,7 @@ final class PlaybackController: ObservableObject {
           let delay = min(max(0.1, proposed), remaining)
           attempt += 1
           notice = "The connection was interrupted. Retrying playback authorization…"
-          errorMessage = notice
+          showNotice(notice!)
           do { try await renewalSleep(delay) } catch { return }
           guard !stopped, !authorizationFailed, !terminalFailure, !Task.isCancelled,
             loadID == generation, activePlayback?.id == old.id
@@ -2096,6 +2194,7 @@ final class PlaybackShutdownCoordinator {
 
   private weak var controller: PlaybackController?
   var hasActivePlayback: Bool { controller != nil }
+  var activeController: PlaybackController? { controller }
 
   func register(_ controller: PlaybackController) {
     self.controller = controller
@@ -2103,6 +2202,14 @@ final class PlaybackShutdownCoordinator {
 
   func unregister(_ controller: PlaybackController) {
     if self.controller === controller { self.controller = nil }
+  }
+
+  func pauseForSystemSleep(flushTimeout: TimeInterval = 2) async {
+    if let controller {
+      await controller.pauseForSystemSleep(flushTimeout: flushTimeout)
+    } else {
+      await PlaybackProgressOutbox.shared.flush(for: flushTimeout)
+    }
   }
 
   func shutdown() async {

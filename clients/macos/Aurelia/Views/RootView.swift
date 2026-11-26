@@ -84,7 +84,8 @@ struct RootView: View {
       // Under Settings the library isn't drawn: its hero and blurred sidebar no longer redraw
       // with every frame of Settings (audit M3). It keeps its state and shows again at once.
       .opacity(
-        model.isSettingsPresented && model.playback == nil && model.offlineMode == nil ? 0 : 1
+        model.isSettingsPresented && model.playback == nil && model.offlineMode == nil
+          && model.movieNightLaunch == nil && model.wrappedLaunch == nil ? 0 : 1
       )
       .accessibilityHidden(
         model.playback != nil || model.isSettingsPresented || model.movieNightLaunch != nil
@@ -102,20 +103,25 @@ struct RootView: View {
         // controls while it faded and slid made every frame redraw and stutter (audit M3).
         AppSettingsView(initialCategory: model.requestedSettingsCategory)
           .transition(.identity)
-          // Opened while a title plays (⌘, or the menu), Settings cover the player too; Done or
-          // Esc returns to it. Below the player they were invisible until it closed.
-          .zIndex(model.playback == nil ? 5 : 11)
+          // Opened while a title plays or during Movie Night / Wrapped (⌘, or the menu), Settings
+          // cover the full-window overlay too; Done or Esc returns to it.
+          .zIndex(
+            AppMenuCommandPolicy.settingsCoversFullWindowOverlay(
+              isPlaying: model.playback != nil,
+              isInMovieNight: model.movieNightLaunch != nil,
+              isInWrapped: model.wrappedLaunch != nil) ? 11 : 5)
       }
 
       // Movie Night and Wrapped take the whole window, over the library and Settings.
-      if model.playback == nil, let launch = model.movieNightLaunch, let api = model.profileClient()
+      if model.playback == nil, !model.requiresProfileSelection,
+        let launch = model.movieNightLaunch, let api = model.profileClient()
       {
         MovieNightView(api: api, joining: launch.joining)
           .id(launch.id)
           .transition(.opacity)
           .zIndex(8)
       }
-      if model.playback == nil, let launch = model.wrappedLaunch {
+      if model.playback == nil, !model.requiresProfileSelection, let launch = model.wrappedLaunch {
         WrappedStoryView(launch: launch)
           .id(launch.id)
           .transition(.opacity)
@@ -240,8 +246,33 @@ private struct SetupStepModifier: ViewModifier {
   }
 }
 
+/// Readable elapsed time and guidance on the server wake screen.
+enum ServerWakeStatusPresentation {
+  static func elapsedText(seconds: Int) -> String {
+    let clamped = max(0, seconds)
+    if clamped < 60 { return "\(clamped) s" }
+    let hours = clamped / 3_600
+    let minutes = (clamped % 3_600) / 60
+    let remainingSeconds = clamped % 60
+    if hours > 0 {
+      return minutes > 0 ? "\(hours) h \(minutes) min" : "\(hours) h"
+    }
+    return remainingSeconds > 0 ? "\(minutes) min \(remainingSeconds) s" : "\(minutes) min"
+  }
+
+  static func guidance(elapsedSeconds: Int) -> String {
+    if elapsedSeconds >= 120 {
+      return
+        "This is taking longer than usual. Check that the server computer is turned on and Wake-on-LAN is enabled, or choose Stop Waiting."
+    }
+    return
+      "From sleep it usually answers within half a minute. If it was turned off, the computer needs one to two minutes to start."
+  }
+}
+
 /// Says what opening Aurelia is doing: reaching the server, waking it, loading the library.
 struct ServerConnectionStatusText: View {
+  @Environment(\.aureliaContrast) private var contrast
   let status: ServerConnectionStatus?
   let serverName: String?
 
@@ -251,35 +282,35 @@ struct ServerConnectionStatusText: View {
       case .waking(let since):
         Text("Waking \(name)…")
           .font(.title2.weight(.semibold))
-        Text(
-          "From sleep it usually answers within half a minute. If it was turned off, the computer needs one to two minutes to start."
-        )
-        .font(.callout)
-        .foregroundStyle(.secondary)
         TimelineView(.periodic(from: since, by: 1)) { context in
-          Text("\(max(0, Int(context.date.timeIntervalSince(since)))) s")
-            .monospacedDigit()
+          let elapsed = max(0, Int(context.date.timeIntervalSince(since)))
+          VStack(spacing: 8) {
+            Text(ServerWakeStatusPresentation.guidance(elapsedSeconds: elapsed))
+              .font(.callout)
+              .foregroundStyle(AureliaDesign.mutedText(for: contrast))
+            Text(ServerWakeStatusPresentation.elapsedText(seconds: elapsed))
+              .font(.footnote.monospacedDigit())
+              .foregroundStyle(AureliaDesign.subtleText(for: contrast))
+          }
         }
-        .font(.caption)
-        .foregroundStyle(.tertiary)
       case .loading:
         Text("Opening Aurelia")
           .font(.title2.weight(.semibold))
         Text("Loading your library from \(name)…")
           .font(.callout)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(AureliaDesign.mutedText(for: contrast))
       case .connecting:
         Text("Opening Aurelia")
           .font(.title2.weight(.semibold))
         Text("Connecting to \(name)…")
           .font(.callout)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(AureliaDesign.mutedText(for: contrast))
       case nil:
         Text("Opening Aurelia")
           .font(.title2.weight(.semibold))
         Text("Preparing your private library…")
           .font(.callout)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(AureliaDesign.mutedText(for: contrast))
       }
     }
     .multilineTextAlignment(.center)

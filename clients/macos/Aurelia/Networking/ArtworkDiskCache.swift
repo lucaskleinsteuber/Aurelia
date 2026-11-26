@@ -9,6 +9,31 @@ import Foundation
 struct ArtworkDiskCache: Sendable {
   let directory: URL
   let byteLimit: Int
+  private let writeTracker = WriteTracker()
+
+  private final class WriteTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var bytesSincePrune = 0
+    private var writesSincePrune = 0
+
+    func shouldPrune(addedBytes: Int, byteThreshold: Int, writeThreshold: Int) -> Bool {
+      lock.withLock {
+        bytesSincePrune += addedBytes
+        writesSincePrune += 1
+        if bytesSincePrune >= byteThreshold || writesSincePrune >= writeThreshold {
+          bytesSincePrune = 0
+          writesSincePrune = 0
+          return true
+        }
+        return false
+      }
+    }
+  }
+
+  init(directory: URL, byteLimit: Int) {
+    self.directory = directory
+    self.byteLimit = byteLimit
+  }
 
   /// The app's cache in the user's Caches folder; unavailable in test processes.
   static let standard: ArtworkDiskCache? = {
@@ -18,9 +43,11 @@ struct ArtworkDiskCache: Sendable {
       environment["AURELIA_UI_TEST_MODE"] == nil,
       let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
     else { return nil }
-    return ArtworkDiskCache(
+    let cache = ArtworkDiskCache(
       directory: caches.appendingPathComponent("Aurelia/Artwork", isDirectory: true),
       byteLimit: 512 * 1_024 * 1_024)
+    Task.detached(priority: .utility) { cache.prune() }
+    return cache
   }()
 
   static func key(serverID: UUID, profileID: UUID?, path: String, revision: Int64) -> String {
@@ -49,7 +76,18 @@ struct ArtworkDiskCache: Sendable {
     } catch {
       return
     }
-    if Int.random(in: 0..<64) == 0 { prune() }
+    // Prune deterministically after 32 MiB written or 32 writes so large responses cannot
+    // temporarily overshoot the 512 MiB cap by many times the limit.
+    if writeTracker.shouldPrune(
+      addedBytes: data.count, byteThreshold: 32 * 1_024 * 1_024, writeThreshold: 32)
+    {
+      prune()
+    }
+  }
+
+  /// Removes a single cached artwork entry (for example when stored bytes fail to decode).
+  func remove(forKey key: String) {
+    try? FileManager.default.removeItem(at: fileURL(forKey: key))
   }
 
   /// Removes the least recently used entries until the cache is below 80 % of its limit.
@@ -71,6 +109,17 @@ struct ArtworkDiskCache: Sendable {
     for entry in entries.sorted(by: { $0.modified < $1.modified }) {
       guard total > byteLimit * 8 / 10 else { break }
       if (try? FileManager.default.removeItem(at: entry.url)) != nil { total -= entry.size }
+    }
+  }
+
+  /// Removes every cached artwork file on disk (for example when disconnecting from a server).
+  func removeAll() {
+    guard
+      let files = try? FileManager.default.contentsOfDirectory(
+        at: directory, includingPropertiesForKeys: nil)
+    else { return }
+    for file in files where file.pathExtension == "artwork" {
+      try? FileManager.default.removeItem(at: file)
     }
   }
 

@@ -35,6 +35,8 @@ if [ "${1:-}" = --uninstall ]; then
   [ "${2:-}" = --remove-data ] && remove_data=true
   systemctl disable --now aurelia aurelia-autosleep.timer aurelia-start.socket aurelia-update-request.path \
     aurelia-update-check.timer aurelia-power-request.path 2>/dev/null || true
+  systemctl stop aurelia-autosleep.service aurelia-update-request.service aurelia-update-check.service \
+    aurelia-power-request.service aurelia-start.service 2>/dev/null || true
   systemctl disable aurelia-wake-on-lan.service 2>/dev/null || true
   rm -f "$unit" "$command_path" /etc/aurelia-autosleep.conf /etc/systemd/system/aurelia-autosleep.service \
     /etc/systemd/system/aurelia-autosleep.timer /etc/systemd/system/aurelia-wake-on-lan.service \
@@ -42,7 +44,7 @@ if [ "${1:-}" = --uninstall ]; then
     /etc/systemd/system/aurelia-update-request.path /etc/systemd/system/aurelia-update-request.service \
     /etc/systemd/system/aurelia-update-check.timer /etc/systemd/system/aurelia-update-check.service \
     /etc/systemd/system/aurelia-power-request.path /etc/systemd/system/aurelia-power-request.service \
-    /etc/aurelia/github-token
+    /etc/aurelia/github-token /etc/aurelia/update-channel /etc/aurelia/test-update-source
   rmdir /etc/aurelia 2>/dev/null || true
   systemctl daemon-reload
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
@@ -106,6 +108,18 @@ if [ ! -x /usr/bin/ffmpeg ] || [ ! -x /usr/bin/ffprobe ]; then
   fi
 fi
 
+# Wake-on-LAN needs ethtool so sleep and shut-down power saving can wake the computer again.
+if ! command -v ethtool >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "Installing ethtool, which enables Wake-on-LAN for power saving..."
+    apt-get install -y ethtool >/dev/null 2>&1 \
+      || { apt-get update -qq >/dev/null 2>&1 && apt-get install -y ethtool >/dev/null 2>&1; } \
+      || echo "ethtool could not be installed. Sleep and shut-down power saving stay unavailable until it is: sudo apt install ethtool" >&2
+  else
+    echo "Install ethtool with your package manager so Wake-on-LAN power saving can work." >&2
+  fi
+fi
+
 if ! id aurelia >/dev/null 2>&1; then
   useradd --system --user-group --home-dir "$data_dir" --no-create-home --shell /usr/sbin/nologin aurelia
 fi
@@ -135,20 +149,25 @@ fi
 
 updating=false
 [ -d "$install_root/server" ] && updating=true
+if command -v flock >/dev/null 2>&1; then
+  exec 8>/run/aurelia-install.lock
+  flock 8
+fi
 # A device connecting meanwhile must not start the program while it is replaced.
 systemctl stop aurelia-start.socket aurelia 2>/dev/null || true
 
 # The new program is copied next to the old one first, so a failed copy leaves the old one whole.
+# Keep server.old until the new version answers its readiness check; roll back if it fails to start.
 install -d -m 0755 "$install_root"
 rm -rf "$install_root/server.new"
 cp -R "$package_root/server" "$install_root/server.new"
 chown -R root:root "$install_root/server.new"
 chmod -R u=rwX,go=rX "$install_root/server.new"
 chmod 0755 "$install_root/server.new/Aurelia.Server"
-rm -rf "$install_root/server.old"
+rm -rf "$install_root/server.old" "$install_root/VERSION.old"
 [ -d "$install_root/server" ] && mv "$install_root/server" "$install_root/server.old"
+[ -f "$install_root/VERSION" ] && cp -p "$install_root/VERSION" "$install_root/VERSION.old"
 mv "$install_root/server.new" "$install_root/server"
-rm -rf "$install_root/server.old"
 
 rm -rf "$install_root/notices"
 cp -R "$package_root/notices" "$install_root/notices"
@@ -186,6 +205,30 @@ rm -f /etc/aurelia-autosleep.conf
 systemctl daemon-reload
 systemctl enable aurelia >/dev/null
 systemctl start aurelia
+
+wait_until_ready() {
+  for _ in $(seq 1 60); do
+    if "$install_root/server/Aurelia.Server" server identity >/dev/null 2>&1; then return 0; fi
+    sleep 1
+  done
+  return 1
+}
+
+if ! wait_until_ready; then
+  echo "Aurelia Server did not become ready after installation." >&2
+  if $updating && [ -d "$install_root/server.old" ]; then
+    echo "Restoring the previous Aurelia Server version..." >&2
+    systemctl stop aurelia 2>/dev/null || true
+    rm -rf "$install_root/server.failed"
+    mv "$install_root/server" "$install_root/server.failed" 2>/dev/null || true
+    mv "$install_root/server.old" "$install_root/server"
+    [ -f "$install_root/VERSION.old" ] && mv "$install_root/VERSION.old" "$install_root/VERSION"
+    rm -rf "$install_root/server.failed"
+    systemctl start aurelia || true
+  fi
+  exit 1
+fi
+rm -rf "$install_root/server.old" "$install_root/VERSION.old"
 systemctl enable --now aurelia-wake-on-lan.service >/dev/null 2>&1 || true
 systemctl enable --now aurelia-autosleep.timer >/dev/null
 # Aurelia on a Mac can ask for an update check or an update; the server looks once a day by itself.

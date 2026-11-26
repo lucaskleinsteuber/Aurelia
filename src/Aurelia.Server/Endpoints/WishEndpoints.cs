@@ -93,7 +93,11 @@ public static class WishEndpoints
     private static WishState? ParseWishState(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
-        if (Enum.TryParse<WishState>(value.Trim(), ignoreCase: true, out var state)) return state;
+        var trimmed = value.Trim();
+        if (!int.TryParse(trimmed, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _)
+            && Enum.TryParse<WishState>(trimmed, ignoreCase: true, out var state)
+            && Enum.IsDefined(state))
+            return state;
         throw new AccountException("invalid_wish_state", "State must be open, fulfilled or declined.", StatusCodes.Status400BadRequest);
     }
 
@@ -102,7 +106,9 @@ public static class WishEndpoints
         if (string.IsNullOrWhiteSpace(value)) return MediaKind.Movie;
         var trimmed = value.Trim();
         if (string.Equals(trimmed, "tv", StringComparison.OrdinalIgnoreCase)) return MediaKind.Series;
-        if (Enum.TryParse<MediaKind>(trimmed, ignoreCase: true, out var kind) && kind is MediaKind.Movie or MediaKind.Series)
+        if (!int.TryParse(trimmed, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _)
+            && Enum.TryParse<MediaKind>(trimmed, ignoreCase: true, out var kind)
+            && kind is MediaKind.Movie or MediaKind.Series)
             return kind;
         throw new AccountException("invalid_wish_kind", "Choose movie or series.", StatusCodes.Status400BadRequest);
     }

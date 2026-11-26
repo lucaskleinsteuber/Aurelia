@@ -56,15 +56,12 @@ and Bonjour discovery. Installing a newer package the same way updates only the 
 library, progress and settings stay.
 
 Server releases use independent `server-<version>-<build>` tags. The Mac app uses
-its own version and can ship UI updates without a new server package. Older
-combined releases remain available under their original tags.
-
-Installed updaters first look at GitHub's Latest release. While Latest is still the
-last combined Mac/server release, they can stop there because it contains a
-compatible server package. If a standalone server release ships before the first
-Mac-only release, download and verify the new server archive and run its
-`install.sh` over the existing installation once. After a Mac-only release becomes
-Latest, the updater falls back to the release list to find server packages.
+its own version and ships betas only, so GitHub's **Latest** release is always the
+newest stable server release. On the stable channel, `aurelia update` reads
+`/releases/latest` first and falls back to the paginated release list when needed; on
+the beta channel (`--beta on`), it reads the paginated release list directly so
+pre-releases are included. Older combined releases remain available under their
+original tags.
 
 ### Updating from GitHub
 
@@ -201,8 +198,8 @@ so the apps and the browser don't show them there.
 - **Put the computer to sleep** suspends it to RAM: fans and disks stop and it uses a few watts.
   Aurelia on a Mac, Linux PC or iPhone wakes it when you open it (Wake-on-LAN), in about 10 to 20
   seconds, because the computer continues where it stopped. An Apple TV
-  cannot send Wake-on-LAN packets: open Aurelia on a Mac first. Someone signed in over SSH keeps
-  the computer awake. Usually the best choice.
+  cannot send Wake-on-LAN packets: open Aurelia on a Mac first. Someone signed in over SSH or on a
+  local console keeps the computer awake. Usually the best choice.
 - **Shut down the computer** turns it off and uses almost nothing. Wake-on-LAN starts it again,
   which takes 30 to 60 seconds because the BIOS and Linux start from scratch, and only when the
   BIOS allows Wake-on-LAN while the computer is off (often "Wake on LAN from S5" or "Power On By
@@ -263,10 +260,14 @@ Media folders are never touched. Uninstalling also removes the saved GitHub toke
 
 On a Mac, `scripts/build-linux-server.sh` builds both downloads into the git-ignored
 `Local/Build/Linux/<version>-<build>/`; each package records the GitHub repository of `origin` for
-`aurelia update`. For every Mac/server version, `scripts/publish-release.sh` publishes these
-downloads, the Apple silicon Mac app from `scripts/build-macos-release.sh` as a disk image and
-`SHA256SUMS` as the GitHub Release `<version>-<build>` at the pushed `HEAD`; GitHub adds the
-source code. `scripts/test-linux-server-install.sh <unpacked package> [--exfat]` installs a package on
-a Linux computer without Aurelia data, checks it with synthetic data only, including an update
-from a local stand-in for GitHub Releases, and removes everything again. The workflow `.github/workflows/linux-server.yml` runs the
-server tests and this check on a Linux runner.
+`aurelia update`. `scripts/publish-release.sh --server` (with `--beta` for a pre-release) signs
+`SHA256SUMS` with minisign and publishes the x64 and arm64 archives, `SHA256SUMS` and
+`SHA256SUMS.minisig` as the GitHub Release `server-<version>-<build>` at the pushed `HEAD`; Mac
+releases (`arm64` and `x64` disk images) are published separately under `<version>-<build>` via
+`scripts/publish-release.sh --beta`. `scripts/test-linux-server-install.sh <unpacked package> [--exfat]`
+installs a package on a Linux computer without Aurelia data, checks it with synthetic data only,
+including an update from a local stand-in for GitHub Releases, and removes everything again. The
+workflow `.github/workflows/linux-server.yml` runs the server tests,
+`scripts/test-server-update-signature.sh`, `scripts/test-get-aurelia.sh` and this install check on
+a Linux runner on matching pushes to `main` (unless `[skip ci]` is in the commit message) or when
+triggered manually via `workflow_dispatch`.

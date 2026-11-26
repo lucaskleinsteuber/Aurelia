@@ -26,6 +26,7 @@ export function updateSummary(status) {
 }
 
 export function createServerUpdates({ api, initial, isCurrent = () => true, onLocked = () => {}, onSessionEnded = () => {},
+  onReload = () => globalThis.location?.reload?.(),
   schedule = (work, delay) => setTimeout(work, delay), cancel = (timer) => clearTimeout(timer) }) {
   const lifetime = new AbortController();
   const rows = h("div", { class: "settings-rows" });
@@ -40,6 +41,7 @@ export function createServerUpdates({ api, initial, isCurrent = () => true, onLo
   let reconnecting = false;
   let locked = false;
   let sessionError = null;
+  let needsReload = false;
   let timer;
   let dialog;
   let operation;
@@ -79,8 +81,10 @@ export function createServerUpdates({ api, initial, isCurrent = () => true, onLo
       remainingPolls = 90;
     }
     if (operation === "install" && next.state === "idle") {
-      result = next.installed !== installedBefore
-        ? `The server is now running ${next.installed}.`
+      const updated = next.installed !== installedBefore;
+      needsReload = updated;
+      result = updated
+        ? `The server is now running ${next.installed}. Reload this page to load the matching browser app.`
         : `The server is back, still on ${next.installed}. The update was not installed; check for updates and try again.`;
       operation = undefined;
     } else if (operation === "check" && next.state === "idle") {
@@ -143,6 +147,7 @@ export function createServerUpdates({ api, initial, isCurrent = () => true, onLo
     installedBefore = status?.installed;
     remainingPolls = kind === "install" ? 480 : 90;
     message = result = "";
+    needsReload = false;
     render();
     try {
       const value = kind === "install"
@@ -188,6 +193,7 @@ export function createServerUpdates({ api, initial, isCurrent = () => true, onLo
     else {
       const disabled = inProgress || reading || !status?.available;
       rows.append(h("div", { class: "button-row" },
+        needsReload ? h("button", { class: "primary-button", onclick: () => { if (current()) onReload(); } }, "Reload Aurelia") : null,
         h("button", { class: "secondary-button", disabled, onclick: () => void run("check") }, "Check for Updates"),
         status?.updateAvailable ? h("button", { class: "primary-button", disabled, onclick: confirmInstall }, "Install Update…") : null,
         message ? h("button", { class: "secondary-button", disabled: working || reading, onclick: () => void refresh({ retry: true }) }, "Check Status Again") : null));

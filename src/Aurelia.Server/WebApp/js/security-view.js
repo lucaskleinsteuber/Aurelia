@@ -6,8 +6,8 @@
 import { h, icon, clear } from "./dom.js";
 import { confirmSheet } from "./sheet.js";
 import {
-  SECURITY_LOG_FILTERS, newDeviceNote, remoteUnlockState, securityDeviceLine, securityEventText, securityEventsQuery,
-  unansweredDevices
+  SECURITY_LOG_FILTERS, deviceConfirmationMessage, newDeviceNote, remoteUnlockState, securityDeviceLine,
+  securityEventText, securityEventsQuery, unansweredDevices
 } from "./security.js";
 
 const when = (value) => (value ? new Date(value).toLocaleString() : "");
@@ -15,12 +15,12 @@ const when = (value) => (value ? new Date(value).toLocaleString() : "");
 /** Asks the owner before blocking: the device is signed out at once and can't come back. */
 function confirmBlock(device) {
   return confirmSheet({ symbol: "lock", title: `Block “${device.deviceName}”?`, confirm: "Block",
-    message: "It is signed out at once and can’t sign in or pair again until you unblock it." });
+    message: deviceConfirmationMessage(device, "It is signed out at once and can’t sign in or pair again until you unblock it.", when) });
 }
 
 function confirmSignOutDevice(device) {
   return confirmSheet({ symbol: "lock", title: `Sign Out “${device.deviceName}”?`, confirm: "Sign Out",
-    message: "It needs a new code to use Aurelia again." });
+    message: deviceConfirmationMessage(device, "It needs a new code to use Aurelia again.", when) });
 }
 
 /**
@@ -168,7 +168,7 @@ export function securitySection({ api, app, kit, refresh }) {
         h("div", { class: "settings-card-actions" },
           device.isNew ? h("button", { type: "button", class: "secondary-button", onclick: () => run(() => api.acknowledgeDevice(device.id)) }, "That Was Me") : null,
           !device.isCurrent ? h("button", { type: "button", class: "secondary-button", onclick: async () => {
-            if (await confirmSignOutDevice(device)) run(() => api.approved(`/api/v1/auth/sessions/${device.id}`, { method: "DELETE" }), `${device.deviceName} is signed out.`);
+            if (await confirmSignOutDevice(device)) run(() => api.approvedIfAsked(`/api/v1/auth/sessions/${encodeURIComponent(device.id)}`, { method: "DELETE" }), `${device.deviceName} is signed out.`);
           } }, "Sign Out…") : null,
           device.canBlock ? h("button", { type: "button", class: "secondary-button danger", onclick: async () => {
             if (await confirmBlock(device)) run(() => api.blockDevice(device.id), `${device.deviceName} is blocked and signed out.`);

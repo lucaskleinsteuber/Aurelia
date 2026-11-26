@@ -323,7 +323,7 @@ public sealed class ImportPlanningService(
     private static T Deserialize<T>(string json) => JsonSerializer.Deserialize<T>(json, Json) ?? throw new InvalidOperationException("The stored import draft is invalid.");
     private static string Relative(LibraryRoot root, string path) => Path.GetRelativePath(root.Path, path) is "." ? "" : Path.GetRelativePath(root.Path, path).Replace('\\', '/');
     private static string Canonical(string path) => path.Replace('\\', '/').Trim('/');
-    private static string Normalize(string path) => Canonical(path).Normalize(System.Text.NormalizationForm.FormKC).ToUpperInvariant();
+    private static string Normalize(string path) => MediaPath.NormalizeRelative(Canonical(path), '/');
     private static bool Descendant(string path, string parent) => Normalize(parent).Length == 0 || Normalize(path) == Normalize(parent) || Normalize(path).StartsWith(Normalize(parent) + "/", StringComparison.Ordinal);
     private static bool Matches(ImportAssignmentUpdate rule, string path) => rule.IsDirectory ? Descendant(path, rule.RelativePath) : Normalize(rule.RelativePath) == Normalize(path);
     internal static ExistingImportAssignment ToScanner(ImportAssignmentUpdate rule) => new(rule.RelativePath, rule.IsDirectory, rule.Kind, rule.ParentRelativePath, rule.SeasonNumber, rule.EpisodeNumber, rule.Category, rule.Title);

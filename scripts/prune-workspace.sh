@@ -1,7 +1,8 @@
 #!/bin/sh
 # Removes old generated output so the Local workspace does not grow without bound.
 # Build and test scripts call this before they write anything new. It keeps:
-#   - the newest numbered Mac builds ("Build <n>" for Apple silicon, "Build <n> x64" for Intel) and the newest tvOS, iOS, iPad, Linux server and Linux app build
+#   - the newest numbered Mac builds ("Build <n>", "Build <n> x64", "Build <n> Test", "Build <n> Test x64")
+#     and the newest tvOS, iOS, iPad, Linux server, Linux app and notarized Releases outputs
 #     (AURELIA_KEEP_BUILDS, default 1 each); every release is on GitHub;
 #   - .NET configurations/frameworks/RIDs used in the last seven days, for incremental builds;
 #     shared restore files at the project level stay. Older whole units are pruned only while
@@ -171,6 +172,8 @@ if real_directory "$build"; then
   if simple_names "$build"; then
     ls "$build" | grep -E '^Build [0-9]+$' | sort -k2 -n -r | remove_all_but "$keep_builds" "$build"
     ls "$build" | grep -E '^Build [0-9]+ x64$' | sort -k2 -n -r | remove_all_but "$keep_builds" "$build"
+    ls "$build" | grep -E '^Build [0-9]+ Test$' | sort -k2 -n -r | remove_all_but "$keep_builds" "$build"
+    ls "$build" | grep -E '^Build [0-9]+ Test x64$' | sort -k2 -n -r | remove_all_but "$keep_builds" "$build"
   fi
   for platform in tvOS iOS iPad Linux LinuxApp; do
     if real_directory "$build/$platform" && simple_names "$build/$platform"; then
@@ -190,6 +193,10 @@ fi
 results="$other_root/Test Results"
 if real_directory "$results" && simple_names "$results"; then
   ls -t "$results" | remove_all_but "$keep_results" "$results"
+fi
+releases="$other_root/Releases"
+if real_directory "$releases" && simple_names "$releases"; then
+  ls -t "$releases" | remove_all_but "$keep_builds" "$releases"
 fi
 if real_directory "$other_root/Logs"; then
   if "$dry_run"; then

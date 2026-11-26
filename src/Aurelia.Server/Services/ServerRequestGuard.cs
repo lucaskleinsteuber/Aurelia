@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using Aurelia.Contracts;
@@ -16,6 +17,16 @@ public sealed class ServerRequestGuard
     /// pairing attempts keep their own much stricter limits.
     /// </summary>
     public const int RequestsPerMinute = 3_000;
+    /// <summary>
+    /// Loopback serves the local desktop app, local browser tabs, and CLI simultaneously, so
+    /// it gets a higher budget than remote addresses.
+    /// </summary>
+    public const int LoopbackRequestsPerMinute = 12_000;
+    /// <summary>
+    /// Playback progress and user-state mutations count in their own bucket so artwork/catalog
+    /// bursts cannot starve progress saves with 429.
+    /// </summary>
+    public const int WriteRequestsPerMinute = 6_000;
     /// <summary>
     /// Timeline preview reads come in short bursts of a few thousand range requests while a
     /// device prepares a title's frames on several cores. They count in their own, larger
@@ -66,10 +77,18 @@ public sealed class ServerRequestGuard
         return new IPAddress(bytes).ToString() + "/64";
     }
 
-    public bool Admit(IPAddress? address, bool preview = false)
+    public bool Admit(IPAddress? address, bool preview = false, bool userStateWrite = false)
     {
-        var key = (preview ? "preview:" : "") + AddressKey(address);
-        var limit = preview ? PreviewRequestsPerMinute : RequestsPerMinute;
+        var isLoopback = address is null || IPAddress.IsLoopback(address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address);
+        var bucket = preview ? "preview:" : userStateWrite ? "write:" : "";
+        var key = bucket + AddressKey(address);
+        var limit = preview
+            ? PreviewRequestsPerMinute
+            : isLoopback
+                ? LoopbackRequestsPerMinute
+                : userStateWrite
+                    ? WriteRequestsPerMinute
+                    : RequestsPerMinute;
         var now = DateTimeOffset.UtcNow;
         lock (gate)
         {
@@ -93,12 +112,76 @@ public sealed class ServerRequestGuard
         }
     }
 
-    /// <summary>A stream read or scrub-preview read that a client marked as a timeline preview.</summary>
-    public static bool IsPreviewStream(HttpRequest request) =>
-        (request.Path.StartsWithSegments("/api/v1/streams")
-            && string.Equals(request.Headers["X-Aurelia-Stream-Purpose"], "preview", StringComparison.OrdinalIgnoreCase))
-        || (request.Path.StartsWithSegments("/api/v1/media")
-            && (request.Path.Value ?? string.Empty).Contains("/scrub-previews", StringComparison.Ordinal));
+    /// <summary>
+    /// Partition key for the "authentication" rate limiter: IPv6 counts by /64 so privacy-address
+    /// rotation cannot bypass limits, while authenticated sessions partition per device session and
+    /// route so one device's failed PIN guesses cannot lock out other devices or profiles sharing
+    /// loopback or a NAT IP.
+    /// </summary>
+    internal static string AuthenticationPartitionKey(HttpContext context)
+    {
+        var address = AddressKey(context.Connection.RemoteIpAddress);
+        if (context.User.Identity?.IsAuthenticated == true)
+        {
+            var sessionId = context.User.FindFirst(DeviceTokenAuthenticationHandler.SessionIdClaim)?.Value;
+            if (!string.IsNullOrEmpty(sessionId))
+            {
+                var path = (context.Request.Path.Value ?? string.Empty).TrimEnd('/').ToLowerInvariant();
+                return $"{address}:session:{sessionId}:{path}";
+            }
+        }
+        return address;
+    }
+
+    /// <summary>Small user-state write endpoints (progress, favorites, watchlist, notes) kept separate from catalog/artwork floods.</summary>
+    public static bool IsUserStateWrite(HttpRequest request)
+    {
+        if (HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method)) return false;
+        var path = request.Path.Value ?? string.Empty;
+        return path.EndsWith("/progress", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith("/favorite", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith("/watched", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/watchlist", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/notes", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/continue-watching", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Maximum byte span allowed for a client-marked timeline preview range read (4 MiB).</summary>
+    public const long MaximumPreviewRangeBytes = 4L * 1024 * 1024;
+
+    /// <summary>A bounded direct file-stream read (or HEAD) or scrub-preview read marked as a timeline preview.</summary>
+    public static bool IsPreviewStream(HttpRequest request)
+    {
+        if (request.Path.StartsWithSegments("/api/v1/media")
+            && (request.Path.Value ?? string.Empty).Contains("/scrub-previews", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (!string.Equals(request.Headers["X-Aurelia-Stream-Purpose"], "preview", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // Only direct file stream reads (/api/v1/streams/{ticket}) may use the preview lane;
+        // never /live, /hls, /speech-audio, or /subtitles.
+        if (!request.Path.StartsWithSegments("/api/v1/streams", out var remaining))
+            return false;
+        var segment = (remaining.Value ?? string.Empty).Trim('/');
+        if (segment.Length == 0 || segment.Contains('/'))
+            return false;
+
+        if (HttpMethods.IsHead(request.Method))
+            return true;
+        if (!HttpMethods.IsGet(request.Method))
+            return false;
+
+        var range = request.GetTypedHeaders().Range;
+        if (range is null || !string.Equals(range.Unit.Value, "bytes", StringComparison.OrdinalIgnoreCase) || range.Ranges.Count != 1)
+            return false;
+        var span = range.Ranges.First();
+        if (span.From is not { } from || span.To is not { } to || from < 0 || to < from)
+            return false;
+        return (to - from + 1) <= MaximumPreviewRangeBytes;
+    }
 
     public static bool RequiresApproval(HttpRequest request)
     {
@@ -114,9 +197,6 @@ public sealed class ServerRequestGuard
         if (IsPasskeyChange(request.Method, path)) return true;
         if (HttpMethods.IsPut(request.Method) && path == "/api/v1/server/security/settings") return true;
         if (HttpMethods.IsDelete(request.Method) && path.StartsWith("/api/v1/server/security/blocked/", StringComparison.Ordinal)) return true;
-        // Where the server sends what is playing, and keys that let other programs act on it.
-        if (path.StartsWith("/api/v1/server/automation/", StringComparison.Ordinal) && !HttpMethods.IsDelete(request.Method)
-            && !path.EndsWith("/test", StringComparison.Ordinal)) return true;
 
         // 1. Critical: Library reset and permanent media removal from library database
         if (path == "/api/v1/libraries/reset") return true;
@@ -196,9 +276,10 @@ public sealed class ServerRequestGuard
 
     /// <summary>
     /// The other ways to change who manages the server (docs/SECURITY_MODEL.md): a new owner or
-    /// administrator, a changed role, or an owner or administrator switched off, cut off from the
-    /// libraries or given a new PIN by someone else. These need the Server Password like
-    /// <c>PUT /users/{id}/role</c>; a stolen owner PIN alone must not make a new owner (audit S-M1).
+    /// administrator, a changed role, or an owner or administrator switched off, given a new PIN
+    /// by someone else, or having libraries or titles revoked. These need the Server Password like
+    /// <c>PUT /users/{id}/role</c>; a stolen owner PIN alone must not make a new owner or cut off
+    /// an administrator (audit S-M1, SRV-SEC-003).
     /// </summary>
     internal static async Task<bool> ChangesWhoManagesAsync(HttpContext context, AureliaDbContext database)
     {
@@ -226,17 +307,90 @@ public sealed class ServerRequestGuard
 
         var targetId = Guid.Parse(segments[4]);
         var target = await database.Users.AsNoTracking().Where(user => user.Id == targetId)
-            .Select(user => new { user.Role }).SingleOrDefaultAsync(context.RequestAborted);
+            .Select(user => new { user.Role, user.AccessMode }).SingleOrDefaultAsync(context.RequestAborted);
         if (target is null) return false;
         var self = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value is { } actor
             && Guid.TryParse(actor, out var actorId) && actorId == targetId;
         bool SwitchedOff() => Values("isEnabled").Any(enabled => enabled.ValueKind == JsonValueKind.False);
         bool NewPin() => Values("pin").Any(pin => pin.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(pin.GetString()));
+        static ProfileAccessMode? ParseAccessMode(JsonElement value)
+        {
+            if (value.ValueKind == JsonValueKind.String
+                && value.GetString() is { } text
+                && !int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out _)
+                && Enum.TryParse<ProfileAccessMode>(text, ignoreCase: true, out var parsed)
+                && Enum.IsDefined(parsed))
+            {
+                return parsed;
+            }
+            if (value.ValueKind == JsonValueKind.Number
+                && value.TryGetInt32(out var numeric)
+                && Enum.IsDefined((ProfileAccessMode)numeric))
+            {
+                return (ProfileAccessMode)numeric;
+            }
+            return null;
+        }
+        async Task<bool> RevokesLibrariesAsync()
+        {
+            var libraryValues = Values("libraryIds").ToList();
+            if (libraryValues.Count == 0) return true;
+            var currentLibraries = target.AccessMode == ProfileAccessMode.LegacyLibraries
+                ? await database.UserLibraryGrants.IgnoreQueryFilters().AsNoTracking()
+                    .Where(grant => grant.UserId == targetId)
+                    .Select(grant => grant.LibraryRootId)
+                    .ToListAsync(context.RequestAborted)
+                : await database.LibraryRoots.IgnoreQueryFilters().AsNoTracking()
+                    .Select(library => library.Id)
+                    .ToListAsync(context.RequestAborted);
+            foreach (var value in libraryValues)
+            {
+                if (value.ValueKind != JsonValueKind.Array) return true;
+                var requested = new HashSet<Guid>();
+                foreach (var item in value.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.String && Guid.TryParse(item.GetString(), out var id))
+                        requested.Add(id);
+                }
+                if (requested.Count == 0 || currentLibraries.Any(id => !requested.Contains(id))) return true;
+            }
+            return false;
+        }
+        async Task<bool> RevokesTitlesAsync(string modeProperty, bool modeOptional)
+        {
+            var modeValues = Values(modeProperty)
+                .Where(value => !modeOptional || value.ValueKind != JsonValueKind.Null)
+                .ToList();
+            if (modeOptional && modeValues.Count == 0) return false;
+            if (modeValues.Count > 0 && modeValues.All(value => ParseAccessMode(value) == ProfileAccessMode.EntireLibrary))
+                return false;
+            if (target.AccessMode != ProfileAccessMode.SelectedTitles) return true;
+            var currentTitles = await database.UserTitleGrants.IgnoreQueryFilters().AsNoTracking()
+                .Where(grant => grant.UserId == targetId)
+                .Select(grant => grant.MediaItemId)
+                .ToListAsync(context.RequestAborted);
+            var titleValues = Values("titleIds").ToList();
+            if (titleValues.Count == 0) return true;
+            foreach (var value in titleValues)
+            {
+                if (value.ValueKind != JsonValueKind.Array) return true;
+                var requested = new HashSet<Guid>();
+                foreach (var item in value.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.String && Guid.TryParse(item.GetString(), out var id))
+                        requested.Add(id);
+                }
+                if (requested.Count == 0 || currentTitles.Any(id => !requested.Contains(id))) return true;
+            }
+            return false;
+        }
         return action switch
         {
             "profile" => Roles().Any(role => role != target.Role)
-                || (Elevated(target.Role) && (SwitchedOff() || (NewPin() && !self))),
-            "enabled" or "access" => Elevated(target.Role) && SwitchedOff(),
+                || (Elevated(target.Role) && (SwitchedOff() || (NewPin() && !self) || await RevokesTitlesAsync("accessMode", modeOptional: true))),
+            "enabled" => Elevated(target.Role) && SwitchedOff(),
+            "access" => Elevated(target.Role) && (SwitchedOff() || await RevokesLibrariesAsync()),
+            "titles" => Elevated(target.Role) && await RevokesTitlesAsync("mode", modeOptional: false),
             "pin" => Elevated(target.Role) && !self,
             _ => false,
         };
@@ -244,7 +398,7 @@ public sealed class ServerRequestGuard
 
     /// <summary>
     /// Requests that may change who manages the server, by address alone: creating a profile, and its
-    /// profile, enabled, access and PIN changes. Their content decides (<see cref="ChangesWhoManagesAsync"/>).
+    /// profile, enabled, access, titles and PIN changes. Their content decides (<see cref="ChangesWhoManagesAsync"/>).
     /// </summary>
     public static bool MayChangeWhoManages(string method, string? path)
     {
@@ -253,7 +407,7 @@ public sealed class ServerRequestGuard
         if (segments.Length < 4 || segments[1] != "api" || segments[2] != "v1" || segments[3] != "users") return false;
         if (segments.Length == 4) return HttpMethods.IsPost(method);
         return segments.Length == 6 && HttpMethods.IsPut(method) && Guid.TryParse(segments[4], out _)
-            && segments[5] is "profile" or "enabled" or "access" or "pin";
+            && segments[5] is "profile" or "enabled" or "access" or "titles" or "pin";
     }
 
     /// <summary>The request's JSON body, read once and left in place for the endpoint.</summary>

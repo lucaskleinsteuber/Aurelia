@@ -32,7 +32,8 @@ public sealed record LiveStreamOptions(
     HardwareEncoder? Hardware = null,
     StreamingStep? Step = null,
     int? SegmentSeconds = null,
-    string? X264Preset = null);
+    string? X264Preset = null,
+    string? Container = null);
 
 /// <summary>
 /// Decides how a title reaches a player that cannot open the original: the picture is only
@@ -180,6 +181,10 @@ public static class LiveConversionPlanner
         {
             "-hide_banner", "-nostdin", "-loglevel", "error", "-protocol_whitelist", "file",
         };
+        if (MediaProbe.SafeFormatWhitelist(options.Container) is { } formatWhitelist)
+        {
+            arguments.AddRange(["-format_whitelist", formatWhitelist]);
+        }
         if (options.Encoder is { } chosen && HardwareEncoding.IsHardware(chosen) && chosen != LiveVideoEncoder.VideoToolbox)
         {
             var hardware = options.Hardware is { } chip && chip.Kind == chosen

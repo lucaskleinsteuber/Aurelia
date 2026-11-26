@@ -14,7 +14,8 @@ namespace Aurelia.Server.Services;
 /// </summary>
 public sealed partial class ServerPerformanceStore(
     ServerRuntimeOptions runtime,
-    TimeProvider? timeProvider = null) : BackgroundService
+    TimeProvider? timeProvider = null,
+    ILogger<ServerPerformanceStore>? logger = null) : BackgroundService
 {
     public const int SlowRequestMilliseconds = 500;
     public const int SlowQueryMilliseconds = 100;
@@ -234,20 +235,40 @@ public sealed partial class ServerPerformanceStore(
     [GeneratedRegex(@"\s+")]
     private static partial Regex Whitespace();
 
+    private static readonly Action<ILogger, Exception?> PerformanceLoopFailed = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(4421, nameof(PerformanceLoopFailed)), "Server performance flush paused after an unexpected failure.");
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         lock (gate) started = clock.GetUtcNow();
-        await LoadAsync(stoppingToken);
+        try { await LoadAsync(stoppingToken); }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            if (logger is not null) PerformanceLoopFailed(logger, exception);
+        }
         try
         {
             while (!stoppingToken.IsCancellationRequested)
             {
                 await Task.Delay(TimeSpan.FromMinutes(2), clock, stoppingToken);
-                await FlushAsync(stoppingToken);
+                try { await FlushAsync(stoppingToken); }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    if (logger is not null) PerformanceLoopFailed(logger, exception);
+                }
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
-        finally { await FlushAsync(CancellationToken.None); }
+        finally
+        {
+            try { await FlushAsync(CancellationToken.None); }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                if (logger is not null) PerformanceLoopFailed(logger, exception);
+            }
+        }
     }
 
     internal async Task LoadAsync(CancellationToken token)

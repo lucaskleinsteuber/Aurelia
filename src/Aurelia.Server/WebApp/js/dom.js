@@ -134,6 +134,150 @@ export function clear(element) {
   while (element.firstChild) element.firstChild.remove();
 }
 
+let activePopupMenuClose = null;
+
+/** Closes the currently open popup menu and removes its document listeners. */
+export function closePopupMenu() {
+  activePopupMenuClose?.();
+}
+
+/**
+ * Opens a positioned popup menu anchored to `anchor`. Replaces any previous popup menu cleanly,
+ * supports ArrowDown/ArrowUp/Home/End navigation and Escape (returning focus to `anchor`), and
+ * closes on outside/item click or page navigation.
+ */
+export function openPopupMenu(anchor, items) {
+  closePopupMenu();
+  const menu = h("div", { class: "popup-menu profile-menu", role: "menu" }, items);
+  for (const entry of menu.querySelectorAll("button")) {
+    if (!entry.getAttribute("role")) entry.setAttribute("role", "menuitem");
+  }
+  const box = anchor.getBoundingClientRect?.() ?? { left: 0, bottom: 0 };
+  const scrollX = globalThis.window?.scrollX ?? 0;
+  const scrollY = globalThis.window?.scrollY ?? 0;
+  const clientWidth = document.documentElement?.clientWidth ?? 1024;
+  menu.style.setProperty("top", `${box.bottom + scrollY + 8}px`);
+  menu.style.setProperty("left", `${Math.max(12, Math.min(box.left + scrollX, scrollX + clientWidth - 260))}px`);
+  document.body.append(menu);
+
+  let closed = false;
+  let attachTimer = null;
+  const enabledItems = () => [...menu.querySelectorAll("button")].filter((entry) => !entry.disabled);
+
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    if (attachTimer !== null) {
+      clearTimeout(attachTimer);
+      attachTimer = null;
+    }
+    if (activePopupMenuClose === close) activePopupMenuClose = null;
+    menu.remove();
+    document.removeEventListener?.("click", close);
+    document.removeEventListener?.("keydown", onKey, true);
+    globalThis.removeEventListener?.("aurelia:page", close);
+  };
+
+  // Esc and menu navigation keys are handled before player or page shortcuts (audit X9).
+  const onKey = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      anchor.focus?.();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+      const entries = enabledItems();
+      if (!entries.length) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === "Home") {
+        entries[0].focus?.();
+        return;
+      }
+      if (event.key === "End") {
+        entries[entries.length - 1].focus?.();
+        return;
+      }
+      const at = entries.indexOf(document.activeElement);
+      const next = at === -1
+        ? (event.key === "ArrowDown" ? 0 : entries.length - 1)
+        : (at + (event.key === "ArrowDown" ? 1 : entries.length - 1)) % entries.length;
+      entries[next]?.focus?.();
+    }
+  };
+
+  activePopupMenuClose = close;
+  document.addEventListener?.("keydown", onKey, true);
+  globalThis.addEventListener?.("aurelia:page", close);
+  attachTimer = setTimeout(() => {
+    attachTimer = null;
+    if (!closed) document.addEventListener?.("click", close);
+  }, 0);
+
+  const initial = enabledItems().find((entry) => entry.getAttribute("aria-checked") === "true") ?? enabledItems()[0];
+  initial?.focus?.();
+  return { menu, close };
+}
+
+/** Keyboard- and pointer-operable vertical resize separator for the sidebar (210–300 px). */
+export function createSidebarResizeHandle({ width = 236, min = 210, max = 300, step = 10, onPreview, onCommit } = {}) {
+  const clamp = (value) => Math.min(max, Math.max(min, Math.round(Number(value) || width)));
+  let current = clamp(width);
+  const handle = h("div", {
+    class: "sidebar-resize",
+    role: "separator",
+    tabindex: "0",
+    "aria-orientation": "vertical",
+    "aria-label": "Sidebar Width",
+    "aria-valuemin": String(min),
+    "aria-valuemax": String(max),
+    "aria-valuenow": String(current),
+  });
+
+  const apply = (next, commit) => {
+    current = clamp(next);
+    handle.setAttribute("aria-valuenow", String(current));
+    onPreview?.(current);
+    if (commit) onCommit?.(current);
+  };
+
+  handle.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    handle.setPointerCapture?.(event.pointerId);
+    const move = (moved) => apply(moved.clientX, false);
+    const end = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", end);
+      handle.removeEventListener("pointercancel", end);
+      apply(current, true);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
+  });
+
+  handle.addEventListener("keydown", (event) => {
+    const delta = event.shiftKey ? step * 2 : step;
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      apply(current - delta, true);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      apply(current + delta, true);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      apply(min, true);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      apply(max, true);
+    }
+  });
+
+  return handle;
+}
+
 /** Hands a file the server made (a backup, a report) to the browser's download. */
 export function saveBlob(blob, name) {
   const address = URL.createObjectURL(blob);

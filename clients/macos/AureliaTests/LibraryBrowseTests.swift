@@ -168,6 +168,53 @@ import Testing
     #expect(!consumes(repeated: true))
   }
 
+  @Test func backShortcutConsumesCommandLeftBracketOnlyWhenDetailCanGoBack() {
+    func consumes(
+      _ modifiers: NSEvent.ModifierFlags = .command, characters: String = "[",
+      active: Bool = true, blocked: Bool = false, repeated: Bool = false, canGoBack: Bool = true
+    ) -> Bool {
+      LibraryFindShortcutPolicy.consumesBack(
+        characters: characters, modifiers: modifiers, isRepeat: repeated,
+        activeShellWindow: active, blocked: blocked, canGoBack: canGoBack)
+    }
+    #expect(consumes())
+    #expect(!consumes(canGoBack: false))
+    #expect(!consumes([]))
+    #expect(!consumes([.command, .shift]))
+    #expect(!consumes(characters: "]"))
+    #expect(!consumes(active: false))
+    #expect(!consumes(blocked: true))
+    #expect(!consumes(repeated: true))
+  }
+
+  @Test func securityTouchIDStateNeverOffersSetupOnFailedOrPendingPasskeyLookup() {
+    let keyID = UUID()
+    #expect(
+      ServerSecurityTouchIDState.resolve(
+        hardwareAvailable: true, loaded: false, error: nil,
+        storedPasskeyID: keyID, serverPasskeyIDs: []) == .loading)
+    #expect(
+      ServerSecurityTouchIDState.resolve(
+        hardwareAvailable: true, loaded: false, error: "Server unreachable",
+        storedPasskeyID: keyID, serverPasskeyIDs: []) == .failed("Server unreachable"))
+    #expect(
+      ServerSecurityTouchIDState.resolve(
+        hardwareAvailable: true, loaded: true, error: "Server unreachable",
+        storedPasskeyID: keyID, serverPasskeyIDs: []) == .failed("Server unreachable"))
+    #expect(
+      ServerSecurityTouchIDState.resolve(
+        hardwareAvailable: true, loaded: true, error: nil,
+        storedPasskeyID: keyID, serverPasskeyIDs: [keyID]) == .configured(keyID))
+    #expect(
+      ServerSecurityTouchIDState.resolve(
+        hardwareAvailable: true, loaded: true, error: nil,
+        storedPasskeyID: keyID, serverPasskeyIDs: []) == .canSetUp)
+    #expect(
+      ServerSecurityTouchIDState.resolve(
+        hardwareAvailable: false, loaded: true, error: nil,
+        storedPasskeyID: nil, serverPasskeyIDs: []) == .hardwareUnavailable)
+  }
+
   private func item(title: String) -> CatalogItemSummary {
     CatalogItemSummary(
       id: UUID(), kind: .movie, title: title, originalTitle: nil, year: 2020, overview: nil,

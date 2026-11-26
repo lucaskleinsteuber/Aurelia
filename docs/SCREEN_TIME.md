@@ -14,6 +14,7 @@ without an age limit.
 | **Screen Time** | Turns the rules on or off for this profile. |
 | **When time is up, close** | **Playback only** keeps browsing open, and playing shows the good-night screen. **The whole profile** closes until the wake time: "Who's watching?" shows it with a moon and "Good night · back at 07:00", and it cannot be opened. |
 | **A title that is playing** | **Let the title finish** lets an episode or film that started before the time play to its end. **Finish within** sets a limit (30 minutes by default), so a film started at 19:25 does not run until 21:30. **Stop right away** ends playback at the time. Progress is kept in both cases. |
+| **Allow offline downloads** | Off by default while screen time is active so offline copies cannot bypass bedtime or daily limits. Turning it on lets the profile download titles; turning it off prevents new downloads while keeping existing downloads on devices. |
 | **School nights** | Sunday to Thursday evening: bedtime, wake time and daily limit. |
 | **Weekend** | Friday and Saturday evening: bedtime, wake time and daily limit. |
 
@@ -50,6 +51,10 @@ Exceptions last until the next wake time.
 - A background check every 15 seconds ends a title that runs past the time it was allowed
   (**Stop right away** at once, **Let the title finish** after the overtime). For a profile
   closed as a whole, it also ends the profile session once nothing is playing.
+- While screen time is active, offline download requests (`POST /api/v1/media/{id}/playback?purpose=download`,
+  `GET /api/v1/media/{id}/download-options`, and converted HLS downloads with `?purpose=download`)
+  return `403` with `screen_time_downloads_disabled` unless **Allow offline downloads** is enabled.
+  Existing downloads on devices are never deleted.
 
 ## API
 

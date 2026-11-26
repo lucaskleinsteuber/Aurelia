@@ -3,13 +3,18 @@ namespace Aurelia.Server.Services;
 /// <summary>
 /// Tells the Linux power saving (<c>aurelia-autosleep</c>) what the server is working on, in a
 /// <c>work</c> file in its data folder, renewed every 30 seconds while it lasts:
-/// <c>keepawake</c> while a library scan or metadata job runs, which should finish first;
-/// <c>analysis</c> while only intro, credits, speech or scrub-preview work runs. That work can take
+/// <c>keepawake</c> while a library scan, metadata job or owner-started speech job runs, which should finish first;
+/// <c>analysis</c> while only intro, credits, file-check or scrub-preview work runs. That work can take
 /// hours for a large library and continues after the next wake, where it left off, so it no longer
 /// keeps an unused computer awake through the processor load it causes (audit B-4). Without the
 /// file the power saving goes by the load as before.
 /// </summary>
-public sealed partial class ServerWorkSignal(ServerRuntimeOptions runtime, TimeProvider clock, ILogger<ServerWorkSignal> logger) : BackgroundService
+public sealed partial class ServerWorkSignal(
+    ServerRuntimeOptions runtime,
+    TimeProvider clock,
+    ILogger<ServerWorkSignal> logger,
+    ActiveStreamRegistry? streams = null,
+    ServerUseClock? useClock = null) : BackgroundService
 {
     public const string FileName = "work";
     private int keepAwake;
@@ -41,16 +46,33 @@ public sealed partial class ServerWorkSignal(ServerRuntimeOptions runtime, TimeP
 
     private string WorkPath => Path.Combine(runtime.DataDirectory, FileName);
 
+    private static readonly Action<ILogger, Exception?> WorkLoopFailed = LoggerMessage.Define(
+        LogLevel.Warning, new EventId(4423, nameof(WorkLoopFailed)), "Server work signal paused after an unexpected failure.");
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30), clock);
         try
         {
-            do Write();
+            do
+            {
+                try { Tick(); }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    WorkLoopFailed(logger, exception);
+                }
+            }
             while (await timer.WaitForNextTickAsync(stoppingToken));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
         finally { Remove(); }
+    }
+
+    /// <summary>Refreshes the work file and updates last-use while playback streams are open (audit LNX-PKG-013).</summary>
+    internal void Tick()
+    {
+        Write();
+        if (streams is { PlaybackCount: > 0 }) useClock?.Record();
     }
 
     /// <summary>Writes the current state, or removes the file when nothing runs.</summary>
@@ -65,7 +87,7 @@ public sealed partial class ServerWorkSignal(ServerRuntimeOptions runtime, TimeP
                 return;
             }
             PrivateFilePermissions.CreatePrivateDirectory(runtime.DataDirectory);
-            File.WriteAllText(WorkPath, state + "\n");
+            PrivateFilePermissions.WritePrivateText(WorkPath, state + "\n");
             Volatile.Write(ref written, state);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -85,9 +107,9 @@ public sealed partial class ServerWorkSignal(ServerRuntimeOptions runtime, TimeP
     {
         if (keep) Interlocked.Add(ref keepAwake, delta);
         else Interlocked.Add(ref analysis, delta);
-        // A new kind of work is written at once, so the power saving sees it before its next look;
-        // short repeats of the same work only wait for the next renewal.
-        if (delta > 0 && State != Volatile.Read(ref written)) Write();
+        // State changes are reflected immediately so power saving sees both starting work and
+        // its completion without waiting up to 30 seconds for the next renewal tick.
+        if (State != Volatile.Read(ref written)) Write();
     }
 
     private sealed class Lease : IDisposable

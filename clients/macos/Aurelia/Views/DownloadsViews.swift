@@ -11,13 +11,11 @@ struct DownloadsPage: View {
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: AureliaDesign.sectionSpacing) {
-        VStack(alignment: .leading, spacing: 6) {
-          Text("Downloads").font(AureliaDesign.pageTitle)
-          Text(
+        AureliaPageHeader(
+          title: "Downloads",
+          subtitle:
             "Titles on this Mac play even when the server is asleep or out of reach. Progress goes back to the server when it answers again."
-          )
-          .foregroundStyle(.secondary)
-        }
+        )
         .aureliaRiseIn(0)
         if !model.offlineTitles.isEmpty || !downloads.active.isEmpty {
           DownloadStorageSummary(titles: model.offlineTitles, totalBytes: downloads.totalBytes)
@@ -59,12 +57,11 @@ struct DownloadsPage: View {
         }
         if model.offlineTitles.isEmpty && downloads.active.isEmpty {
           // Centered in the page, not at the leading edge of the text column above it.
-          ContentUnavailableView(
-            "No Downloads", systemImage: "arrow.down.circle",
-            description: Text(
-              "Choose Download in a movie’s or episode’s menu to keep it on this Mac.")
+          AureliaUnavailableView(
+            title: "No Downloads",
+            systemImage: "arrow.down.circle",
+            message: "Choose Download in a movie’s or episode’s menu to keep it on this Mac."
           )
-          .frame(maxWidth: .infinity, minHeight: 360)
           .accessibilityIdentifier("downloads-empty")
           .aureliaRiseIn(1)
         } else {
@@ -269,9 +266,12 @@ struct OfflineTitleList: View {
       isPresented: Binding(
         get: { removing != nil }, set: { if !$0 { removing = nil } }), presenting: removing
     ) { title in
-      Button("Remove Download", role: .destructive) { downloads.remove(title.id) }
-    } message: { _ in
-      Text("The copy on this Mac is deleted. The title stays on the server.")
+      Button("Remove Download", role: .destructive) {
+        let profile = model.profile
+        Task { await downloads.remove(title.id, profile: profile) }
+      }
+    } message: { title in
+      Text(OfflineTitleText.removalMessage(for: title, hasServerProfile: model.profile != nil))
     }
   }
 
@@ -367,7 +367,7 @@ private struct OfflinePosterCard: View {
         Image(systemName: "play.fill")
           .font(.title3)
           .frame(width: 46, height: 46)
-          .background(.ultraThinMaterial, in: Circle())
+          .aureliaGlass(in: Circle())
           .opacity(hovering ? 1 : 0)
           .frame(maxHeight: .infinity)
         if let progress = OfflineTitlePresentation.progress(title) {
@@ -492,10 +492,19 @@ struct DownloadMenuItems: View {
           // Asked as on the Downloads page; a menu can't hold a dialog, so this one is modal.
           let alert = NSAlert()
           alert.messageText = "Remove \(item.title)?"
-          alert.informativeText = "The copy on this Mac is deleted. The title stays on the server."
+          if let downloaded = downloads.title(item.id) {
+            alert.informativeText = OfflineTitleText.removalMessage(
+              for: downloaded, hasServerProfile: model.profile != nil)
+          } else {
+            alert.informativeText =
+              "The copy on this Mac is deleted. The title stays on the server."
+          }
           alert.addButton(withTitle: "Remove Download").hasDestructiveAction = true
           alert.addButton(withTitle: "Cancel")
-          if alert.runModal() == .alertFirstButtonReturn { downloads.remove(item.id) }
+          if alert.runModal() == .alertFirstButtonReturn {
+            let profile = model.profile
+            Task { await downloads.remove(item.id, profile: profile) }
+          }
         }
       } else {
         Button("Download", systemImage: "arrow.down.circle") { model.download(item) }

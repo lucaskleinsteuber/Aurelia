@@ -110,25 +110,25 @@ struct MediaDetailView: View {
         }
         .padding(.bottom, 48)
       } else if let errorMessage {
-        ContentUnavailableView {
-          Label("Media Unavailable", systemImage: "exclamationmark.triangle")
-        } description: {
-          Text(errorMessage)
-        } actions: {
-          // The page's own Back only appears after scrolling, which this page can't.
-          HStack(spacing: 12) {
-            Button("Back", action: onBack)
-              .buttonStyle(.bordered)
-              .keyboardShortcut(.cancelAction)
-            Button("Try Again") {
-              self.errorMessage = nil
-              Task { await load() }
-            }
-            .buttonStyle(AureliaPrimaryActionButtonStyle())
-            .keyboardShortcut(.defaultAction)
-          }
-        }
-        .frame(maxWidth: .infinity, minHeight: 420)
+        AureliaUnavailableView(
+          title: "Media Unavailable",
+          systemImage: "exclamationmark.triangle",
+          message: errorMessage,
+          primaryAction: AureliaUnavailableAction(
+            title: "Try Again",
+            shortcut: .defaultAction
+          ) {
+            self.errorMessage = nil
+            Task { await load() }
+          },
+          secondaryAction: AureliaUnavailableAction(
+            title: "Back",
+            prominent: false,
+            shortcut: .cancelAction,
+            action: onBack
+          ),
+          minHeight: 420
+        )
         .padding(AureliaDesign.pagePadding)
       } else {
         ZStack {
@@ -398,9 +398,11 @@ struct MediaDetailView: View {
         VStack(alignment: .leading, spacing: 4) {
           Text("Part of the \(franchise.name)")
             .font(AureliaDesign.sectionTitle)
-          Text("\(franchise.items.count) titles in your library")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+          Text(
+            "\(AureliaCountText.format(franchise.items.count, singular: "title")) in your library"
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
         }
         Spacer()
         Button(isSavingFranchise ? "Saving…" : "Save as Collection") {
@@ -599,7 +601,7 @@ struct MediaDetailView: View {
                 Image(systemName: "play.fill")
                   .font(.title2)
                   .frame(width: 50, height: 50)
-                  .background(.ultraThinMaterial, in: Circle())
+                  .aureliaGlass(in: Circle())
               }
             }
             .buttonStyle(AureliaCardButtonStyle())
@@ -851,78 +853,26 @@ private struct DetailHero: View {
             .frame(maxWidth: 620, alignment: .leading)
             .aureliaRiseIn(3)
         }
-        HStack(spacing: 10) {
-          Button(action: onPlay) {
-            Label(isPlayLoading ? "Loading…" : playLabel, systemImage: "play.fill")
-              .font(.headline).padding(.horizontal, 5)
-          }
-          .buttonStyle(AureliaPrimaryActionButtonStyle())
-          .disabled(!canPlay || isPlayLoading)
-          .accessibilityIdentifier("play-media")
-          // Parties others started for this title or one of its episodes.
-          WatchTogetherJoinButtons(
-            mediaIds: Set(
-              [detail.item.id] + detail.seasons.flatMap { $0.episodes.map(\.item.id) })
-          )
-          .buttonStyle(.bordered).controlSize(.large)
-          if !remoteDevices.isEmpty, let onPlayOnDevice {
-            Menu {
-              ForEach(remoteDevices) { device in
-                Button(device.deviceName) {
-                  onPlayOnDevice(device)
-                }
-              }
-            } label: {
-              Label("Play on…", systemImage: "airplayvideo")
-                .font(.headline)
-            }
-            .buttonStyle(.bordered).controlSize(.large)
-            .accessibilityIdentifier("play-on-device")
-          }
-          Button(action: onFavorite) {
-            Label(
-              detail.item.isFavorite ? "Remove from Favorites" : "Add to Favorites",
-              systemImage: detail.item.isFavorite ? "star.fill" : "star"
-            )
-            .contentTransition(.symbolEffect(.replace))
-            .symbolEffect(.bounce, value: detail.item.isFavorite)
-          }
-          .buttonStyle(.bordered).controlSize(.large)
-          if let onWatchlist {
-            Button(action: onWatchlist) {
-              Label(
-                isWatchlisted ? "Remove from Watchlist" : "Add to Watchlist",
-                systemImage: isWatchlisted ? "bookmark.fill" : "bookmark"
-              )
-              .contentTransition(.symbolEffect(.replace))
-              .symbolEffect(.bounce, value: isWatchlisted)
-            }
-            .buttonStyle(.bordered).controlSize(.large)
-            .accessibilityIdentifier("watchlist-media")
-          }
-          if let playTarget {
+        actionBar
+          .aureliaRiseIn(4)
+        if let playTarget,
+          MediaAvailabilityPresentation.message(
+            availability: playTarget.availability,
+            libraryAvailability: playTarget.libraryAvailability) != nil
+        {
+          HStack(spacing: 10) {
             AvailabilityBadge(
               availability: playTarget.availability,
               libraryAvailability: playTarget.libraryAvailability)
             if MediaAvailabilityPresentation.isOffline(playTarget) {
-              Label(
-                MediaAvailabilityPresentation.offlineDetailNotice,
-                systemImage: "icloud.slash"
-              )
-              .font(.caption)
-              .foregroundStyle(.white.opacity(0.85))
-              .padding(.horizontal, 10)
-              .padding(.vertical, 5)
-              .background(.black.opacity(0.56), in: Capsule())
-              .overlay { Capsule().stroke(.white.opacity(0.16), lineWidth: 1) }
+              Text("Details and progress are kept.")
+                .font(.callout)
+                .foregroundStyle(.white.opacity(0.82))
+                .fixedSize(horizontal: false, vertical: true)
             }
           }
-          if MediaWatchPresentation.isWatched(detail.item) {
-            Label("Watched", systemImage: "checkmark.circle.fill")
-              .font(.caption.weight(.medium)).foregroundStyle(.white.opacity(0.8))
-          }
+          .aureliaRiseIn(4)
         }
-        .aureliaRiseIn(4)
         if let remainingText, !isPlayLoading {
           HStack(spacing: 10) {
             if let fraction = playTarget?.progressFraction {
@@ -972,12 +922,7 @@ private struct DetailHero: View {
 
       VStack {
         HStack {
-          Button(action: onBack) {
-            Image(systemName: "chevron.left").font(.headline).frame(width: 44, height: 44)
-              .background(.ultraThinMaterial, in: Circle())
-              .overlay { Circle().stroke(AureliaDesign.hairline, lineWidth: 1) }
-          }
-          .buttonStyle(AureliaPressableButtonStyle()).accessibilityLabel("Back")
+          AureliaIconControl(symbol: "chevron.left", label: "Back", action: onBack)
           Spacer()
           HStack(spacing: 10) {
             AureliaIconMenu(symbol: "ellipsis", label: "More Actions") {
@@ -998,9 +943,144 @@ private struct DetailHero: View {
         Spacer()
       }
     }
+    .frame(maxWidth: .infinity)
     .frame(height: 540)
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("media-hero")
+  }
+
+  private enum ActionBarMode {
+    case full
+    case concise
+    case icons
+  }
+
+  private var actionBar: some View {
+    ViewThatFits(in: .horizontal) {
+      actionRow(mode: .full)
+      actionRow(mode: .concise)
+      actionRow(mode: .icons)
+    }
+  }
+
+  private func actionRow(mode: ActionBarMode) -> some View {
+    HStack(spacing: 10) {
+      Button(action: onPlay) {
+        Label(isPlayLoading ? "Loading…" : playLabel, systemImage: "play.fill")
+          .font(.headline)
+          .lineLimit(1)
+          .padding(.horizontal, 5)
+      }
+      .buttonStyle(AureliaPrimaryActionButtonStyle())
+      .fixedSize()
+      .layoutPriority(1)
+      .disabled(!canPlay || isPlayLoading)
+      .accessibilityIdentifier("play-media")
+
+      // Parties others started for this title or one of its episodes.
+      WatchTogetherJoinButtons(
+        mediaIds: Set(
+          [detail.item.id] + detail.seasons.flatMap { $0.episodes.map(\.item.id) })
+      )
+      .buttonStyle(.bordered).controlSize(.large)
+      .fixedSize()
+
+      if !remoteDevices.isEmpty, let onPlayOnDevice {
+        if mode == .icons {
+          AureliaIconMenu(symbol: "airplayvideo", label: "Play on…") {
+            ForEach(remoteDevices) { device in
+              Button(device.deviceName) {
+                onPlayOnDevice(device)
+              }
+            }
+          }
+          .help("Play on…")
+          .accessibilityIdentifier("play-on-device")
+        } else {
+          Menu {
+            ForEach(remoteDevices) { device in
+              Button(device.deviceName) {
+                onPlayOnDevice(device)
+              }
+            }
+          } label: {
+            Label("Play on…", systemImage: "airplayvideo")
+              .font(.headline)
+              .lineLimit(1)
+          }
+          .buttonStyle(.bordered).controlSize(.large)
+          .fixedSize()
+          .accessibilityIdentifier("play-on-device")
+        }
+      }
+
+      favoriteButton(mode: mode)
+
+      if let onWatchlist {
+        watchlistButton(mode: mode, action: onWatchlist)
+      }
+
+      if MediaWatchPresentation.isWatched(detail.item) {
+        Label("Watched", systemImage: "checkmark.circle.fill")
+          .font(.caption.weight(.medium))
+          .foregroundStyle(.white.opacity(0.84))
+          .fixedSize()
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func favoriteButton(mode: ActionBarMode) -> some View {
+    let fullLabel = detail.item.isFavorite ? "Remove from Favorites" : "Add to Favorites"
+    let symbol = detail.item.isFavorite ? "star.fill" : "star"
+    if mode == .icons {
+      AureliaIconControl(
+        symbol: symbol, label: fullLabel, selected: detail.item.isFavorite, action: onFavorite
+      )
+      .help(fullLabel)
+    } else {
+      Button(action: onFavorite) {
+        Label(
+          mode == .full ? fullLabel : (detail.item.isFavorite ? "Favorited" : "Favorite"),
+          systemImage: symbol
+        )
+        .lineLimit(1)
+        .contentTransition(.symbolEffect(.replace))
+        .symbolEffect(.bounce, value: detail.item.isFavorite)
+      }
+      .buttonStyle(AureliaSecondaryActionButtonStyle())
+      .fixedSize()
+      .help(fullLabel)
+      .accessibilityLabel(fullLabel)
+    }
+  }
+
+  @ViewBuilder
+  private func watchlistButton(mode: ActionBarMode, action: @escaping () -> Void) -> some View {
+    let fullLabel = isWatchlisted ? "Remove from Watchlist" : "Add to Watchlist"
+    let symbol = isWatchlisted ? "bookmark.fill" : "bookmark"
+    if mode == .icons {
+      AureliaIconControl(
+        symbol: symbol, label: fullLabel, selected: isWatchlisted, action: action
+      )
+      .help(fullLabel)
+      .accessibilityIdentifier("watchlist-media")
+    } else {
+      Button(action: action) {
+        Label(
+          mode == .full ? fullLabel : (isWatchlisted ? "Watchlisted" : "Watchlist"),
+          systemImage: symbol
+        )
+        .lineLimit(1)
+        .contentTransition(.symbolEffect(.replace))
+        .symbolEffect(.bounce, value: isWatchlisted)
+      }
+      .buttonStyle(AureliaSecondaryActionButtonStyle())
+      .fixedSize()
+      .help(fullLabel)
+      .accessibilityLabel(fullLabel)
+      .accessibilityIdentifier("watchlist-media")
+    }
   }
 
   private var metadataLine: String {
@@ -1095,12 +1175,17 @@ private struct PersonCreditCard: View {
 }
 
 private struct InfoValue: View {
+  @Environment(\.aureliaContrast) private var contrast
   let title: String
   let value: String?
   var body: some View {
     VStack(alignment: .leading, spacing: 5) {
-      Text(title).font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
-      Text(value?.isEmpty == false ? value! : "—").foregroundStyle(.secondary).lineLimit(2)
+      Text(title)
+        .font(.footnote.weight(.semibold))
+        .foregroundStyle(AureliaDesign.subtleText(for: contrast))
+      Text(value?.isEmpty == false ? value! : "—")
+        .foregroundStyle(contrast == .increased ? Color.white : Color.primary.opacity(0.9))
+        .lineLimit(2)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }

@@ -80,6 +80,7 @@ public sealed partial class HlsSession : IAsyncDisposable
     private readonly ILogger logger;
     private readonly TimeProvider clock;
     private readonly IDisposable fileOwner;
+    private readonly object lifecycleGate = new();
     private readonly SemaphoreSlim control = new(1, 1);
     private readonly SegmentStore store = new();
     private readonly CancellationTokenSource ending = new();
@@ -88,8 +89,13 @@ public sealed partial class HlsSession : IAsyncDisposable
     private CancellationTokenSource? producerStop;
     private Task? producer;
     private int failures;
+    private int activeOperations;
+    private bool disposed;
+    private bool primitivesDisposed;
     private long lastUsedTicks;
     private double speed;
+    private volatile bool yielded;
+    private volatile bool completed;
 
     internal HlsSession(
         HlsSessionManager manager,
@@ -107,7 +113,8 @@ public sealed partial class HlsSession : IAsyncDisposable
         LiveConversionService live,
         IHlsConverter converter,
         ILogger logger,
-        TimeProvider clock)
+        TimeProvider clock,
+        string? container = null)
     {
         this.manager = manager;
         Key = key;
@@ -120,6 +127,7 @@ public sealed partial class HlsSession : IAsyncDisposable
         Video = video;
         Audio = audio;
         ToneMapping = toneMapping;
+        Container = container;
         this.tools = tools;
         this.live = live;
         this.converter = converter;
@@ -137,6 +145,7 @@ public sealed partial class HlsSession : IAsyncDisposable
     public ProbedVideo Video { get; }
     public ProbedAudio? Audio { get; }
     public HdrToneMapping ToneMapping { get; }
+    public string? Container { get; }
     public string Ffmpeg => tools.Ffmpeg;
     public int SegmentCount => HlsPlaylists.SegmentCount(DurationSeconds);
     public SegmentStore Store => store;
@@ -147,6 +156,12 @@ public sealed partial class HlsSession : IAsyncDisposable
     /// <summary>Whether ffmpeg runs for this session now.</summary>
     public bool IsProducing { get { lock (store) return producer is { IsCompleted: false }; } }
 
+    /// <summary>Whether ffmpeg is running but paused because the player is far behind.</summary>
+    internal bool IsPaused => IsProducing && store.ShouldPause;
+
+    /// <summary>Whether this session yielded to another quality or finished converting and can be reclaimed.</summary>
+    internal bool IsReclaimable => !IsProducing && (yielded || completed);
+
     /// <summary>The encoder of the conversion, once one started.</summary>
     public LiveVideoEncoder? Encoder => encoder?.Kind;
 
@@ -155,32 +170,69 @@ public sealed partial class HlsSession : IAsyncDisposable
 
     internal CancellationToken Ending => ending.Token;
 
+    internal bool IsDisposed { get { lock (lifecycleGate) return disposed; } }
+
+    private bool TryEnterOperation()
+    {
+        lock (lifecycleGate)
+        {
+            if (disposed) return false;
+            activeOperations++;
+            return true;
+        }
+    }
+
+    private void ExitOperation()
+    {
+        bool shouldDisposePrimitives;
+        lock (lifecycleGate)
+        {
+            activeOperations--;
+            shouldDisposePrimitives = disposed && activeOperations == 0 && !primitivesDisposed;
+            if (shouldDisposePrimitives) primitivesDisposed = true;
+        }
+        if (shouldDisposePrimitives)
+        {
+            control.Dispose();
+            ending.Dispose();
+        }
+    }
+
     private void Touch() => Interlocked.Exchange(ref lastUsedTicks, clock.GetUtcNow().UtcTicks);
 
     /// <summary>The init segment; starts the conversion when none ran yet. Null when the conversion failed.</summary>
     public async Task<byte[]?> InitAsync(CancellationToken cancellationToken)
     {
-        Touch();
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, ending.Token);
-        linked.CancelAfter(InitWait);
+        if (!TryEnterOperation()) throw new HlsSessionEndedException();
         try
         {
-            while (true)
+            Touch();
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, ending.Token);
+            linked.CancelAfter(InitWait);
+            try
             {
-                var changed = store.ChangedAsync(linked.Token);
-                if (Volatile.Read(ref init) is { } ready) return ready.Data;
-                if (!IsProducing)
+                while (true)
                 {
-                    if (Volatile.Read(ref failures) >= 2) return null;
-                    await StartAsync(Math.Max(0, store.Playhead), force: true, linked.Token);
-                    continue;
+                    var changed = store.ChangedAsync(linked.Token);
+                    if (Volatile.Read(ref init) is { } ready) return ready.Data;
+                    if (!IsProducing)
+                    {
+                        if (Volatile.Read(ref failures) >= 2) return null;
+                        await StartAsync(Math.Max(0, store.Playhead), force: true, linked.Token);
+                        continue;
+                    }
+                    await changed;
                 }
-                await changed;
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                if (IsDisposed) throw new HlsSessionEndedException();
+                return null;
             }
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        finally
         {
-            return null;
+            ExitOperation();
         }
     }
 
@@ -188,38 +240,47 @@ public sealed partial class HlsSession : IAsyncDisposable
     public async Task<byte[]?> SegmentAsync(int index, CancellationToken cancellationToken)
     {
         if (index < 0 || index >= SegmentCount) return null;
-        Touch();
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, ending.Token);
-        linked.CancelAfter(SegmentWait);
-        var attempts = 0;
+        if (!TryEnterOperation()) throw new HlsSessionEndedException();
         try
         {
-            while (true)
+            Touch();
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, ending.Token);
+            linked.CancelAfter(SegmentWait);
+            var attempts = 0;
+            try
             {
-                var changed = store.ChangedAsync(linked.Token);
-                switch (store.Request(index))
+                while (true)
                 {
-                    case SegmentPlan.Ready:
-                        if (store.TryGet(index) is { } segment)
-                        {
-                            Touch();
-                            return segment;
-                        }
-                        break;
-                    case SegmentPlan.Restart:
-                        if (attempts++ >= 2 || Volatile.Read(ref failures) >= 2) return null;
-                        await StartAsync(index, force: false, linked.Token);
-                        continue;
-                    case SegmentPlan.Wait:
-                        if (!IsProducing) goto case SegmentPlan.Restart;
-                        break;
+                    var changed = store.ChangedAsync(linked.Token);
+                    switch (store.Request(index))
+                    {
+                        case SegmentPlan.Ready:
+                            if (store.TryGet(index) is { } segment)
+                            {
+                                Touch();
+                                return segment;
+                            }
+                            break;
+                        case SegmentPlan.Restart:
+                            if (attempts++ >= 2 || Volatile.Read(ref failures) >= 2) return null;
+                            await StartAsync(index, force: false, linked.Token);
+                            continue;
+                        case SegmentPlan.Wait:
+                            if (!IsProducing) goto case SegmentPlan.Restart;
+                            break;
+                    }
+                    await changed;
                 }
-                await changed;
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                if (IsDisposed) throw new HlsSessionEndedException();
+                return null;
             }
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        finally
         {
-            return null;
+            ExitOperation();
         }
     }
 
@@ -229,21 +290,54 @@ public sealed partial class HlsSession : IAsyncDisposable
         await control.WaitAsync(cancellationToken);
         try
         {
+            if (IsDisposed || ending.IsCancellationRequested) throw new HlsSessionEndedException();
             if (!force && store.Request(index) != SegmentPlan.Restart && IsProducing) return;
             if (force && IsProducing) return;
             await StopProducerAsync();
             // Only one conversion per title and profile session: an earlier quality yields its place.
             await manager.YieldOthersAsync(this);
+            if (IsDisposed || ending.IsCancellationRequested) throw new HlsSessionEndedException();
             var slot = await EnterAsync(cancellationToken) ?? throw new HlsBusyException();
-            encoder ??= live.ChooseEncoder(tools) ?? throw new InvalidOperationException("The server cannot encode pictures.");
-            var stop = CancellationTokenSource.CreateLinkedTokenSource(ending.Token);
-            var options = new LiveStreamOptions(index * HlsPlaylists.SegmentSeconds, Video, encoder.Value.Kind, Audio, CopyAudio: false,
-                ToneMapping, encoder.Value.Chip, Step, HlsPlaylists.SegmentSeconds, live.Pace.Preset(encoder.Value.Kind, Step.Id));
-            store.BeginProducing(index);
-            lock (store)
+            var handedOff = false;
+            try
             {
-                producerStop = stop;
-                producer = Task.Run(() => ProduceAsync(index, options, slot, stop.Token), CancellationToken.None);
+                if (IsDisposed || ending.IsCancellationRequested) throw new HlsSessionEndedException();
+                yielded = false;
+                completed = false;
+                encoder ??= live.ChooseEncoder(tools) ?? throw new InvalidOperationException("The server cannot encode pictures.");
+                var stop = CancellationTokenSource.CreateLinkedTokenSource(ending.Token);
+                try
+                {
+                    if (IsDisposed || ending.IsCancellationRequested)
+                    {
+                        stop.Dispose();
+                        throw new HlsSessionEndedException();
+                    }
+                    var options = new LiveStreamOptions(index * HlsPlaylists.SegmentSeconds, Video, encoder.Value.Kind, Audio, CopyAudio: false,
+                        ToneMapping, encoder.Value.Chip, Step, HlsPlaylists.SegmentSeconds, live.Pace.Preset(encoder.Value.Kind, Step.Id), Container);
+                    store.BeginProducing(index);
+                    lock (store)
+                    {
+                        if (IsDisposed || ending.IsCancellationRequested)
+                        {
+                            stop.Dispose();
+                            store.EndProducing(finished: false);
+                            throw new HlsSessionEndedException();
+                        }
+                        producerStop = stop;
+                        producer = Task.Run(() => ProduceAsync(index, options, slot, stop.Token), CancellationToken.None);
+                        handedOff = true;
+                    }
+                }
+                catch
+                {
+                    if (!handedOff) stop.Dispose();
+                    throw;
+                }
+            }
+            finally
+            {
+                if (!handedOff) slot.Dispose();
             }
         }
         finally { control.Release(); }
@@ -263,8 +357,16 @@ public sealed partial class HlsSession : IAsyncDisposable
         using (manager.WaitForPlace())
         {
             if (live.VideoPlacesTaken) await manager.PauseDownloadAsync(this);
+            if (live.VideoPlacesTaken) await manager.PausePausedSiblingAsync(this);
             return await live.EnterAsync(encodesVideo: true, cancellationToken);
         }
+    }
+
+    /// <summary>Stops converting because another quality of the same title took over.</summary>
+    internal async Task YieldAsync()
+    {
+        yielded = true;
+        await StopProducerAsync();
     }
 
     /// <summary>Ends the running ffmpeg, if any, and waits until it is gone.</summary>
@@ -346,6 +448,7 @@ public sealed partial class HlsSession : IAsyncDisposable
         }
         finally
         {
+            if (finished && fragments > 0 && !cancellationToken.IsCancellationRequested) completed = true;
             store.EndProducing(finished && fragments > 0);
             if (fragments == 0 && !cancellationToken.IsCancellationRequested)
             {
@@ -379,13 +482,31 @@ public sealed partial class HlsSession : IAsyncDisposable
     /// <summary>Ends the conversion and frees the memory and the file.</summary>
     public async ValueTask DisposeAsync()
     {
-        if (ending.IsCancellationRequested) return;
-        await ending.CancelAsync();
-        await StopProducerAsync();
-        store.Clear();
-        fileOwner.Dispose();
-        control.Dispose();
-        ending.Dispose();
+        lock (lifecycleGate)
+        {
+            if (disposed) return;
+            disposed = true;
+            activeOperations++;
+        }
+        try
+        {
+            await ending.CancelAsync();
+            await control.WaitAsync();
+            try
+            {
+                await StopProducerAsync();
+            }
+            finally
+            {
+                control.Release();
+            }
+            store.Clear();
+            fileOwner.Dispose();
+        }
+        finally
+        {
+            ExitOperation();
+        }
     }
 
     [LoggerMessage(LogLevel.Warning, "An HLS conversion stopped: {Message}")]
@@ -394,3 +515,6 @@ public sealed partial class HlsSession : IAsyncDisposable
 
 /// <summary>The server converts as many titles as it can.</summary>
 public sealed class HlsBusyException() : Exception("The server is converting as many titles as it can.");
+
+/// <summary>The HLS session ended while a segment request was starting or waiting on it.</summary>
+public sealed class HlsSessionEndedException() : Exception("The HLS session has ended.");

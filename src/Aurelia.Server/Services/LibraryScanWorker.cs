@@ -618,30 +618,56 @@ public sealed partial class LibraryScanWorker(
             cancellationToken);
 
         var missingFiles = 0;
+        Guid? previousCompletedScanId = null;
+        var resolvedPreviousScan = false;
+        var normalizedScanRoot = MediaPath.Normalize(scanRoot);
         var unreadable = discovery.Issues.Where(issue => issue.Code is "unreadable_directory" or "unreadable_entry" or "unreadable_file")
-            .Select(issue => issue.Path is null ? MediaPath.Normalize(scanRoot) : MediaPath.Normalize(issue.Path)).ToArray();
+            .Select(issue => issue.Path is null ? normalizedScanRoot : MediaPath.Normalize(issue.Path)).ToArray();
         foreach (var item in allItems.Where(item => item.Kind != MediaKind.Series
                      && !seenIds.Contains(item.Id)
                      && !unreadable.Any(path => MediaPath.IsSameOrDescendant(item.NormalizedSourcePath, path))
                      && MediaPath.IsSameOrDescendant(
                          item.NormalizedSourcePath,
-                         MediaPath.Normalize(scanRoot))))
+                         normalizedScanRoot)))
         {
             if (item.Availability == MediaAvailability.Available)
             {
+                if (!resolvedPreviousScan)
+                {
+                    previousCompletedScanId = await database.LibraryScans.AsNoTracking()
+                        .Where(previous => previous.LibraryRootId == library.Id
+                            && previous.Id != scan.Id
+                            && previous.State == LibraryScanState.Completed
+                            && previous.TargetRelativePath == null)
+                        .OrderByDescending(previous => previous.CompletedAt)
+                        .Select(previous => (Guid?)previous.Id)
+                        .FirstOrDefaultAsync(cancellationToken);
+                    resolvedPreviousScan = true;
+                }
+
                 missingFiles += 1;
+                if (previousCompletedScanId.HasValue)
+                {
+                    item.LastSeenScanId = previousCompletedScanId;
+                }
                 item.Availability = MediaAvailability.Missing;
                 item.UpdatedAt = now;
             }
         }
 
-        foreach (var series in allItems.Where(item => item.Kind == MediaKind.Series))
+        foreach (var series in allItems.Where(item => item.Kind == MediaKind.Series
+                     && (MediaPath.IsSameOrDescendant(item.NormalizedSourcePath, normalizedScanRoot)
+                         || MediaPath.IsSameOrDescendant(normalizedScanRoot, item.NormalizedSourcePath))))
         {
-            series.Availability = allItems.Any(item =>
+            var availability = allItems.Any(item =>
                 item.ParentId == series.Id && item.Availability == MediaAvailability.Available)
                 ? MediaAvailability.Available
                 : MediaAvailability.Missing;
-            series.UpdatedAt = now;
+            if (series.Availability != availability)
+            {
+                series.Availability = availability;
+                series.UpdatedAt = now;
+            }
         }
 
         foreach (var issue in discovery.Issues.Take(MaximumStoredIssues))
@@ -697,10 +723,12 @@ public sealed partial class LibraryScanWorker(
         var stored = await database.LibraryImportReviews
             .Where(review => review.LibraryRootId == library.Id)
             .ToListAsync(cancellationToken);
-        var byPath = stored.ToDictionary(review => review.NormalizedRelativePath, StringComparer.Ordinal);
-        var unresolved = (discovery.ImportReviews ?? []).ToDictionary(
-            review => NormalizeRelativePath(Path.GetRelativePath(library.Path, review.SourcePath)),
-            StringComparer.Ordinal);
+        var byPath = stored
+            .GroupBy(review => review.NormalizedRelativePath, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var unresolved = (discovery.ImportReviews ?? [])
+            .GroupBy(review => NormalizeRelativePath(Path.GetRelativePath(library.Path, review.SourcePath)), StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
         foreach (var pending in discovery.ImportReviews ?? [])
         {
             var path = Path.GetRelativePath(library.Path, pending.SourcePath);
@@ -909,13 +937,8 @@ public sealed partial class LibraryScanWorker(
     private static string AssignmentKey(string normalizedRelativePath) =>
         Path.DirectorySeparatorChar == '/' ? normalizedRelativePath : normalizedRelativePath.Replace(Path.DirectorySeparatorChar, '/');
 
-    private static string NormalizeRelativePath(string path)
-    {
-        return path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
-            .Trim(Path.DirectorySeparatorChar)
-            .Normalize(System.Text.NormalizationForm.FormKC)
-            .ToUpperInvariant();
-    }
+    private static string NormalizeRelativePath(string path) =>
+        MediaPath.NormalizeRelative(path);
 
     private static MediaItem Upsert(
         AureliaDbContext database,
@@ -985,39 +1008,50 @@ public sealed partial class LibraryScanWorker(
             database.MediaItems.Add(item);
         }
 
-        wasUpdated = !wasAdded && (
+        // SQLite stores timestamps at millisecond precision; truncate before comparing so
+        // sub-millisecond filesystem ticks do not mark unchanged files as modified on every scan.
+        var fileModifiedAt = candidate.FileModifiedAt is { } modifiedAt
+            ? DateTimeOffset.FromUnixTimeMilliseconds(modifiedAt.ToUnixTimeMilliseconds())
+            : (DateTimeOffset?)null;
+        var bindingChanged = !item.ManualSourceBinding && (
             item.Kind != candidate.Kind
             || item.ParentId != parentId
-            || item.SourcePath != candidate.SourcePath
             || item.DetectedTitle != candidate.DetectedTitle
             || item.Year != candidate.Year
             || item.SeasonNumber != candidate.SeasonNumber
             || item.EpisodeNumber != candidate.EpisodeNumber
-            || item.Category != candidate.Category
+            || item.Category != candidate.Category);
+        wasUpdated = !wasAdded && (
+            bindingChanged
+            || item.SourcePath != candidate.SourcePath
+            || item.NormalizedSourcePath != normalizedPath
             || item.Extension != candidate.Extension
             || item.FileSize != candidate.FileSize
-            || item.FileModifiedAt != candidate.FileModifiedAt
+            || item.FileModifiedAt != fileModifiedAt
             || item.FileSystemIdentity != candidate.FileSystemIdentity
             || item.Availability != MediaAvailability.Available);
-        if (!item.ManualSourceBinding)
+        if (wasAdded || wasUpdated)
         {
-            item.ParentId = parentId;
-            item.Kind = candidate.Kind;
-            item.DetectedTitle = candidate.DetectedTitle;
-            item.Year = candidate.Year;
-            item.SeasonNumber = candidate.SeasonNumber;
-            item.EpisodeNumber = candidate.EpisodeNumber;
-            item.Category = candidate.Category;
+            if (!item.ManualSourceBinding)
+            {
+                item.ParentId = parentId;
+                item.Kind = candidate.Kind;
+                item.DetectedTitle = candidate.DetectedTitle;
+                item.Year = candidate.Year;
+                item.SeasonNumber = candidate.SeasonNumber;
+                item.EpisodeNumber = candidate.EpisodeNumber;
+                item.Category = candidate.Category;
+            }
+            item.SourcePath = candidate.SourcePath;
+            item.NormalizedSourcePath = normalizedPath;
+            item.Extension = candidate.Extension;
+            item.FileSize = candidate.FileSize;
+            item.FileModifiedAt = fileModifiedAt;
+            item.FileSystemIdentity = candidate.FileSystemIdentity;
+            item.Availability = MediaAvailability.Available;
+            item.LastSeenScanId = scanId;
+            item.UpdatedAt = now;
         }
-        item.SourcePath = candidate.SourcePath;
-        item.NormalizedSourcePath = normalizedPath;
-        item.Extension = candidate.Extension;
-        item.FileSize = candidate.FileSize;
-        item.FileModifiedAt = candidate.FileModifiedAt;
-        item.FileSystemIdentity = candidate.FileSystemIdentity;
-        item.Availability = MediaAvailability.Available;
-        item.LastSeenScanId = scanId;
-        item.UpdatedAt = now;
         seenIds.Add(item.Id);
         return item;
     }
@@ -1083,7 +1117,15 @@ public sealed partial class LibraryScanWorker(
     private static void EnsureReadableRoot(string path)
     {
         var directory = new DirectoryInfo(path);
-        if (!directory.Exists || directory.LinkTarget is not null || StorageMounts.IsDetached(path))
+        if (directory.Exists && directory.LinkTarget is not null)
+        {
+            throw new LibraryException(
+                "library_symbolic_link",
+                "The library directory is a symbolic link, which Aurelia does not follow.",
+                StatusCodes.Status409Conflict);
+        }
+
+        if (!directory.Exists || StorageMounts.IsDetached(path))
         {
             throw new LibraryException(
                 "library_unavailable",

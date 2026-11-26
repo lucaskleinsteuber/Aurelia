@@ -103,8 +103,11 @@ app="$app/Aurelia.app"
 
 step "Done"
 print "Aurelia is built: $app"
-if pgrep -x Aurelia >/dev/null 2>&1; then
-  print "Aurelia is running. Quit it, then drag the new Aurelia.app into Applications (replace the old one)."
+if pgrep -x Aurelia >/dev/null 2>&1 \
+  || pgrep -x AureliaServerHost >/dev/null 2>&1 \
+  || pgrep -f '^/Applications/Aurelia\.app/Contents/' >/dev/null 2>&1; then
+  print "Aurelia or its background server is running."
+  print "Quit Aurelia and stop its background server (in Settings › Power or from the menu bar icon), then drag the new Aurelia.app into Applications (replace the old one)."
   open -R "$app"
 elif ask "Copy Aurelia to Applications now (replacing an older Aurelia there)?"; then
   rm -rf "/Applications/Aurelia.app.new"

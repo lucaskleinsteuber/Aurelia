@@ -70,11 +70,20 @@ public sealed class BonjourAdvertisementService(
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                await PublishWithRetriesAsync(stoppingToken);
-                _ = await renewals.Reader.ReadAsync(stoppingToken);
-                // Coalesce interface changes before replacing both announcements.
-                await Task.Delay(TimeSpan.FromSeconds(1), timeProvider, stoppingToken);
-                while (renewals.Reader.TryRead(out _)) { }
+                try
+                {
+                    await PublishWithRetriesAsync(stoppingToken);
+                    _ = await renewals.Reader.ReadAsync(stoppingToken);
+                    // Coalesce interface changes before replacing both announcements.
+                    await Task.Delay(TimeSpan.FromSeconds(1), timeProvider, stoppingToken);
+                    while (renewals.Reader.TryRead(out _)) { }
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    DiscoveryUnavailable(logger, exception);
+                    await Task.Delay(TimeSpan.FromSeconds(30), timeProvider, stoppingToken);
+                }
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }

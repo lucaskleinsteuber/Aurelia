@@ -135,7 +135,7 @@ public static class ApiEndpointMappings
         api.MapGet("/watchlist", GetWatchlistAsync).RequireAuthorization();
 
         var metadata = api.MapGroup("/metadata").RequireAuthorization("Administrator");
-        metadata.MapGet("/provider", GetMetadataProviderAsync).RequireAuthorization("Owner");
+        metadata.MapGet("/provider", GetMetadataProviderAsync);
         metadata.MapPut("/provider", UpdateMetadataProviderAsync);
         metadata.MapDelete("/provider/token", RemoveMetadataProviderTokenAsync);
         metadata.MapPost("/jobs", StartMetadataJobAsync);
@@ -253,6 +253,7 @@ public static class ApiEndpointMappings
         ServerTlsIdentity tlsIdentity,
         LiveConversionService live,
         ServerMoveService moves,
+        WebAppAssets webAssets,
         Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions> json,
         CancellationToken cancellationToken)
     {
@@ -270,10 +271,11 @@ public static class ApiEndpointMappings
             runtime.LanAccessEnabled ? runtime.LanHttpsPort : null,
             runtime.LanAccessEnabled ? tlsIdentity.PublicKeyFingerprint : null,
             runtime.LanAccessEnabled ? tlsIdentity.DisplayFingerprint : null,
-            ServerFeatures.Reported(await live.IsAvailableAsync(), await live.SpeechAudioAvailableAsync()),
+            await live.ReportedFeaturesAsync(),
             // A desktop or laptop that hosts Aurelia in its app is woken by its owner, not over the network.
             runtime.LanAccessEnabled && !ServerHosting.ByApp(ServerHosting.Kind(runtime)) ? WakeOnLan.LocalAddresses() : null,
-            ServerHosting.Kind(runtime));
+            ServerHosting.Kind(runtime),
+            webAssets.Version);
         if (moves.MovedTo is not { } movedTo) return Results.Ok(info);
         // A server that moved tells reconnecting devices where it went (docs/SERVER_MOVE.md).
         var options = json.Value.SerializerOptions;
@@ -863,14 +865,29 @@ public static class ApiEndpointMappings
     private static Task<IResult> GetMonthlyWrappedAsync(HttpContext context, int year, int month, WatchHistoryService history, CancellationToken cancellationToken) =>
         ExecuteAsync(() => history.GetWrappedAsync(context.User.RequireUserId(), year, month, cancellationToken));
 
-    private static Task<IResult> GetHealthDuplicatesAsync(int? offset, int? limit, LibraryHealthService health, CancellationToken cancellationToken) =>
-        ExecuteAsync(() => health.GetDuplicatesAsync(offset ?? 0, limit ?? 50, cancellationToken));
+    private static Task<IResult> GetHealthDuplicatesAsync(HttpContext context, int? offset, int? limit, LibraryHealthService health, CancellationToken cancellationToken) =>
+        ExecuteAsync(async () =>
+        {
+            var (items, total) = await health.GetDuplicatesPageAsync(offset ?? 0, limit ?? 50, cancellationToken);
+            context.Response.Headers["X-Total-Count"] = total.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return items;
+        });
 
-    private static Task<IResult> GetHealthOfflineAsync(int? days, int? offset, int? limit, LibraryHealthService health, CancellationToken cancellationToken) =>
-        ExecuteAsync(() => health.GetOfflineAsync(days ?? 7, offset ?? 0, limit ?? 50, cancellationToken));
+    private static Task<IResult> GetHealthOfflineAsync(HttpContext context, int? days, int? offset, int? limit, LibraryHealthService health, CancellationToken cancellationToken) =>
+        ExecuteAsync(async () =>
+        {
+            var (items, total) = await health.GetOfflinePageAsync(days ?? 7, offset ?? 0, limit ?? 50, cancellationToken);
+            context.Response.Headers["X-Total-Count"] = total.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return items;
+        });
 
-    private static Task<IResult> GetHealthUnmatchedAsync(int? offset, int? limit, LibraryHealthService health, CancellationToken cancellationToken) =>
-        ExecuteAsync(() => health.GetUnmatchedAsync(offset ?? 0, limit ?? 50, cancellationToken));
+    private static Task<IResult> GetHealthUnmatchedAsync(HttpContext context, int? offset, int? limit, LibraryHealthService health, CancellationToken cancellationToken) =>
+        ExecuteAsync(async () =>
+        {
+            var (items, total) = await health.GetUnmatchedPageAsync(offset ?? 0, limit ?? 50, cancellationToken);
+            context.Response.Headers["X-Total-Count"] = total.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return items;
+        });
 
     private static Task<IResult> MergeHealthMediaAsync(HttpContext context, MergeMediaRequest request, LibraryHealthService health, CancellationToken cancellationToken) =>
         ExecuteNoContentAsync(() => health.MergeAsync(context.User.RequireUserId(), request.SourceMediaId, request.TargetMediaId, cancellationToken));
@@ -892,11 +909,22 @@ public static class ApiEndpointMappings
         {
             var hasBody = context.Request.ContentLength is > 0
                 || context.Request.Headers.TransferEncoding.Count > 0;
-            var job = hasBody
-                ? await metadata.StartAsync(
-                    await context.Request.ReadFromJsonAsync<StartMetadataJobRequest>(cancellationToken)
-                        ?? throw new MetadataException("invalid_metadata_job", "The metadata job request is invalid.", StatusCodes.Status400BadRequest),
-                    cancellationToken)
+            StartMetadataJobRequest? request = null;
+            if (hasBody)
+            {
+                try
+                {
+                    request = await context.Request.ReadFromJsonAsync<StartMetadataJobRequest>(cancellationToken);
+                }
+                catch (System.Text.Json.JsonException)
+                {
+                    throw new MetadataException("invalid_metadata_job", "The metadata job request is invalid.", StatusCodes.Status400BadRequest);
+                }
+                if (request is null)
+                    throw new MetadataException("invalid_metadata_job", "The metadata job request is invalid.", StatusCodes.Status400BadRequest);
+            }
+            var job = request is not null
+                ? await metadata.StartAsync(request, cancellationToken)
                 : await metadata.StartAsync(libraryId, mediaId, cancellationToken);
             return Results.Accepted($"/api/v1/metadata/jobs/{job.Id}", job);
         });
@@ -982,7 +1010,11 @@ public static class ApiEndpointMappings
     private static MediaKind? ParseCatalogKind(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
-        if (Enum.TryParse<MediaKind>(value, ignoreCase: true, out var kind)) return kind;
+        var trimmed = value.Trim();
+        if (!int.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out _)
+            && Enum.TryParse<MediaKind>(trimmed, ignoreCase: true, out var kind)
+            && Enum.IsDefined(kind))
+            return kind;
         throw new MetadataException(
             "invalid_catalog_kind",
             "Catalog kind must be movie or series.",
@@ -1166,19 +1198,24 @@ public static class ApiEndpointMappings
         ScrubPreviewService scrubPreviews,
         CancellationToken cancellationToken)
     {
-        // "download": an app copies the title to keep it; nobody watches yet, so Smart Home hears
-        // nothing and no scrub previews are made for it (since server 2.20.0).
+        // "download": an app copies the title to keep it; nobody watches yet, so pending sleep
+        // timers are not cancelled and no scrub previews are made for it (since server 2.20.0).
         if (purpose is not (null or "" or "playback" or "download"))
             return Task.FromResult(Results.Json(new ApiProblem("invalid_purpose", "The purpose must be playback or download."),
                 statusCode: StatusCodes.Status400BadRequest));
         var download = purpose == "download";
-        sleep.PlaybackStarted();
-        if (!download) scrubPreviews.NotifyTitleOpened(mediaId);
+        if (!download)
+        {
+            sleep.PlaybackStarted();
+            scrubPreviews.NotifyTitleOpened(mediaId);
+        }
         return ExecuteAsync(() => playback.CreateAsync(
             context.User.RequireUserId(),
             context.User.RequireSessionId(),
             mediaId,
-            cancellationToken, context.User.RequireProfileSessionId(), download));
+            cancellationToken,
+            context.User.RequireProfileSessionId(),
+            forDownload: download));
     }
 
     private static Task<IResult> RevokePlaybackAsync(
@@ -1252,14 +1289,15 @@ public static class ApiEndpointMappings
 
         context.Response.Headers.CacheControl = "private, no-store";
         context.Response.Headers.XContentTypeOptions = "nosniff";
+        // RFC 9110 §14.2: ignore unknown range units, syntactically invalid Range headers, and
+        // multi-range requests (serve the full representation with 200); reserve 416 for valid
+        // single byte ranges that are unsatisfiable.
         if (context.Request.Headers.Range.Count > 0
             && (!RangeHeaderValue.TryParse(context.Request.Headers.Range.ToString(), out var range)
                 || !string.Equals(range.Unit, "bytes", StringComparison.OrdinalIgnoreCase)
                 || range.Ranges.Count != 1))
         {
-            source.Stream.Dispose();
-            context.Response.Headers.ContentRange = $"bytes */{source.ContentLength}";
-            return Results.StatusCode(StatusCodes.Status416RangeNotSatisfiable);
+            context.Request.Headers.Remove("Range");
         }
 
         var entityTag = new EntityTagHeaderValue(

@@ -31,11 +31,22 @@ enum TVWakeOnLan {
   static func remember(
     serverID: UUID, info: TVServerInfo?, hosts: [String], defaults: UserDefaults = .standard
   ) {
+    remember(
+      serverID: serverID, wakeOnLanAddresses: info?.wakeOnLanAddresses, hosting: info?.hosting,
+      hosts: hosts, defaults: defaults)
+  }
+
+  /// Remembers what a server reported (from `/server/info` or `/api/v1/profiles`) and where it
+  /// answered, keyed by its identity.
+  static func remember(
+    serverID: UUID, wakeOnLanAddresses: [String]?, hosting: String?, hosts: [String],
+    defaults: UserDefaults = .standard
+  ) {
     var all = load(defaults)
     var target = all[serverID.uuidString] ?? Target()
-    let reported = (info?.wakeOnLanAddresses ?? []).compactMap(hardwareAddress).map(format)
+    let reported = (wakeOnLanAddresses ?? []).compactMap(hardwareAddress).map(format)
     if !reported.isEmpty { target.hardwareAddresses = reported }
-    if let hosting = info?.hosting {
+    if let hosting {
       target.hosting = hosting
       // A desktop or laptop is started by its owner; old addresses must not wake it.
       if hosting == "macApp" || hosting == "linuxApp" { target.hardwareAddresses = [] }

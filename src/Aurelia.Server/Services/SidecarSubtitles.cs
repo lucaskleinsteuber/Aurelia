@@ -30,13 +30,63 @@ public static partial class SidecarSubtitles
         ".sub", ".idx"
     };
 
-    private static readonly ConcurrentDictionary<string, CachedSubtitle> MemoryCache = new();
-    // Converted subtitles are small; the cap keeps a few large files from filling a small server's memory.
-    private const long MaximumCachedBytes = 32 * 1024 * 1024;
-    private const int MaximumCachedFileBytes = 2 * 1024 * 1024;
-    private static long cachedBytes;
+    private static readonly SubtitleMemoryCache MemoryCache = new(maximumEntries: 100, maximumTotalBytes: 32 * 1024 * 1024, maximumEntryBytes: 2 * 1024 * 1024);
 
-    private sealed record CachedSubtitle(long LastModifiedTicks, long FileLength, byte[] Content);
+    internal sealed class SubtitleMemoryCache(int maximumEntries, long maximumTotalBytes, int maximumEntryBytes)
+    {
+        private sealed record Entry(string Key, long LastModifiedTicks, long FileLength, byte[] Content);
+
+        private readonly object gate = new();
+        private readonly Dictionary<string, LinkedListNode<Entry>> map = new(StringComparer.Ordinal);
+        private readonly LinkedList<Entry> order = new();
+        private long totalBytes;
+
+        public int Count { get { lock (gate) return map.Count; } }
+
+        public bool TryGet(string key, long lastModifiedTicks, long fileLength, out byte[] content)
+        {
+            lock (gate)
+            {
+                if (map.TryGetValue(key, out var node))
+                {
+                    if (node.Value.LastModifiedTicks == lastModifiedTicks && node.Value.FileLength == fileLength)
+                    {
+                        order.Remove(node);
+                        order.AddFirst(node);
+                        content = node.Value.Content;
+                        return true;
+                    }
+                    RemoveLocked(node);
+                }
+            }
+            content = [];
+            return false;
+        }
+
+        public void Set(string key, long lastModifiedTicks, long fileLength, byte[] content)
+        {
+            if (content.Length > maximumEntryBytes || content.Length > maximumTotalBytes) return;
+            lock (gate)
+            {
+                if (map.TryGetValue(key, out var existing)) RemoveLocked(existing);
+                while (order.Last is { } oldest && (map.Count >= maximumEntries || totalBytes + content.Length > maximumTotalBytes))
+                {
+                    RemoveLocked(oldest);
+                }
+                var node = new LinkedListNode<Entry>(new Entry(key, lastModifiedTicks, fileLength, content));
+                order.AddFirst(node);
+                map[key] = node;
+                totalBytes += content.Length;
+            }
+        }
+
+        private void RemoveLocked(LinkedListNode<Entry> node)
+        {
+            order.Remove(node);
+            map.Remove(node.Value.Key);
+            totalBytes -= node.Value.Content.Length;
+        }
+    }
 
     /// <summary>
     /// Subtitle files that belong to a video, in a stable order (track numbers are positions in
@@ -51,7 +101,7 @@ public static partial class SidecarSubtitles
         var video = new FileInfo(videoPath);
         if (!video.Exists || video.Directory is not { Exists: true, LinkTarget: null } directory) return [];
 
-        var baseName = Path.GetFileNameWithoutExtension(video.Name);
+        var baseName = Path.GetFileNameWithoutExtension(video.Name).Normalize(NormalizationForm.FormC);
         var candidates = new List<FileInfo>();
         try
         {
@@ -61,7 +111,7 @@ public static partial class SidecarSubtitles
             {
                 candidates.AddRange(folder.EnumerateFiles().Where(file => alone || BelongsTo(file.Name, baseName)));
                 if (folder.EnumerateDirectories().FirstOrDefault(child => child.LinkTarget is null
-                        && string.Equals(child.Name, baseName, StringComparison.OrdinalIgnoreCase)) is { } named)
+                        && string.Equals(child.Name.Normalize(NormalizationForm.FormC), baseName, StringComparison.OrdinalIgnoreCase)) is { } named)
                     candidates.AddRange(named.EnumerateFiles());
             }
         }
@@ -88,11 +138,12 @@ public static partial class SidecarSubtitles
     /// <summary>"Movie.srt" and "Movie.en.srt" belong to "Movie.mkv"; "Movie 2.srt" does not.</summary>
     private static bool BelongsTo(string fileName, string baseName)
     {
-        var name = Path.GetFileNameWithoutExtension(fileName);
-        return name.Length == baseName.Length
-            ? string.Equals(name, baseName, StringComparison.OrdinalIgnoreCase)
-            : name.Length > baseName.Length && name[baseName.Length] == '.'
-                && name.StartsWith(baseName, StringComparison.OrdinalIgnoreCase);
+        var name = Path.GetFileNameWithoutExtension(fileName).Normalize(NormalizationForm.FormC);
+        var normalizedBase = baseName.Normalize(NormalizationForm.FormC);
+        return name.Length == normalizedBase.Length
+            ? string.Equals(name, normalizedBase, StringComparison.OrdinalIgnoreCase)
+            : name.Length > normalizedBase.Length && name[normalizedBase.Length] == '.'
+                && name.StartsWith(normalizedBase, StringComparison.OrdinalIgnoreCase);
     }
 
     private static DiscoveredSidecarSubtitle Describe(FileInfo file, string baseName)
@@ -111,14 +162,16 @@ public static partial class SidecarSubtitles
 
     public static (string? Language, bool IsForced, bool IsSdh, bool IsDefault, string? Title) ParseTags(string videoBaseName, string subtitleBaseName)
     {
+        var normalizedVideo = videoBaseName.Normalize(NormalizationForm.FormC);
+        var normalizedSubtitle = subtitleBaseName.Normalize(NormalizationForm.FormC);
         string tagPart;
-        if (subtitleBaseName.StartsWith(videoBaseName, StringComparison.OrdinalIgnoreCase))
+        if (normalizedSubtitle.StartsWith(normalizedVideo, StringComparison.OrdinalIgnoreCase))
         {
-            tagPart = subtitleBaseName[videoBaseName.Length..].TrimStart('.', '_', '-', ' ');
+            tagPart = normalizedSubtitle[normalizedVideo.Length..].TrimStart('.', '_', '-', ' ');
         }
         else
         {
-            tagPart = subtitleBaseName;
+            tagPart = normalizedSubtitle;
         }
 
         var tokens = tagPart.Split(['.', '_', '-', ' '], StringSplitOptions.RemoveEmptyEntries);
@@ -265,7 +318,7 @@ public static partial class SidecarSubtitles
         return false;
     }
 
-    public static async Task<byte[]> ReadAsWebVttAsync(string filePath, CancellationToken cancellationToken)
+    public static async Task<byte[]> ReadAsWebVttAsync(string filePath, CancellationToken cancellationToken, string? language = null)
     {
         if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
             throw new FileNotFoundException("Subtitle file not found.", filePath);
@@ -278,10 +331,12 @@ public static partial class SidecarSubtitles
 
         var ticks = fileInfo.LastWriteTimeUtc.Ticks;
         var length = fileInfo.Length;
+        var effectiveLanguage = language ?? InferTrailingLanguage(filePath);
+        var cacheKey = effectiveLanguage is null ? filePath : $"{filePath}\0{effectiveLanguage}";
 
-        if (MemoryCache.TryGetValue(filePath, out var cached) && cached.LastModifiedTicks == ticks && cached.FileLength == length)
+        if (MemoryCache.TryGet(cacheKey, ticks, length, out var cached))
         {
-            return cached.Content;
+            return cached;
         }
 
         byte[] rawBytes;
@@ -299,7 +354,7 @@ public static partial class SidecarSubtitles
             }
         }
 
-        var text = DecodeText(rawBytes);
+        var text = DecodeText(rawBytes, effectiveLanguage);
         var ext = Path.GetExtension(filePath).ToLowerInvariant();
 
         string vtt;
@@ -317,22 +372,11 @@ public static partial class SidecarSubtitles
         }
 
         var resultBytes = Encoding.UTF8.GetBytes(vtt);
-        if (resultBytes.Length <= MaximumCachedFileBytes)
-        {
-            if (MemoryCache.Count >= 100 || Interlocked.Read(ref cachedBytes) + resultBytes.Length > MaximumCachedBytes)
-            {
-                MemoryCache.Clear();
-                Interlocked.Exchange(ref cachedBytes, 0);
-            }
-            if (MemoryCache.TryAdd(filePath, new CachedSubtitle(ticks, length, resultBytes)))
-                Interlocked.Add(ref cachedBytes, resultBytes.Length);
-            else
-                MemoryCache[filePath] = new CachedSubtitle(ticks, length, resultBytes);
-        }
+        MemoryCache.Set(cacheKey, ticks, length, resultBytes);
         return resultBytes;
     }
 
-    public static string DecodeText(byte[] bytes)
+    public static string DecodeText(byte[] bytes, string? language = null)
     {
         if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
             return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
@@ -351,18 +395,67 @@ public static partial class SidecarSubtitles
         }
         catch (DecoderFallbackException)
         {
-            // Fallback to Windows-1252 (or ISO-8859-1)
+            // Fallback to a language-matched legacy Windows code page (e.g. CP1251 Cyrillic,
+            // CP1250 Central European), an unlabeled Cyrillic heuristic, or Windows-1252.
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            var codePage = CodePageForLanguage(language)
+                ?? (LooksLikeCyrillicWindows1251(bytes) ? 1251 : 1252);
             try
             {
-                var win1252 = Encoding.GetEncoding(1252);
-                return win1252.GetString(bytes);
+                return Encoding.GetEncoding(codePage).GetString(bytes);
             }
             catch
             {
                 return Encoding.Latin1.GetString(bytes);
             }
         }
+    }
+
+    private static int? CodePageForLanguage(string? language)
+    {
+        if (string.IsNullOrWhiteSpace(language)) return null;
+        var primary = language.Trim().Split(['-', '_'], StringSplitOptions.RemoveEmptyEntries)[0].ToLowerInvariant();
+        return primary switch
+        {
+            "ru" or "uk" or "bg" or "be" or "mk" or "sr" => 1251,
+            "pl" or "cs" or "sk" or "hu" or "ro" or "hr" or "sl" or "bs" or "sq" => 1250,
+            "el" => 1253,
+            "tr" or "az" => 1254,
+            "he" or "iw" => 1255,
+            "ar" or "fa" or "ur" => 1256,
+            "lt" or "lv" or "et" => 1257,
+            "vi" => 1258,
+            "th" => 874,
+            "ja" => 932,
+            "zh" => 936,
+            "ko" => 949,
+            _ => null,
+        };
+    }
+
+    private static bool LooksLikeCyrillicWindows1251(byte[] bytes)
+    {
+        var cyrillicLike = 0;
+        var asciiLetters = 0;
+        foreach (var b in bytes)
+        {
+            if (b is >= 0xC0 or 0xA8 or 0xB8) cyrillicLike++;
+            else if (b is (>= (byte)'A' and <= (byte)'Z') or (>= (byte)'a' and <= (byte)'z')) asciiLetters++;
+        }
+        return cyrillicLike >= 16 && cyrillicLike > asciiLetters * 3;
+    }
+
+    private static string? InferTrailingLanguage(string filePath)
+    {
+        var stem = Path.GetFileNameWithoutExtension(filePath);
+        var parts = stem.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = parts.Length - 1; i >= 1 && i >= parts.Length - 3; i--)
+        {
+            var token = parts[i].ToLowerInvariant();
+            if (token is "forced" or "force" or "sdh" or "cc" or "default" or "def") continue;
+            return TryParseLanguage(token, out var lang) ? lang : null;
+        }
+        return null;
     }
 
     public static string NormalizeWebVtt(string input)

@@ -47,12 +47,6 @@ struct AppSettingsView: View {
   @AppStorage(GeneralPreferenceKeys.posterSize) private var posterSize = "standard"
   @AppStorage(GeneralPreferenceKeys.showWatchedInRows) private var showWatchedInRows = true
   @AppStorage(GeneralPreferenceKeys.reduceHeroMotion) private var reduceHeroMotion = false
-  @AppStorage(GeneralPreferenceKeys.showMoviesInSidebar) private var showMoviesInSidebar = true
-  @AppStorage(GeneralPreferenceKeys.showSeriesInSidebar) private var showSeriesInSidebar = true
-  @AppStorage(GeneralPreferenceKeys.showWatchlistInSidebar) private var showWatchlistInSidebar =
-    true
-  @AppStorage(GeneralPreferenceKeys.showCollectionsInSidebar) private var showCollectionsInSidebar =
-    true
   @AppStorage(GeneralPreferenceKeys.hideOfflineTitles) private var hideOfflineTitles = false
   @AppStorage(GeneralPreferenceKeys.wishNotificationsEnabled) private var wishNotificationsEnabled =
     true
@@ -75,6 +69,7 @@ struct AppSettingsView: View {
   @State private var libraryToRemove: LibrarySummary?
   @State private var libraryToRelocate: LibrarySummary?
   @State private var showingSwitchConfirmation = false
+  @State private var showingDisconnectConfirmation = false
   @State private var pendingLocations: [StorageLocationDraft] = []
   @State private var showingCombineConfirmation = false
   @State private var isLoadingAdministration = false
@@ -181,6 +176,19 @@ struct AppSettingsView: View {
       Text("Server data and media files remain untouched.")
     }
     .confirmationDialog(
+      "Disconnect This Mac?",
+      isPresented: $showingDisconnectConfirmation,
+      titleVisibility: .visible
+    ) {
+      Button("Disconnect This Mac", role: .destructive) {
+        Task { await model.disconnect() }
+      }
+    } message: {
+      Text(
+        "To connect to this server again, you will need a new pairing code. Offline downloads stored on this Mac can no longer be opened without the server."
+      )
+    }
+    .confirmationDialog(
       "Combine Existing Libraries?",
       isPresented: $showingCombineConfirmation,
       titleVisibility: .visible
@@ -221,11 +229,13 @@ struct AppSettingsView: View {
 
   private var sidebar: some View {
     VStack(spacing: 12) {
-      AureliaSearchField(prompt: "Search settings…", text: $searchText)
-        .padding(.horizontal, 12)
-        // Below the window buttons and Done.
-        .padding(.top, 52)
-        .accessibilityIdentifier("settings-search-field")
+      AureliaSearchField(
+        prompt: "Search settings…", text: $searchText, identifier: "settings-search-field",
+        compact: true
+      )
+      .padding(.horizontal, 12)
+      // Below the window buttons and Done.
+      .padding(.top, 52)
 
       ScrollView {
         VStack(spacing: 2) {
@@ -300,6 +310,10 @@ struct AppSettingsView: View {
 
   @ViewBuilder
   private var detailArea: some View {
+    let topError = SettingsErrorBannerPolicy.topError(
+      category: selectedCategory,
+      administrationError: model.administrationErrorMessage,
+      modelError: model.errorMessage)
     ScrollViewReader { proxy in
       ScrollView {
         VStack(alignment: .leading, spacing: 22) {
@@ -307,27 +321,42 @@ struct AppSettingsView: View {
             .frame(height: 0)
             .id("settings-top")
 
+          if let topError {
+            ErrorBanner(
+              message: topError,
+              retry: {
+                Task {
+                  if model.canRestoreLocalHosting {
+                    await model.restoreLocalHosting()
+                  } else if model.serverUnreachable {
+                    await model.retryConnection()
+                    await model.reloadAdministration()
+                  } else {
+                    await model.reloadAdministration()
+                  }
+                }
+              },
+              retryLabel: model.canRestoreLocalHosting ? "Start Local Server" : "Try Again",
+              retryDisabled: model.isRecoveringLocalHost || isLoadingAdministration,
+              inline: true)
+          }
+
           if !searchText.isEmpty {
             searchResultsView
           } else {
             categoryView(selectedCategory)
           }
-
-          if selectedCategory != .updates, let error = model.administrationErrorMessage {
-            ErrorBanner(message: error, inline: true)
-          }
-          if selectedCategory != .updates, let error = model.errorMessage {
-            ErrorBanner(message: error, inline: true)
-          }
         }
         .padding(26)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(maxWidth: AureliaDesign.settingsMaxContentWidth, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .top)
         .aureliaSettingRows()
       }
       .id(selectedCategory)
       // Another category shows at once; it no longer springs in (audit M3).
       .transition(.identity)
       .scrollContentBackground(.hidden)
+      .aureliaOverlayScrollbars()
       .onChange(of: selectedCategory) {
         proxy.scrollTo("settings-top", anchor: .top)
       }
@@ -538,24 +567,20 @@ struct AppSettingsView: View {
     ) {
       VStack(alignment: .leading, spacing: 14) {
         LabeledContent("Default Start Screen") {
-          Picker("Default Start Screen", selection: $defaultStartScreen) {
+          AureliaSettingPicker("Default Start Screen", selection: $defaultStartScreen) {
             ForEach(StartScreenPreference.allCases) { screen in
               Text(screen.label).tag(screen.rawValue)
             }
           }
-          .labelsHidden()
-          .frame(width: 170)
           .accessibilityIdentifier("interface-start-screen")
         }
 
         LabeledContent("Poster Size") {
-          Picker("Poster Size", selection: $posterSize) {
+          AureliaSettingPicker("Poster Size", selection: $posterSize) {
             ForEach(PosterSizePreference.allCases) { size in
               Text(size.label).tag(size.rawValue)
             }
           }
-          .labelsHidden()
-          .frame(width: 170)
           .accessibilityIdentifier("interface-poster-size")
         }
 
@@ -567,6 +592,7 @@ struct AppSettingsView: View {
           Text("Keeps finished titles in Favorites, genre rows and Recently Added on Home.")
             .font(.caption)
             .foregroundStyle(.secondary)
+            .aureliaSettingsDescriptionWidth()
         }
 
         VStack(alignment: .leading, spacing: 2) {
@@ -575,6 +601,7 @@ struct AppSettingsView: View {
           Text("Turns off sliding and zooming animations in Aurelia, as the system setting does.")
             .font(.caption)
             .foregroundStyle(.secondary)
+            .aureliaSettingsDescriptionWidth()
         }
 
         if model.supportsWishes {
@@ -587,6 +614,7 @@ struct AppSettingsView: View {
             )
             .font(.caption)
             .foregroundStyle(.secondary)
+            .aureliaSettingsDescriptionWidth()
           }
         }
       }
@@ -649,13 +677,11 @@ struct AppSettingsView: View {
           Toggle("Let the Server Rest When Unused", isOn: $restsWhenUnused)
             .accessibilityIdentifier("interface-rest")
           LabeledContent("After") {
-            Picker("After", selection: $restMinutes) {
+            AureliaSettingPicker("After", selection: $restMinutes) {
               ForEach(AureliaRest.minuteChoices, id: \.self) { minutes in
                 Text("\(minutes) minutes").tag(minutes)
               }
             }
-            .labelsHidden()
-            .frame(width: 170)
           }
           .padding(.top, 6)
           .disabled(!restsWhenUnused)
@@ -664,7 +690,7 @@ struct AppSettingsView: View {
           )
           .font(.caption)
           .foregroundStyle(.secondary)
-          .frame(maxWidth: .infinity, alignment: .leading)
+          .aureliaSettingsDescriptionWidth()
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -679,6 +705,14 @@ struct AppSettingsView: View {
     cinemaModeSection
     playerControlsSection
     audioSubtitlesSection
+    HStack {
+      Spacer()
+      Button("Restore Playback Defaults") {
+        playbackPreferences.restoreDefaults()
+      }
+      .buttonStyle(.bordered)
+      .accessibilityIdentifier("playback-restore-defaults")
+    }
   }
 
   private var cinemaModeSection: some View {
@@ -695,22 +729,35 @@ struct AppSettingsView: View {
             "When a film starts from the beginning, an ad and trailers of films in your library you haven't watched yet come first. Return starts the film at any time."
           )
           .font(.caption).foregroundStyle(.secondary)
+          .aureliaSettingsDescriptionWidth()
         }
 
         Group {
-          Toggle("Ads", isOn: $playbackPreferences.preferences.cinemaAds)
-            .accessibilityIdentifier("playback-cinema-ads")
+          VStack(alignment: .leading, spacing: 2) {
+            Toggle("Cinema Bumper", isOn: $playbackPreferences.preferences.cinemaAds)
+              .accessibilityIdentifier("playback-cinema-ads")
+            Text("Plays a short built-in Aurelia cinema opener before the trailers.")
+              .font(.caption).foregroundStyle(.secondary)
+              .aureliaSettingsDescriptionWidth()
+          }
 
-          LabeledContent("Trailers") {
-            Picker("Trailers", selection: $playbackPreferences.preferences.cinemaTrailers) {
-              Text("None").tag(0)
-              Text("1").tag(1)
-              Text("2").tag(2)
-              Text("3").tag(3)
+          VStack(alignment: .leading, spacing: 2) {
+            LabeledContent("Trailers") {
+              AureliaSettingPicker(
+                "Trailers", selection: $playbackPreferences.preferences.cinemaTrailers
+              ) {
+                Text("None").tag(0)
+                Text("1").tag(1)
+                Text("2").tag(2)
+                Text("3").tag(3)
+              }
+              .accessibilityIdentifier("playback-cinema-trailers")
             }
-            .labelsHidden()
-            .frame(width: 140)
-            .accessibilityIdentifier("playback-cinema-trailers")
+            Text(
+              "How many trailers for unwatched movies in your library play before the feature film."
+            )
+            .font(.caption).foregroundStyle(.secondary)
+            .aureliaSettingsDescriptionWidth()
           }
         }
         .disabled(!playbackPreferences.preferences.cinemaMode)
@@ -731,43 +778,42 @@ struct AppSettingsView: View {
             .accessibilityIdentifier("playback-automatic-resume")
           Text("Play continues where you stopped instead of asking whether to start over.")
             .font(.caption).foregroundStyle(.secondary)
+            .aureliaSettingsDescriptionWidth()
         }
 
         if model.supportsAdaptiveStreaming {
           VStack(alignment: .leading, spacing: 2) {
             LabeledContent("Streaming Quality") {
-              Picker(
+              AureliaSettingPicker(
                 "Streaming Quality", selection: $playbackPreferences.preferences.streamingQuality
               ) {
                 ForEach(StreamingQuality.allCases) { quality in Text(quality.title).tag(quality) }
               }
-              .labelsHidden()
-              .frame(width: 180)
               .accessibilityIdentifier("playback-streaming-quality")
             }
             Text(
               "Original plays the file itself. The other choices let the server convert the title while it plays, in the quality your connection carries, which helps away from home."
             )
             .font(.caption).foregroundStyle(.secondary)
+            .aureliaSettingsDescriptionWidth()
           }
         }
 
         if model.libraryCapabilities.contains(ServerFeatureNames.convertedDownloads) {
           VStack(alignment: .leading, spacing: 2) {
             LabeledContent("Download Quality") {
-              Picker("Download Quality", selection: $downloadQuality) {
+              AureliaSettingPicker("Download Quality", selection: $downloadQuality) {
                 ForEach(DownloadQualityPreference.choices, id: \.id) { choice in
                   Text(choice.title).tag(choice.id)
                 }
               }
-              .labelsHidden()
-              .frame(width: 180)
               .accessibilityIdentifier("playback-download-quality")
             }
             Text(
               "Original keeps the file itself. A smaller quality has the server convert a copy while it downloads, which saves space on this Mac; a title that is already small keeps its original."
             )
             .font(.caption).foregroundStyle(.secondary)
+            .aureliaSettingsDescriptionWidth()
           }
         }
 
@@ -779,36 +825,37 @@ struct AppSettingsView: View {
           .accessibilityIdentifier("playback-auto-next")
           Text("When an episode ends, the next one starts after the countdown below.")
             .font(.caption).foregroundStyle(.secondary)
+            .aureliaSettingsDescriptionWidth()
         }
 
         LabeledContent("Up Next Countdown Duration") {
-          Picker(
-            "Up Next Countdown", selection: $playbackPreferences.preferences.upNextCountdownSeconds
+          AureliaSettingPicker(
+            "Up Next Countdown",
+            selection: $playbackPreferences.preferences.upNextCountdownSeconds
           ) {
             ForEach([5, 10, 15, 20, 30], id: \.self) { sec in
               Text("\(sec) seconds").tag(sec)
             }
           }
-          .labelsHidden()
-          .frame(width: 140)
           .accessibilityIdentifier("playback-upnext-countdown")
         }
+        .disabled(!playbackPreferences.preferences.automaticallyPlayNextEpisode)
 
         if model.supportsMediaSegments {
           VStack(alignment: .leading, spacing: 2) {
             LabeledContent("Intros") {
-              Picker("Intros", selection: $playbackPreferences.preferences.introSkipping) {
+              AureliaSettingPicker(
+                "Intros", selection: $playbackPreferences.preferences.introSkipping
+              ) {
                 ForEach(IntroSkipping.allCases) { choice in Text(choice.title).tag(choice) }
               }
-              .labelsHidden()
-              .frame(width: 180)
               .accessibilityIdentifier("playback-skip-intros")
             }
             Text(
               "Your server finds where an episode's intro is. Show Skip Intro offers a button while it plays (Return or S); Skip Automatically jumps past it once per episode, but never when you go back into it yourself."
             )
             .font(.caption).foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            .aureliaSettingsDescriptionWidth()
           }
           VStack(alignment: .leading, spacing: 2) {
             Toggle(
@@ -821,7 +868,7 @@ struct AppSettingsView: View {
               "Up Next appears when the credits begin, with the countdown above and Watch Credits. Turned off, or for episodes without known credits, it appears in the last seconds."
             )
             .font(.caption).foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            .aureliaSettingsDescriptionWidth()
           }
           VStack(alignment: .leading, spacing: 2) {
             Toggle(
@@ -833,27 +880,27 @@ struct AppSettingsView: View {
               "When a movie or a series' last episode reaches its credits, your server suggests what to watch next, with Watch Now, Watch Credits and Done. Turned on, the suggestion starts by itself when the title ends; otherwise an end screen shows it with two more."
             )
             .font(.caption).foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            .aureliaSettingsDescriptionWidth()
           }
         }
 
-        LabeledContent("Start Over If Barely Started") {
-          Picker(
-            "Start Over Threshold",
-            selection: $playbackPreferences.preferences.resumeThresholdSeconds
-          ) {
-            Text("Never").tag(0)
-            Text("Under 30 seconds").tag(30)
-            Text("Under 1 minute").tag(60)
-            Text("Under 2 minutes").tag(120)
+        VStack(alignment: .leading, spacing: 2) {
+          LabeledContent("Start Over If Barely Started") {
+            AureliaSettingPicker(
+              "Start Over Threshold",
+              selection: $playbackPreferences.preferences.resumeThresholdSeconds
+            ) {
+              Text("Never").tag(0)
+              Text("Under 30 seconds").tag(30)
+              Text("Under 1 minute").tag(60)
+              Text("Under 2 minutes").tag(120)
+            }
+            .accessibilityIdentifier("playback-resume-threshold")
           }
-          .labelsHidden()
-          .frame(width: 140)
-          .accessibilityIdentifier("playback-resume-threshold")
+          Text("A title stopped within this time starts from the beginning next time.")
+            .font(.caption).foregroundStyle(.secondary)
+            .aureliaSettingsDescriptionWidth()
         }
-        Text("A title stopped within this time starts from the beginning next time.")
-          .font(.caption).foregroundStyle(.secondary)
-          .padding(.top, -12)
 
         Divider()
 
@@ -865,6 +912,7 @@ struct AppSettingsView: View {
           .accessibilityIdentifier("playback-prevent-sleep")
           Text("Keeps this Mac and its display awake while a title plays.")
             .font(.caption).foregroundStyle(.secondary)
+            .aureliaSettingsDescriptionWidth()
         }
 
         VStack(alignment: .leading, spacing: 2) {
@@ -878,6 +926,7 @@ struct AppSettingsView: View {
           )
           .font(.caption)
           .foregroundStyle(.secondary)
+          .aureliaSettingsDescriptionWidth()
         }
 
         VStack(alignment: .leading, spacing: 2) {
@@ -890,29 +939,31 @@ struct AppSettingsView: View {
             "Cuts off the edges of pictures that are wider or narrower than the window. Z switches it in the player."
           )
           .font(.caption).foregroundStyle(.secondary)
+          .aureliaSettingsDescriptionWidth()
         }
 
         VStack(alignment: .leading, spacing: 8) {
           LabeledContent("Dialogue Boost") {
-            Picker("Dialogue Boost", selection: $playbackPreferences.preferences.dialogueBoost) {
+            AureliaSettingPicker(
+              "Dialogue Boost", selection: $playbackPreferences.preferences.dialogueBoost
+            ) {
               ForEach(DialogueBoost.allCases, id: \.self) { Text($0.title).tag($0) }
             }
-            .labelsHidden()
-            .frame(width: 170)
             .accessibilityIdentifier("playback-dialogue-boost")
           }
           LabeledContent("Volume Leveling") {
-            Picker("Volume Leveling", selection: $playbackPreferences.preferences.volumeLeveling) {
+            AureliaSettingPicker(
+              "Volume Leveling", selection: $playbackPreferences.preferences.volumeLeveling
+            ) {
               ForEach(VolumeLeveling.allCases, id: \.self) { Text($0.title).tag($0) }
             }
-            .labelsHidden()
-            .frame(width: 170)
             .accessibilityIdentifier("playback-volume-leveling")
           }
           Text(
             "Dialogue Boost makes speech clearer; Volume Leveling evens out quiet and loud passages, and Sleep evens them out more for late nights."
           )
           .font(.caption).foregroundStyle(.secondary)
+          .aureliaSettingsDescriptionWidth()
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -927,15 +978,14 @@ struct AppSettingsView: View {
     ) {
       VStack(alignment: .leading, spacing: 14) {
         LabeledContent("Default Playback Rate") {
-          Picker(
-            "Default Playback Rate", selection: $playbackPreferences.preferences.defaultPlaybackRate
+          AureliaSettingPicker(
+            "Default Playback Rate",
+            selection: $playbackPreferences.preferences.defaultPlaybackRate
           ) {
             ForEach(PlaybackPreferences.supportedRates, id: \.self) { rate in
               Text(playbackRateLabel(rate)).tag(rate)
             }
           }
-          .labelsHidden()
-          .frame(width: 120)
           .accessibilityIdentifier("playback-default-rate")
         }
 
@@ -952,27 +1002,38 @@ struct AppSettingsView: View {
         }
 
         LabeledContent("Controls Auto-Hide Delay") {
-          Picker(
+          AureliaSettingPicker(
             "Controls Auto-Hide Delay",
-            selection: $playbackPreferences.preferences.controlsAutoHideDelay
+            selection: Binding(
+              get: {
+                SettingsChoiceNormalization.autoHideDelay(
+                  playbackPreferences.preferences.controlsAutoHideDelay)
+              },
+              set: { playbackPreferences.preferences.controlsAutoHideDelay = $0 }
+            )
           ) {
-            ForEach([2.0, 3.0, 5.0, 8.0], id: \.self) { value in
+            ForEach(SettingsChoiceNormalization.autoHideDelayChoices, id: \.self) { value in
               Text("\(Int(value)) seconds").tag(value)
             }
           }
-          .labelsHidden()
-          .frame(width: 140)
           .accessibilityIdentifier("playback-auto-hide-delay")
         }
 
         LabeledContent("Seek Interval") {
-          Stepper(
-            "\(playbackPreferences.preferences.seekInterval) seconds",
-            value: $playbackPreferences.preferences.seekInterval,
-            in: 5...60,
-            step: 5
-          )
-          .frame(width: 170, alignment: .trailing)
+          AureliaSettingPicker(
+            "Seek Interval",
+            selection: Binding(
+              get: {
+                SettingsChoiceNormalization.seekInterval(
+                  playbackPreferences.preferences.seekInterval)
+              },
+              set: { playbackPreferences.preferences.seekInterval = $0 }
+            )
+          ) {
+            ForEach(SettingsChoiceNormalization.seekIntervalChoices, id: \.self) { value in
+              Text("\(value) seconds").tag(value)
+            }
+          }
           .accessibilityIdentifier("playback-seek-interval")
         }
       }
@@ -989,7 +1050,7 @@ struct AppSettingsView: View {
     ) {
       VStack(alignment: .leading, spacing: 14) {
         LabeledContent("Default Audio Language") {
-          Picker(
+          AureliaSettingPicker(
             "Default Audio Language",
             selection: $playbackPreferences.preferences.defaultAudioLanguage
           ) {
@@ -1001,13 +1062,11 @@ struct AppSettingsView: View {
             Text("Italian").tag("it")
             Text("Japanese").tag("ja")
           }
-          .labelsHidden()
-          .frame(width: 160)
           .accessibilityIdentifier("playback-audio-lang")
         }
 
         LabeledContent("Default Subtitle Language") {
-          Picker(
+          AureliaSettingPicker(
             "Default Subtitle Language",
             selection: $playbackPreferences.preferences.defaultSubtitleLanguage
           ) {
@@ -1019,33 +1078,30 @@ struct AppSettingsView: View {
             Text("Italian").tag("it")
             Text("Japanese").tag("ja")
           }
-          .labelsHidden()
-          .frame(width: 160)
           .accessibilityIdentifier("playback-sub-lang")
         }
 
         LabeledContent("Subtitle Size") {
-          Picker("Subtitle Size", selection: $playbackPreferences.preferences.subtitleSize) {
+          AureliaSettingPicker(
+            "Subtitle Size", selection: $playbackPreferences.preferences.subtitleSize
+          ) {
             ForEach(SubtitleSize.allCases) { Text($0.title).tag($0) }
           }
-          .labelsHidden()
-          .frame(width: 160)
           .accessibilityIdentifier("playback-subtitle-size")
         }
 
         LabeledContent("Subtitle Background") {
-          Picker(
+          AureliaSettingPicker(
             "Subtitle Background", selection: $playbackPreferences.preferences.subtitleBackground
           ) {
             ForEach(SubtitleBackground.allCases) { Text($0.title).tag($0) }
           }
-          .labelsHidden()
-          .frame(width: 160)
           .accessibilityIdentifier("playback-subtitle-background")
         }
         Text("Subtitle size and background apply from the next title you open.")
           .font(.caption)
           .foregroundStyle(.secondary)
+          .aureliaSettingsDescriptionWidth()
 
         Divider()
 
@@ -1055,6 +1111,7 @@ struct AppSettingsView: View {
             Text("Aurelia remembers the tracks you choose, separately for each series.")
               .font(.caption)
               .foregroundStyle(.secondary)
+              .aureliaSettingsDescriptionWidth()
           }
           Spacer()
           Button("Forget Track Choices") {
@@ -1062,11 +1119,6 @@ struct AppSettingsView: View {
           }
           .accessibilityIdentifier("playback-forget-tracks")
         }
-
-        Button("Restore Playback Defaults") {
-          playbackPreferences.restoreDefaults()
-        }
-        .accessibilityIdentifier("playback-restore-defaults")
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1094,13 +1146,14 @@ struct AppSettingsView: View {
       description:
         "Inspect duplicate titles, manage missing or offline files, and resolve unmatched metadata."
     ) {
-      VStack(alignment: .leading, spacing: 10) {
+      HStack {
+        Spacer()
         Button("Open Library Health…") {
           showingLibraryHealth = true
         }
+        .buttonStyle(.bordered)
         .accessibilityIdentifier("open-library-health")
       }
-      .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
 
@@ -1131,7 +1184,7 @@ struct AppSettingsView: View {
               Text(library.path).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
-            Text(library.availability.rawValue.capitalized)
+            Text(AureliaStateLabels.libraryAvailability(library.availability))
               .font(.caption).foregroundStyle(.secondary)
             Button("Scan") { Task { await model.scanLibrary(id: library.id) } }
               .disabled(library.importPreviewRequired == true)
@@ -1155,14 +1208,18 @@ struct AppSettingsView: View {
 
         Divider()
 
-        VStack(alignment: .leading, spacing: 6) {
-          Text("Manage Media & Assignments").font(.headline)
-          Text(
-            "Assign target titles, verify seasons, tag extras or trailers, and manage folder import rules."
-          )
-          .font(.caption).foregroundStyle(.secondary)
-
+        HStack(alignment: .center, spacing: 16) {
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Manage Media & Assignments").font(.headline)
+            Text(
+              "Assign target titles, verify seasons, tag extras or trailers, and manage folder import rules."
+            )
+            .font(.caption).foregroundStyle(.secondary)
+            .aureliaSettingsDescriptionWidth()
+          }
+          Spacer()
           Button("Manage Media…") { showingMediaManager = true }
+            .buttonStyle(.bordered)
             .accessibilityIdentifier("add-storage-locations")
         }
       }
@@ -1307,8 +1364,8 @@ struct AppSettingsView: View {
             AureliaProfileAvatar(user: user, size: 44)
             VStack(alignment: .leading, spacing: 2) {
               Text(user.shownName).font(.headline)
-              Text("Role: \(user.role.rawValue.capitalized)").font(.caption).foregroundStyle(
-                .secondary)
+              Text("Role: \(AureliaStateLabels.userRole(user.role))").font(.caption)
+                .foregroundStyle(.secondary)
             }
             Spacer()
             if model.profile?.isViewingSession == true {
@@ -1360,7 +1417,11 @@ struct AppSettingsView: View {
           "Installed Version", value: "\(updater.currentVersion) (\(updater.currentBuild))")
         LabeledContent("Status", value: updateStatusText)
 
-        if updater.state == .downloading || updater.state == .installing {
+        if let locationIssue = updater.installLocationIssue {
+          Text(locationIssue.message)
+            .font(.callout).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        } else if updater.state == .downloading || updater.state == .installing {
           AppUpdateProgressBar(updater: updater)
           if updater.state == .downloading {
             Button("Cancel Download") { updater.cancelInstall() }
@@ -1370,6 +1431,13 @@ struct AppSettingsView: View {
           Button("Install \(release.version) and Restart") { updater.startInstall(release) }
             .buttonStyle(AureliaPrimaryActionButtonStyle())
             .accessibilityIdentifier("updates-install")
+          if model.isLocalHost {
+            Text(
+              "Your server on this Mac will stop for about a minute during the update, so anyone watching will be interrupted."
+            )
+            .font(.callout).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+          }
         }
 
         Toggle("Check for Updates Automatically", isOn: $automaticUpdateChecks)
@@ -1440,12 +1508,13 @@ struct AppSettingsView: View {
           if let user = profile.user {
             LabeledContent(
               model.requiresProfileSelection ? "Paired Device" : "Signed In",
-              value: "\(user.username) · \(user.role.rawValue.capitalized)")
+              value: "\(user.username) · \(AureliaStateLabels.userRole(user.role))")
           }
           Divider()
           if model.operatingMode == .host {
             if profile.user?.role != .owner {
-              LabeledContent("Status", value: model.hostSnapshot.state.rawValue.capitalized)
+              LabeledContent(
+                "Status", value: AureliaStateLabels.hostState(model.hostSnapshot.state))
               Button("Restart Server") { Task { await model.restartNativeHost() } }
             }
             Button("Switch to Another Server…", role: .destructive) {
@@ -1467,8 +1536,8 @@ struct AppSettingsView: View {
                 .accessibilityIdentifier("restore-local-host")
               }
             }
-            Button("Disconnect This Mac", role: .destructive) {
-              Task { await model.disconnect() }
+            Button("Disconnect This Mac…", role: .destructive) {
+              showingDisconnectConfirmation = true
             }
             .accessibilityIdentifier("disconnect-server")
           }
@@ -1506,6 +1575,84 @@ struct AppSettingsView: View {
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+}
+
+// MARK: - Settings Policies & Labels
+
+/// Deduplicates page-level server errors so Settings shows one visible banner at the top.
+enum SettingsErrorBannerPolicy {
+  static func topError(
+    category: SettingsCategory,
+    administrationError: String?,
+    modelError: String?
+  ) -> String? {
+    guard category != .updates else { return nil }
+    let admin = administrationError?.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let admin, !admin.isEmpty { return admin }
+    let general = modelError?.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let general, !general.isEmpty { return general }
+    return nil
+  }
+
+  static func shouldShowSectionError(
+    _ sectionError: String?,
+    pageAdministrationError: String?,
+    pageModelError: String?
+  ) -> Bool {
+    guard let trimmed = sectionError?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !trimmed.isEmpty
+    else { return false }
+    let admin = pageAdministrationError?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let general = pageModelError?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed != admin && trimmed != general
+  }
+}
+
+/// Maps stored preference values onto the nearest picker option so menus never render blank.
+enum SettingsChoiceNormalization {
+  static let autoHideDelayChoices: [Double] = [2.0, 3.0, 5.0, 8.0]
+  static let seekIntervalChoices: [Int] = [5, 10, 15, 20, 30, 45, 60]
+
+  static func autoHideDelay(_ stored: Double) -> Double {
+    autoHideDelayChoices.min { abs($0 - stored) < abs($1 - stored) } ?? 3.0
+  }
+
+  static func seekInterval(_ stored: Int) -> Int {
+    seekIntervalChoices.min { abs($0 - stored) < abs($1 - stored) } ?? 15
+  }
+}
+
+/// Human-readable labels for enum states (never raw `camelCase.capitalized` like "Setuprequired").
+enum AureliaStateLabels {
+  static func hostState(_ state: NativeHostState) -> String {
+    switch state {
+    case .starting: "Starting"
+    case .setupRequired: "Setup Required"
+    case .running: "Running"
+    case .restarting: "Restarting"
+    case .stopping: "Stopping"
+    case .stopped: "Stopped"
+    case .failed: "Failed"
+    case .idle: "Idle"
+    }
+  }
+
+  static func libraryAvailability(_ availability: LibraryAvailability) -> String {
+    switch availability {
+    case .available: "Available"
+    case .unavailable: "Unavailable"
+    case .error: "Access Error"
+    case .unknown: "Unknown"
+    }
+  }
+
+  static func userRole(_ role: UserRole) -> String {
+    switch role {
+    case .owner: "Owner"
+    case .admin: "Administrator"
+    case .user: "User"
     }
   }
 }

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Cmd-F focuses the library search; coming from Home or a detail page starts a new search.
@@ -6,9 +7,18 @@ private struct FindRequest: Hashable {
   let startsNewSearch: Bool
 }
 
+private struct FranchiseSelection: Hashable {
+  let summary: CollectionSummary
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine(summary.id)
+  }
+}
+
 private enum MediaSelection: Hashable {
   case media(UUID)
-  case collection(UUID)
+  case collection(UUID, notice: String? = nil)
+  case franchise(FranchiseSelection)
   case person(PersonSelection)
 }
 
@@ -43,21 +53,21 @@ struct LibraryShellView: View {
   /// Back returns to the page before instead of to the library.
   @State private var backStack: [MediaSelection] = []
   @State private var sidebarVisible = true
-  @State private var sidebarWidth = AureliaDesign.sidebarWidth
+  @AppStorage(GeneralPreferenceKeys.sidebarWidth) private var storedSidebarWidth = Double(
+    AureliaDesign.sidebarWidth)
   @State private var resizeStartWidth: CGFloat?
+  @State private var hoveringSidebarResize = false
   @State private var findRequest: FindRequest?
   @Environment(\.aureliaReduceMotion) private var reduceMotion
   @AppStorage(GeneralPreferenceKeys.sidebarVisibilityRevision) private
     var sidebarVisibilityRevision = 0
   @AppStorage(GeneralPreferenceKeys.sidebarItemOrder) private var sidebarItemOrder = ""
-  @AppStorage(GeneralPreferenceKeys.showMoviesInSidebar) private var showMoviesInSidebar = true
-  @AppStorage(GeneralPreferenceKeys.showSeriesInSidebar) private var showSeriesInSidebar = true
-  @AppStorage(GeneralPreferenceKeys.showWatchlistInSidebar) private var showWatchlistInSidebar =
-    true
-  @AppStorage(GeneralPreferenceKeys.showCollectionsInSidebar) private var showCollectionsInSidebar =
-    true
   @AppStorage(GeneralPreferenceKeys.defaultStartScreen) private var defaultStartScreen =
     StartScreenPreference.lastScreen.rawValue
+
+  private var sidebarWidth: CGFloat {
+    AureliaDesign.clampedSidebarWidth(CGFloat(storedSidebarWidth))
+  }
 
   var body: some View {
     GeometryReader { geometry in
@@ -88,42 +98,69 @@ struct LibraryShellView: View {
             .contentShape(Rectangle())
             .onTapGesture {}  // Obscured cards must never receive navigation clicks.
           sidebar
-            // Same top position as before the stack was top-aligned.
+            // Clears the 44 pt toggle in both windowed and fullscreen layouts.
             .padding(
-              .top, max(0, 44 - geometry.safeAreaInsets.top) + geometry.safeAreaInsets.top / 2
+              .top, max(0, 52 - geometry.safeAreaInsets.top) + geometry.safeAreaInsets.top / 2
             )
             .frame(width: sidebarWidth, height: geometry.size.height)
             .clipped()
           Color.clear
             .frame(width: 8, height: geometry.size.height)
             .contentShape(Rectangle())
+            .onHover { hovering in
+              if hovering && !hoveringSidebarResize {
+                hoveringSidebarResize = true
+                NSCursor.resizeLeftRight.push()
+              } else if !hovering && hoveringSidebarResize {
+                hoveringSidebarResize = false
+                NSCursor.pop()
+              }
+            }
+            .onDisappear {
+              if hoveringSidebarResize {
+                hoveringSidebarResize = false
+                NSCursor.pop()
+              }
+            }
             .gesture(
               DragGesture(minimumDistance: 2)
                 .onChanged { value in
                   if resizeStartWidth == nil { resizeStartWidth = sidebarWidth }
-                  sidebarWidth = min(
-                    max((resizeStartWidth ?? sidebarWidth) + value.translation.width, 210), 300)
+                  storedSidebarWidth = Double(
+                    AureliaDesign.clampedSidebarWidth(
+                      (resizeStartWidth ?? sidebarWidth) + value.translation.width))
                 }
                 .onEnded { _ in resizeStartWidth = nil }
             )
             .offset(x: sidebarWidth - 4)
+            .accessibilityElement()
+            .accessibilityLabel("Resize Sidebar")
+            .accessibilityValue("\(Int(sidebarWidth.rounded())) points")
+            .accessibilityAdjustableAction { direction in
+              let step: CGFloat = direction == .increment ? 16 : -16
+              storedSidebarWidth = Double(AureliaDesign.clampedSidebarWidth(sidebarWidth + step))
+            }
         }
       }
       .overlay(alignment: .topLeading) {
         sidebarToggle
           .padding(
             .leading,
-            sidebarVisible ? sidebarWidth - 44 : (geometry.safeAreaInsets.top > 0 ? 76 : 12)
+            sidebarVisible ? sidebarWidth - 52 : (geometry.safeAreaInsets.top > 0 ? 78 : 12)
           )
-          .padding(.top, 8 - geometry.safeAreaInsets.top)
+          .padding(.top, 4 - geometry.safeAreaInsets.top)
       }
       .aureliaRemoveEmptyWindowToolbar()
     }
     .background(AureliaDesign.canvas)
     .background {
-      LibraryFindShortcut(isBlocked: {
-        model.playback != nil || model.movieNightLaunch != nil || model.wrappedLaunch != nil
-      }) {
+      LibraryFindShortcut(
+        isBlocked: {
+          model.playback != nil || model.movieNightLaunch != nil || model.wrappedLaunch != nil
+        },
+        canGoBack: { selection != nil },
+        back: { goBack() }
+      ) {
         // Wishes and People have their own search; every page without a library search switches
         // to Library.
         let searchesHere: Set<LibraryDestination> = [
@@ -165,6 +202,8 @@ struct LibraryShellView: View {
           .transition(.move(edge: .bottom).combined(with: .opacity))
         }
       }
+      .frame(maxWidth: .infinity)
+      .padding(.leading, sidebarVisible ? sidebarWidth : 0)
       .padding(.bottom, 24)
     }
     .animation(
@@ -207,7 +246,9 @@ struct LibraryShellView: View {
       if case .media(let id) = selection, !model.catalogItems.contains(where: { $0.id == id }) {
         selection = nil
       }
-      if case .collection(let id) = selection, !model.collections.contains(where: { $0.id == id }) {
+      if case .collection(let id, _) = selection,
+        !model.collections.contains(where: { $0.id == id })
+      {
         selection = nil
       }
     }
@@ -340,17 +381,13 @@ struct LibraryShellView: View {
   }
 
   private var sidebarToggle: some View {
-    Button {
+    AureliaIconControl(
+      symbol: "sidebar.left",
+      label: sidebarVisible ? "Hide Sidebar" : "Show Sidebar"
+    ) {
       sidebarVisible.toggle()
-    } label: {
-      Image(systemName: "sidebar.left")
-        .font(.system(size: 15, weight: .medium))
-        .frame(width: 34, height: 34)
-        .background(.ultraThinMaterial, in: Circle())
     }
-    .buttonStyle(AureliaPressableButtonStyle())
     .help(sidebarVisible ? "Hide Sidebar (⌃⌘S)" : "Show Sidebar (⌃⌘S)")
-    .accessibilityLabel(sidebarVisible ? "Hide Sidebar" : "Show Sidebar")
     .accessibilityIdentifier("toggle-sidebar")
     .keyboardShortcut("s", modifiers: [.command, .control])
   }
@@ -419,18 +456,10 @@ struct LibraryShellView: View {
           .equatable()
           .id(page)
           .opacity(isTop ? 1 : 0)
-          .allowsHitTesting(isTop)
+          .allowsHitTesting(selection != nil && isTop)
           .accessibilityHidden(!isTop)
           .transition(.opacity)
           .zIndex(Double(index + 1))
-      }
-      if selection != nil {
-        // ⌘[ goes back from a title, collection or person, as in Safari and Finder.
-        Button("Back") { goBack() }
-          .keyboardShortcut("[", modifiers: .command)
-          .opacity(0)
-          .frame(width: 0, height: 0)
-          .accessibilityHidden(true)
       }
     }
     .onExitCommand { if selection != nil { goBack() } }
@@ -446,8 +475,14 @@ struct LibraryShellView: View {
 
   /// What a detail page is built from: a collection page also from the collection as it is now.
   private func pageKey(_ page: MediaSelection) -> DetailPageKey {
-    guard case .collection(let id) = page else { return DetailPageKey(page: page, collection: nil) }
-    return DetailPageKey(page: page, collection: model.collections.first(where: { $0.id == id }))
+    switch page {
+    case .collection(let id, _):
+      return DetailPageKey(page: page, collection: model.collections.first(where: { $0.id == id }))
+    case .franchise(let franchise):
+      return DetailPageKey(page: page, collection: franchise.summary)
+    default:
+      return DetailPageKey(page: page, collection: nil)
+    }
   }
 
   /// Opens a detail page; one opened from another detail page remembers it for Back.
@@ -468,24 +503,31 @@ struct LibraryShellView: View {
       MediaDetailView(
         mediaId: id,
         onBack: { goBack() })
-    case .collection(let id):
+    case .collection(let id, let notice):
       if let collection = model.collections.first(where: { $0.id == id }) {
         CollectionDetailView(
           collection: collection,
+          initialNotice: notice,
           onBack: { goBack() },
           onSelect: { open(.media($0)) },
-          onOpenCollection: { open(.collection($0)) })
+          onOpenCollection: { id, savedNotice in open(.collection(id, notice: savedNotice)) })
       } else {
         // Removed on another device meanwhile: say so instead of an empty page without Back.
-        ContentUnavailableView {
-          Label("Collection Unavailable", systemImage: "square.stack.3d.up.slash")
-        } description: {
-          Text("This collection was removed or is no longer shared with this profile.")
-        } actions: {
-          Button("Back") { goBack() }.buttonStyle(.bordered)
-        }
+        AureliaUnavailableView(
+          title: "Collection Unavailable",
+          systemImage: "square.stack.3d.up.slash",
+          message: "This collection was removed or is no longer shared with this profile.",
+          secondaryAction: AureliaUnavailableAction(title: "Back", prominent: false, action: goBack)
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
+    case .franchise(let franchise):
+      CollectionDetailView(
+        collection: franchise.summary,
+        isFranchise: true,
+        onBack: { goBack() },
+        onSelect: { open(.media($0)) },
+        onOpenCollection: { id, savedNotice in open(.collection(id, notice: savedNotice)) })
     case .person(let person):
       PersonDetailView(
         person: person,
@@ -530,7 +572,9 @@ struct LibraryShellView: View {
         onSelect: { open(.media($0)) },
         onSelectCollection: { open(.collection($0)) })
     case .collections:
-      CollectionsPage(onSelectCollection: { open(.collection($0)) })
+      CollectionsPage(
+        onSelectCollection: { open(.collection($0)) },
+        onSelectFranchise: { open(.franchise(FranchiseSelection(summary: $0))) })
     case .history:
       HistoryPage(onSelect: { open(.media($0)) })
     case .statistics:
@@ -564,12 +608,13 @@ private struct HomePage: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityLabel("Loading Library")
         } else if model.visibleErrorMessage != nil || model.isRecoveringLocalHost {
-          ContentUnavailableView(
-            model.isRecoveringLocalHost ? "Starting Local Server" : "Server Unavailable",
+          AureliaUnavailableView(
+            title: model.isRecoveringLocalHost ? "Starting Local Server" : "Server Unavailable",
             systemImage: "server.rack",
-            description: Text(
-              "Your saved connection is intact. Your library will appear when the server is ready.")
+            message:
+              "Your saved connection is intact. Your library will appear when the server is ready."
           )
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
           EmptyLibraryState(
             title: "Your Library Is Ready",
@@ -823,6 +868,7 @@ private struct HomeHero: View {
       .padding(AureliaDesign.pagePadding)
       .padding(.bottom, 22)
     }
+    .frame(maxWidth: .infinity)
     .frame(height: 500)
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("home-hero")
@@ -893,23 +939,20 @@ private struct LibraryPage: View {
             .frame(maxWidth: .infinity, minHeight: 250)
             .accessibilityLabel("Loading Library")
         } else if let error = browser.errorMessage {
-          ContentUnavailableView {
-            Label("Library Unavailable", systemImage: "wifi.exclamationmark")
-          } description: {
-            Text(error)
-          } actions: {
-            Button("Try Again") { retryRevision += 1 }
-          }
-          .frame(maxWidth: .infinity, minHeight: 250)
+          AureliaUnavailableView(
+            title: "Library Unavailable",
+            systemImage: "wifi.exclamationmark",
+            message: error,
+            primaryAction: AureliaUnavailableAction(title: "Try Again") { retryRevision += 1 })
         } else if browser.items.isEmpty {
           if !search.isEmpty || hasFilters {
-            ContentUnavailableView(
-              "No Results", systemImage: "magnifyingglass",
-              description: Text("Try another search or clear your filters.")
-            )
-            .frame(maxWidth: .infinity, minHeight: 300)
+            AureliaUnavailableView(
+              title: "No Results",
+              systemImage: "magnifyingglass",
+              message: "Try another search or clear your filters.")
           } else {
             EmptyCatalogResults(
+              section: section,
               query: search, canAddMedia: model.canManageMedia,
               addMedia: { model.showMediaManager() })
           }
@@ -921,6 +964,7 @@ private struct LibraryPage: View {
       .padding(AureliaDesign.pagePadding)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
+    .aureliaOverlayScrollbars()
     .accessibilityIdentifier("browse-\(section.rawValue)")
     .task(id: requestKey) {
       if loadedContext != context {
@@ -988,53 +1032,28 @@ private struct LibraryPage: View {
 
   private var libraryHeader: some View {
     VStack(alignment: .leading, spacing: 18) {
-      HStack(alignment: .firstTextBaseline, spacing: 10) {
-        Text(section.title)
-          .font(AureliaDesign.pageTitle)
-          .tracking(-0.35)
-          .accessibilityIdentifier("library-title")
-        // A list shown for this page keeps its count while a newer one loads quietly beneath it,
-        // so catching up after a start does not make the count blink.
-        if hasResultForContext, !(browser.isLoading && browser.items.isEmpty) {
-          Text(String(browser.items.count))
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.tertiary)
-        }
-        Spacer()
+      AureliaPageHeader(
+        title: section.title,
+        count: hasResultForContext && !(browser.isLoading && browser.items.isEmpty)
+          ? browser.items.count : nil,
+        titleIdentifier: "library-title"
+      ) {
         if model.canManageMedia, section == .library { managementActions }
       }
       HStack(spacing: 10) {
-        searchField
+        AureliaSearchField(
+          prompt: "Search \(section.title)",
+          text: $search,
+          focus: $searchFocused,
+          identifier: "library-search"
+        )
+        .frame(maxWidth: 520)
         LibrarySortButton(query: $query, isSearching: !search.isEmpty)
       }
       LibraryFilterBar(
         section: section, query: $query, genres: genres, years: years,
         isSearching: !search.isEmpty, supportsWatchState: model.supportsLibraryState)
     }
-  }
-
-  private var searchField: some View {
-    HStack(spacing: 9) {
-      Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-      TextField("Search \(section.title)", text: $search)
-        .textFieldStyle(.plain)
-        .focused($searchFocused)
-        .accessibilityIdentifier("library-search")
-      if !search.isEmpty {
-        Button {
-          search = ""
-        } label: {
-          Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
-        }
-        .buttonStyle(AureliaPressableButtonStyle())
-        .accessibilityLabel("Clear Search")
-      }
-    }
-    .padding(.horizontal, 14)
-    .frame(height: 38)
-    .background(.white.opacity(0.08), in: Capsule())
-    .overlay { Capsule().strokeBorder(AureliaDesign.hairline) }
-    .frame(maxWidth: 520)
   }
 
   private var genres: [String] {
@@ -1046,32 +1065,68 @@ private struct LibraryPage: View {
   private var years: [Int] { Set(model.catalogItems.compactMap(\.year)).sorted(by: >) }
 
   private var managementActions: some View {
-    HStack(spacing: 10) {
-      Button {
-        showingMetadataReviewQueue = true
-      } label: {
+    ViewThatFits(in: .horizontal) {
+      HStack(spacing: 8) {
+        reviewMatchesButton(compact: false)
+        createCollectionButton(compact: false)
+        addMediaButton(compact: false)
+      }
+      HStack(spacing: 8) {
+        reviewMatchesButton(compact: true)
+        createCollectionButton(compact: true)
+        addMediaButton(compact: true)
+      }
+    }
+  }
+
+  private func reviewMatchesButton(compact: Bool) -> some View {
+    Button {
+      showingMetadataReviewQueue = true
+    } label: {
+      if compact {
+        Image(systemName: "checklist")
+      } else {
         Label("Review Matches", systemImage: "checklist")
       }
-      .buttonStyle(.bordered)
-      .accessibilityIdentifier("library-review-metadata")
-      Button {
-        model.showMediaManager()
-      } label: {
-        Image(systemName: "plus").frame(height: 32)
-      }
-      .buttonStyle(AureliaPrimaryActionButtonStyle(compact: true))
-      .help("Add Media")
-      .accessibilityLabel("Add Media")
-      .accessibilityIdentifier("library-add-media")
-      Button {
-        showingCollectionEditor = true
-      } label: {
-        Image(systemName: "rectangle.stack.badge.plus").frame(width: 32, height: 32)
-      }
-      .buttonStyle(.bordered)
-      .help("Create Collection")
-      .accessibilityLabel("Create Collection")
     }
+    .buttonStyle(AureliaSecondaryActionButtonStyle(compact: true))
+    .fixedSize()
+    .help("Review Matches")
+    .accessibilityLabel("Review Matches")
+    .accessibilityIdentifier("library-review-metadata")
+  }
+
+  private func createCollectionButton(compact: Bool) -> some View {
+    Button {
+      showingCollectionEditor = true
+    } label: {
+      if compact {
+        Image(systemName: "rectangle.stack.badge.plus")
+      } else {
+        Label("New Collection", systemImage: "rectangle.stack.badge.plus")
+      }
+    }
+    .buttonStyle(AureliaSecondaryActionButtonStyle(compact: true))
+    .fixedSize()
+    .help("Create Collection")
+    .accessibilityLabel("Create Collection")
+  }
+
+  private func addMediaButton(compact: Bool) -> some View {
+    Button {
+      model.showMediaManager()
+    } label: {
+      if compact {
+        Image(systemName: "plus")
+      } else {
+        Label("Add Media", systemImage: "plus")
+      }
+    }
+    .buttonStyle(AureliaPrimaryActionButtonStyle(compact: true))
+    .fixedSize()
+    .help("Add Media")
+    .accessibilityLabel("Add Media")
+    .accessibilityIdentifier("library-add-media")
   }
 
   private var collectionRow: some View {
@@ -1160,52 +1215,53 @@ private struct EmptyLibraryState: View {
   let action: (() -> Void)?
 
   var body: some View {
-    VStack(spacing: 22) {
-      Image(systemName: "play.rectangle.on.rectangle")
-        .font(.system(size: 54, weight: .light))
-        .symbolRenderingMode(.hierarchical)
-        .foregroundStyle(.white.opacity(0.7))
-      VStack(spacing: 8) {
-        Text(title)
-          .font(.title.bold())
-        Text(message)
-          .foregroundStyle(.secondary)
-          .multilineTextAlignment(.center)
-          .frame(maxWidth: 460)
+    AureliaUnavailableView(
+      title: title,
+      systemImage: "play.rectangle.on.rectangle",
+      message: message,
+      primaryAction: action.map {
+        AureliaUnavailableAction(title: "Add Media…", identifier: "home-add-media", action: $0)
       }
-      if let action {
-        Button("Add Media…", action: action)
-          .buttonStyle(AureliaPrimaryActionButtonStyle())
-          .controlSize(.large)
-          .accessibilityIdentifier("home-add-media")
-      }
-    }
+    )
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .padding(40)
   }
 }
 
 private struct EmptyCatalogResults: View {
+  let section: CatalogBrowseSection
   let query: String
   let canAddMedia: Bool
   let addMedia: () -> Void
 
-  var body: some View {
-    VStack(spacing: 18) {
-      ContentUnavailableView(
-        query.isEmpty ? "No Media Yet" : "No Results",
-        systemImage: query.isEmpty ? "rectangle.stack" : "magnifyingglass",
-        description: Text(
-          query.isEmpty
-            ? "Movies and TV shows appear after a storage location is scanned."
-            : "Try another title, person, genre, season, or episode.")
-      )
-      if query.isEmpty, canAddMedia {
-        Button("Add Media…", action: addMedia)
-          .buttonStyle(AureliaPrimaryActionButtonStyle())
-      }
+  private var emptyTitle: String {
+    guard query.isEmpty else { return "No Results" }
+    switch section {
+    case .movies: return "No Movies Yet"
+    case .tvShows: return "No TV Shows Yet"
+    case .library, .recentlyAdded: return "No Media Yet"
     }
-    .frame(maxWidth: .infinity, minHeight: 330)
+  }
+
+  private var emptyDescription: String {
+    guard query.isEmpty else {
+      return "Try another title, person, genre, season, or episode."
+    }
+    switch section {
+    case .movies: return "Movies appear after a storage location is scanned."
+    case .tvShows: return "TV shows appear after a storage location is scanned."
+    case .library, .recentlyAdded:
+      return "Movies and TV shows appear after a storage location is scanned."
+    }
+  }
+
+  var body: some View {
+    AureliaUnavailableView(
+      title: emptyTitle,
+      systemImage: query.isEmpty ? "rectangle.stack" : "magnifyingglass",
+      message: emptyDescription,
+      primaryAction: query.isEmpty && canAddMedia
+        ? AureliaUnavailableAction(title: "Add Media…", action: addMedia)
+        : nil)
   }
 }
 
@@ -1271,8 +1327,7 @@ private struct CollectionCard: View {
           .font(.caption2.weight(.bold))
           .padding(.horizontal, 8)
           .padding(.vertical, 4)
-          .background(.ultraThinMaterial, in: Capsule())
-          .overlay { Capsule().stroke(.white.opacity(0.25), lineWidth: 1) }
+          .aureliaGlass(in: Capsule())
           .padding(.top, 20)
           .padding(.trailing, 20)
         } else if collection.isSmart {
@@ -1280,8 +1335,7 @@ private struct CollectionCard: View {
             .font(.caption2.weight(.bold))
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay { Capsule().stroke(.white.opacity(0.25), lineWidth: 1) }
+            .aureliaGlass(in: Capsule())
             .padding(.top, 20)
             .padding(.trailing, 20)
         }
@@ -1305,20 +1359,26 @@ private struct CollectionCard: View {
 private struct CollectionDetailView: View {
   @EnvironmentObject private var model: AppModel
   let collection: CollectionSummary
+  var isFranchise: Bool = false
+  var initialNotice: String? = nil
   let onBack: () -> Void
   let onSelect: (UUID) -> Void
-  var onOpenCollection: ((UUID) -> Void)? = nil
+  var onOpenCollection: ((UUID, String?) -> Void)? = nil
   @State private var detail: CollectionDetail?
   @State private var expandedMemberIds: Set<UUID> = []
   @State private var showingEditor = false
   @State private var isUpdatingOrder = false
   @State private var isSavingCopy = false
+  @State private var statusNotice: String?
   @State private var errorMessage: String?
   /// The collection itself failed to load; its banner then offers Try Again.
   @State private var loadFailed = false
 
   private var summary: CollectionSummary { detail?.asSummary ?? collection }
-  private var canEdit: Bool { detail?.canEdit ?? collection.canEdit }
+  private var canEdit: Bool { !isFranchise && (detail?.canEdit ?? collection.canEdit) }
+  private var canSaveAsCollection: Bool {
+    (isFranchise || summary.provider != nil) && !canEdit
+  }
   private var members: [CollectionMember] { detail?.members ?? [] }
 
   var body: some View {
@@ -1326,6 +1386,21 @@ private struct CollectionDetailView: View {
       VStack(alignment: .leading, spacing: 30) {
         collectionHero
         VStack(alignment: .leading, spacing: 16) {
+          if let statusNotice {
+            HStack(spacing: 10) {
+              Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+              Text(statusNotice)
+                .font(.callout)
+                .frame(maxWidth: .infinity, alignment: .leading)
+              Button("Dismiss") { self.statusNotice = nil }
+                .buttonStyle(.borderless)
+            }
+            .padding(12)
+            .background(
+              Color.green.opacity(0.14),
+              in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
+          }
           if let errorMessage {
             ErrorBanner(message: errorMessage, retry: detailRetry, inline: true)
           }
@@ -1350,16 +1425,13 @@ private struct CollectionDetailView: View {
 
           if let detail {
             if detail.members.isEmpty {
-              ContentUnavailableView(
-                "No Titles Yet",
+              AureliaUnavailableView(
+                title: "No Titles Yet",
                 systemImage: "rectangle.stack",
-                description: Text(
-                  canEdit
-                    ? "Edit this collection or use Add to Collection on any title."
-                    : "Matching titles will appear here automatically."
-                )
-              )
-              .frame(maxWidth: .infinity, minHeight: 200)
+                message: canEdit
+                  ? "Edit this collection or use Add to Collection on any title."
+                  : "Matching titles will appear here automatically.",
+                minHeight: 220)
             } else {
               VStack(spacing: 12) {
                 ForEach(Array(detail.members.enumerated()), id: \.element.id) { index, member in
@@ -1379,6 +1451,11 @@ private struct CollectionDetailView: View {
     .scrollClipDisabled()
     .aureliaOverlayScrollbars()
     .aureliaCompactHeader(title: summary.name, threshold: 380, onBack: onBack)
+    .onAppear {
+      if statusNotice == nil, let initialNotice {
+        statusNotice = initialNotice
+      }
+    }
     .task(id: collection) {
       await loadDetail()
     }
@@ -1499,7 +1576,7 @@ private struct CollectionDetailView: View {
               .buttonStyle(AureliaPrimaryActionButtonStyle())
             }
 
-            if summary.provider != nil && !canEdit {
+            if canSaveAsCollection {
               Button {
                 Task { await saveAsEditableCollection() }
               } label: {
@@ -1509,6 +1586,7 @@ private struct CollectionDetailView: View {
               }
               .buttonStyle(.bordered)
               .disabled(isSavingCopy)
+              .accessibilityIdentifier("save-franchise-as-collection")
             }
 
             if canEdit {
@@ -1543,6 +1621,7 @@ private struct CollectionDetailView: View {
       }
     }
     // Full-bleed like every other hero; artwork continues beneath the sidebar.
+    .frame(maxWidth: .infinity)
     .frame(height: 500)
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("collection-hero")
@@ -1788,6 +1867,13 @@ private struct CollectionDetailView: View {
       loadFailed = false
     } catch {
       guard !(error is CancellationError) else { return }
+      // A detected franchise that is not yet saved may only have its summary items locally.
+      if isFranchise && !collection.items.isEmpty {
+        detail = nil
+        errorMessage = nil
+        loadFailed = false
+        return
+      }
       errorMessage = "Couldn't load this collection. \(error.localizedDescription)"
       loadFailed = true
     }
@@ -1828,13 +1914,21 @@ private struct CollectionDetailView: View {
   }
 
   private func saveAsEditableCollection() async {
+    guard !isSavingCopy else { return }
     isSavingCopy = true
+    errorMessage = nil
     defer { isSavingCopy = false }
     do {
       let copied = try await model.createCollectionFromFranchise(collection.id.uuidString)
-      onOpenCollection?(copied.id)
+      let savedMessage = "Saved “\(copied.name)” to Collections."
+      if let onOpenCollection {
+        onOpenCollection(copied.id, savedMessage)
+      } else {
+        statusNotice = savedMessage
+      }
+    } catch is CancellationError {
     } catch {
-      errorMessage = error.localizedDescription
+      errorMessage = "Couldn't save the collection. \(error.localizedDescription)"
     }
   }
 }
@@ -1878,8 +1972,8 @@ private struct WatchlistPage: View {
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 26) {
-        AureliaSectionHeading(title: "Watchlist", count: model.watchlistItems.count)
+      VStack(alignment: .leading, spacing: AureliaDesign.sectionSpacing) {
+        AureliaPageHeader(title: "Watchlist", count: model.watchlistItems.count)
           .aureliaRiseIn(0)
         if let loadError {
           ErrorBanner(
@@ -1894,19 +1988,17 @@ private struct WatchlistPage: View {
             .frame(maxWidth: .infinity, minHeight: 330)
             .accessibilityLabel("Loading Watchlist")
         } else if loadError == nil {
-          ContentUnavailableView(
-            "Your Watchlist Is Empty",
+          AureliaUnavailableView(
+            title: "Your Watchlist Is Empty",
             systemImage: "bookmark",
-            description: Text(
+            message:
               "Save movies and TV shows you want to watch later from their detail page or context menu."
-            )
           )
-          .frame(maxWidth: .infinity, minHeight: 330)
           .aureliaRiseIn(1)
         }
       }
       .padding(AureliaDesign.pagePadding)
-      .padding(.top, 22)
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
     .scrollClipDisabled()
     .aureliaOverlayScrollbars()
@@ -1950,6 +2042,7 @@ private struct PersonDetailView: View {
   @State private var biographyExpanded = false
   @State private var wishing: String?
   @State private var wishMessage: String?
+  @Environment(\.aureliaContrast) private var contrast
 
   /// Only a person TMDB identified has a life to show.
   private var profileKey: String? {
@@ -2090,7 +2183,7 @@ private struct PersonDetailView: View {
         }
         Text("From TMDB")
           .font(.caption)
-          .foregroundStyle(.tertiary)
+          .foregroundStyle(AureliaDesign.subtleText(for: contrast))
       }
     }
   }
@@ -2102,23 +2195,20 @@ private struct PersonDetailView: View {
         .frame(maxWidth: .infinity, minHeight: 240)
         .accessibilityLabel("Loading titles")
     } else if let errorMessage {
-      ContentUnavailableView {
-        Label("Couldn’t Load Person", systemImage: "exclamationmark.triangle")
-      } description: {
-        Text(errorMessage)
-      } actions: {
-        Button("Try Again") { retryRevision += 1 }
-      }
-      .frame(maxWidth: .infinity, minHeight: 260)
+      AureliaUnavailableView(
+        title: "Couldn’t Load Person",
+        systemImage: "exclamationmark.triangle",
+        message: errorMessage,
+        primaryAction: AureliaUnavailableAction(title: "Try Again") { retryRevision += 1 },
+        minHeight: 260)
     } else if let items = detail?.items, !items.isEmpty {
       posterGrid(items, onSelect: onSelect)
     } else {
-      ContentUnavailableView(
-        "No Titles Found",
+      AureliaUnavailableView(
+        title: "No Titles Found",
         systemImage: "person.crop.circle.badge.questionmark",
-        description: Text("No accessible movies or TV shows in this library match this person.")
-      )
-      .frame(maxWidth: .infinity, minHeight: 260)
+        message: "No accessible movies or TV shows in this library match this person.",
+        minHeight: 260)
     }
   }
 
@@ -2240,33 +2330,32 @@ private struct PersonDetailView: View {
 private struct CollectionsPage: View {
   @EnvironmentObject private var model: AppModel
   let onSelectCollection: (UUID) -> Void
+  let onSelectFranchise: (CollectionSummary) -> Void
   @State private var showingCreate = false
   @State private var franchises: [CollectionSummary] = []
   @State private var isLoadingFranchises = false
+  @State private var franchisesError: String?
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 32) {
-        HStack {
-          AureliaSectionHeading(title: "Collections", count: model.collections.count)
-          Spacer()
+      VStack(alignment: .leading, spacing: AureliaDesign.sectionSpacing) {
+        AureliaPageHeader(title: "Collections", count: model.collections.count) {
           Button {
             showingCreate = true
           } label: {
             Label("New Collection", systemImage: "plus")
           }
-          .buttonStyle(.bordered)
+          .buttonStyle(AureliaSecondaryActionButtonStyle(compact: true))
           .accessibilityIdentifier("new-collection-button")
         }
         .aureliaRiseIn(0)
 
         if model.collections.isEmpty {
-          ContentUnavailableView(
-            "No Collections Yet",
+          AureliaUnavailableView(
+            title: "No Collections Yet",
             systemImage: "square.stack.3d.up",
-            description: Text("Create manual collections or rule-based smart lists.")
+            message: "Create manual collections or rule-based smart lists."
           )
-          .frame(maxWidth: .infinity, minHeight: 280)
           .aureliaRiseIn(1)
         } else {
           LazyVGrid(
@@ -2288,14 +2377,21 @@ private struct CollectionsPage: View {
           .aureliaRiseIn(1)
         }
 
+        if let franchisesError {
+          ErrorBanner(
+            message: "Couldn't load franchises in your library. \(franchisesError)",
+            retry: { Task { await loadFranchises() } },
+            retryDisabled: isLoadingFranchises,
+            inline: true)
+        }
+
         if !franchises.isEmpty {
           VStack(alignment: .leading, spacing: 14) {
-            Text("Franchises in Library")
-              .font(AureliaDesign.sectionTitle)
+            AureliaSectionHeading(title: "Franchises in Library", count: franchises.count)
             Text(
-              "Movie series detected by TMDB. Save any franchise to create an organized collection."
+              "Movie series detected by TMDB. Open any franchise to browse its titles or save it as a collection."
             )
-            .font(.caption)
+            .font(.callout)
             .foregroundStyle(.secondary)
 
             LazyVGrid(
@@ -2304,34 +2400,13 @@ private struct CollectionsPage: View {
               spacing: 24
             ) {
               ForEach(franchises) { franchise in
-                VStack(alignment: .leading, spacing: 8) {
-                  AuthenticatedArtwork(artwork: franchise.poster, symbol: "film.stack")
-                    .frame(width: 210, height: 280)
-                    .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
-                    .overlay {
-                      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
-                        .stroke(AureliaDesign.hairline, lineWidth: 1)
-                    }
-                  Text(franchise.name)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .frame(width: 210, alignment: .leading)
-                  HStack {
-                    Text("\(franchise.items.count) titles")
-                      .font(.caption)
-                      .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Save") {
-                      Task {
-                        _ = try? await model.createCollectionFromFranchise(franchise.id.uuidString)
-                        await loadFranchises()
-                      }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                  }
-                  .frame(width: 210)
+                Button {
+                  onSelectFranchise(franchise)
+                } label: {
+                  CollectionCard(collection: franchise)
                 }
+                .buttonStyle(AureliaCardButtonStyle())
+                .accessibilityIdentifier("franchise-\(franchise.id.uuidString.lowercased())")
               }
             }
           }
@@ -2340,7 +2415,7 @@ private struct CollectionsPage: View {
         }
       }
       .padding(AureliaDesign.pagePadding)
-      .padding(.top, 22)
+      .frame(maxWidth: .infinity, alignment: .leading)
       .aureliaAnimation(AureliaMotion.standard, value: franchises.map(\.id))
     }
     .scrollClipDisabled()
@@ -2357,8 +2432,14 @@ private struct CollectionsPage: View {
   private func loadFranchises() async {
     guard let profile = model.profile else { return }
     isLoadingFranchises = true
-    franchises = (try? await APIClient(profile: profile).franchises()) ?? []
-    isLoadingFranchises = false
+    defer { isLoadingFranchises = false }
+    do {
+      franchises = try await APIClient(profile: profile).franchises()
+      franchisesError = nil
+    } catch is CancellationError {
+    } catch {
+      franchisesError = error.localizedDescription
+    }
   }
 }
 
@@ -2390,14 +2471,14 @@ private struct ActivityPageScroll<Content: View>: View {
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 26) {
-        AureliaSectionHeading(title: title)
+      VStack(alignment: .leading, spacing: AureliaDesign.sectionSpacing) {
+        AureliaPageHeader(title: title)
           .aureliaRiseIn(0)
         content.frame(maxWidth: 980, alignment: .leading)
           .aureliaRiseIn(1)
       }
       .padding(AureliaDesign.pagePadding)
-      .padding(.top, 22)
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
     .scrollClipDisabled()
     .aureliaOverlayScrollbars()
@@ -2492,10 +2573,9 @@ struct MacMiniRemoteView: View {
     }
     .padding(.horizontal, 20)
     .padding(.vertical, 12)
-    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
-    .overlay(
-      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
-        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+    .aureliaGlass(
+      in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous),
+      opaqueFill: AureliaDesign.surface
     )
     .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
   }

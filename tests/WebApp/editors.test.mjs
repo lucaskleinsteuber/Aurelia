@@ -246,3 +246,33 @@ test("metadata Escape preserves the draft until explicit discard", async (t) => 
   f.dialog.querySelectorAll("button").find((node) => node.textContent === "Keep Editing").click();
   assert.equal(title.value, "Private draft"); assert.ok(f.dialog);
 });
+
+test("Create Profile shows an inline error on empty name, avoids duplicate headings and omits Mac-only age copy", async (t) => {
+  let created = 0;
+  const f = fixture(t, {
+    createProfile: async () => { created++; return { id: "new-user" }; },
+  });
+  f.app.state.server = { capabilities: ["age-limits-v1", "screen-time-v1"] };
+  f.editors.editProfile();
+  await flush();
+
+  const form = f.dialog.querySelector("form");
+  assert.equal(form.getAttribute("novalidate"), "", "editor form uses custom inline validation instead of silent browser blocking");
+  form.dispatchEvent(new Event("submit", { cancelable: true }));
+  await flush();
+  assert.equal(created, 0);
+  assert.ok(f.dialog?.open);
+  assert.match(f.dialog.textContent, /profile name of 3–64 characters/i);
+  assert.equal(labelled(f.dialog, "Name").getAttribute("aria-invalid"), "true");
+
+  // Headings and their first toggle labels should not duplicate verbatim.
+  const headings = f.dialog.querySelectorAll("h3").map((node) => node.textContent);
+  const labelTitles = f.dialog.querySelectorAll("label").map((label) => label.firstChild?.textContent);
+  assert.ok(headings.includes("Children's Profile"));
+  assert.ok(headings.includes("Screen Time"));
+  assert.equal(labelTitles.includes("Children's Profile"), false);
+  assert.equal(labelTitles.includes("Screen Time"), false);
+  assert.ok(labelTitles.includes("Limit by age rating"));
+  assert.ok(labelTitles.includes("Enable screen time limits"));
+  assert.doesNotMatch(f.dialog.textContent, /on the Mac/i);
+});

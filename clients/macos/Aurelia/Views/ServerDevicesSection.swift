@@ -4,6 +4,7 @@ import SwiftUI
 /// Pairing new devices and the sessions of this server's devices.
 struct ServerDevicesSection: View {
   @EnvironmentObject private var model: AppModel
+  @State private var sessionToSignOut: DeviceSessionSummary?
 
   var body: some View {
     AureliaSettingsSection(
@@ -38,8 +39,8 @@ struct ServerDevicesSection: View {
               }
               Spacer()
               if !session.isCurrent && session.revokedAt == nil {
-                Button("Sign Out", role: .destructive) {
-                  Task { await model.revokeSession(id: session.id) }
+                Button("Sign Out…", role: .destructive) {
+                  sessionToSignOut = session
                 }
               }
             }
@@ -47,6 +48,23 @@ struct ServerDevicesSection: View {
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .confirmationDialog(
+      "Sign Out “\(sessionToSignOut?.deviceName ?? "Device")”?",
+      isPresented: Binding(
+        get: { sessionToSignOut != nil },
+        set: { if !$0 { sessionToSignOut = nil } }),
+      titleVisibility: .visible
+    ) {
+      if let target = sessionToSignOut {
+        Button("Sign Out", role: .destructive) {
+          sessionToSignOut = nil
+          Task { await model.revokeSession(id: target.id) }
+        }
+      }
+      Button("Cancel", role: .cancel) { sessionToSignOut = nil }
+    } message: {
+      Text("It needs a new code to use Aurelia again.")
     }
   }
 

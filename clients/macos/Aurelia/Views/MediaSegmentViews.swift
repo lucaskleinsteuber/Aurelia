@@ -408,7 +408,7 @@ struct ServerMediaSegmentsEditor: View {
 
   static func summary(_ settings: MediaSegmentSettings) -> String {
     var parts = [
-      "\(settings.analyzedCount) episodes with times",
+      "\(AureliaCountText.format(settings.analyzedCount, singular: "episode")) with times",
       "\(settings.noResultCount) without a certain result",
     ]
     if settings.pendingCount > 0 { parts.append("\(settings.pendingCount) still to examine") }

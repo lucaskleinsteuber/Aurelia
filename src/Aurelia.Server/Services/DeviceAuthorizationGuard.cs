@@ -6,7 +6,47 @@ public sealed class DeviceAuthorizationGuard(TimeProvider clock) : IDisposable
 {
     private readonly object gate = new();
     private readonly Dictionary<(string Operation, string Actor), (int Count, DateTimeOffset Start)> windows = [];
+    private readonly Dictionary<string, List<(Guid Id, DateTimeOffset ExpiresAt)>> pendingByAddress = [];
     private readonly SemaphoreSlim mutations = new(1, 1);
+    public const int MaxPendingPerAddress = 20;
+
+    public void ReservePending(string actor, Guid id, DateTimeOffset expiresAt)
+    {
+        var now = clock.GetUtcNow();
+        lock (gate)
+        {
+            if (pendingByAddress.Count >= 4096)
+            {
+                foreach (var key in pendingByAddress.Keys.ToArray())
+                {
+                    pendingByAddress[key].RemoveAll(entry => entry.ExpiresAt <= now);
+                    if (pendingByAddress[key].Count == 0) pendingByAddress.Remove(key);
+                }
+            }
+            if (!pendingByAddress.TryGetValue(actor, out var entries))
+            {
+                entries = [];
+                pendingByAddress[actor] = entries;
+            }
+            entries.RemoveAll(entry => entry.ExpiresAt <= now);
+            if (entries.Count >= MaxPendingPerAddress)
+                throw new AccountException("device_pairing_limit", "Too many pending device pairings from this network. Try again shortly.", 429);
+            entries.Add((id, expiresAt));
+        }
+    }
+
+    public void ReleasePending(Guid id)
+    {
+        lock (gate)
+        {
+            foreach (var key in pendingByAddress.Keys.ToArray())
+            {
+                var entries = pendingByAddress[key];
+                entries.RemoveAll(entry => entry.Id == id);
+                if (entries.Count == 0) pendingByAddress.Remove(key);
+            }
+        }
+    }
 
     public void Admit(string operation, string actor)
     {
