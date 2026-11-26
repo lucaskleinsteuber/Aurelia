@@ -25,6 +25,9 @@ struct AureliaApp: App {
         .task(id: securityAlertKey) { securityAlerts.start(model: model) }
         .task {
           await model.start()
+          #if DEBUG
+            if AuditRenderFixture.enabled { return }
+          #endif
           VLCPlaybackEngine.warmUp()
         }
         .onChange(of: scenePhase) { _, phase in
@@ -137,6 +140,14 @@ final class AureliaAppDelegate: NSObject, NSApplicationDelegate {
   private var updateCheckTimer: Timer?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    #if DEBUG
+      // Offscreen screen renders stay in the background: no activation, window or update check.
+      if AuditRenderFixture.enabled {
+        NSApplication.shared.setActivationPolicy(.accessory)
+        Task { await AppModel.active?.start() }
+        return
+      }
+    #endif
     powerOffObserver = NSWorkspace.shared.notificationCenter.addObserver(
       forName: NSWorkspace.willPowerOffNotification,
       object: nil,
@@ -167,11 +178,18 @@ final class AureliaAppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-    WindowClosePreference.quits()
+    #if DEBUG
+      // The renderer hides every window it does not draw into; it ends the process itself.
+      if AuditRenderFixture.enabled { return false }
+    #endif
+    return WindowClosePreference.quits()
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    termination.request(
+    #if DEBUG
+      if AuditRenderFixture.enabled { return .terminateCancel }
+    #endif
+    return termination.request(
       shutdown: { await AppModel.active?.shutdown() },
       terminate: { sender.terminate(nil) },
       reply: { sender.reply(toApplicationShouldTerminate: $0) })

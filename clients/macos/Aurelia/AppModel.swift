@@ -643,6 +643,11 @@ final class AppModel: ObservableObject {
     }
 
     #if DEBUG
+      if AuditRenderFixture.enabled {
+        // Draws screens offscreen with their own models; this window's model stays starting.
+        AuditScreenRenderer.launch()
+        return
+      }
       // UI test fixtures set their library directly; it counts as loaded.
       if Self.uiTestMode != nil { libraryLoaded = true }
       if Self.uiTestMode == "profile-management" {
@@ -1881,7 +1886,11 @@ final class AppModel: ObservableObject {
 
   func refresh(requireCompleteSnapshot: Bool = false) async throws {
     #if DEBUG
-      if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" { return }
+      if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin"
+        || AuditRenderFixture.enabled
+      {
+        return
+      }
     #endif
     guard let profile, !isSwitchingProfile else { return }
     if requiresProfileSelection {
@@ -1975,6 +1984,10 @@ final class AppModel: ObservableObject {
 
   func refreshHome() async {
     #if DEBUG
+      if AuditRenderFixture.enabled {
+        if !AuditRenderFixture.failing { home = AuditRenderFixture.home }
+        return
+      }
       if ShowcaseUITestFixture.enabled {
         home = ShowcaseUITestFixture.home
         return
@@ -2012,6 +2025,11 @@ final class AppModel: ObservableObject {
     let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmed.isEmpty { return catalogItems }
     #if DEBUG
+      if AuditRenderFixture.enabled {
+        return LibraryStateUITestFixture.browse(
+          catalogItems + AuditRenderFixture.episodes(season: 1), query: CatalogBrowseQuery(),
+          search: trimmed)
+      }
       if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" {
         let candidates =
           ShowcaseUITestFixture.enabled ? catalogItems : catalogItems + [Self.previewSearchEpisode]
@@ -2031,6 +2049,13 @@ final class AppModel: ObservableObject {
   func browseCatalog(query: CatalogBrowseQuery, search: String) async throws -> [CatalogItemSummary]
   {
     #if DEBUG
+      if AuditRenderFixture.enabled {
+        if AuditRenderFixture.failing {
+          throw APIClientError.serverRejected(
+            code: "audit_unreachable", message: "The server could not be reached.")
+        }
+        return LibraryStateUITestFixture.browse(catalogItems, query: query, search: search)
+      }
       if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" {
         let items =
           LibraryStateUITestFixture.enabled || ShowcaseUITestFixture.enabled
@@ -2396,6 +2421,13 @@ final class AppModel: ObservableObject {
 
   func catalogDetail(id: UUID) async throws -> CatalogDetailPresentation {
     #if DEBUG
+      if AuditRenderFixture.enabled {
+        guard !AuditRenderFixture.failing, let detail = AuditRenderFixture.detail(id) else {
+          throw APIClientError.serverRejected(
+            code: "audit_unreachable", message: "The server could not be reached.")
+        }
+        return detail
+      }
       if ShowcaseUITestFixture.enabled {
         guard let detail = ShowcaseUITestFixture.detail(id) else {
           throw APIClientError.invalidResponse
@@ -5126,3 +5158,133 @@ final class AppModel: ObservableObject {
     }
   }
 }
+
+#if DEBUG
+  /// What one offscreen audit render shows (scripts/audit-render-screens.sh).
+  enum AuditRenderScenario {
+    case library
+    case emptyLibrary
+    case unreachable
+    case starting(ServerConnectionStatus?)
+    case operatingMode
+    case connect
+    case hostSetup
+    case hostStarting
+    case hostFailed
+    case firstLibrary
+    case setupFinish
+    case profiles
+    case profilesUnreachable
+    case player
+  }
+
+  extension AppModel {
+    /// A model filled from AuditRenderFixture; it never loads anything itself.
+    static func auditRenderModel(_ scenario: AuditRenderScenario) -> AppModel {
+      var selectsProfiles = false
+      if case .profiles = scenario { selectsProfiles = true }
+      if case .profilesUnreachable = scenario { selectsProfiles = true }
+      let model = AppModel(
+        store: InMemoryServerProfileStore(), profileSelectionEnabled: selectsProfiles)
+      model.hasStarted = true
+      model.isStarting = false
+      model.libraryLoaded = true
+      model.operatingMode = .client
+      model.profile = AuditRenderFixture.profile()
+      model.deviceConnection = AuditRenderFixture.profile(viewing: false)
+      model.catalogItems = AuditRenderFixture.catalog
+      model.movies = model.catalogItems.filter { $0.kind == .movie }.map {
+        MovieSummary(id: $0.id, title: $0.title, year: $0.year, availability: $0.availability)
+      }
+      model.series = model.catalogItems.filter { $0.kind == .series }.map {
+        SeriesSummary(
+          id: $0.id, title: $0.title, availability: $0.availability, seasonCount: 3,
+          episodeCount: 14)
+      }
+      model.home = AuditRenderFixture.home
+      model.collections = AuditRenderFixture.collections
+      model.wishSummary = WishSummaryResponse(
+        openCount: AuditRenderFixture.emptyData ? 0 : 2,
+        newlyFulfilledCount: AuditRenderFixture.emptyData ? 0 : 1)
+      model.libraries =
+        AuditRenderFixture.emptyData
+        ? []
+        : [
+          LibrarySummary(
+            id: UUID(uuidString: "A0000009-0000-0000-0000-000000000001")!,
+            name: "Filme – Ünïcødé Archiv (Wohnzimmer-NAS)",
+            path: "/Volumes/Mediathek Ølmühle/Filme/Skandinavien/Klassiker und Neuerscheinungen",
+            kind: .movies, availability: .available, createdAt: "2026-01-01T00:00:00Z",
+            lastScanStartedAt: "2026-11-20T03:00:00Z",
+            lastScanCompletedAt: "2026-11-20T03:04:00Z", lastError: nil, monitoringEnabled: true,
+            lastObservedAt: "2026-11-21T08:00:00Z", health: .healthy),
+          LibrarySummary(
+            id: UUID(uuidString: "A0000009-0000-0000-0000-000000000002")!, name: "Serien",
+            path: "/Volumes/Archive Drive/Serien", kind: .tvShows, availability: .unavailable,
+            createdAt: "2026-01-01T00:00:00Z", lastScanStartedAt: "2026-11-19T03:00:00Z",
+            lastScanCompletedAt: nil, lastError: "The library directory is unavailable.",
+            monitoringEnabled: true, lastObservedAt: "2026-11-19T03:00:00Z",
+            health: .waitingForStorage),
+        ]
+      switch scenario {
+      case .library, .emptyLibrary:
+        break
+      case .unreachable:
+        model.serverUnreachable = true
+        model.errorMessage =
+          "Ünïcødé Heimkino-Server in der Dachgeschosswohnung can't be reached. Check that it is turned on and on the same network."
+      case .starting(let status):
+        model.isStarting = true
+        model.connectionStatus = status
+      case .operatingMode:
+        model.operatingMode = nil
+        model.profile = nil
+        model.deviceConnection = nil
+      case .connect:
+        model.profile = nil
+        model.deviceConnection = nil
+      case .hostSetup:
+        model.operatingMode = .host
+        model.profile = nil
+        model.deviceConnection = nil
+        model.hostSnapshot = NativeHostSnapshot(
+          state: .setupRequired, message: nil, bootstrapToken: "audit-bootstrap-token",
+          serverInfo: nil)
+      case .hostStarting, .hostFailed:
+        var failed = false
+        if case .hostFailed = scenario { failed = true }
+        model.operatingMode = .host
+        model.profile = nil
+        model.deviceConnection = nil
+        model.hostSnapshot = NativeHostSnapshot(
+          state: failed ? .failed : .starting,
+          message: failed
+            ? "The server could not start: port 43111 is already used by another program." : nil,
+          bootstrapToken: nil, serverInfo: nil)
+      case .firstLibrary:
+        model.operatingMode = .host
+        model.profile = AuditRenderFixture.profile(viewing: false)
+        model.hostSnapshot = Self.previewHostSnapshot
+        model.needsInitialLibrarySetup = true
+        model.libraries = []
+      case .setupFinish:
+        model.setupGuide.start()
+      case .profiles:
+        model.profile = AuditRenderFixture.profile(viewing: false)
+        model.watchingProfiles = AuditRenderFixture.watchingProfiles
+      case .profilesUnreachable:
+        model.profile = AuditRenderFixture.profile(viewing: false)
+        model.watchingProfiles = []
+        model.serverUnreachable = true
+      case .player:
+        let item = AuditRenderFixture.movies[1]
+        model.playback = PlaybackPresentation(
+          mediaId: item.id, title: item.title, subtitle: "2021 · Adventure",
+          startIntent: .resume, artwork: item.backdrop)
+      }
+      // After the profile: a new connection clears the server's features.
+      model.libraryCapabilities = AuditRenderFixture.capabilities
+      return model
+    }
+  }
+#endif
