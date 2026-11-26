@@ -383,6 +383,7 @@ struct IOSAboutView: View {
 
 /// A license text bundled with the app, in full, with a link to the source where the license asks for one.
 private struct IOSLicenseView: View {
+  @Environment(\.horizontalSizeClass) private var sizeClass
   let title: String
   let resource: String
   let source: URL?
@@ -404,7 +405,7 @@ private struct IOSLicenseView: View {
         }
         Text(text).font(.system(.footnote, design: .monospaced)).textSelection(.enabled)
       }
-      .padding(IOSDesign.margin)
+      .padding(IOSDesign.margin(for: sizeClass))
       .frame(maxWidth: .infinity, alignment: .leading)
     }
     .background(IOSDesign.canvas.ignoresSafeArea())
@@ -428,6 +429,7 @@ struct IOSSetupIntroductionView: View {
   var replay = false
   var closed: (() -> Void)? = nil
   @State private var page: Page = .welcome
+  @Environment(\.horizontalSizeClass) private var sizeClass
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
@@ -442,7 +444,7 @@ struct IOSSetupIntroductionView: View {
       }
       .id(page)
       .transition(.opacity)
-      .padding(.horizontal, IOSDesign.margin).padding(.vertical, 40)
+      .padding(.horizontal, IOSDesign.margin(for: sizeClass)).padding(.vertical, 40)
       .frame(maxWidth: 560)
     }
     .background(IOSDesign.canvas.ignoresSafeArea())

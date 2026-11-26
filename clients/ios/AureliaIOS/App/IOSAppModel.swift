@@ -117,7 +117,7 @@ final class IOSAppModel: ObservableObject {
       tag: UIDevice.current.identifierForVendor)
   }
   private let credentials = IOSCredentialStore()
-  let environment = IOSAppEnvironment.current()
+  let environment: IOSAppEnvironment
   private var generation = UUID()
   private var task: Task<Void, Never>?
   private var expiry: Task<Void, Never>?
@@ -138,14 +138,18 @@ final class IOSAppModel: ObservableObject {
   let setupGuide: IOSSetupGuide
   private var setupGuideObservation: AnyCancellable?
 
-  init() {
+  init(customEnvironment: IOSAppEnvironment? = nil, forceFixture: Bool = false) {
     #if DEBUG
-      let fixture = IOSUITestScenario.current != nil
-      let assistantFixture = ProcessInfo.processInfo.environment["AURELIA_IOS_ASSISTANT"] == "1"
+      let fixture =
+        forceFixture || IOSUITestScenario.current != nil
+        || IOSAppEnvironment.isRunningHostedUnitTests
+      let assistantFixture =
+        !forceFixture && ProcessInfo.processInfo.environment["AURELIA_IOS_ASSISTANT"] == "1"
     #else
       let fixture = false
       let assistantFixture = false
     #endif
+    environment = customEnvironment ?? IOSAppEnvironment.current()
     offline = Self.offlineStore(fixture: fixture)
     if !fixture { convertedBackground = IOSConvertedBackground(store: offline) }
     if !fixture { IOSTestEdition.forgetLeftoversAfterReinstall() }
@@ -164,6 +168,44 @@ final class IOSAppModel: ObservableObject {
         id: id, revision: revision)
     }
   }
+
+  #if DEBUG
+    static func layoutFixture(
+      scenario: IOSUITestScenario = .library,
+      phase targetPhase: Phase? = nil
+    ) async -> IOSAppModel {
+      let model = IOSAppModel(customEnvironment: .fixture(scenario: scenario), forceFixture: true)
+      model.started = true
+      model.connection = IOSUITestFixtures.connection
+      model.capabilities = IOSCapabilities(
+        formatVersion: 2, minimumClientVersion: "1.0",
+        capabilities: [
+          "device-authorization-v1", "library-state-v1", "watchlist-people-v1",
+          "scrub-previews-v1", "wishes-v1", "movie-night-v1", "year-wrapped-v1",
+          "screen-time-v1", "security-v1", "power-now-v1", "converted-downloads-v1",
+        ])
+      let resolvedPhase = targetPhase ?? (scenario == .profiles ? .profiles : .library)
+      model.phase = resolvedPhase
+      switch resolvedPhase {
+      case .connection:
+        model.connection = nil
+      case .pairing:
+        model.pairing = IOSPairingStart(
+          id: UUID(), code: "48291736", secret: String(repeating: "S", count: 43),
+          expiresAt: IOSUITestFixtures.expiry, pollIntervalSeconds: 5)
+      case .profiles:
+        await model.refreshProfiles()
+      case .library:
+        let activeSession =
+          scenario == .admin ? IOSUITestFixtures.ownerSession : IOSUITestFixtures.session
+        model.session = activeSession
+        await model.loadHome()
+      case .trust, .setup:
+        break
+      }
+      return model
+    }
+  #endif
 
   /// The synthetic UI fixtures never see or start real downloads.
   private static func offlineStore(fixture: Bool) -> IOSOfflineStore {

@@ -17,6 +17,7 @@ struct IOSHomeView: View {
   @State private var monthlyWrapped: IOSWrappedLaunch?
   @State private var loadedRevision: UUID?
   @State private var failedHeroArtwork: IOSArtwork?
+  @State private var containerWidth: CGFloat?
   /// The server returns at most this many items in Home's catalog shelves.
   private static let shelfLimit = 30
   private var margin: CGFloat { IOSDesign.margin(for: sizeClass) }
@@ -185,6 +186,11 @@ struct IOSHomeView: View {
           .padding(.horizontal, margin).padding(.top, model.home == nil ? 120 : 0)
         }
       }.padding(.bottom, 32)
+    }
+    .onGeometryChange(for: CGFloat.self) {
+      $0.size.width
+    } action: { width in
+      if width > 0 { containerWidth = width }
     }
     // Only real artwork extends under the status bar; the text feature uses native safe areas.
     .ignoresSafeArea(edges: showsHeroArtwork ? .top : [])
@@ -405,7 +411,7 @@ struct IOSHomeView: View {
                 Button {
                   play(item)
                 } label: {
-                  IOSContinueCard(item: item)
+                  IOSContinueCard(item: item, availableWidth: containerWidth)
                 }
               } else {
                 NavigationLink {
@@ -643,9 +649,10 @@ struct IOSContinueCard: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   let item: IOSCatalogItem
+  var availableWidth: CGFloat? = nil
 
   private var cardWidth: CGFloat {
-    IOSDesign.landscapeWidth(for: sizeClass)
+    IOSDesign.landscapeWidth(for: sizeClass, availableWidth: availableWidth)
   }
 
   var body: some View {

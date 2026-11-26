@@ -10,6 +10,29 @@ struct IOSAppEnvironment {
   let allowsDiscovery: Bool
   let allowsPersistentCredentials: Bool
 
+  static var isRunningHostedUnitTests: Bool {
+    #if DEBUG
+      return ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        && IOSUITestScenario.current == nil
+    #else
+      return false
+    #endif
+  }
+
+  #if DEBUG
+    static func fixture(scenario: IOSUITestScenario) -> Self {
+      let defaults = UserDefaults(suiteName: "Aurelia.IOS.Fixture.\(UUID().uuidString)")!
+      return Self(
+        transport: scenario == .showcase
+          ? IOSShowcaseTransport() : IOSUITestTransport(scenario: scenario),
+        outbox: IOSProgressOutbox(journal: IOSDefaultsProgressJournal(defaults: defaults)),
+        makePlaybackRuntime: { IOSUITestEngine.runtime(scenario: scenario) },
+        preferences: IOSPlaybackPreferencesStore(defaults: defaults),
+        browsePreferences: IOSBrowsePreferenceStore(defaults: defaults), allowsDiscovery: false,
+        allowsPersistentCredentials: false)
+    }
+  #endif
+
   static func current() -> Self {
     #if DEBUG
       if let scenario = IOSUITestScenario.current {
@@ -25,6 +48,9 @@ struct IOSAppEnvironment {
           preferences: IOSPlaybackPreferencesStore(defaults: defaults),
           browsePreferences: IOSBrowsePreferenceStore(defaults: defaults), allowsDiscovery: false,
           allowsPersistentCredentials: false)
+      }
+      if isRunningHostedUnitTests {
+        return fixture(scenario: .library)
       }
     #endif
     return Self(

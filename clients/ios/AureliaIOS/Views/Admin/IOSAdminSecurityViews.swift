@@ -518,6 +518,7 @@ struct IOSSecurityAlertBanner: View {
   @EnvironmentObject private var model: IOSAppModel
   @ObservedObject var center: IOSSecurityAlertCenter
   @Environment(\.dynamicTypeSize) private var typeSize
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   @Environment(\.verticalSizeClass) private var verticalSizeClass
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -588,7 +589,7 @@ struct IOSSecurityAlertBanner: View {
         }
       }
     }
-    .padding(.horizontal, IOSDesign.margin)
+    .padding(.horizontal, IOSDesign.margin(for: horizontalSizeClass))
     .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: center.newDevices)
     .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: center.unlockRequests)
   }

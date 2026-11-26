@@ -297,8 +297,9 @@
           "items": Array(all.dropFirst(offset).prefix(limit)), "offset": offset,
           "limit": limit, "total": all.count, "revision": "fixture-\(revision)",
         ]
-      } else if path.hasSuffix("/summary") {
-        let id = UUID(uuidString: url.pathComponents[url.pathComponents.count - 2])!
+      } else if path.hasPrefix("/api/v1/catalog/items/"), path.hasSuffix("/summary"),
+        let id = UUID(uuidString: url.pathComponents[url.pathComponents.count - 2])
+      {
         body = item(
           id == IOSUITestFixtures.seriesID ? IOSUITestFixtures.series() : IOSUITestFixtures.movie())
       } else if path.hasPrefix("/api/v1/catalog/items/") {
@@ -451,6 +452,51 @@
           "titlesWatched": 12, "moviesWatched": 4, "episodesWatched": 31,
           "topGenre": "Drama", "topTitle": "Aurelia Test Series",
         ]
+      } else if path == "/api/v1/wishes/seen" {
+        return IOSHTTPResponse(
+          statusCode: 204, headers: [:], body: Data(), fingerprint: IOSUITestFixtures.fingerprint)
+      } else if path == "/api/v1/wishes/summary" {
+        body = ["openCount": 2, "newlyFulfilledCount": 0]
+      } else if path == "/api/v1/wishes" {
+        body = [
+          "wishes": [
+            [
+              "id": UUID().uuidString,
+              "userId": IOSUITestFixtures.profileID.uuidString,
+              "userName": "Alex",
+              "kind": "movie",
+              "provider": "tmdb",
+              "providerMediaId": "101",
+              "title": "The Grand Harbour Lighthouse Chronicles",
+              "year": 2025,
+              "overview": "A synthetic family wish to verify card wrapping and button layout.",
+              "posterPath": NSNull(),
+              "posterUrl": NSNull(),
+              "ageRating": "FSK 12",
+              "minimumAge": 12,
+              "note": "For Friday Movie Night!",
+              "state": "open",
+              "resolvedByUserId": NSNull(),
+              "resolvedByUserName": NSNull(),
+              "resolutionNote": NSNull(),
+              "fulfilledMediaItemId": NSNull(),
+              "createdAt": IOSUITestFixtures.stamp,
+              "resolvedAt": NSNull(),
+              "seenByWisherAt": NSNull(),
+              "canSupport": true,
+              "supportedByCaller": false,
+              "supporters": [
+                ["userId": IOSUITestFixtures.movieID.uuidString, "name": "Sam"]
+              ],
+              "suggestions": [],
+            ] as [String: Any]
+          ],
+          "openCount": 1,
+          "newlyFulfilledCount": 0,
+          "providerEnabled": true,
+        ]
+      } else if path == "/api/v1/movie-nights" || path == "/api/v1/watch-together" {
+        body = []
       } else if path.contains("/scrub-previews/") {
         return IOSHTTPResponse(
           statusCode: 503, headers: [:], body: Data(), fingerprint: IOSUITestFixtures.fingerprint)

@@ -25,6 +25,8 @@ printf '%s\n' "$matches" | sed '/./s|^|./|' | awk -F: '
     allow["./clients/tvos/Configuration/AureliaTV-Info.plist:aurelia-home"] = 1
     allow["./clients/macos/AureliaTests/AureliaTests.swift:aurelia-home"] = 1
     allow["./clients/macos/AureliaTests/AureliaTests.swift:Aurelia Home Server"] = 1
+    allow["./clients/macos/AureliaTests/TestEditionIsolationTests.swift:aurelia-home"] = 1
+    allow["./clients/macos/AureliaTests/TestEditionIsolationTests.swift:Aurelia Home Server"] = 1
   }
   NF && !allow[$0] { print "Unexpected retired product label: " $0; failed = 1 }
   END { exit failed }

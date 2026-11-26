@@ -62,7 +62,7 @@ enum IOSLayoutMetrics: Sendable {
   static func heroBackdropHeight(
     isRegularWidth: Bool, isCompactHeight: Bool, isAccessibilitySize: Bool
   ) -> CGFloat {
-    if isCompactHeight { return isAccessibilitySize ? 320 : 260 }
+    if isCompactHeight { return isAccessibilitySize ? 300 : 260 }
     if isAccessibilitySize { return isRegularWidth ? 560 : 500 }
     return isRegularWidth ? 560 : 450
   }

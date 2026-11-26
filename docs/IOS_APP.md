@@ -167,6 +167,14 @@ Runs the logic tests on the Mac without a simulator. Like the build below, it fi
 Swift formatting (`bash scripts/check-swift-format.sh`, `--fix` formats).
 
 ```bash
+zsh scripts/test-ios-layout.sh
+```
+
+Renders the main iPhone and iPad screens with synthetic fixtures in a headless iOS Simulator session
+across compact iPhones, Landscape, 320 pt iPad Slide Over, iPad Pro and accessibility text sizes to
+verify that nothing overflows or clips.
+
+```bash
 zsh scripts/build-ios.sh
 ```
 

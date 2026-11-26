@@ -24,23 +24,27 @@ struct AureliaIOSApp: App {
 
   var body: some Scene {
     WindowGroup {
-      IOSRootView()
-        .environmentObject(model)
-        .preferredColorScheme(.dark)
-        // The Apple TV screens rely on focus instead of a tint; text stays white here as well.
-        .tint(.white)
-        .task {
-          let appModel = model
-          IOSWishNotificationCenter.shared.installDelegateIfNeeded { [weak appModel] in
-            appModel?.openWishesFromNotification()
+      if IOSAppEnvironment.isRunningHostedUnitTests {
+        Color.clear
+      } else {
+        IOSRootView()
+          .environmentObject(model)
+          .preferredColorScheme(.dark)
+          // The Apple TV screens rely on focus instead of a tint; text stays white here as well.
+          .tint(.white)
+          .task {
+            let appModel = model
+            IOSWishNotificationCenter.shared.installDelegateIfNeeded { [weak appModel] in
+              appModel?.openWishesFromNotification()
+            }
+            await model.start()
+            IOSVideoEngine.warmUp()
           }
-          await model.start()
-          IOSVideoEngine.warmUp()
-        }
-        .onChange(of: scenePhase) { _, phase in
-          if phase == .background { model.enterBackground() }
-          if phase == .active { model.enterForeground() }
-        }
+          .onChange(of: scenePhase) { _, phase in
+            if phase == .background { model.enterBackground() }
+            if phase == .active { model.enterForeground() }
+          }
+      }
     }
   }
 }
