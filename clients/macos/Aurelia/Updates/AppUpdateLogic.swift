@@ -119,7 +119,7 @@ struct AppRelease: Equatable, Sendable {
 }
 
 /// Aurelia for Mac is published only as betas while it is development-signed and starts only on
-/// Macs registered to the developer's Apple account (CLAUDE.md, Hard rule 1). Beta Updates is
+/// Macs registered to the developer's Apple account (AGENTS.md, Hard rule 1). Beta Updates is
 /// therefore on by default and these texts say why. With a paid Apple Developer membership and
 /// stable Mac releases again, remove this and turn the default off in AppUpdatePreferences.
 enum AppUpdateBetaOnly {
