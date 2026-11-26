@@ -358,26 +358,29 @@ struct ServerProfileEditor: View {
           ScrollView {
             LazyVStack(alignment: .leading, spacing: 10) {
               ForEach(titles) { item in
-                Toggle(
-                  isOn: Binding(
-                    get: { selectedTitles.contains(item.id) },
-                    set: { checked in
-                      if checked {
-                        selectedTitles.insert(item.id)
-                      } else {
-                        selectedTitles.remove(item.id)
-                      }
-                    })
-                ) {
-                  HStack(spacing: 8) {
-                    Image(systemName: item.kind == .series ? "tv" : "film")
-                      .foregroundStyle(.secondary).frame(width: 18)
-                    Text(item.title).lineLimit(1)
-                    Spacer()
-                    if let year = item.year { Text(String(year)).foregroundStyle(.secondary) }
-                  }
-                }.toggleStyle(.checkbox)
-                  .accessibilityIdentifier("profile-editor-title-\(item.id.uuidString)")
+                HStack(spacing: 8) {
+                  Toggle(
+                    isOn: Binding(
+                      get: { selectedTitles.contains(item.id) },
+                      set: { checked in
+                        if checked {
+                          selectedTitles.insert(item.id)
+                        } else {
+                          selectedTitles.remove(item.id)
+                        }
+                      })
+                  ) {
+                    HStack(spacing: 8) {
+                      Image(systemName: item.kind == .series ? "tv" : "film")
+                        .foregroundStyle(.secondary).frame(width: 18)
+                      Text(item.title).lineLimit(1)
+                    }
+                  }.toggleStyle(.checkbox)
+                    .labeledContentStyle(.automatic)
+                    .accessibilityIdentifier("profile-editor-title-\(item.id.uuidString)")
+                  Spacer()
+                  if let year = item.year { Text(String(year)).foregroundStyle(.secondary) }
+                }
               }
               if titles.isEmpty {
                 Text(query.isEmpty ? "No films or series available." : "No matching titles.")

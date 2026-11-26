@@ -353,6 +353,16 @@ final class CinemaUITests: XCTestCase {
       CGVector(dx: frame.midX - window.frame.minX, dy: frame.midY - window.frame.minY))
   }
 
+  @MainActor private func revealInEditor(_ element: XCUIElement, in app: XCUIApplication) {
+    let editorScroll = app.descendants(matching: .any)["metadata-editor-scroll"]
+    XCTAssertTrue(element.waitForExistence(timeout: 5))
+    for _ in 0..<12
+    where !element.isHittable || element.frame.maxY > editorScroll.frame.maxY - 16 {
+      editorScroll.scroll(byDeltaX: 0, deltaY: -180)
+    }
+    XCTAssertTrue(element.isHittable)
+  }
+
   /// Opens the first person's photo crop; the photo menu may sit below the editor's visible
   /// area, where isHittable is still true, so it is scrolled into view by its frame.
   @MainActor private func openFirstPersonCrop(in app: XCUIApplication) {
@@ -470,12 +480,8 @@ final class CinemaUITests: XCTestCase {
     selectEditorSection("Artwork", in: app)
     shot(app, "Cinema - Editor - Artwork")
     let crop = app.buttons["metadata-crop-backdrop"]
-    XCTAssertTrue(crop.waitForExistence(timeout: 5))
+    revealInEditor(crop, in: app)
     XCTAssertTrue(crop.isEnabled)
-    if !crop.isHittable {
-      app.descendants(matching: .any)["metadata-editor-scroll"].scroll(byDeltaX: 0, deltaY: -300)
-    }
-    XCTAssertTrue(crop.isHittable)
     crop.click()
     shot(app, "Cinema - Crop - Immediately After Opening")
     let opened = app.buttons["crop-use"].waitForExistence(timeout: 8)
@@ -516,7 +522,9 @@ final class CinemaUITests: XCTestCase {
     app.menuItems["Edit Metadata…"].click()
     XCTAssertTrue(app.textFields["metadata-title"].waitForExistence(timeout: 5))
     selectEditorSection("Artwork", in: app)
-    app.buttons["metadata-crop-backdrop"].click()
+    let reopenedCrop = app.buttons["metadata-crop-backdrop"]
+    revealInEditor(reopenedCrop, in: app)
+    reopenedCrop.click()
     XCTAssertTrue(app.buttons["crop-use"].waitForExistence(timeout: 5))
     XCTAssertEqual(selection.frame.width, savedFrame.width, accuracy: 2)
     XCTAssertEqual(selection.frame.minX, savedFrame.minX, accuracy: 2)

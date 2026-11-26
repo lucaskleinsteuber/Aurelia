@@ -400,7 +400,14 @@ final class TVLibraryUITests: XCTestCase {
 
   @MainActor
   private func selectTab(_ app: XCUIApplication, title: String) {
-    let titles = ["Home", "Movies", "TV Shows", "Search", "Test Viewer"]
+    let tabButtons = app.tabBars.firstMatch.buttons
+    var titles = (0..<tabButtons.count).map { tabButtons.element(boundBy: $0).label }
+      .filter { !$0.isEmpty }
+    if titles.isEmpty {
+      let profileTab =
+        ["Home", "Movies", "TV Shows", "People", "Search"].contains(title) ? "Test Viewer" : title
+      titles = ["Home", "Movies", "TV Shows", "Search", profileTab]
+    }
     for _ in 0..<14 {
       if titles.contains(where: { app.buttons[$0].firstMatch.hasFocus }) { break }
       remote.press(.up)

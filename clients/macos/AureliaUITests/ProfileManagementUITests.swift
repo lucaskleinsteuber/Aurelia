@@ -83,7 +83,7 @@ final class ProfileManagementUITests: XCTestCase {
     search.click()
     search.typeText("Breaking Bad")
     let series = app.checkBoxes["profile-editor-title-20000000-0000-0000-0000-000000000001"]
-    XCTAssertTrue(series.waitForExistence(timeout: 5))
+    reveal(series, in: app)
     series.click()
     XCTAssertTrue(app.staticTexts["1 selected"].exists)
     XCTAssertTrue(app.buttons["profile-editor-save"].isEnabled)
@@ -142,12 +142,16 @@ final class ProfileManagementUITests: XCTestCase {
 
   @MainActor private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
     XCTAssertTrue(element.waitForExistence(timeout: 8))
+    let scroll = app.scrollViews.containing(.any, identifier: element.identifier).firstMatch
     for _ in 0..<12 {
-      if element.isHittable { return }
-      let scroll = app.scrollViews.containing(.any, identifier: element.identifier).firstMatch
+      let withinScroll =
+        !scroll.exists
+        || (element.frame.maxY <= scroll.frame.maxY - 12
+          && element.frame.minY >= scroll.frame.minY + 4)
+      if element.isHittable && withinScroll { return }
       XCTAssertTrue(scroll.exists, "The target must belong to its actual scroll view.")
-      scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.7))
-        .scroll(byDeltaX: 0, deltaY: -300)
+      scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.25))
+        .scroll(byDeltaX: 0, deltaY: -220)
     }
     XCTAssertTrue(element.isHittable)
   }

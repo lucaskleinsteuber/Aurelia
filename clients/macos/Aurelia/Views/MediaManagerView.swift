@@ -306,7 +306,7 @@ private struct AureliaSectionSurfaceModifier: ViewModifier {
   }
 }
 
-private struct LibraryLocationRow: View {
+struct LibraryLocationRow: View {
   @EnvironmentObject private var model: AppModel
   let library: LibrarySummary
   let canEdit: Bool
@@ -314,58 +314,80 @@ private struct LibraryLocationRow: View {
   @State private var relocating = false
 
   var body: some View {
-    HStack(spacing: 12) {
-      Image(systemName: availabilitySymbol)
-        .foregroundStyle(library.availability == .available ? Color.primary : Color.orange)
-      VStack(alignment: .leading, spacing: 3) {
-        HStack {
-          Text(library.name).font(.headline)
-          Text(library.kind.title).font(.caption).foregroundStyle(.secondary)
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(alignment: .top, spacing: 10) {
+        Image(systemName: availabilitySymbol)
+          .foregroundStyle(library.availability == .available ? Color.primary : Color.orange)
+          .padding(.top, 2)
+        VStack(alignment: .leading, spacing: 3) {
+          HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(library.name).font(.headline).lineLimit(1)
+            Text(library.kind.title)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize()
+          }
+          Text(library.path)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+          if let error = library.lastError, !error.isEmpty {
+            Text(error).font(.caption).foregroundStyle(.orange).lineLimit(2)
+          }
         }
-        Text(library.path).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-        if let error = library.lastError, !error.isEmpty {
-          Text(error).font(.caption).foregroundStyle(.orange).lineLimit(2)
-        }
+        .layoutPriority(1)
+        Spacer(minLength: 8)
+        Text(ReadableState.text(library.availability.rawValue))
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize()
       }
-      Spacer()
-      Text(ReadableState.text(library.availability.rawValue))
-        .font(.caption).foregroundStyle(.secondary)
+
       if canEdit {
-        if library.importPreviewRequired == true {
-          Button("Preview…") { model.importPreviewLibrary = library }
+        HStack(spacing: 10) {
+          if library.monitoringEnabled != nil {
+            Toggle(
+              "Monitor",
+              isOn: Binding(
+                get: { library.isMonitoringEnabled },
+                set: { enabled in
+                  Task { await model.setMonitoring(libraryID: library.id, enabled: enabled) }
+                })
+            )
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .fixedSize()
+            .accessibilityIdentifier("library-monitor-\(library.id.uuidString.lowercased())")
+            .help("Automatically detect changes in this storage location")
+            .disabled(library.importPreviewRequired == true)
+          }
+          Spacer(minLength: 8)
+          if library.importPreviewRequired == true {
+            Button("Preview…") { model.importPreviewLibrary = library }
+              .fixedSize()
+          }
+          Button("Rescan") { Task { await model.scanLibrary(id: library.id) } }
+            .frame(minHeight: AureliaDesign.minimumControlSize)
+            .fixedSize()
+            .disabled(library.importPreviewRequired == true)
+          Button("Moved…") { relocating = true }
+            .frame(minHeight: AureliaDesign.minimumControlSize)
+            .fixedSize()
+            .help("Storage Location Moved: point it at the folder where its files are now")
+            .accessibilityLabel("Storage Location Moved for \(library.name)")
+          Button(role: .destructive) {
+            confirmingRemoval = true
+          } label: {
+            Image(systemName: "trash")
+              .frame(
+                width: AureliaDesign.minimumControlSize, height: AureliaDesign.minimumControlSize)
+          }
+          .buttonStyle(AureliaPressableButtonStyle())
+          .accessibilityLabel("Remove \(library.name)")
+          .help("Remove This Storage Location…")
         }
-        if library.monitoringEnabled != nil {
-          Toggle(
-            "Monitor",
-            isOn: Binding(
-              get: { library.isMonitoringEnabled },
-              set: { enabled in
-                Task { await model.setMonitoring(libraryID: library.id, enabled: enabled) }
-              })
-          )
-          .toggleStyle(.switch)
-          .controlSize(.small)
-          .accessibilityIdentifier("library-monitor-\(library.id.uuidString.lowercased())")
-          .help("Automatically detect changes in this storage location")
-          .disabled(library.importPreviewRequired == true)
-        }
-        Button("Rescan") { Task { await model.scanLibrary(id: library.id) } }
-          .frame(minHeight: AureliaDesign.minimumControlSize)
-          .disabled(library.importPreviewRequired == true)
-        Button("Moved…") { relocating = true }
-          .frame(minHeight: AureliaDesign.minimumControlSize)
-          .help("Storage Location Moved: point it at the folder where its files are now")
-          .accessibilityLabel("Storage Location Moved for \(library.name)")
-        Button(role: .destructive) {
-          confirmingRemoval = true
-        } label: {
-          Image(systemName: "trash")
-            .frame(
-              width: AureliaDesign.minimumControlSize, height: AureliaDesign.minimumControlSize)
-        }
-        .buttonStyle(AureliaPressableButtonStyle())
-        .accessibilityLabel("Remove \(library.name)")
-        .help("Remove This Storage Location…")
+        .padding(.leading, 26)
       }
     }
     .padding(10)

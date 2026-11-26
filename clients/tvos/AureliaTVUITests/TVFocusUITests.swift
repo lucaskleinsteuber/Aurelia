@@ -89,13 +89,20 @@ final class TVFocusUITests: XCTestCase {
     XCUIRemote.shared.press(.right)
     XCUIRemote.shared.press(.right)
     XCTAssertFalse(first.hasFocus)
+    let filters = app.buttons["browse-filters"]
     XCUIRemote.shared.press(.up)
+    if filters.hasFocus {
+      XCUIRemote.shared.press(.up)
+    }
     expectFocus(app.buttons["Movies"].firstMatch)
     // Give the tab bar its expand animation, as a person would.
     _ = XCTWaiter.wait(
       for: [XCTNSPredicateExpectation(predicate: NSPredicate(value: false), object: nil)],
       timeout: 1)
     XCUIRemote.shared.press(.down)
+    if filters.hasFocus {
+      XCUIRemote.shared.press(.down)
+    }
     expectFocus(first)
     shot(app, "Library - Grid Entry")
   }

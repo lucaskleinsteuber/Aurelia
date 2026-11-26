@@ -1176,19 +1176,26 @@ struct AppSettingsView: View {
         }
 
         ForEach(model.libraries) { library in
-          HStack {
+          HStack(spacing: 10) {
             Image(systemName: "externaldrive.fill")
               .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {
-              Text(library.name).font(.headline)
-              Text(library.path).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+              Text(library.name).font(.headline).lineLimit(1)
+              Text(library.path)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
             }
-            Spacer()
+            .layoutPriority(1)
+            Spacer(minLength: 8)
             Text(AureliaStateLabels.libraryAvailability(library.availability))
-              .font(.caption).foregroundStyle(.secondary)
+              .font(.caption).foregroundStyle(.secondary).fixedSize()
             Button("Scan") { Task { await model.scanLibrary(id: library.id) } }
+              .fixedSize()
               .disabled(library.importPreviewRequired == true)
             Button("Moved…") { libraryToRelocate = library }
+              .fixedSize()
               .help("Storage Location Moved: point it at the folder where its files are now")
               .accessibilityLabel("Storage Location Moved for \(library.name)")
             Button(role: .destructive) {
