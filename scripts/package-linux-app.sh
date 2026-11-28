@@ -110,8 +110,8 @@ Requires: glibc, libgcc, libstdc++, libicu, fontconfig, freetype, (libX11 or lib
 Requires: (vlc-libs or libvlc5), (vlc-plugins-base or vlc-noX), (vlc-plugin-pulseaudio or vlc-noX)
 Requires: (dejavu-sans-fonts or dejavu-fonts)
 Requires: (openssl-libs or libopenssl3), (zlib or libz1), /usr/bin/pkexec
-Obsoletes: aurelia-desktop
-Provides: aurelia-desktop
+Obsoletes: aurelia-desktop < $version
+Provides: aurelia-desktop = %{version}-%{release}
 Recommends: ffmpeg
 %global debug_package %{nil}
 %global __os_install_post %{nil}
