@@ -52,6 +52,8 @@ jobs:
           dotnet test Tarven.slnx --configuration Release --no-build
       - name: Test the browser app's logic
         run: node --test "tests/WebApp/*.test.mjs"
+      - name: Test the website's logic
+        run: node --test "tests/Website/*.test.mjs"
       - name: Check update signatures and the one-line installer
         run: |
           bash scripts/test-server-update-signature.sh

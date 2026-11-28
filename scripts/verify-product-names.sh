@@ -89,6 +89,7 @@ allowed='
   src/Tarven.Server/WebApp/js/settings-admin.js
   tests/Tarven.Server.Tests/LegacyNamesTests.cs
   tests/WebApp/legacy-storage.test.mjs
+  tests/Website/releases.test.mjs
 '
 status=0
 # git grep needs no extra tool; --untracked also checks new files that are not ignored yet.

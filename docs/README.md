@@ -50,6 +50,7 @@ Tarven from source or write their own client.
 | [Linux app parity](LINUX_APP_PARITY.md) | Which Mac features the Linux app has and how each is verified |
 | [System callbacks](SYSTEM_CALLBACKS.md) | Threading rules for Apple framework callbacks in the Mac app |
 | [Update test](UPDATE_TEST.md) | How the real update path of the Mac and Linux apps was tested |
+| [Website](WEBSITE.md) | The download page: what it may contain and how it is hosted |
 | [Contributing](../CONTRIBUTING.md) | How to report bugs, suggest features and send changes |
 
 A plain list of every page with a one-line summary, meant for AI assistants and search tools,

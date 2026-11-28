@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Tarven">
+  <!-- The Tarven app icon as a flat SVG for the website; a copy of docs/assets/tarven-icon.svg. -->
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2B3036"/>
+      <stop offset="1" stop-color="#121417"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.42" r="0.55">
+      <stop offset="0" stop-color="#5B7CFF" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#5B7CFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="echo" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8EC5FF"/>
+      <stop offset="1" stop-color="#5B4FE0"/>
+    </linearGradient>
+    <linearGradient id="letter" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E3E8EE"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="232" fill="url(#background)"/>
+  <rect width="1024" height="1024" rx="232" fill="url(#glow)"/>
+  <rect x="2" y="2" width="1020" height="1020" rx="230" fill="none" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="4"/>
+  <path d="M328 232 L696 232 Q762 232 762 298 L762 306 Q762 372 696 372 L610 372 Q580 372 580 402 L580 724 Q580 792 512 792 Q444 792 444 724 L444 402 Q444 372 414 372 L328 372 Q262 372 262 306 L262 298 Q262 232 328 232 Z" fill="url(#echo)" fill-rule="evenodd" transform="translate(34 30)"/>
+  <path d="M328 232 L696 232 Q762 232 762 298 L762 306 Q762 372 696 372 L610 372 Q580 372 580 402 L580 724 Q580 792 512 792 Q444 792 444 724 L444 402 Q444 372 414 372 L328 372 Q262 372 262 306 L262 298 Q262 232 328 232 Z" fill="url(#letter)" fill-rule="evenodd"/>
+</svg>

@@ -46,6 +46,11 @@ earlier habit suggests:
   `scripts/verify-product-names.sh` allows the old names only there. Git history and historical
   changelog entries keep the old name; never rewrite them.
 - Keep all user-facing text in English until localization is an explicit task.
+- The website (`website/`, see `docs/WEBSITE.md`) is private (owner, 28.11.2026): it is served
+  only behind Cloudflare Access, nothing public links to it, and it holds no personal data (no
+  names, addresses or email addresses). It is static files with no build step, nothing loaded from
+  other sites except GitHub's release list, and no cookies or tracking. Making it public is the
+  owner's decision.
 - Preserve the native macOS design direction, but keep infrastructure
   milestones focused and functional.
 - Media files are only ever read: never modify, move, rename or delete them.

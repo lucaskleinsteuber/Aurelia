@@ -1,0 +1,8 @@
+# Cloudflare Pages response headers. The site is private: search engines are told to stay out,
+# and nothing is loaded from anywhere but this site, except the release list from GitHub.
+/*
+  X-Robots-Tag: noindex, nofollow
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src https://api.github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff
+  Permissions-Policy: camera=(), microphone=(), geolocation=()

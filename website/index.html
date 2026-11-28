@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#1b1e21">
+  <title>Tarven: your own movies and TV shows</title>
+  <meta name="description" content="A free, self-hosted media server for Mac, Linux or a NAS, with apps for Mac, Linux, Apple TV, iPhone and iPad and a player in any browser.">
+  <link rel="icon" href="tarven-icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="site.css">
+  <script type="module" src="site.js"></script>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-text">
+      <h1>Tarven</h1>
+      <p class="lede">Your own movies and TV shows, in a library that feels like a streaming service, on your own hardware.</p>
+      <p>A free media server for a Mac, a Linux PC or a NAS, with apps for Mac, Linux, Apple TV, iPhone and iPad and a player in any browser. No account, no cloud and no subscription.</p>
+      <p class="hero-actions">
+        <a class="button primary" href="#downloads">Download</a>
+        <a class="button" href="#start">How to start</a>
+      </p>
+    </div>
+    <svg class="mark" viewBox="230 200 600 660" aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id="echo" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#8EC5FF"/>
+          <stop offset="1" stop-color="#5B4FE0"/>
+        </linearGradient>
+        <linearGradient id="letter" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#FFFFFF"/>
+          <stop offset="1" stop-color="#E3E8EE"/>
+        </linearGradient>
+        <path id="t" d="M328 232 L696 232 Q762 232 762 298 L762 306 Q762 372 696 372 L610 372 Q580 372 580 402 L580 724 Q580 792 512 792 Q444 792 444 724 L444 402 Q444 372 414 372 L328 372 Q262 372 262 306 L262 298 Q262 232 328 232 Z"/>
+      </defs>
+      <use class="mark-echo" href="#t" fill="url(#echo)"/>
+      <use href="#t" fill="url(#letter)"/>
+    </svg>
+  </header>
+
+  <main>
+    <section id="downloads" aria-labelledby="downloads-title">
+      <h2 id="downloads-title">Downloads</h2>
+      <p class="intro">Choose your system and processor. Not sure which processor you have? On a Mac, open Apple menu › About This Mac: it says <em>Chip: Apple M…</em> or <em>Processor: Intel</em>. On Linux, run <code>uname -m</code>: <code>x86_64</code> means x64, <code>aarch64</code> means arm64.</p>
+      <p class="status" data-status role="status">Looking up the newest versions…</p>
+
+      <article class="product" data-product="mac">
+        <div class="product-name">
+          <h3>Tarven for Mac</h3>
+          <p>macOS 26. The library server is built in.</p>
+          <p class="version" data-version></p>
+        </div>
+        <div class="product-downloads">
+          <div class="choice">
+            <a class="button primary" data-asset="arm64" href="https://github.com/lucaskleinsteuber/Tarven/releases">Apple silicon</a>
+            <span>M1 and newer</span>
+          </div>
+          <div class="choice">
+            <a class="button" data-asset="x64" href="https://github.com/lucaskleinsteuber/Tarven/releases">Intel</a>
+          </div>
+          <p class="note">A test version: it runs only on Macs registered to the developer, because Tarven doesn't use Apple's paid developer program. On any other Mac, use Tarven in your browser, which can do everything the Mac app does, or <a href="https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/BUILD_MAC_APP.md">build the app yourself</a> with a free Apple ID.</p>
+        </div>
+      </article>
+
+      <article class="product" data-product="linux">
+        <div class="product-name">
+          <h3>Tarven for Linux</h3>
+          <p>The desktop app, with an optional library server on this PC.</p>
+          <p class="version" data-version></p>
+        </div>
+        <div class="product-downloads">
+          <table class="packages">
+            <thead>
+              <tr><th scope="col">Distribution</th><th scope="col">x64</th><th scope="col">arm64</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Ubuntu, Debian, Mint</th>
+                <td><a data-asset="debX64" href="https://github.com/lucaskleinsteuber/Tarven/releases">.deb</a></td>
+                <td><a data-asset="debArm64" href="https://github.com/lucaskleinsteuber/Tarven/releases">.deb</a></td>
+              </tr>
+              <tr>
+                <th scope="row">Fedora, openSUSE</th>
+                <td><a data-asset="rpmX64" href="https://github.com/lucaskleinsteuber/Tarven/releases">.rpm</a></td>
+                <td><a data-asset="rpmArm64" href="https://github.com/lucaskleinsteuber/Tarven/releases">.rpm</a></td>
+              </tr>
+              <tr>
+                <th scope="row">Arch, CachyOS, Manjaro</th>
+                <td><a data-asset="archX64" href="https://github.com/lucaskleinsteuber/Tarven/releases">.pkg.tar.zst</a></td>
+                <td><a data-asset="archArm64" href="https://github.com/lucaskleinsteuber/Tarven/releases">.pkg.tar.zst</a></td>
+              </tr>
+              <tr>
+                <th scope="row">Any distribution with Flatpak</th>
+                <td><a data-asset="flatpakX64" href="https://github.com/lucaskleinsteuber/Tarven/releases">.flatpak</a></td>
+                <td class="none">Not available</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="note"><a href="https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/LINUX_APP.md">Installing the Linux app</a></p>
+        </div>
+      </article>
+
+      <article class="product" data-product="server">
+        <div class="product-name">
+          <h3>Tarven Server for Linux</h3>
+          <p>For a PC without a screen: an old laptop, a mini PC or a Raspberry Pi class computer with systemd.</p>
+          <p class="version" data-version></p>
+        </div>
+        <div class="product-downloads">
+          <p>Install it with one line. The installer picks x64 or arm64 by itself:</p>
+          <div class="command">
+            <code id="install-command">curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Tarven/main/packaging/linux/get-tarven.sh | sudo bash</code>
+            <button type="button" class="copy" data-copy="install-command">Copy</button>
+          </div>
+          <p class="note">Or download the package for
+            <a data-asset="x64" href="https://github.com/lucaskleinsteuber/Tarven/releases">x64</a> or
+            <a data-asset="arm64" href="https://github.com/lucaskleinsteuber/Tarven/releases">arm64</a>.
+            <a href="https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/LINUX_SERVER.md">Server guide</a></p>
+        </div>
+      </article>
+
+      <article class="product">
+        <div class="product-name">
+          <h3>Tarven Server with Docker</h3>
+          <p>For a NAS or any Docker host, amd64 or arm64.</p>
+        </div>
+        <div class="product-downloads">
+          <p>The image is built on your own machine from a verified server release.</p>
+          <p class="note"><a href="https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/DOCKER.md">Docker guide</a></p>
+        </div>
+      </article>
+
+      <article class="product">
+        <div class="product-name">
+          <h3>Apple TV, iPhone and iPad</h3>
+          <p>tvOS 26, iOS and iPadOS 26.</p>
+        </div>
+        <div class="product-downloads">
+          <p>These apps aren't in the App Store. You install them from the source code with Xcode and a free Apple ID.</p>
+          <p class="note">
+            <a href="https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/APPLE_TV.md">Apple TV guide</a>,
+            <a href="https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/IOS_APP.md">iPhone and iPad guide</a>
+          </p>
+        </div>
+      </article>
+
+      <article class="product">
+        <div class="product-name">
+          <h3>Tarven in a browser</h3>
+          <p>Safari, Chrome, Edge and Firefox.</p>
+        </div>
+        <div class="product-downloads">
+          <p>Nothing to install: open your server's address in the browser.</p>
+          <p class="note"><a href="https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/WEB_APP.md">Tarven in a web browser</a></p>
+        </div>
+      </article>
+    </section>
+
+    <section id="start" aria-labelledby="start-title">
+      <h2 id="start-title">How to start</h2>
+      <ol class="steps">
+        <li>
+          <h3>Pick the computer that keeps the library</h3>
+          <p>A Mac or Linux PC that is on when you watch, with your media drives attached.</p>
+        </li>
+        <li>
+          <h3>Set it up</h3>
+          <p>In the Mac or Linux app, choose <em>Set Up This Mac</em> or <em>Set Up This PC</em>. On a Linux server, open the address the installer shows and type its one-time code.</p>
+        </li>
+        <li>
+          <h3>Connect your other devices</h3>
+          <p>On the server computer, choose Settings › Profiles and Devices › Create Code, or run <code>tarven pair</code> on a Linux server. Type the 8-digit code on the new device.</p>
+        </li>
+        <li>
+          <h3>Choose your profile and watch</h3>
+          <p>Your files are only ever read: never moved, renamed or converted.</p>
+        </li>
+      </ol>
+      <p class="note"><a href="https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/GETTING_STARTED.md">The full getting started guide</a> also explains how to name your folders so everything is recognized.</p>
+    </section>
+  </main>
+
+  <footer>
+    <p>
+      <a href="https://github.com/lucaskleinsteuber/Tarven">Source code</a>
+      <a href="https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/README.md">Guides</a>
+      <a href="https://github.com/lucaskleinsteuber/Tarven/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/lucaskleinsteuber/Tarven/releases">All releases</a>
+    </p>
+    <p>Tarven is free and open source under the MIT license. This page loads the version list from GitHub.</p>
+  </footer>
+</body>
+</html>
