@@ -11,7 +11,7 @@ bash "$repository_root/scripts/check-swift-format.sh"
 dependency_root=${MOBILEVLCKIT_ROOT:-"$repository_root/clients/ios/Dependencies"}
 MOBILEVLCKIT_ROOT="$dependency_root" "$repository_root/scripts/prepare-ios-vlckit.sh"
 
-simulator_id=${AURELIA_IOS_SIMULATOR_ID:-$(
+simulator_id=${TARVEN_IOS_SIMULATOR_ID:-$(
   xcrun simctl list devices available | grep -E "    iPhone .*\([0-9A-F-]{36}\)" | tail -1 \
     | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/'
 )}
@@ -21,12 +21,12 @@ if [[ -z "$simulator_id" ]]; then
 fi
 
 run_id="ios-layout-$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"
-runtime_root="$HOME/Library/Caches/Aurelia/TestRuns/$run_id"
+runtime_root="$HOME/Library/Caches/Tarven/TestRuns/$run_id"
 derived_data="$runtime_root/DerivedData"
-temporary_result="$runtime_root/AureliaIOS-Layout.xcresult"
+temporary_result="$runtime_root/TarvenIOS-Layout.xcresult"
 temporary_log="$runtime_root/xcodebuild.log"
-final_result="$other_root/Test Results/AureliaIOS-Layout-$run_id.xcresult"
-final_log="$other_root/Logs/AureliaIOS-Layout-$run_id.log"
+final_result="$other_root/Test Results/TarvenIOS-Layout-$run_id.xcresult"
+final_log="$other_root/Logs/TarvenIOS-Layout-$run_id.log"
 mkdir -p "$runtime_root" "$other_root/Test Results" "$other_root/Logs"
 
 finish() {
@@ -40,8 +40,8 @@ finish() {
 trap finish EXIT
 
 DEVELOPER_DIR="$developer_dir" xcodebuild \
-  -project "$repository_root/clients/ios/AureliaIOS.xcodeproj" \
-  -scheme AureliaIOSLayoutTests -configuration Debug \
+  -project "$repository_root/clients/ios/TarvenIOS.xcodeproj" \
+  -scheme TarvenIOSLayoutTests -configuration Debug \
   -sdk iphonesimulator \
   -destination "platform=iOS Simulator,id=$simulator_id" \
   -derivedDataPath "$derived_data" \

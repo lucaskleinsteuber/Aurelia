@@ -40,10 +40,10 @@ separate; it is not a prerequisite or the chosen release channel.
 
 Team-prefixed Mac App Groups do not themselves require a provisioning profile,
 provided the signing team's identity matches. Restricted Keychain access-group
-entitlements do require authorization. Aurelia's existing Keychain query does not
+entitlements do require authorization. Tarven's existing Keychain query does not
 explicitly select an access group or force the Data Protection Keychain.
 
-`AURELIA_SIGNING_IDENTITY=<matching-development-identity> zsh scripts/probe-profileless-macos-signing.sh`
+`TARVEN_SIGNING_IDENTITY=<matching-development-identity> zsh scripts/probe-profileless-macos-signing.sh`
 therefore tests an ordinary synthetic Keychain write/read/delete and an isolated
 team-prefixed App Group in a correctly bundled, sandboxed app with no profile.
 It does not read an existing connection, change the installed app or certify
@@ -60,17 +60,17 @@ independent public package.
 `build-macos-release.sh` supports an opt-in **local development** mode:
 
 ```sh
-AURELIA_DISTRIBUTION=profileless-development \
-AURELIA_SIGNING_IDENTITY=<matching-Apple-Development-SHA-1> \
+TARVEN_DISTRIBUTION=profileless-development \
+TARVEN_SIGNING_IDENTITY=<matching-Apple-Development-SHA-1> \
 zsh scripts/build-macos-release.sh
 ```
 
-Setting `AURELIA_TEST_EDITION=1` builds **Aurelia Test** (a side-by-side test edition with its own
+Setting `TARVEN_TEST_EDITION=1` builds **Tarven Test** (a side-by-side test edition with its own
 bundle identifier, App Group, Keychain entry and launch agents, no self-updates, and Reset App Data
-in Settings), which automatically uses `profileless-development`. When `AURELIA_SIGNING_IDENTITY`
+in Settings), which automatically uses `profileless-development`. When `TARVEN_SIGNING_IDENTITY`
 is unset in `profileless-development` mode, `build-macos-release.sh` selects the first valid
-*Apple Development* identity in the Keychain matching `AURELIA_TEAM_ID`; set
-`AURELIA_SIGNING_IDENTITY` explicitly if you have multiple identities or want to pin one.
+*Apple Development* identity in the Keychain matching `TARVEN_TEAM_ID`; set
+`TARVEN_SIGNING_IDENTITY` explicitly if you have multiple identities or want to pin one.
 
 Find available identities with `security find-identity -v -p codesigning`. The
 identity must belong to the existing signing team; no profile is selected or
@@ -96,7 +96,7 @@ Before switching an existing installation, run the synthetic continuity test wit
 the same identity and a valid matching baseline profile:
 
 ```sh
-AURELIA_SIGNING_IDENTITY=<matching-Apple-Development-SHA-1> \
+TARVEN_SIGNING_IDENTITY=<matching-Apple-Development-SHA-1> \
 zsh scripts/probe-profileless-macos-continuity.sh
 ```
 
@@ -125,22 +125,22 @@ membership gives one-year profiles.
 
 ## Updating the Mac app
 
-*Aurelia › Check for Updates…* asks GitHub for the newest release of the repository the app
-was built from (`build-macos-release.sh` writes it into `AureliaUpdateRepository` in the
+*Tarven › Check for Updates…* asks GitHub for the newest release of the repository the app
+was built from (`build-macos-release.sh` writes it into `TarvenUpdateRepository` in the
 app's Info.plist; builds made in Xcode have none and cannot update). The repository is public,
 so updates check and download anonymously; the app has no GitHub token setting. The app
 also looks at launch and periodically while running (including after wake) when at least 24 hours
 have passed since its last successful check.
 *Settings › Updates › Check for updates automatically* is on by default; turning it off stops
-background checks. Automatic updates require Aurelia to be installed at `/Applications/Aurelia.app`
+background checks. Automatic updates require Tarven to be installed at `/Applications/Tarven.app`
 with write permission to `/Applications` (a translocated copy in Downloads or another folder cannot
-replace itself). *Check for Updates…* in the Aurelia menu opens *Settings › Updates* and
+replace itself). *Check for Updates…* in the Tarven menu opens *Settings › Updates* and
 checks there; its answer shows on that page instead of in dialogs.
 
 Once an update is chosen (*Install and Restart* in the offer of a background check, or
 *Install … and Restart* in *Settings › Updates*), *Settings › Updates* shows the download with
 its size, percentage and Cancel, and the Dock icon carries a small progress bar; there is no
-extra window. Then Aurelia closes and reopens by itself. In offline mode, where Settings can't
+extra window. Then Tarven closes and reopens by itself. In offline mode, where Settings can't
 open, the check answers in dialogs as before.
 
 To protect GitHub's anonymous rate limit (60 requests per hour per IP), checks send the HTTP
@@ -149,7 +149,7 @@ GitHub answers with `304 Not Modified`, which consumes minimal quota and complet
 If GitHub limits requests, try again later. With *Beta updates* on, the app reads the list of
 recent releases instead of the latest one, so it also finds pre-releases.
 
-Every Mac release has one disk image per processor, `Aurelia-<version>-<build>-macOS-arm64.dmg`
+Every Mac release has one disk image per processor, `Tarven-<version>-<build>-macOS-arm64.dmg`
 (Apple silicon) and `…-macOS-x64.dmg` (Intel), each with only its own server runtime, VLCKit and
 ffmpeg slice. The updater downloads the image named for the architecture it was built for.
 
@@ -188,7 +188,7 @@ and the error gives its recovery path instead of deleting it.
 
 `sh scripts/test-update-installer.sh` exercises the production filesystem transaction with
 invented bundles and injected signature/process checks in a unique
-`~/Library/Caches/Aurelia/TestRuns/` directory. It neither launches applications nor modifies
+`~/Library/Caches/Tarven/TestRuns/` directory. It neither launches applications nor modifies
 the installed app. Mac unit tests cover release validation, bounded transfer and checksum
 rules, download failures and cleanup using a synthetic transport, plus release notes,
 optional download sizes, automatic-check timing and version-specific skip choices using

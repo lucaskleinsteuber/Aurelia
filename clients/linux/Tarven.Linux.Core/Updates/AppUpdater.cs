@@ -1,0 +1,407 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text.Json.Nodes;
+using Tarven.Linux.Core.Platform;
+using Tarven.Linux.Core.Connection;
+using Tarven.Linux.Core.Settings;
+using Tarven.Linux.Core.Api;
+
+namespace Tarven.Linux.Core.Updates;
+
+public interface IReleaseSource
+{
+    Task<JsonArray> ReleasesAsync(CancellationToken cancellation);
+    Task<string> ChecksumsAsync(AppRelease release, CancellationToken cancellation);
+    Task<string> SignatureAsync(AppRelease release, CancellationToken cancellation);
+    Task DownloadAsync(AppRelease release, Stream destination, CancellationToken cancellation);
+}
+
+/// <summary>Reads the public release feed anonymously; no request carries credentials.</summary>
+public sealed class GitHubReleaseSource(HttpMessageHandler? handler = null,
+    ISettingsStore? settings = null, string? auditPath = null) : IReleaseSource, IDisposable
+{
+    private readonly HttpClient client = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }) { Timeout = TimeSpan.FromMinutes(30) };
+
+    public async Task<JsonArray> ReleasesAsync(CancellationToken cancellation)
+    {
+        var repository = UpdateFeed.Repository(settings);
+        var first = $"https://api.github.com/repos/{repository}/releases?per_page=100";
+        Uri? next = new(first);
+        var results = new JsonArray();
+        for (var page = 1; page <= 10 && next is not null; page++)
+        {
+            using var response = await GetAsync(next, false, cancellation);
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.NotFound)
+                throw new IOException(repository == UpdateFeed.PublicTestRepository
+                    ? "The public update test feed is unavailable. Turn off Public Update Test to use the normal release feed."
+                    : "GitHub could not read the releases. Try again later.");
+            // Anonymous requests share a small hourly GitHub limit; that is not a connection problem.
+            if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
+                throw new IOException("GitHub is limiting update checks right now. Try again in about an hour.");
+            response.EnsureSuccessStatusCode();
+            await using var input = await response.Content.ReadAsStreamAsync(cancellation);
+            using var output = new MemoryStream();
+            await CopyBoundedAsync(input, output, 2 * 1024 * 1024, cancellation);
+            var batch = JsonNode.Parse(output.ToArray()) as JsonArray ?? throw new IOException("GitHub returned an invalid release list.");
+            foreach (var node in batch) results.Add(node?.DeepClone());
+            next = null;
+            if (response.Headers.TryGetValues("Link", out var links))
+            {
+                foreach (var link in string.Join(',', links).Split(','))
+                {
+                    if (!link.Contains("rel=\"next\"", StringComparison.Ordinal)) continue;
+                    var trimmed = link.Trim();
+                    var end = trimmed.IndexOf('>');
+                    if (next is not null || !link.TrimStart().StartsWith('<') || end < 0
+                        || !Uri.TryCreate(trimmed[1..end], UriKind.Absolute, out var address)
+                        || address.Scheme != "https" || address.Host != "api.github.com" || !address.IsDefaultPort
+                        || address.UserInfo.Length != 0 || address.Fragment.Length != 0
+                        || (address.AbsolutePath != $"/repos/{repository}/releases" && !System.Text.RegularExpressions.Regex.IsMatch(address.AbsolutePath, @"\A/repositories/[0-9]+/releases\z")))
+                        throw new IOException("GitHub returned an unexpected release page address.");
+                    // GitHub may use its numeric repository route in Link. Never follow that
+                    // supplied route: construct the next page within our already selected feed.
+                    next = new Uri(first + "&page=" + (page + 1).ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+            }
+        }
+        if (next is not null) throw new IOException("The release search could not be completed. Try again later.");
+        return results;
+    }
+
+    public async Task<string> ChecksumsAsync(AppRelease release, CancellationToken cancellation)
+    {
+        if (release.SourceRepository != UpdateFeed.Repository(settings) || !AppRelease.IsAssetUrl(release.Checksums.AbsoluteUri, release.SourceRepository)) throw new IOException("The checksum address is invalid.");
+        using var response = await GetAsync(release.Checksums, true, cancellation);
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellation);
+        using var output = new MemoryStream();
+        await CopyBoundedAsync(stream, output, 1024 * 1024, cancellation);
+        return System.Text.Encoding.UTF8.GetString(output.ToArray());
+    }
+
+    public async Task<string> SignatureAsync(AppRelease release, CancellationToken cancellation)
+    {
+        if (release.Signature is not { } address || release.SourceRepository != UpdateFeed.Repository(settings)
+            || !AppRelease.IsAssetUrl(address.AbsoluteUri, release.SourceRepository)) throw new IOException("The signature address is invalid.");
+        using var response = await GetAsync(address, true, cancellation);
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellation);
+        using var output = new MemoryStream();
+        await CopyBoundedAsync(stream, output, 16 * 1024, cancellation);
+        return System.Text.Encoding.UTF8.GetString(output.ToArray());
+    }
+
+    public async Task DownloadAsync(AppRelease release, Stream destination, CancellationToken cancellation)
+    {
+        if (release.SourceRepository != UpdateFeed.Repository(settings) || !AppRelease.IsAssetUrl(release.Download.AbsoluteUri, release.SourceRepository)) throw new IOException("The package address is invalid.");
+        using var response = await GetAsync(release.Download, true, cancellation);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength is { } length && length != release.Bytes)
+            throw new IOException("The package size changed. Check for updates again.");
+        await using var source = await response.Content.ReadAsStreamAsync(cancellation);
+        var copied = await CopyBoundedAsync(source, destination, release.Bytes, cancellation);
+        if (copied != release.Bytes) throw new IOException("The package download ended early. Try again.");
+    }
+
+    private async Task<HttpResponseMessage> GetAsync(Uri uri, bool asset, CancellationToken cancellation)
+    {
+        var publicTest = UpdateFeed.IsPublicTest(settings)
+            || uri.AbsolutePath.StartsWith($"/repos/{UpdateFeed.PublicTestRepository}/", StringComparison.Ordinal);
+        for (var redirects = 0; redirects <= 5; redirects++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            request.Headers.UserAgent.ParseAdd("Tarven-Linux-Updater/1.0");
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(asset ? "application/octet-stream" : "application/vnd.github+json"));
+            if (redirects == 0) request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
+            if (publicTest && auditPath is not null)
+            {
+                // The audit contains neither paths, signed query strings nor credential values.
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(auditPath)!);
+                    if (File.Exists(auditPath) && new FileInfo(auditPath).Length > 64 * 1024) File.Delete(auditPath);
+                    await File.AppendAllTextAsync(auditPath, System.Text.Json.JsonSerializer.Serialize(new
+                    { host = uri.Host, authorizationPresent = request.Headers.Authorization is not null }) + "\n", cancellation);
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            }
+            var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation);
+            if ((int)response.StatusCode is < 300 or >= 400) return response;
+            var location = response.Headers.Location;
+            response.Dispose();
+            if (location is null) break;
+            uri = new Uri(uri, location);
+            if (uri.Scheme != "https" || !uri.IsDefaultPort || uri.UserInfo.Length > 0 || uri.Fragment.Length > 0
+                || uri.Host is not ("release-assets.githubusercontent.com" or "objects.githubusercontent.com"))
+                throw new IOException("GitHub redirected the download to an unexpected address.");
+        }
+        throw new IOException("GitHub redirected the download too many times.");
+    }
+
+    private static async Task<long> CopyBoundedAsync(Stream source, Stream destination, long limit, CancellationToken cancellation)
+    {
+        var buffer = new byte[128 * 1024];
+        long count = 0;
+        int read;
+        while ((read = await source.ReadAsync(buffer, cancellation)) != 0)
+        {
+            count += read;
+            if (count > limit) throw new IOException("The download is larger than expected.");
+            await destination.WriteAsync(buffer.AsMemory(0, read), cancellation);
+        }
+        return count;
+    }
+
+    public void Dispose() => client.Dispose();
+}
+
+public interface IPackageInstaller
+{
+    LinuxPackageKind Kind { get; }
+    Task InstallAsync(string path, CancellationToken cancellation);
+}
+
+/// <summary>The desktop asks for administrator authorization only after the person chose Install.</summary>
+public sealed class LinuxPackageInstaller : IPackageInstaller
+{
+    private LinuxPackageKind? kind;
+
+    /// <summary>
+    /// Detected on first use, not at start: on a distribution without a supported package manager
+    /// only updating is unavailable, and the app itself still opens.
+    /// </summary>
+    public LinuxPackageKind Kind => kind ??= Detect();
+
+    public static LinuxPackageKind Detect(Func<string, bool>? exists = null)
+    {
+        exists ??= File.Exists;
+        if (exists("/.flatpak-info")) return LinuxPackageKind.Flatpak;
+        if (exists("/usr/bin/pacman")) return LinuxPackageKind.Arch;
+        if (exists("/usr/bin/apt-get")) return LinuxPackageKind.Debian;
+        if (exists("/usr/bin/dnf") || exists("/usr/bin/zypper")) return LinuxPackageKind.Rpm;
+        throw new PlatformNotSupportedException("Use the Flatpak on this distribution; no supported package manager was found.");
+    }
+
+    public static (string Executable, string[] Arguments) Command(LinuxPackageKind kind, string path, bool zypper = false) => kind switch
+    {
+        LinuxPackageKind.Arch => ("/usr/bin/pkexec", ["/usr/bin/pacman", "-U", "--noconfirm", path]),
+        LinuxPackageKind.Debian => ("/usr/bin/pkexec", ["/usr/bin/apt-get", "install", "-y", path]),
+        LinuxPackageKind.Rpm when zypper => ("/usr/bin/pkexec", ["/usr/bin/zypper", "--non-interactive", "install", "--allow-unsigned-rpm", path]),
+        LinuxPackageKind.Rpm => ("/usr/bin/pkexec", ["/usr/bin/dnf", "install", "-y", path]),
+        _ => ("/usr/bin/flatpak-spawn", ["--host", "flatpak", "install", "--user", "--noninteractive", path]),
+    };
+
+    public async Task InstallAsync(string path, CancellationToken cancellation)
+    {
+        cancellation.ThrowIfCancellationRequested();
+        var command = Command(Kind, path, File.Exists("/usr/bin/zypper") && !File.Exists("/usr/bin/dnf"));
+        var start = new ProcessStartInfo(command.Executable) { UseShellExecute = false };
+        foreach (var arg in command.Arguments) start.ArgumentList.Add(arg);
+        using var process = Process.Start(start) ?? throw new IOException("The package manager could not start.");
+        // Once authorized, let the package manager finish its transaction even if the window closes.
+        await process.WaitForExitAsync(CancellationToken.None);
+        if (process.ExitCode != 0) throw new IOException("The update was not installed. Authorization may have been cancelled, or the package manager reported a problem.");
+    }
+}
+
+/// <summary>Checks daily, validates the exact download, and never installs without the caller's confirmation.</summary>
+public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installer, ISettingsStore settings, string cacheDirectory,
+    Version currentVersion, int currentBuild, TimeProvider? time = null,
+    System.Runtime.InteropServices.Architecture? architecture = null, string? signingKey = null) : INotifyPropertyChanged, IDisposable
+{
+    private readonly string publicKey = signingKey ?? UpdateFeed.SigningPublicKey;
+
+    private readonly System.Runtime.InteropServices.Architecture processor =
+        architecture ?? System.Runtime.InteropServices.RuntimeInformation.OSArchitecture;
+
+    /// <summary>Packages are published for 64-bit Intel/AMD (x64) and 64-bit ARM (arm64, no Flatpak there).</summary>
+    private bool IsArm64 => processor == System.Runtime.InteropServices.Architecture.Arm64;
+
+    private bool supportedArchitecture => processor == System.Runtime.InteropServices.Architecture.X64
+        || (IsArm64 && installer.Kind != LinuxPackageKind.Flatpak);
+
+    private readonly TimeProvider clock = time ?? TimeProvider.System;
+    public event PropertyChangedEventHandler? PropertyChanged;
+    public AppRelease? Available { get; private set; }
+    public string Status { get; private set; } = "Check for a newer version of Tarven for Linux.";
+    public bool IsBusy { get; private set; }
+
+    /// <summary>How much of the package arrived, 0 to 1, while it downloads; null otherwise.</summary>
+    public double? DownloadProgress { get; private set; }
+
+    /// <summary>
+    /// Whether Tarven can start the new version by itself after installing: a native package
+    /// replaces the program in place. A Flatpak is started again by the desktop.
+    /// </summary>
+    public bool CanRestart => installer.Kind != LinuxPackageKind.Flatpak;
+    public bool RestartRequired { get; private set; }
+    public bool PublicUpdateTestEnabled => UpdateFeed.IsPublicTest(settings);
+    public const string BetaUpdatesKey = "betaUpdates";
+    /// <summary>Off by default: only test computers see pre-releases.</summary>
+    public bool BetaUpdatesEnabled => settings.Read<bool?>(BetaUpdatesKey) == true;
+
+    public void SetBetaUpdates(bool enabled)
+    {
+        if (IsBusy || RestartRequired) return;
+        settings.Write(BetaUpdatesKey, enabled);
+        Available = null;
+        Status = "Check for a newer version of Tarven for Linux.";
+        Notify();
+    }
+    private string CheckKey => "lastUpdateCheck." + UpdateFeed.Repository(settings);
+
+    public void SetPublicUpdateTest(bool enabled)
+    {
+        if (IsBusy || RestartRequired) return;
+        settings.Write(UpdateFeed.PublicTestKey, enabled);
+        Available = null;
+        Status = "Check for a newer version of Tarven for Linux.";
+        Notify();
+    }
+
+    public async Task CheckAsync(bool userInitiated, CancellationToken cancellation = default)
+    {
+        if (IsBusy || RestartRequired || (!userInitiated && ((settings.Read<bool?>("automaticUpdateChecks") ?? true) == false
+            || settings.Read<DateTimeOffset?>(CheckKey) is { } last && clock.GetUtcNow() - last is var since
+                // A check "in the future" means the clock was set back; it no longer silences checks
+                // until the clock catches up (audit C-X13).
+                && since >= TimeSpan.Zero && since < TimeSpan.FromDays(1)))) return;
+        if (!supportedArchitecture)
+        {
+            Available = null;
+            Status = IsArm64
+                ? "Flatpak updates are published for 64-bit Intel and AMD computers only. On this computer, install the arm64 package for its distribution."
+                : "Updates are published for 64-bit Intel, AMD and ARM computers only. Install new versions of Tarven for this computer by hand.";
+            Notify();
+            return;
+        }
+        IsBusy = true;
+        Status = "Checking for updates…";
+        Notify();
+        try
+        {
+            Available = null;
+            Available = AppRelease.Newest(await source.ReleasesAsync(cancellation), installer.Kind, currentVersion, currentBuild, UpdateFeed.Repository(settings), BetaUpdatesEnabled, IsArm64);
+            // Only a completed check waits a day; a failed automatic one is tried again next time.
+            settings.Write(CheckKey, clock.GetUtcNow());
+            Status = Available is { } release
+                ? $"Tarven {release.Version} ({release.Build}){(release.IsBeta ? " Beta" : "")} is available."
+                : "Tarven is up to date.";
+        }
+        catch (PlatformNotSupportedException error)
+        {
+            Status = error.Message;
+        }
+        catch (Exception error) when (error is HttpRequestException or IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException or CredentialStoreUnavailableException)
+        {
+            Status = error is CredentialStoreUnavailableException ? "The desktop keyring could not be opened. Unlock it and try again." : error is IOException ? error.Message : "Updates could not be checked. Check the connection and try again.";
+        }
+        catch (OperationCanceledException)
+        {
+            Status = "The update check was cancelled.";
+        }
+        finally { IsBusy = false; Notify(); }
+    }
+
+    public async Task<bool> InstallAsync(Func<Task>? beforeInstall = null, CancellationToken cancellation = default)
+    {
+        if (IsBusy || RestartRequired || Available is not { } release) return false;
+        IsBusy = true;
+        Status = "Downloading and verifying the update…";
+        Notify();
+        // In Flatpak the host must be able to read the package. The app's XDG cache is visible to
+        // the host at its real path; the package manager receives that path, never the sandbox /tmp.
+        var directory = Path.Combine(cacheDirectory, "updates", Guid.NewGuid().ToString("N"));
+        try
+        {
+            PrivateFiles.CreateDirectory(directory);
+            var path = Path.Combine(directory, release.FileName);
+            var sums = await source.ChecksumsAsync(release, cancellation);
+            await VerifySignatureAsync(release, sums, cancellation);
+            var expected = AppRelease.Checksum(release.FileName, sums)
+                ?? throw new IOException("The release has no unambiguous checksum for this package.");
+            await using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+            {
+                if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                DownloadProgress = 0;
+                Notify();
+                await source.DownloadAsync(release, new ProgressStream(file, release.Bytes, value =>
+                {
+                    DownloadProgress = value;
+                    Notify();
+                }), cancellation);
+                DownloadProgress = null;
+                if (file.Length != release.Bytes) throw new IOException("The package download is incomplete.");
+                file.Position = 0;
+                var actual = Convert.ToHexStringLower(await SHA256.HashDataAsync(file, cancellation));
+                if (actual != expected) throw new IOException("The downloaded package did not match its checksum. It was not installed.");
+            }
+            cancellation.ThrowIfCancellationRequested();
+            if (beforeInstall is not null) await beforeInstall();
+            cancellation.ThrowIfCancellationRequested();
+            // Checked again just before the package manager reads it, so the time a program of
+            // this user could swap the file is as short as it can be without a privileged helper
+            // (audit C-L13).
+            await using (var check = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                if (Convert.ToHexStringLower(await SHA256.HashDataAsync(check, cancellation)) != expected)
+                    throw new IOException("The downloaded package changed after it was checked. It was not installed.");
+            }
+            Status = "Waiting for the package manager…";
+            Notify();
+            await installer.InstallAsync(path, cancellation);
+            Status = installer.Kind == LinuxPackageKind.Flatpak ? "The update is installed. Quit and reopen Tarven to use it." : "The update is installed. Restart Tarven to use it.";
+            Available = null;
+            RestartRequired = true;
+            return true;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or HttpRequestException or CredentialStoreUnavailableException or Win32Exception or TarvenApiException or InvalidOperationException or TimeoutException or PlatformNotSupportedException)
+        {
+            Status = error is IOException or PlatformNotSupportedException ? error.Message : "The update could not be installed. Try again.";
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            Status = "The update was cancelled.";
+            return false;
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+            }
+            catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+            {
+                // The download remains private in the app cache. Cleanup must not hide the install
+                // result or leave the updater permanently busy after a package-manager transaction.
+            }
+            DownloadProgress = null;
+            IsBusy = false;
+            Notify();
+        }
+    }
+
+    /// <summary>
+    /// The checksum list must carry the owner's signature: a release or token on GitHub alone can
+    /// replace a package and its checksum, but not this signature, so such a package is never installed.
+    /// </summary>
+    private async Task VerifySignatureAsync(AppRelease release, string sums, CancellationToken cancellation)
+    {
+        if (!MinisignSignature.TryReadPublicKey(publicKey, out _, out _))
+            throw new IOException("This version of Tarven cannot check update signatures. Install the new version from the release page.");
+        if (release.Signature is null)
+            throw new IOException("This release is not signed, so it was not installed. Install it from the release page if you trust it.");
+        var signature = await source.SignatureAsync(release, cancellation);
+        if (!MinisignSignature.Verify(System.Text.Encoding.UTF8.GetBytes(sums), signature, publicKey))
+            throw new IOException("The release signature is not valid, so the update was not installed.");
+        if (!MinisignSignature.CommentAllows(MinisignSignature.TrustedComment(signature), release.SourceRepository, release.IsBeta))
+            throw new IOException("The release was signed for another channel or repository, so the update was not installed.");
+    }
+
+    private void Notify() => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));
+    public void Dispose() { if (source is IDisposable disposable) disposable.Dispose(); }
+}

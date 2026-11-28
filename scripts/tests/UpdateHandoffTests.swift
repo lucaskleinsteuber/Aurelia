@@ -11,7 +11,7 @@ struct UpdateHandoffTests {
     try manager.createDirectory(at: root, withIntermediateDirectories: true)
     let directory = root.appendingPathComponent(UUID().uuidString)
     try manager.createDirectory(at: directory, withIntermediateDirectories: false)
-    let image = directory.appendingPathComponent("Aurelia-1.27.2-126-macOS-universal.dmg")
+    let image = directory.appendingPathComponent("Tarven-1.27.2-126-macOS-universal.dmg")
     try Data("invented bytes; never mounted".utf8).write(to: image)
     let request = try MacUpdateInstallRequest.prepare(
       image: image, build: 126, appPID: 42, root: root)
@@ -41,7 +41,7 @@ struct UpdateHandoffTests {
         id: UUID(), directory: request.directory,
         imageName: scenario == "traversal"
           ? "../outside.dmg"
-          : scenario == "wrong-name" ? "Aurelia-1.27.2-125-macOS-universal.dmg" : request.imageName,
+          : scenario == "wrong-name" ? "Tarven-1.27.2-125-macOS-universal.dmg" : request.imageName,
         build: scenario == "build" ? 0 : 126, appPID: scenario == "pid" ? 0 : 42,
         createdAt: Date().addingTimeInterval(
           scenario == "old" ? -121 : scenario == "future" ? 30 : 0))
@@ -70,7 +70,7 @@ struct UpdateHandoffTests {
     try require(manager.fileExists(atPath: outside.path), "Preserve unrelated files")
 
     // Stale expired pending request is ignored by hasFreshPendingRequest and cleaned before save.
-    let staleImage = directory.appendingPathComponent("Aurelia-1.27.2-126-macOS-universal.dmg")
+    let staleImage = directory.appendingPathComponent("Tarven-1.27.2-126-macOS-universal.dmg")
     try? manager.removeItem(at: staleImage)
     try Data("fresh bytes".utf8).write(to: staleImage)
     let stale = MacUpdateInstallRequest(

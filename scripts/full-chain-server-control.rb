@@ -8,8 +8,8 @@ require 'timeout'
 
 server, data_root, http_port, https_port, manifest, output, parent = ARGV
 abort 'Invalid isolated server configuration.' unless ARGV.length == 7 &&
-  File.executable?(server) && server.match?(%r{/Contents/Resources/Server/osx-(arm64|x64)/Aurelia\.Server\z}) &&
-  data_root.match?(%r{/Library/Caches/Aurelia/TestRuns/full-chain-[^/]+/ServerData\z}) &&
+  File.executable?(server) && server.match?(%r{/Contents/Resources/Server/osx-(arm64|x64)/Tarven\.Server\z}) &&
+  data_root.match?(%r{/Library/Caches/Tarven/TestRuns/full-chain-[^/]+/ServerData\z}) &&
   File.directory?(data_root) && [manifest, output].all? { |path| path.start_with?(File.dirname(data_root) + '/') } &&
   [http_port, https_port].all? { |port| port.match?(/\A\d+\z/) && (1024..65535).cover?(port.to_i) } &&
   parent.match?(/\A\d+\z/)
@@ -64,8 +64,8 @@ end
 start = lambda do
   raise 'Server child already running.' if child
   child = Process.spawn(
-    {'ASPNETCORE_ENVIRONMENT' => 'Testing', 'AURELIA_TEST_TICKET_LIFETIME_SECONDS' => '360',
-     'AURELIA_HOST_PARENT_PID' => Process.pid.to_s, 'Logging__LogLevel__Default' => 'Warning'},
+    {'ASPNETCORE_ENVIRONMENT' => 'Testing', 'TARVEN_TEST_TICKET_LIFETIME_SECONDS' => '360',
+     'TARVEN_HOST_PARENT_PID' => Process.pid.to_s, 'Logging__LogLevel__Default' => 'Warning'},
     server, '--data-dir', data_root, '--urls', "http://127.0.0.1:#{http_port}",
     '--lan', '--lan-port', https_port, out: [output, 'a', 0o600], err: [:child, :out])
 end

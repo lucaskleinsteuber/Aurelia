@@ -1,16 +1,16 @@
-# Aurelia TV client
+# Tarven TV client
 
 - This is an independent native tvOS client, not a target in the Mac project.
-  Do not link Mac application sources or introduce a shared Aurelia product
-  library. Platform-neutral TV files under `AureliaTV/Core` are compiled directly
+  Do not link Mac application sources or introduce a shared Tarven product
+  library. Platform-neutral TV files under `TarvenTV/Core` are compiled directly
   into the hostless macOS logic-test target.
-- The approved client identity is **Aurelia**, bundle ID
-  `com.lucas.aurelia.tvos`, version **2.0.0**, build **35**, minimum **tvOS 26**.
+- The approved client identity is **Tarven**, bundle ID
+  `org.tarven.tv`, version **2.0.0**, build **35**, minimum **tvOS 26**.
   `Configuration/BuildNumber.xcconfig` owns the TV version. Keep the product name and
   bundle identity. Choose version changes independently using MAJOR.MINOR.PATCH as
   described in the root AGENTS.md, state the reason before building, and increment the
   independent build counter by one; do not ask the owner to choose or confirm a version.
-- Keep UI text in English. Use Aurelia's opaque `#202326` canvas, large artwork,
+- Keep UI text in English. Use Tarven's opaque `#202326` canvas, large artwork,
   restrained controls, native focus behavior and remote navigation. Focus alone
   must never start playback.
 - Server administration is allowed here (owner's decision, 17.11.2026): owners and

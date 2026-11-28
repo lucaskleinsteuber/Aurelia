@@ -3,7 +3,7 @@ import Foundation
 @preconcurrency import VLCKit
 import XCTest
 
-@testable import Aurelia
+@testable import Tarven
 
 /// Overlay only into an external source archive of 1.4.0 or 1.4.1. This file is
 /// intentionally outside the active test target and never changes production code.
@@ -48,24 +48,24 @@ final class PlaybackHistoricalBaselineTests: XCTestCase {
     }
     do {
       let environment = ProcessInfo.processInfo.environment
-      guard environment["AURELIA_BASELINE_OWNED_TEST_STATE"] == "YES",
-        environment["AURELIA_UI_TEST_MODE"] != nil,
+      guard environment["TARVEN_BASELINE_OWNED_TEST_STATE"] == "YES",
+        environment["TARVEN_UI_TEST_MODE"] != nil,
         NativePreflightIsolation.isRequested, !NativePreflightIsolation.isActive,
-        let address = environment["AURELIA_BASELINE_SERVER_URL"],
+        let address = environment["TARVEN_BASELINE_SERVER_URL"],
         let url = URL(string: address), url.scheme == "https", url.host == "127.0.0.1",
         let port = url.port, port >= 1_024,
-        let pin = environment["AURELIA_BASELINE_FINGERPRINT"], pin.count == 64,
+        let pin = environment["TARVEN_BASELINE_FINGERPRINT"], pin.count == 64,
         pin.allSatisfy(\.isHexDigit),
-        let authentication = environment["AURELIA_BASELINE_AUTH"]?.data(using: .utf8),
-        let fixtureBytes = environment["AURELIA_BASELINE_FIXTURES"]?.data(using: .utf8),
-        let rootPath = environment["AURELIA_BASELINE_RUN_ROOT"],
-        rootPath.hasPrefix("/"), rootPath.contains("/Library/Caches/Aurelia/TestRuns/"),
-        let expectedServerVersion = environment["AURELIA_BASELINE_EXPECTED_SERVER_VERSION"]
+        let authentication = environment["TARVEN_BASELINE_AUTH"]?.data(using: .utf8),
+        let fixtureBytes = environment["TARVEN_BASELINE_FIXTURES"]?.data(using: .utf8),
+        let rootPath = environment["TARVEN_BASELINE_RUN_ROOT"],
+        rootPath.hasPrefix("/"), rootPath.contains("/Library/Caches/Tarven/TestRuns/"),
+        let expectedServerVersion = environment["TARVEN_BASELINE_EXPECTED_SERVER_VERSION"]
       else { throw Failure.code("missing_owned_baseline_configuration") }
       version =
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
         ?? "unknown"
-      #if AURELIA_BASELINE_REVISIONED_PROGRESS
+      #if TARVEN_BASELINE_REVISIONED_PROGRESS
         try require(version == "1.4.1", "wrong_revisioned_client_version")
       #else
         try require(version == "1.4.0", "wrong_legacy_client_version")
@@ -80,7 +80,7 @@ final class PlaybackHistoricalBaselineTests: XCTestCase {
       let inspected = try await APIClient.inspect(baseURL: url)
       try require(
         inspected.publicKeyFingerprint.caseInsensitiveCompare(pin) == .orderedSame
-          && inspected.info.name == "Aurelia Historical Baseline"
+          && inspected.info.name == "Tarven Historical Baseline"
           && inspected.info.version == expectedServerVersion
           && inspected.info.version == version, "wrong_owned_server_or_pin")
       serverVersion = inspected.info.version
@@ -102,7 +102,7 @@ final class PlaybackHistoricalBaselineTests: XCTestCase {
         contentRect: view.frame, styleMask: [.titled],
         backing: .buffered, defer: false)
       outputWindow.isReleasedWhenClosed = false
-      outputWindow.title = "Aurelia historical synthetic playback baseline"
+      outputWindow.title = "Tarven historical synthetic playback baseline"
       outputWindow.contentView = view
       outputWindow.makeKeyAndOrderFront(nil)
       window = outputWindow
@@ -159,7 +159,7 @@ final class PlaybackHistoricalBaselineTests: XCTestCase {
               sourceURL: source, publicKeyFingerprint: fingerprint,
               authorizationToken: profile.token)
           }
-          #if AURELIA_BASELINE_REVISIONED_PROGRESS
+          #if TARVEN_BASELINE_REVISIONED_PROGRESS
             let playback = PlaybackController(
               client: client, presentation: presentation,
               engine: engine, preferences: preferences, relayFactory: relay,
@@ -209,7 +209,7 @@ final class PlaybackHistoricalBaselineTests: XCTestCase {
           }
           phase = "\(fixture.format)_120_second_baseline"
           let minimumSeconds = min(
-            max(Double(environment["AURELIA_BASELINE_MINIMUM_SECONDS"] ?? "120") ?? 120, 120), 600)
+            max(Double(environment["TARVEN_BASELINE_MINIMUM_SECONDS"] ?? "120") ?? 120, 120), 600)
           let baselineStart = ContinuousClock.now
           let baselineDeadline = baselineStart.advanced(by: .seconds(minimumSeconds))
           var lastTime = playback.currentTimeMilliseconds
@@ -260,7 +260,7 @@ final class PlaybackHistoricalBaselineTests: XCTestCase {
           controller = nil
           formatOutcomes[fixture.format] = "passed"
         } catch {
-          #if AURELIA_BASELINE_REVISIONED_PROGRESS
+          #if TARVEN_BASELINE_REVISIONED_PROGRESS
             if let controller, let data = try? controller.diagnostics.export(),
               let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             {
@@ -282,7 +282,7 @@ final class PlaybackHistoricalBaselineTests: XCTestCase {
       passed = failures.isEmpty && formatOutcomes.count == 3
       phase = passed ? "complete" : "complete_with_playback_failures"
     } catch {
-      #if AURELIA_BASELINE_REVISIONED_PROGRESS
+      #if TARVEN_BASELINE_REVISIONED_PROGRESS
         if let controller, let data = try? controller.diagnostics.export(),
           let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         {

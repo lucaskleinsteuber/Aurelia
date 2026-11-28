@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.tarven.Tarven</id>
+  <name>Tarven</name>
+  <summary>Watch the movies and TV shows on your Tarven server</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="org.tarven">
+    <name>Tarven</name>
+  </developer>
+  <description>
+    <p>
+      Tarven is a self-hosted media server with native apps. Tarven for Linux browses your library,
+      plays your movies and TV shows, and can host the Tarven server on this computer.
+    </p>
+  </description>
+  <launchable type="desktop-id">org.tarven.Tarven.desktop</launchable>
+  <url type="homepage">https://github.com/lucaskleinsteuber/Tarven</url>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="@VERSION@" date="@DATE@" />
+  </releases>
+</component>

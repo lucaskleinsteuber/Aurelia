@@ -13,7 +13,7 @@ on:
       - "packaging/docker/fetch-server.sh"
       - "scripts/test-linux-server-install.sh"
       - "scripts/test-server-update-signature.sh"
-      - "scripts/test-get-aurelia.sh"
+      - "scripts/test-get-tarven.sh"
       - "scripts/synthetic-signing.sh"
       - ".github/workflows/linux-server.yml"
       - "Directory.Build.props"
@@ -43,23 +43,23 @@ jobs:
           sudo apt-get install -y -qq ffmpeg >/dev/null
       - name: Verify formatting, build, and tests on Linux
         env:
-          AURELIA_REQUIRE_FFMPEG: "1"
+          TARVEN_REQUIRE_FFMPEG: "1"
         run: |
           dotnet tool restore
-          dotnet restore Aurelia.slnx
-          dotnet format Aurelia.slnx --verify-no-changes --no-restore
-          dotnet build Aurelia.slnx --configuration Release --no-restore
-          dotnet test Aurelia.slnx --configuration Release --no-build
+          dotnet restore Tarven.slnx
+          dotnet format Tarven.slnx --verify-no-changes --no-restore
+          dotnet build Tarven.slnx --configuration Release --no-restore
+          dotnet test Tarven.slnx --configuration Release --no-build
       - name: Test the browser app's logic
         run: node --test "tests/WebApp/*.test.mjs"
       - name: Check update signatures and the one-line installer
         run: |
           bash scripts/test-server-update-signature.sh
-          bash scripts/test-get-aurelia.sh
+          bash scripts/test-get-tarven.sh
       - name: Build the linux-x64 package
         run: |
-          stage="$RUNNER_TEMP/Aurelia-Server-linux-x64"
-          dotnet publish src/Aurelia.Server/Aurelia.Server.csproj --configuration Release --runtime linux-x64 \
+          stage="$RUNNER_TEMP/Tarven-Server-linux-x64"
+          dotnet publish src/Tarven.Server/Tarven.Server.csproj --configuration Release --runtime linux-x64 \
             --self-contained true -p:DebugType=none --output "$stage/server"
           while IFS= read -r file; do
             [ -n "$file" ] || continue
@@ -68,12 +68,12 @@ jobs:
           mkdir -p "$stage/notices"
           echo "ci (0)" > "$stage/VERSION"
           echo x64 > "$stage/ARCHITECTURE"
-          chmod 0755 "$stage/install.sh" "$stage/aurelia" "$stage/aurelia-autosleep" "$stage/aurelia-wake-on-lan" \
-            "$stage/server/Aurelia.Server"
+          chmod 0755 "$stage/install.sh" "$stage/tarven" "$stage/tarven-autosleep" "$stage/tarven-wake-on-lan" \
+            "$stage/server/Tarven.Server"
       - name: Install and check the package as a service
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq sqlite3 exfatprogs jq >/dev/null
           exfat=""
           if sudo modprobe exfat; then exfat=--exfat; else echo "::warning::No exFAT driver on this runner; the exFAT checks were skipped."; fi
-          sudo bash scripts/test-linux-server-install.sh "$RUNNER_TEMP/Aurelia-Server-linux-x64" $exfat
+          sudo bash scripts/test-linux-server-install.sh "$RUNNER_TEMP/Tarven-Server-linux-x64" $exfat

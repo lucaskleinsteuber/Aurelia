@@ -1,4 +1,4 @@
-# Aurelia for Mac
+# Tarven for Mac
 
 The Mac app watches, manages the library and, if you like, hosts the server on the Mac itself.
 It needs macOS 26 or later.
@@ -9,24 +9,24 @@ Each release has one disk image per processor. Open the Apple menu › **About T
 
 | It says | Download |
 | --- | --- |
-| *Chip: Apple M1, M2, M3, M4 …* | `Aurelia-<version>-macOS-arm64.dmg` (Apple silicon) |
-| *Processor: … Intel …* | `Aurelia-<version>-macOS-x64.dmg` (Intel) |
+| *Chip: Apple M1, M2, M3, M4 …* | `Tarven-<version>-macOS-arm64.dmg` (Apple silicon) |
+| *Processor: … Intel …* | `Tarven-<version>-macOS-x64.dmg` (Intel) |
 
 Each image carries only the server for its processor, so it is about half the size of one image
 for both. The release also lists `…-macOS-universal.dmg`; that is the Apple silicon image under the
 name that version 1.34 of the app asks for when it updates itself, not a separate build.
 
 > [!IMPORTANT]
-> Aurelia is free and does not use Apple's paid developer program. The published Mac download is
+> Tarven is free and does not use Apple's paid developer program. The published Mac download is
 > development-signed and starts only on Macs registered to the developer's account, so every Mac
 > release is a beta (pre-release) and the app looks for betas from the start. On any other Mac, use
-> Aurelia in a browser or [build the app yourself](BUILD_MAC_APP.md).
+> Tarven in a browser or [build the app yourself](BUILD_MAC_APP.md).
 > [Distribution and updates](FREE_DISTRIBUTION.md) explains the background.
 
 ## Installing
 
-1. Open the disk image and drag **Aurelia** onto **Applications**.
-2. Open Aurelia from Applications.
+1. Open the disk image and drag **Tarven** onto **Applications**.
+2. Open Tarven from Applications.
 3. Choose **Set Up This Mac** to keep the library on this Mac, or **Connect to an Existing Server**
    to watch from a server elsewhere at home. [Getting started](GETTING_STARTED.md) walks through
    both.
@@ -34,24 +34,24 @@ name that version 1.34 of the app asks for when it updates itself, not a separat
 ## Building it yourself
 
 On a Mac that is not registered to the developer's account, build the app yourself with your own
-free Apple ID: [Build Aurelia for Mac yourself](BUILD_MAC_APP.md) explains every step for people
+free Apple ID: [Build Tarven for Mac yourself](BUILD_MAC_APP.md) explains every step for people
 who have never built an app. In short, with Xcode 26 and an Apple Development certificate:
 
 ```sh
-git clone https://github.com/lucaskleinsteuber/Aurelia.git
-cd Aurelia
+git clone https://github.com/lucaskleinsteuber/Tarven.git
+cd Tarven
 zsh scripts/build-mac-app-yourself.sh
 ```
 
-The developer's own builds use `AURELIA_MAC_ARCH=arm64 zsh scripts/build-macos-release.sh` (or
+The developer's own builds use `TARVEN_MAC_ARCH=arm64 zsh scripts/build-macos-release.sh` (or
 `x64`); [Building and verification](TRANSPORT_TESTING.md) lists every check.
 
 ## Hosting on the Mac
 
-With **Set Up This Mac** the server runs in a separate helper, *Aurelia Server Host*, so the
-Apple TV and other devices can keep watching while the Aurelia window is closed. *Quit When the
+With **Set Up This Mac** the server runs in a separate helper, *Tarven Server Host*, so the
+Apple TV and other devices can keep watching while the Tarven window is closed. *Quit When the
 Window Closes* (Settings › General) decides only whether the app itself quits. *Let the Server Rest
-When Unused* stops the server after a while without anyone watching; opening any Aurelia app starts
+When Unused* stops the server after a while without anyone watching; opening any Tarven app starts
 it again.
 
 *Settings › Server* holds network access (*Allow HTTPS access from LAN / private VPN*), Bonjour,
@@ -64,7 +64,7 @@ without waiting for the unused minutes.
 *Settings › Profiles and Devices › Security* sets up Touch ID for server management (the key
 stays in the Mac's Secure Enclave) and shows the owner the security log, signed-in devices with
 That Was Me and Block, the block list and the Face ID requirement for administrators. While
-Aurelia runs, a banner and a notification report a new device and requests from Linux or a
+Tarven runs, a banner and a notification report a new device and requests from Linux or a
 browser to confirm an unlock with Touch ID.
 
 ## Settings at a glance
@@ -79,17 +79,17 @@ browser to confirm an unlock with Touch ID.
 | Metadata | TMDB token, Review Matches, OpenSubtitles key (subtitles from speech are in Edit Metadata) |
 | Profiles and Devices | Profiles, PINs, age limits, devices, **Create Code** for a new device, the browser address |
 | Server | Network, backups, scrub previews, Video Conversion, Server Health (only on the host) |
-| Power | For the owner: when a server on a Mac runs (with the app open or in the background, keeping the Mac awake), and what the server does when nobody uses Aurelia (see below) |
+| Power | For the owner: when a server on a Mac runs (with the app open or in the background, keeping the Mac awake), and what the server does when nobody uses Tarven (see below) |
 | Updates | App and server updates, Beta updates |
 | About | Version, what changed, source code, license texts, privacy policy |
 
 **Power** depends on where the server runs. A Linux server installed from the package can keep
-running, stop only Aurelia Server, put its computer to sleep or shut it down after the unused
+running, stop only Tarven Server, put its computer to sleep or shut it down after the unused
 minutes, also right after a player's sleep timer, outside optional awake hours, and wake when a
-device connects to it. A server that Aurelia hosts on a Mac or Linux PC can only keep running or
+device connects to it. A server that Tarven hosts on a Mac or Linux PC can only keep running or
 stop after the unused minutes: a desktop or laptop is woken by its owner, not over the network.
-It then stays stopped until Aurelia is opened on that computer again, and the Mac may sleep; Apple
-TV, iPhone, iPad, the browser and other computers show "Start Aurelia on Your Mac" instead of
+It then stays stopped until Tarven is opened on that computer again, and the Mac may sleep; Apple
+TV, iPhone, iPad, the browser and other computers show "Start Tarven on Your Mac" instead of
 trying Wake-on-LAN.
 
 **Streaming Quality** (with a server that offers it) chooses between the original file and the
@@ -103,18 +103,18 @@ On a movie or episode, choose **Download** to keep a copy on this Mac. It is the
 streamed through the usual secure connection and kept in the app's own data folder; its size is
 shown and **Remove Download** deletes it. Downloads belong to the profile that made them.
 
-With Aurelia Server 2.20 or newer a download can be a smaller copy instead (1080p, 720p or 480p,
+With Tarven Server 2.20 or newer a download can be a smaller copy instead (1080p, 720p or 480p,
 with its size and how long the server needs): **Settings › Playback › Download Quality** asks
 every time or always uses one. The server converts the copy while it downloads and stores
 nothing; its conversion waits while someone watches.
 
-When the server is out of reach, for example on a train, Aurelia offers **Watch Downloads Offline**.
+When the server is out of reach, for example on a train, Tarven offers **Watch Downloads Offline**.
 It shows your downloads with Continue Watching, movies and series. Your profile opens with its PIN,
 and the progress you make is sent to the server the next time it answers.
 
 ## Subtitles from speech
 
-For a title without fitting subtitles, Aurelia can write them from what is said. With a server
+For a title without fitting subtitles, Tarven can write them from what is said. With a server
 from 2.11.0 that has whisper.cpp and a speech model (Settings › Server › **Speech Recognition**,
 where the owner downloads Base, Small or Medium once), the **server** listens in the background:
 Create Subtitles from Speech and Sync to Speech then start a job on the server, the editor shows
@@ -123,7 +123,7 @@ as described below.
 
 1. Open the movie or episode, choose **Edit Metadata** and scroll to **Subtitles**.
 2. Choose **Create Subtitles from Speech…**, pick the sound track and the language spoken in it
-   (Aurelia suggests both), then **Create Subtitles**.
+   (Tarven suggests both), then **Create Subtitles**.
 3. The Mac listens to the track and shows how far it got. A two-hour film usually takes a few
    minutes, mostly for reading the sound from the server. You can close the editor meanwhile.
 4. The finished subtitles are saved on the server as "German · From Speech" (or the language you
@@ -147,7 +147,7 @@ the sound track and compares when people speak with when the subtitles show:
 - Subtitles that already fit stay as they are, and subtitles that fit at no offset (another
   film, or the wrong spoken language chosen) are refused without saving anything.
 
-The sound track is listened to once per title while Aurelia is open, so syncing a second set of
+The sound track is listened to once per title while Tarven is open, so syncing a second set of
 subtitles is quick.
 
 The recognition is macOS's own speech recognition and runs on this Mac only: the sound goes from
@@ -165,7 +165,7 @@ dates, biography and a Known For row of titles the library doesn't have, each wi
 
 ## Motion
 
-Motion follows one set of curves (`AureliaMotion` in `Views/AureliaDesign.swift`): `press` for
+Motion follows one set of curves (`TarvenMotion` in `Views/TarvenDesign.swift`): `press` for
 buttons and cards, `quick` for hover, `standard` for content that changes in place, `page` for
 pages and full-window layers. Reduce Motion turns each into a short fade.
 
@@ -188,7 +188,7 @@ can also be typed. A correction is never replaced by detection.
 ## Cinema mode
 
 Settings › Playback › **Cinema Mode** turns a film into a night at the cinema. When a film starts
-from the beginning, the Mac first shows one of Aurelia's made-up ads (nothing is for sale), then
+from the beginning, the Mac first shows one of Tarven's made-up ads (nothing is for sale), then
 trailers of films in your library you haven't watched yet (never one of the film itself), and then
 the curtain: the film starts behind it, and the curtain opens once its picture moves, waiting at
 most ten seconds.
@@ -202,24 +202,24 @@ folders (see [Organizing your media](MEDIA_LIBRARY.md)).
 ## Updates
 
 The app checks GitHub releases at launch and once a day while running (*Settings › Updates*).
-Automatic updates require Aurelia to be installed at `/Applications/Aurelia.app` (not run from a
+Automatic updates require Tarven to be installed at `/Applications/Tarven.app` (not run from a
 disk image, Downloads, or another folder). It downloads the disk image for its own processor, checks
 it against the release's signed checksums and Apple's code signature, replaces only the app and
 starts it again; the library, profiles and settings stay. If this Mac hosts your server, the server
 stops briefly while the update installs.
 
-Aurelia for Mac is currently published only as beta versions (development-signed for Macs registered
+Tarven for Mac is currently published only as beta versions (development-signed for Macs registered
 to the developer's Apple account), so **Beta updates** is enabled by default and should stay on to
 receive updates; there are no stable Mac versions yet.
 
-## Removing Aurelia
+## Removing Tarven
 
-If this Mac hosts your library, first open *Settings › Power* in Aurelia and switch background
-hosting to **Only while Aurelia is running** so the background server stops and its login item is
-removed. Then quit Aurelia and move it from Applications to the Trash. Your media is never touched.
+If this Mac hosts your library, first open *Settings › Power* in Tarven and switch background
+hosting to **Only while Tarven is running** so the background server stops and its login item is
+removed. Then quit Tarven and move it from Applications to the Trash. Your media is never touched.
 
-The server database and settings stay in `~/Library/Application Support/Aurelia Server`, server
-logs in `~/Library/Logs/Aurelia Server`, and app preferences in your Library container folders
-(`~/Library/Containers/com.lucas.aurelia.media` and the host App Group folder under
+The server database and settings stay in `~/Library/Application Support/Tarven Server`, server
+logs in `~/Library/Logs/Tarven Server`, and app preferences in your Library container folders
+(`~/Library/Containers/org.tarven.mac` and the host App Group folder under
 `~/Library/Group Containers/`), so a reinstall picks up where you left off. Delete those folders as
 well if you want a completely clean removal.

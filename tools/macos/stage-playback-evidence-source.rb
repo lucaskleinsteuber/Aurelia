@@ -8,7 +8,7 @@ begin
   raise ArgumentError unless ARGV.length == 3
   repository, destination, overlay = ARGV.map { |value| File.expand_path(value) }
   run = ENV.fetch('EVIDENCE_RUN_ROOT')
-  owned_parent = File.join(Dir.home, 'Library/Caches/Aurelia/TestRuns')
+  owned_parent = File.join(Dir.home, 'Library/Caches/Tarven/TestRuns')
   raise ArgumentError unless File.dirname(run) == owned_parent &&
                             File.basename(run).start_with?('playback-evidence-') &&
                             File.realpath(run) == run && destination == File.join(run, 'Source') &&
@@ -21,7 +21,7 @@ begin
   raise ArgumentError unless status.success?
   new_code, status = Open3.capture2('git', '-C', repository, 'ls-files', '--others',
                                    '--exclude-standard', '-z', '--',
-                                   'clients/macos/Aurelia', 'clients/macos/AureliaServerHost')
+                                   'clients/macos/Tarven', 'clients/macos/TarvenServerHost')
   raise ArgumentError unless status.success?
   paths = tracked.split("\0") + new_code.split("\0").select { |path| path.end_with?('.swift') }
   paths.uniq.each do |relative|
@@ -35,7 +35,7 @@ begin
     FileUtils.copy_file(source, target)
   end
   raise ArgumentError unless File.file?(overlay) && !File.symlink?(overlay)
-  FileUtils.copy_file(overlay, File.join(destination, 'clients/macos/AureliaTests/PlaybackAuthorizedSourceTests.swift'))
+  FileUtils.copy_file(overlay, File.join(destination, 'clients/macos/TarvenTests/PlaybackAuthorizedSourceTests.swift'))
   puts 'Owned source-only playback snapshot prepared; production working tree and installed apps unchanged.'
 rescue StandardError
   warn 'Playback evidence preparation failed: isolated_source_snapshot'

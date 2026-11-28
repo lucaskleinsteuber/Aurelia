@@ -7,9 +7,9 @@ begin
   raise ArgumentError unless ARGV.length == 2 && %w[before after].include?(ARGV[0])
   mode, output = ARGV
   run = ENV.fetch('EVIDENCE_RUN_ROOT')
-  source = ENV.fetch('AURELIA_AUTHORIZED_MEDIA_FILE')
-  raise ArgumentError unless ENV['AURELIA_AUTHORIZED_PLAYBACK'] == 'BREAKING_BAD_S01E01_10_MINUTES'
-  owned_parent = File.join(Dir.home, 'Library/Caches/Aurelia/TestRuns')
+  source = ENV.fetch('TARVEN_AUTHORIZED_MEDIA_FILE')
+  raise ArgumentError unless ENV['TARVEN_AUTHORIZED_PLAYBACK'] == 'BREAKING_BAD_S01E01_10_MINUTES'
+  owned_parent = File.join(Dir.home, 'Library/Caches/Tarven/TestRuns')
   raise ArgumentError unless File.dirname(run) == owned_parent &&
                             File.basename(run).start_with?('playback-evidence-') && File.realpath(run) == run &&
                             output.start_with?(run + '/') && !File.symlink?(output) &&

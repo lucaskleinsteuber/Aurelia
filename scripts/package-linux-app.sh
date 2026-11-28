@@ -1,8 +1,8 @@
 #!/bin/bash
-# Makes the Aurelia for Linux packages from the installed-layout archive that build-linux-app.sh
+# Makes the Tarven for Linux packages from the installed-layout archive that build-linux-app.sh
 # writes. Runs on Linux and needs dpkg-deb, rpmbuild, makepkg, flatpak-builder (with the
 # org.freedesktop Platform and Sdk 26.08) and bsdtar; a missing tool fails the run.
-# AURELIA_LINUX_PACKAGE_FORMATS may select a space-separated subset (deb rpm arch flatpak) for
+# TARVEN_LINUX_PACKAGE_FORMATS may select a space-separated subset (deb rpm arch flatpak) for
 # intermediate test builds. Releases require all four. Flatpak modules are pinned beside this
 # script in packaging/flatpak (or in clients/linux/packaging/flatpak in a checkout).
 #   .deb  Ubuntu, Linux Mint, Debian, Pop!_OS
@@ -26,12 +26,12 @@ case "$linux_arch" in
 esac
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$build" =~ ^[0-9]+$ ]] \
   || { echo "Use a MAJOR.MINOR.PATCH version and numeric build." >&2; exit 1; }
-name=aurelia-desktop
-app_id=io.github.lucasfd3.Aurelia
-base="Aurelia-Desktop-$version-$build"
-summary="Watch the movies and TV shows on your Aurelia server"
-homepage=https://github.com/lucaskleinsteuber/Aurelia
-formats="${AURELIA_LINUX_PACKAGE_FORMATS:-deb rpm arch flatpak}"
+name=tarven-desktop
+app_id=org.tarven.Tarven
+base="Tarven-Desktop-$version-$build"
+summary="Watch the movies and TV shows on your Tarven server"
+homepage=https://github.com/lucaskleinsteuber/Tarven
+formats="${TARVEN_LINUX_PACKAGE_FORMATS:-deb rpm arch flatpak}"
 normalized_formats=''
 for format in $formats; do
   case "$format" in deb|rpm|arch|flatpak) ;; *) echo "Unknown package format: $format" >&2; exit 1 ;; esac
@@ -52,16 +52,16 @@ selected flatpak && required_tools+=(flatpak flatpak-builder flock jq)
 for tool in "${required_tools[@]}"; do
   command -v "$tool" >/dev/null || { echo "$tool is missing" >&2; exit 1; }
 done
-package_cache="${XDG_CACHE_HOME:-$HOME/.cache}/aurelia-package"
+package_cache="${XDG_CACHE_HOME:-$HOME/.cache}/tarven-package"
 mkdir -p "$package_cache"
 work=$(mktemp -d "$package_cache/work.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/tree"
 bsdtar -xpf "$archive" -C "$work/tree"
 archive_sha256=$(sha256sum "$archive" | cut -d ' ' -f1)
-[ -x "$work/tree/usr/lib/aurelia-desktop/aurelia-desktop" ] \
-  && [ -x "$work/tree/usr/lib/aurelia-desktop/server/Aurelia.Server" ] \
-  && [ "$(cat "$work/tree/usr/lib/aurelia-desktop/VERSION")" = "$version ($build)" ] \
+[ -x "$work/tree/usr/lib/tarven-desktop/tarven-desktop" ] \
+  && [ -x "$work/tree/usr/lib/tarven-desktop/server/Tarven.Server" ] \
+  && [ "$(cat "$work/tree/usr/lib/tarven-desktop/VERSION")" = "$version ($build)" ] \
   || { echo "The archive is incomplete or has a different version." >&2; exit 1; }
 size_kb=$(du -sk "$work/tree" | cut -f1)
 
@@ -75,15 +75,18 @@ cat > "$work/deb/DEBIAN/control" <<CONTROL
 Package: $name
 Version: $version-$build
 Architecture: $deb_arch
-Maintainer: Aurelia <$homepage>
+Maintainer: Tarven <$homepage>
 Installed-Size: $size_kb
 Section: video
 Priority: optional
 Homepage: $homepage
 Depends: libc6, libgcc-s1, libstdc++6, ${icu_packages% | }, libssl3t64 | libssl3, zlib1g, pkexec, libfontconfig1, libfreetype6, fonts-dejavu-core, libx11-6, libice6, libsm6, libwayland-client0, libwayland-cursor0, libwayland-egl1, libxkbcommon0, libegl1, libgl1, libvlc5 (>= 3.0), vlc-plugin-base, vlc-plugin-video-output
+Replaces: aurelia-desktop
+Conflicts: aurelia-desktop
+Provides: aurelia-desktop
 Recommends: ffmpeg
 Description: $summary
- Browse and play your Aurelia library, manage your server and host a server
+ Browse and play your Tarven library, manage your server and host a server
  on this computer. VLC is provided by the distribution. Install ffmpeg for
  browser conversion and server-generated scrub previews when hosting here.
 CONTROL
@@ -107,13 +110,15 @@ Requires: glibc, libgcc, libstdc++, libicu, fontconfig, freetype, (libX11 or lib
 Requires: (vlc-libs or libvlc5), (vlc-plugins-base or vlc-noX), (vlc-plugin-pulseaudio or vlc-noX)
 Requires: (dejavu-sans-fonts or dejavu-fonts)
 Requires: (openssl-libs or libopenssl3), (zlib or libz1), /usr/bin/pkexec
+Obsoletes: aurelia-desktop
+Provides: aurelia-desktop
 Recommends: ffmpeg
 %global debug_package %{nil}
 %global __os_install_post %{nil}
 %global _build_id_links none
 
 %description
-Browse and play your Aurelia library, manage your server and host a server on this computer.
+Browse and play your Tarven library, manage your server and host a server on this computer.
 VLC is provided by the distribution. ffmpeg is recommended for browser conversion and previews.
 
 %install
@@ -146,6 +151,9 @@ url="$homepage"
 license=('MIT')
 depends=(glibc gcc-libs icu openssl zlib polkit fontconfig freetype2 ttf-dejavu libx11 libice libsm wayland libxkbcommon libglvnd libvlc vlc-plugins-base vlc-plugin-ffmpeg vlc-plugin-pulse vlc-plugin-ass vlc-plugin-freetype)
 optdepends=('ffmpeg: browser conversion and server-generated scrub previews when hosting here')
+replaces=(aurelia-desktop)
+conflicts=(aurelia-desktop)
+provides=(aurelia-desktop)
 options=(!strip !debug)
 source=(tree.tar.gz)
 noextract=(tree.tar.gz)
@@ -166,7 +174,7 @@ if selected flatpak; then
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 flatpak_sources="$script_dir/../clients/linux/packaging/flatpak"
 [ -d "$flatpak_sources" ] || flatpak_sources="$script_dir/packaging/flatpak"
-[ -f "$flatpak_sources/io.github.lucasfd3.Aurelia.json" ] \
+[ -f "$flatpak_sources/org.tarven.Tarven.json" ] \
   || { echo "Missing the pinned Flatpak manifests beside the packaging script." >&2; exit 1; }
 # Flatpak's module-cache identity includes the absolute manifest path. Keep that path stable
 # between versions, and serialize access, so a new app build reuses unchanged decoder modules.
@@ -180,10 +188,10 @@ cp "$flatpak_sources/"* "$flatpak_work/"
 # Local archive paths alone are not a reliable Flatpak cache key. Pin this exact tree's bytes
 # in the generated manifest so a later version cannot reuse an older app module at that path.
 jq --arg sha "$archive_sha256" \
-  '(.modules[] | objects | select(.name == "aurelia-desktop") | .sources[] | select(.path == "tree.tar.gz") | .sha256) = $sha' \
+  '(.modules[] | objects | select(.name == "tarven-desktop") | .sources[] | select(.path == "tree.tar.gz") | .sha256) = $sha' \
   "$flatpak_work/$app_id.json" > "$flatpak_work/$app_id.json.tmp"
 mv "$flatpak_work/$app_id.json.tmp" "$flatpak_work/$app_id.json"
-flatpak_state="${AURELIA_FLATPAK_BUILD_STATE:-$package_cache/flatpak-builder}"
+flatpak_state="${TARVEN_FLATPAK_BUILD_STATE:-$package_cache/flatpak-builder}"
 mkdir -p "$flatpak_state"
 flatpak_log="$package_cache/flatpak-build.log"
 (cd "$flatpak_work" && flatpak-builder --user --jobs=4 --state-dir="$flatpak_state" --disable-rofiles-fuse --force-clean --repo=repo build "$app_id.json") 2>&1 | tee "$flatpak_log"
@@ -191,15 +199,15 @@ if LC_ALL=C grep -Ein '(^|[^[:alnum:]_])warning([[:space:]:]|$)' "$flatpak_log";
   echo "The Flatpak dependency build contains warnings; no bundle will be made. See $flatpak_log." >&2
   exit 1
 fi
-installed="$flatpak_work/build/files/lib/aurelia-desktop"
+installed="$flatpak_work/build/files/lib/tarven-desktop"
 [ "$(cat "$installed/VERSION")" = "$version ($build)" ] \
   || { echo "The Flatpak contains a different app version." >&2; exit 1; }
-if [ -f "$work/tree/usr/lib/aurelia-desktop/aurelia-desktop.dll" ]; then
-  cmp "$work/tree/usr/lib/aurelia-desktop/aurelia-desktop.dll" "$installed/aurelia-desktop.dll" \
+if [ -f "$work/tree/usr/lib/tarven-desktop/tarven-desktop.dll" ]; then
+  cmp "$work/tree/usr/lib/tarven-desktop/tarven-desktop.dll" "$installed/tarven-desktop.dll" \
     || { echo "The Flatpak app assembly does not match the supplied build." >&2; exit 1; }
 fi
-if [ -f "$work/tree/usr/lib/aurelia-desktop/SOURCE_COMMIT" ]; then
-  cmp "$work/tree/usr/lib/aurelia-desktop/SOURCE_COMMIT" "$installed/SOURCE_COMMIT" \
+if [ -f "$work/tree/usr/lib/tarven-desktop/SOURCE_COMMIT" ]; then
+  cmp "$work/tree/usr/lib/tarven-desktop/SOURCE_COMMIT" "$installed/SOURCE_COMMIT" \
     || { echo "The Flatpak source revision does not match the supplied build." >&2; exit 1; }
 fi
 flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \

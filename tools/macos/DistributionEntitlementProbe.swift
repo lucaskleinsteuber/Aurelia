@@ -3,8 +3,8 @@ import Security
 
 // A diagnostic for an isolated synthetic group, never the installed app's group
 // or credentials. It cannot validate a complete downloaded application.
-let group = "B5N7JVK37J.com.aurelia.distribution-probe"
-let service = "Aurelia.DistributionProbe.\(UUID().uuidString)"
+let group = "B5N7JVK37J.com.tarven.distribution-probe"
+let service = "Tarven.DistributionProbe.\(UUID().uuidString)"
 let query: [String: Any] = [
   kSecClass as String: kSecClassGenericPassword,
   kSecAttrService as String: service,

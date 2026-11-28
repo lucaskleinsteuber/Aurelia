@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Player } from "../../src/Aurelia.Server/WebApp/js/player.js";
+import { Player } from "../../src/Tarven.Server/WebApp/js/player.js";
 import { installDOM } from "./dom-fixture.mjs";
 
 test("Up Next forwards its real menu item only while the player owns it", (t) => {

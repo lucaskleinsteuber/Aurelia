@@ -4,13 +4,13 @@
 set -euo pipefail
 repository_root=${0:A:h:h}
 source "$repository_root/scripts/workspace-paths.sh"
-signing_identity=${AURELIA_SIGNING_IDENTITY:-}
+signing_identity=${TARVEN_SIGNING_IDENTITY:-}
 if [[ -z "$signing_identity" ]]; then
-  print -u2 "Set AURELIA_SIGNING_IDENTITY to the matching Apple Development identity."
+  print -u2 "Set TARVEN_SIGNING_IDENTITY to the matching Apple Development identity."
   exit 2
 fi
-mkdir -p "$other_root/Logs" "$HOME/Library/Caches/Aurelia/TestRuns"
-probe_root=$(mktemp -d "$HOME/Library/Caches/Aurelia/TestRuns/Profileless-Probe.XXXXXX")
+mkdir -p "$other_root/Logs" "$HOME/Library/Caches/Tarven/TestRuns"
+probe_root=$(mktemp -d "$HOME/Library/Caches/Tarven/TestRuns/Profileless-Probe.XXXXXX")
 candidate="$probe_root/ProfilelessProbe.app"
 log="$other_root/Logs/Profileless-Signing-${probe_root:t}.log"
 probe_pid=''
@@ -28,7 +28,7 @@ stop_probe() {
 }
 cleanup() {
   stop_probe
-  if [[ "$probe_root" == "$HOME/Library/Caches/Aurelia/TestRuns/Profileless-Probe."* ]]; then
+  if [[ "$probe_root" == "$HOME/Library/Caches/Tarven/TestRuns/Profileless-Probe."* ]]; then
     find "$probe_root" -depth -delete
   fi
 }

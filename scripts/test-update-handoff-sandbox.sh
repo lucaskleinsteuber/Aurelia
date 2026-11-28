@@ -5,7 +5,7 @@ set -euo pipefail
 repository_root=${0:A:h:h}
 source "$repository_root/scripts/workspace-paths.sh"
 /bin/sh "$repository_root/scripts/prune-workspace.sh" || true
-run_root="$HOME/Library/Caches/Aurelia/TestRuns/handoff-$(uuidgen)"
+run_root="$HOME/Library/Caches/Tarven/TestRuns/handoff-$(uuidgen)"
 mkdir -p "$run_root"
 trap 'chmod -R u+w "$run_root" 2>/dev/null || true; rm -rf -- "$run_root"' EXIT
 python3 - "$run_root" <<'PY'
@@ -13,7 +13,7 @@ import pathlib,plistlib,sys,json
 root=pathlib.Path(sys.argv[1]);shared=root/'Shared/Updates';shared.mkdir(parents=True)
 for name in ['Sender','Receiver']:
  bundle=root/(name+'.app');(bundle/'Contents/MacOS').mkdir(parents=True)
- with (bundle/'Contents/Info.plist').open('wb') as f:plistlib.dump(dict(CFBundleExecutable=name,CFBundleIdentifier='com.lucas.aurelia.handofftest.'+name+'.'+root.name.removeprefix('handoff-'),CFBundleName=name,CFBundlePackageType='APPL',LSUIElement=True),f)
+ with (bundle/'Contents/Info.plist').open('wb') as f:plistlib.dump(dict(CFBundleExecutable=name,CFBundleIdentifier='org.tarven.handofftest.'+name+'.'+root.name.removeprefix('handoff-'),CFBundleName=name,CFBundlePackageType='APPL',LSUIElement=True),f)
 with (root/'sender.entitlements').open('wb') as f:plistlib.dump({'com.apple.security.app-sandbox':True,'com.apple.security.temporary-exception.files.absolute-path.read-write':[str(root)+'/']},f)
 quote=lambda p:json.dumps(str(p))
 (root/'Sender.swift').write_text('''import AppKit
@@ -24,7 +24,7 @@ import Foundation
     let root = URL(fileURLWithPath: ROOT)
     let directory = root.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-    let image = directory.appendingPathComponent("Aurelia-1.27.2-126-macOS-universal.dmg")
+    let image = directory.appendingPathComponent("Tarven-1.27.2-126-macOS-universal.dmg")
     try Data("invented data; never mounted".utf8).write(to: image)
     let request = try MacUpdateInstallRequest.prepare(image: image, build: 126, appPID: getpid(), root: root)
     try request.save(in: root)
@@ -59,12 +59,12 @@ import Foundation
           requiredAppPath: fakeApp.path, updatesRoot: root)
         else { exit(11) }
         guard !UpdateInstaller.hasPendingRequest(
-          arguments: [], environment: ["AURELIA_HOST_BOOTSTRAP_DIR": "/tmp"], appURL: fakeApp,
+          arguments: [], environment: ["TARVEN_HOST_BOOTSTRAP_DIR": "/tmp"], appURL: fakeApp,
           requiredAppPath: fakeApp.path, updatesRoot: root)
         else { exit(12) }
         guard !UpdateInstaller.hasPendingRequest(
           arguments: [], environment: [:], appURL: fakeApp,
-          requiredAppPath: "/Applications/Aurelia.app", updatesRoot: root)
+          requiredAppPath: "/Applications/Tarven.app", updatesRoot: root)
         else { exit(13) }
         guard UpdateInstaller.hasPendingRequest(
           arguments: [], environment: [:], appURL: fakeApp,
@@ -80,9 +80,9 @@ import Foundation
         let roDir = roUpdates.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try fm.createDirectory(at: roApps, withIntermediateDirectories: true)
         try fm.createDirectory(at: roDir, withIntermediateDirectories: true)
-        let roApp = roApps.appendingPathComponent("Aurelia.app", isDirectory: true)
+        let roApp = roApps.appendingPathComponent("Tarven.app", isDirectory: true)
         try fm.createDirectory(at: roApp, withIntermediateDirectories: true)
-        let roImage = roDir.appendingPathComponent("Aurelia-1.27.2-126-macOS-universal.dmg")
+        let roImage = roDir.appendingPathComponent("Tarven-1.27.2-126-macOS-universal.dmg")
         try Data("invented bytes".utf8).write(to: roImage)
         let roReq = try MacUpdateInstallRequest.prepare(
           image: roImage, build: 126, appPID: getpid(), root: roUpdates)
@@ -117,8 +117,8 @@ for name in Sender Receiver; do
     xcrun swiftc -warnings-as-errors -swift-version 6 \
       "$repository_root/clients/macos/UpdateHandoff/MacUpdateInstallRequest.swift" \
       "$repository_root/clients/macos/UpdateHandoff/AppEdition.swift" \
-      "$repository_root/clients/macos/AureliaServerHost/UpdateInstallation.swift" \
-      "$repository_root/clients/macos/AureliaServerHost/UpdateInstaller.swift" \
+      "$repository_root/clients/macos/TarvenServerHost/UpdateInstallation.swift" \
+      "$repository_root/clients/macos/TarvenServerHost/UpdateInstaller.swift" \
       "$run_root/$name.swift" \
       -o "$run_root/$name.app/Contents/MacOS/$name"
     codesign --force --sign - "$run_root/$name.app"

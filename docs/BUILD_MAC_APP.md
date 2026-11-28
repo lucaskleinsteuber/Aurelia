@@ -1,10 +1,10 @@
-# Build Aurelia for Mac yourself
+# Build Tarven for Mac yourself
 
-The Aurelia for Mac download on GitHub starts **only on Macs registered to the developer's Apple
-account**. Aurelia is free and doesn't pay for Apple's developer program, so Apple doesn't let the
+The Tarven for Mac download on GitHub starts **only on Macs registered to the developer's Apple
+account**. Tarven is free and doesn't pay for Apple's developer program, so Apple doesn't let the
 download run on other Macs. On your Mac you have two choices:
 
-- **Use Aurelia in your browser** (Safari, Chrome, Firefox). It does everything the Mac app does,
+- **Use Tarven in your browser** (Safari, Chrome, Firefox). It does everything the Mac app does,
   from setting up the server to editing your library. Nothing to build. See
   [Getting started](GETTING_STARTED.md).
 - **Build the Mac app yourself**, as described here. It takes about half an hour the first time,
@@ -59,21 +59,21 @@ speech).
 If you are unsure whether you already have it: type `brew --version` and press Return. A version
 number means you have it.
 
-## Step 4: Get Aurelia's source code
+## Step 4: Get Tarven's source code
 
 In Terminal, type these two lines (press Return after each):
 
 ```sh
-git clone https://github.com/lucaskleinsteuber/Aurelia.git
-cd Aurelia
+git clone https://github.com/lucaskleinsteuber/Tarven.git
+cd Tarven
 ```
 
-The first line downloads Aurelia into a folder named *Aurelia* in your home folder. If your Mac
+The first line downloads Tarven into a folder named *Tarven* in your home folder. If your Mac
 asks to install the "command line developer tools", click **Install** and run the line again.
 
-## Step 5: Build Aurelia
+## Step 5: Build Tarven
 
-Still in Terminal, in the *Aurelia* folder:
+Still in Terminal, in the *Tarven* folder:
 
 ```sh
 zsh scripts/build-mac-app-yourself.sh
@@ -83,30 +83,30 @@ The script:
 
 1. checks macOS and Xcode;
 2. offers to install cmake and ninja with Homebrew (type `y` and press Return);
-3. downloads the .NET SDK from Microsoft into the Aurelia folder (it builds the server inside the
+3. downloads the .NET SDK from Microsoft into the Tarven folder (it builds the server inside the
    app; nothing is installed elsewhere on your Mac);
 4. finds your certificate. macOS may ask for your Mac password to let it sign; enter it and click
    **Always Allow**;
 5. builds the app for your Mac's processor (Apple silicon or Intel). This takes **15 to 40
    minutes** the first time and prints a lot of text; let it run.
 
-At the end it asks: *Copy Aurelia to Applications now?* Type `y` and press Return. Or drag
-*Aurelia.app* from the window it opens into Applications yourself.
+At the end it asks: *Copy Tarven to Applications now?* Type `y` and press Return. Or drag
+*Tarven.app* from the window it opens into Applications yourself.
 
-## Step 6: Open Aurelia
+## Step 6: Open Tarven
 
-Open **Aurelia** from Applications. Because you built it yourself on this Mac, macOS opens it
+Open **Tarven** from Applications. Because you built it yourself on this Mac, macOS opens it
 without a warning. Choose **Set Up This Mac** to keep your library on this Mac, or **Connect to an
-Existing Server** if Aurelia already runs on another computer at home. [Getting
+Existing Server** if Tarven already runs on another computer at home. [Getting
 started](GETTING_STARTED.md) walks through both.
 
 ## Updating
 
-The update button in Aurelia offers the developer's downloads, which don't run on your Mac, so a
+The update button in Tarven offers the developer's downloads, which don't run on your Mac, so a
 copy you built yourself doesn't look for updates. To update, open Terminal and run:
 
 ```sh
-cd Aurelia
+cd Tarven
 git pull
 zsh scripts/build-mac-app-yourself.sh
 ```
@@ -125,10 +125,10 @@ when your certificate expires (Xcode › Settings › Accounts › Manage Certif
 | *macOS did not let this certificate sign* | Run the script again; when macOS asks for your password, choose **Always Allow** |
 | *The .NET SDK could not be installed* | Check the internet connection and run the script again |
 | `git: command not found` | Install the command line tools when macOS offers them, or run `xcode-select --install` |
-| The build stops with an error near the end | Run the script once more (a download may have broken off). If it stops again, copy the last lines into a new [issue](https://github.com/lucaskleinsteuber/Aurelia/issues) |
-| Aurelia doesn't open after a year | Your certificate expired: create a new one (step 2) and build again |
+| The build stops with an error near the end | Run the script once more (a download may have broken off). If it stops again, copy the last lines into a new [issue](https://github.com/lucaskleinsteuber/Tarven/issues) |
+| Tarven doesn't open after a year | Your certificate expired: create a new one (step 2) and build again |
 
-For developers: the script runs `scripts/build-macos-release.sh` with `AURELIA_TEAM_ID` (your
-team), `AURELIA_SIGNING_IDENTITY`, `AURELIA_DISTRIBUTION=profileless-development` and
-`AURELIA_MAC_ARCH`. The App Group carries your team ID; the sandbox and all other protections stay
+For developers: the script runs `scripts/build-macos-release.sh` with `TARVEN_TEAM_ID` (your
+team), `TARVEN_SIGNING_IDENTITY`, `TARVEN_DISTRIBUTION=profileless-development` and
+`TARVEN_MAC_ARCH`. The App Group carries your team ID; the sandbox and all other protections stay
 as in the published app. [Distribution and updates](FREE_DISTRIBUTION.md) explains the signing.

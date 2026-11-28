@@ -1,0 +1,11 @@
+[Unit]
+Description=Notice an update or update check requested in Tarven on a Mac
+
+[Path]
+# Tarven Server leaves these files in its data folder; the service removes them.
+PathExists=/var/lib/tarven/update-requested
+PathExists=/var/lib/tarven/update-check-requested
+Unit=tarven-update-request.service
+
+[Install]
+WantedBy=paths.target

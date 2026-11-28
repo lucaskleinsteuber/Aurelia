@@ -1,4 +1,4 @@
-# Aurelia Agent Rules
+# Tarven Agent Rules
 
 These rules apply to every task in this repository.
 
@@ -26,19 +26,25 @@ earlier habit suggests:
 - When the owner brings a new feature, first ask which clients it should come to
   (Mac, Linux, browser, iPhone & iPad, Apple TV) before planning or building it
   (owner's decision, 13.11.2026). The server part follows from that answer.
-- Aurelia is a self-hosted media server with native clients. Do not replace it
+- Tarven is a self-hosted media server with native clients. Do not replace it
   with a browser-only product or a shortcut that merely opens localhost.
-- The server also serves a browser app (`src/Aurelia.Server/WebApp`, see
-  `docs/WEB_APP.md`) for devices without an Aurelia app. It is an additional
+- The server also serves a browser app (`src/Tarven.Server/WebApp`, see
+  `docs/WEB_APP.md`) for devices without a Tarven app. It is an additional
   client, not a replacement: it is plain HTML, CSS and JavaScript modules with
   no framework, build step, npm package or anything loaded from the internet;
   its credentials stay in HttpOnly cookies that scripts never read; and its
   logic is tested with `node --test "tests/WebApp/*.test.mjs"`.
-- This repository's current product name is **Aurelia**. **Aurelia Classic** is
-  the separate, local-only reference application and is read-only. Do not call
-  the current product by its retired two-word label in user-facing text or
-  active documentation. Preserve historic identifiers only when required to
-  discover or migrate data and settings from older releases.
+- This repository's current product name is **Tarven** (owner's decision, 28.11.2026; domain
+  tarven.org). It was called **Aurelia** until Server 3.0.0, Mac 2.30.0, Linux 2.16.0, Apple TV
+  2.13.0 and iPhone & iPad 2.23.0, and before that by a two-word label. **Aurelia Classic** is the
+  separate, local-only reference application and is read-only. Do not call the current product
+  Aurelia or by its older label in user-facing text or active documentation. Old identifiers
+  stay only where they are needed to discover, migrate or keep working with data, settings and
+  apps from older releases: `LegacyNames` (server), `LegacyAppData` (Linux app),
+  `AureliaHandover` (Mac), the legacy header, cookie, mDNS and configuration fallbacks, the
+  `Aurelia-Server-…` bridge packages and the frozen values listed in `LegacyNames`.
+  `scripts/verify-product-names.sh` allows the old names only there. Git history and historical
+  changelog entries keep the old name; never rewrite them.
 - Keep all user-facing text in English until localization is an explicit task.
 - Preserve the native macOS design direction, but keep infrastructure
   milestones focused and functional.
@@ -70,7 +76,7 @@ earlier habit suggests:
   `LiveConversionTests` guards that no file appears in the data, temporary or
   media folder; keep it. The Mac app ships its own LGPL ffmpeg from
   `scripts/build-ffmpeg-macos.sh`, never a GPL build; the Linux server uses the
-  distribution's ffmpeg, which Aurelia does not distribute.
+  distribution's ffmpeg, which Tarven does not distribute.
   For the same reason the Docker image (`packaging/docker`, `docs/DOCKER.md`) is built
   on the user's computer from a verified server release and Debian's ffmpeg; do not
   publish a built image.
@@ -106,7 +112,7 @@ earlier habit suggests:
 - Maintain one coherent native macOS visual language.
 - The sidebar is a dark, blurred panel like the Apple TV app's: hero artwork
   and rails may pass beneath it softly, its labels stay legible, and Reduce
-  Transparency falls back to the opaque Aurelia canvas color. Keep content
+  Transparency falls back to the opaque Tarven canvas color. Keep content
   full-height beneath native window chrome; never introduce a gray or black
   strip above the content.
 - Use native macOS window controls and fullscreen behavior. Never draw fake
@@ -131,7 +137,7 @@ earlier habit suggests:
   from `scripts/capture-showcase.sh`, whose library, titles, names and pictures are
   invented by `scripts/make-showcase.swift`; never show a personal library.
 - Generated output and private local files live in the git-ignored `Local/`
-  folder of the checkout (`AURELIA_OTHER_ROOT` may select another place). Never
+  folder of the checkout (`TARVEN_OTHER_ROOT` may select another place). Never
   commit anything from it and never remove `/Local/` from `.gitignore`. Standard
   subdirectories are `Build/`, `Package Cache/`, `Test Results/` and `Logs/`;
   `Local/` also holds icon drafts, the Linux server's SSH
@@ -142,8 +148,8 @@ earlier habit suggests:
   deleted locally by `scripts/publish-release.sh`, and only the newest tvOS, iOS and
   iPad build folder is kept.
 - Runnable Mac test products must be staged under a unique
-  `~/Library/Caches/Aurelia/TestRuns/<run-id>` directory. Pre-install smoke
-  candidates use a unique `/private/tmp/Aurelia/<run-id>` directory. Launch the
+  `~/Library/Caches/Tarven/TestRuns/<run-id>` directory. Pre-install smoke
+  candidates use a unique `/private/tmp/Tarven/<run-id>` directory. Launch the
   installed release only from `/Applications`.
 - Tests use isolated synthetic media and credentials. Personal media may only
   be read in place for an explicitly requested, bounded playback check; record
@@ -152,7 +158,7 @@ earlier habit suggests:
 ## Client versions and verification
 
 - macOS, Server, and tvOS are separate products with independent version/build
-  counters. Every Aurelia product (Mac app and server, Linux server, tvOS, and
+  counters. Every Tarven product (Mac app and server, Linux server, tvOS, and
   any Windows or other client) follows Semantic Versioning (MAJOR.MINOR.PATCH): MAJOR for
   changes that break existing clients, servers or data; MINOR for new features;
   PATCH for fixes only. Whether a new version is made at all is the owner's
@@ -161,32 +167,33 @@ earlier habit suggests:
   building; do not ask the owner to choose the number. The build number rises by
   exactly one per build. Every product reached 2.0.0 together (08.11.2026): Mac 2.0.0 (153), server
   2.0.0 (148), Linux app 2.0.0 (25), Apple TV 2.0.0 (35), iPhone and iPad 2.0.0 (16); from there
-  each counts on independently. The tvOS client is named Aurelia and requires tvOS 26.
+  each counts on independently. The tvOS client is named Tarven and requires tvOS 26.
 - Keep tvOS in its own Xcode project with no Mac source references or shared
-  Aurelia product library. A third-party playback engine is allowed.
+  Tarven product library. A third-party playback engine is allowed.
 - The iPhone and iPad client (`clients/ios`) follows the same
   rules as tvOS: its own Xcode project and version counter, code copied from the
   Apple TV app rather than linked, logic tests with `scripts/test-ios-logic.sh`, a
   warning-free simulator build with `scripts/build-ios.sh`, synthetic data only,
   no real playback in tests, and it is not published as a download (built from source, see
   `docs/IOS_APP.md`).
-- Aurelia for Linux (`clients/linux`) is the native Linux desktop
+- Tarven for Linux (`clients/linux`) is the native Linux desktop
   app, with library browsing, playback, settings, server administration and optional hosting
   on this PC. It is meant to become the full Mac app on Linux. It is a separate product with
-  its own version counter (`Version` and `AureliaLinuxBuildNumber` in
+  its own version counter (`Version` and `TarvenLinuxBuildNumber` in
   `clients/linux/Directory.Build.props`), written in C# with Avalonia, for Linux x64 and arm64 (one build each),
-  with platform specifics behind small adapters. It shares only `src/Aurelia.Contracts`
+  with platform specifics behind small adapters. It shares only `src/Tarven.Contracts`
   with the server and copies no Mac code. Verify it with `scripts/test-linux-app.sh`
   (formatting, warning-free build, headless Avalonia tests, which need no screen and no
   question first) and build it with `scripts/build-linux-app.sh`. Its packages are always made
   on the owner's Linux server (owner, 16.11.2026: slower, but the laptop's fans are too loud),
-  never on the laptop: `AURELIA_LINUX_PACKAGE_HOST=aurelia-test`,
-  `AURELIA_LINUX_PACKAGE_SSH_CONFIG=Local/LinuxServer/ssh_config` and
-  `AURELIA_LINUX_PACKAGE_DOCKER=1` run `scripts/package-linux-app.sh` there in a throwaway Arch
+  never on the laptop: `TARVEN_LINUX_PACKAGE_HOST=tarven-test`,
+  `TARVEN_LINUX_PACKAGE_SSH_CONFIG=Local/LinuxServer/ssh_config` and
+  `TARVEN_LINUX_PACKAGE_DOCKER=1` run `scripts/package-linux-app.sh` there in a throwaway Arch
   Linux container (`scripts/package-linux-app-in-docker.sh`) at the lowest priority, without
-  touching the Aurelia server running there. The server turns itself off when unused: wake it
+  touching the Tarven server running there. The server turns itself off when unused: wake it
   with Wake-on-LAN (address in `Local/LinuxServer/wake-on-lan.txt`), and while the packages are
-  made pause only `aurelia-autosleep.timer` (with a fallback that starts it again after three
+  made pause only `tarven-autosleep.timer` (`aurelia-autosleep.timer` while it still runs a server
+  from before the rename) (with a fallback that starts it again after three
   hours) and start it again right after; never change its power settings. Install each verified
   test build on the owner's CachyOS laptop (`Local/LinuxLaptop/ssh_config`) with
   `scripts/install-linux-app.sh` without asking when the laptop answers (ssh with a short
@@ -220,7 +227,7 @@ earlier habit suggests:
 
 - The Mac version and build are authoritative in
   `clients/macos/Configuration/BuildNumber.xcconfig`. The server version and
-  `AureliaBuildNumber` are authoritative in `Directory.Build.props`.
+  `TarvenBuildNumber` are authoritative in `Directory.Build.props`.
   Increment the relevant counter only after the owner agreed to a new version
   (Hard rule 2) and its pre-version verification is green.
   A Mac-only change does not bump the server. A server-only change does not bump
@@ -246,8 +253,8 @@ earlier habit suggests:
   release has a separate Apple Silicon/arm64 and Intel/x64 build, each with only its own server
   runtime and ffmpeg, so a download carries one server instead of two. No universal Mac build.
   Name every download so its system and architecture are clear at a glance:
-  `Aurelia-<version>-<build>-macOS-arm64.dmg` (Apple Silicon, M1 and newer) and
-  `Aurelia-<version>-<build>-macOS-x64.dmg` (Intel); Linux app and server packages carry
+  `Tarven-<version>-<build>-macOS-arm64.dmg` (Apple Silicon, M1 and newer) and
+  `Tarven-<version>-<build>-macOS-x64.dmg` (Intel); Linux app and server packages carry
   `linux-arm64` or `linux-x64` (and their format: deb, rpm, Arch, Flatpak) in the name. Release
   notes list the downloads grouped by system with a plain label ("Mac with Apple Silicon",
   "Mac with Intel", "Linux x64", "Linux arm64 (e.g. Raspberry Pi)"). The updaters pick the
@@ -262,14 +269,14 @@ earlier habit suggests:
 ## Installation and version handling
 
 - Publish verified macOS releases and let the owner install them through the
-  Aurelia updater. Do not replace or relaunch the installed Mac app directly
+  Tarven updater. Do not replace or relaunch the installed Mac app directly
   unless the owner explicitly requests a direct installation for that build.
 - Installation replaces only the app bundle. Preserve the existing library
-  and all Aurelia setup state across builds and updates, including the server
+  and all Tarven setup state across builds and updates, including the server
   database, local server data, accounts, sessions, preferences, connection
   profiles, and server settings. Do not reset installed test state, clear
   Keychain or preferences, or
-  move any Aurelia data to Trash as part of a normal install. Reset or recreate
+  move any Tarven data to Trash as part of a normal install. Reset or recreate
   setup only when the user explicitly asks for it.
 - Never delete, edit, scan, or move user-selected media folders as part of an
   install. Never touch Aurelia Classic, `Application Support/Aurelia`,
@@ -280,9 +287,9 @@ earlier habit suggests:
   `CFBundleShortVersionString`; never infer them from a filename.
 - Stop the installed app and its owned helper/server processes cleanly before
   replacement. Preserve user data and libraries separately from the app bundle.
-- Do not leave old, previous, duplicate, renamed, or backup Aurelia app bundles
+- Do not leave old, previous, duplicate, renamed, or backup Tarven app bundles
   in `/Applications`. After an update, only the intended current
-  `/Applications/Aurelia.app` may remain.
+  `/Applications/Tarven.app` may remain.
 - Local builds use free 7-day development profiles. There is no re-signing job
   (owner's decision, 15.11.2026: every client gets a new version at least weekly,
   and the daily job mostly sent failure notifications); an app whose profile
@@ -326,7 +333,7 @@ earlier habit suggests:
   owner's decision. After that, publish every new Mac, Server and Linux Desktop version the owner
   agreed to (Hard rule 2) as a beta
   (`scripts/publish-release.sh --beta`, with `--server` or `--linux-app`), a GitHub pre-release
-  that only apps with **Beta updates** turned on offer (servers: `sudo aurelia update --beta on`);
+  that only apps with **Beta updates** turned on offer (servers: `sudo tarven update --beta on`);
   the owner's apps and server have it on. Make a
   stable release only when the owner says the tested beta is good, with
   `scripts/publish-release.sh --promote <tag>` (same downloads, no rebuild), usually one or two
@@ -339,12 +346,12 @@ earlier habit suggests:
   never promoted to stable (owner's decision, 11.11.2026: its development signature runs only on
   registered Macs; see Hard rule 1 for when this changes); both architectures are still built and published.
   GitHub's Latest is the newest stable server (owner, 17.11.2026; `promote-release.sh` makes a promoted
-  server Latest), so `aurelia update`, the one-line install and Docker find it directly; they also read
+  server Latest), so `tarven update`, the one-line install and Docker find it directly; they also read
   the release list page by page, never only the last 30. Mac 2.12.1 (170), once stable, is a pre-release
   like every Mac release. Everyone else builds the Mac app themselves
-  (`scripts/build-mac-app-yourself.sh`, `docs/BUILD_MAC_APP.md`, any free Apple ID via `AURELIA_TEAM_ID`)
-  or uses Aurelia in a browser, so the browser gets every Mac feature.
-- The main `lucaskleinsteuber/Aurelia` repository is public and stays public (owner's
+  (`scripts/build-mac-app-yourself.sh`, `docs/BUILD_MAC_APP.md`, any free Apple ID via `TARVEN_TEAM_ID`)
+  or uses Tarven in a browser, so the browser gets every Mac feature.
+- The main `lucaskleinsteuber/Tarven` repository is public and stays public (owner's
   decision, 06.11.2026). Never change its visibility. Updates of the Mac app, the Linux app and
   the Linux server, the one-line Linux install and the Docker build read the public release feed
   anonymously; do not add GitHub token settings or send tokens. The existing Linux preparation
@@ -368,7 +375,7 @@ earlier habit suggests:
   background update jobs after the app quits. Launch the visible native helper directly.
   `scripts/test-update-worker.sh --build-only` compiles its complete signed synthetic
   fixture without UI. Running the fixture shows installer/test-app windows, requires
-  the per-run UI-test approval above, and uses `AURELIA_UPDATE_UI_TESTS=1` only after
+  the per-run UI-test approval above, and uses `TARVEN_UPDATE_UI_TESTS=1` only after
   that approval. Match the real app's normal application type, termination properties
   and optimized compilation; testing an agent/background caller can falsely pass.
   Client updates must remain available before profile unlock and while the server is
@@ -381,7 +388,11 @@ earlier habit suggests:
 - Keep the README concise and user-facing. Put build/test/API details in linked
   documentation, not the README. Do not add personal names or machine paths.
 - Preserve bundle IDs, App Groups, Keychain identifiers, and signing identity
-  continuity; a cosmetic rename must not lose existing users' connections/data.
+  continuity; a cosmetic rename must not lose existing users' connections/data. The one
+  exception is the rename to Tarven (owner, 28.11.2026), which moved everything to `org.tarven.*`
+  with one-time takeovers (Mac: Keychain group, App Group settings and server folder; Linux:
+  folders, keyring and packages; iPhone, iPad and Apple TV connect once again). Users install
+  Tarven on the Mac once by hand; the old updaters can't, because the bundle identifier changed.
 - A local development signature is not a public release. Public Mac packages
   must be tested for their actual distribution mode. The intended channel is a
   free GitHub download, not the App Store. Do not require paid Apple membership

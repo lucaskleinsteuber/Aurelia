@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   initialVariant, masterUrl, nextVariant, normalizeQuality, parseMaster, parseMedia, qualityLabel, retryAfterDelayMs,
   segmentAt, smoothed, startsAdaptive, stallsCallForAdaptive,
-} from "../../src/Aurelia.Server/WebApp/js/hls-logic.js";
+} from "../../src/Tarven.Server/WebApp/js/hls-logic.js";
 
 const MASTER = `#EXTM3U
 #EXT-X-VERSION:7
@@ -126,7 +126,7 @@ test("Retry-After delays are parsed and clamped for 429 HLS retries", () => {
 });
 
 test("HlsSource.seeking reports playlist errors through onFailure without unhandled rejection", async () => {
-  const { HlsSource } = await import("../../src/Aurelia.Server/WebApp/js/hls.js");
+  const { HlsSource } = await import("../../src/Tarven.Server/WebApp/js/hls.js");
   const failures = [];
   const source = Object.assign(Object.create(HlsSource.prototype), {
     destroyed: false,

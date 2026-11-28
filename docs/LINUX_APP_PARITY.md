@@ -1,6 +1,6 @@
-# Aurelia for Linux: Mac feature inventory
+# Tarven for Linux: Mac feature inventory
 
-This inventory compares the current Mac app in `clients/macos/Aurelia` with the independent Linux
+This inventory compares the current Mac app in `clients/macos/Tarven` with the independent Linux
 app in `clients/linux`. It was reviewed on 2026-11-01. The shared server and contracts supply the
 same library and account behavior; interface code and platform adapters remain independent.
 
@@ -11,8 +11,8 @@ Avalonia views without opening desktop windows. Integration tests use the real s
 synthetic accounts and media; simulated player tests never load a real decoder. Desktop, package,
 portal and physical playback checks must be reported separately with the release verification.
 
-In the tables, UI test names are in `Aurelia.Linux.Tests`; server integration test names are in
-`Aurelia.Linux.IntegrationTests`. Linux paths are relative to `clients/linux`. This document is a
+In the tables, UI test names are in `Tarven.Linux.Tests`; server integration test names are in
+`Tarven.Linux.IntegrationTests`. Linux paths are relative to `clients/linux`. This document is a
 source and coverage map; private test receipts record which tests actually ran for a release.
 
 ## Window and navigation
@@ -39,7 +39,7 @@ source and coverage map; private test receipts record which tests actually ran f
 | Remember host/client mode and show the welcome choice | `Flow/AppFlow`, `Views/WelcomeView` | `AppFlowTests.StartsThenAsksWhereTheServerRuns`, `RemembersTheChosenMode`; `WindowTests.ChoosingAModeOpensItsScreenAndBackReturns`. |
 | Discover nearby servers, including legacy service advertisements | `Connection/ServerDiscovery`, `DiscoveryCache` | `DiscoveryMergeTests.ListsEachServerOnceSortedByName`; `DiscoveryLifecycleTests` covers offline startup, cleanup, background retry and manual entry. Real multicast discovery is a desktop/network check. |
 | Typed HTTPS address and default port | `Api/ServerAddress`, `Views/ConnectionView` | `ServerAddressTests.NormalizesTypedAddresses`, `RejectsUnsafeOrUnclearAddresses`. |
-| Compare fingerprint and pair using an eight-digit code | `Flow/ConnectionModel`, `Api/AureliaApi` | `SetupScreenTests.PairsChoosesAProfileAndOpensTheLibrary`; `ConnectionFlowTests.PairsOpensTheOwnerProfileAndDisconnects`. |
+| Compare fingerprint and pair using an eight-digit code | `Flow/ConnectionModel`, `Api/TarvenApi` | `SetupScreenTests.PairsChoosesAProfileAndOpensTheLibrary`; `ConnectionFlowTests.PairsOpensTheOwnerProfileAndDisconnects`. |
 | Pin the trusted key on later requests | `Api/PinnedServerTransport`, `ServerIdentity` | `ConnectionFlowTests.RefusesAServerWithAnotherIdentity`; `ServerIdentityTests.FingerprintIsTheHashOfTheP256PublicKey`. |
 | Keep device credentials in secure OS storage | Secret Service, no plain-file fallback | `StoredConnectionTests.RoundTripsThroughTheKeyringFormat`; `KeyringTests.SavesReplacesReadsAndDeletesAnEntry` is opt-in on a real Linux desktop. |
 | Wake a sleeping server and stop waiting | `Connection/ServerWakeUp`, `WakeOnLan`, Starting view | `WakeOnLanTests.BuildsTheMagicPacket`; `SetupScreenTests.ASilentServerOffersToTryAgain`. Network wake and desktop reachability are separate checks. |
@@ -106,7 +106,7 @@ source and coverage map; private test receipts record which tests actually ran f
 | OS media keys/Now Playing | MPRIS adapter in `Platform/LinuxPlaybackSystem` | Platform counterpart; D-Bus adapter is source reviewed, needs desktop verification. |
 | Keep screen awake during playback | ScreenSaver/portal inhibition | Simulated controller tests verify keep-awake state; actual D-Bus permission/inhibitor behavior needs desktop verification. |
 | Export playback diagnostics from player/error screen | Bounded sanitized diagnostics collector and save action | `PlaybackPreviewTests.DiagnosticsAreBoundedAndExcludeUnrecognizedErrorText`, `ControllerDiagnosticsRecordActionsAndSanitizeServerFailures`; `PlayerViewTests.ExportsSanitizedDiagnosticsOnlyWhenADestinationIsChosen`. |
-| AirPlay route picker | Apple-only framework; Linux exposes Play On and desktop media controls | Platform difference: Aurelia's Linux client does not provide an AirPlay audio-output route picker. |
+| AirPlay route picker | Apple-only framework; Linux exposes Play On and desktop media controls | Platform difference: Tarven's Linux client does not provide an AirPlay audio-output route picker. |
 
 ## App settings and updates
 

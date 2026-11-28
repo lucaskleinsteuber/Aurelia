@@ -1,0 +1,130 @@
+using System.Net.Http.Headers;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Tarven.Contracts;
+using Tarven.Linux.Core.Api;
+using Tarven.Linux.Core.Library;
+
+namespace Tarven.Linux.Core.Management;
+
+/// <summary>
+/// Owner and administrator requests, sent the way the Mac app's AdministrationRequestExecutor
+/// does: every request goes out as it is. Only when the server answers "approval_required" does
+/// the client ask for a one-use approval for exactly that request (its method, path and the SHA-256
+/// of its exact bytes) and send it again. When management is locked, <paramref name="askPassword"/>
+/// asks for the Server Password, management is unlocked for ten minutes and the request is retried.
+/// When the owner requires Face ID or Touch ID for administrators, the password is refused
+/// ("passkey_required") and <paramref name="confirmElsewhere"/> asks an iPhone, iPad or Mac to confirm.
+/// </summary>
+public sealed partial class ManagementClient(TarvenApi api, LibraryClient library, Func<string, Task<string?>> askPassword,
+    Func<ManagementClient, Task<bool>>? confirmElsewhere = null)
+{
+    public LibraryClient Library { get; } = library;
+
+    private HttpClient Pinned => api.Pinned(Library.Server.Address, Library.Server.Fingerprint);
+
+    public Task<T> GetAsync<T>(string path, CancellationToken cancellation = default) => SendAsync<T>(HttpMethod.Get, path, null, cancellation);
+
+    public async Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken cancellation = default)
+    {
+        var bytes = body is null ? null : JsonSerializer.SerializeToUtf8Bytes(body, body.GetType(), TarvenJson.Options);
+        return await SendBytesAsync<T>(method, path, bytes, "application/json", cancellation);
+    }
+
+    public async Task<T> SendBytesAsync<T>(HttpMethod method, string path, byte[]? bytes, string contentType, CancellationToken cancellation = default)
+    {
+        string? approval = null;
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                using var request = Request(method, path, bytes, contentType, approval);
+                if (typeof(T) != typeof(JsonNode) && typeof(T) != typeof(JsonObject))
+                    return await TarvenApi.SendRequestAsync<T>(Pinned, request, inspecting: false, cancellation);
+                // Untyped answers may be empty (204 No Content).
+                var raw = await TarvenApi.SendRequestAsync<byte[]>(Pinned, request, inspecting: false, cancellation);
+                return raw.Length == 0 ? default! : ParseNode(raw) is T node ? node : throw TarvenApiException.InvalidResponse();
+            }
+            catch (TarvenApiException error) when (attempt < 3 && error.Status == 403 && error.Code == "approval_required")
+            {
+                approval = await ApproveAsync(method, path, bytes ?? [], cancellation);
+            }
+            catch (TarvenApiException error) when (attempt < 3 && error.Status == 403 && error.Code == "management_locked")
+            {
+                await UnlockAsync(error.Message, cancellation);
+            }
+        }
+    }
+
+    /// <summary>A file the server sends (diagnostics, an exported backup), as bytes.</summary>
+    public async Task<byte[]> DownloadAsync(string path, CancellationToken cancellation = default)
+    {
+        using var request = Request(HttpMethod.Get, path, null, null, null);
+        request.Headers.Accept.Clear();
+        using var response = await Pinned.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation);
+        if (!response.IsSuccessStatusCode) throw await TarvenApi.ProblemAsync(response, cancellation);
+        return await response.Content.ReadAsByteArrayAsync(cancellation);
+    }
+
+    /// <summary>A large file the server sends (a moving file), streamed into <paramref name="destination"/>.</summary>
+    public async Task DownloadToAsync(string path, Stream destination, CancellationToken cancellation = default)
+    {
+        using var request = Request(HttpMethod.Get, path, null, null, null);
+        request.Headers.Accept.Clear();
+        using var response = await Pinned.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation);
+        if (!response.IsSuccessStatusCode) throw await TarvenApi.ProblemAsync(response, cancellation);
+        await response.Content.CopyToAsync(destination, cancellation);
+    }
+
+    /// <summary>POST /api/v1/management/unlock with the Server Password; it lasts ten minutes.</summary>
+    public async Task UnlockAsync(string reason, CancellationToken cancellation = default)
+    {
+        var password = await askPassword(reason) ?? throw new OperationCanceledException("The Server Password was not entered.");
+        try
+        {
+            await TarvenApi.SendAsync<ManagementUnlockResponse>(Pinned, HttpMethod.Post, "/api/v1/management/unlock", Library.Profile.Token,
+                new UnlockManagementRequest(password), false, cancellation);
+        }
+        catch (TarvenApiException error) when (error.Code == "passkey_required" && confirmElsewhere is not null)
+        {
+            if (!await confirmElsewhere(this)) throw new OperationCanceledException("The unlock was not confirmed on another device.");
+        }
+    }
+
+    public static string PayloadHash(ReadOnlySpan<byte> payload) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(payload)).ToLowerInvariant();
+
+    private async Task<string> ApproveAsync(HttpMethod method, string path, byte[] bytes, CancellationToken cancellation)
+    {
+        var request = new AdministrationApprovalRequest(method.Method + " " + path, PayloadHash(bytes));
+        var approval = await SendAsync<AdministrationApprovalResponse>(HttpMethod.Post, "/api/v1/management/approval", request, cancellation);
+        return approval.Token;
+    }
+
+    private HttpRequestMessage Request(HttpMethod method, string path, byte[]? bytes, string? contentType, string? approval)
+    {
+        var request = new HttpRequestMessage(method, path);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Library.Profile.Token);
+        // Servers from before the rename to Tarven (Aurelia) read the old header names too.
+        if (approval is not null) request.Headers.Add("X-Tarven-Approval", approval);
+        if (approval is not null) request.Headers.Add("X-Aurelia-Approval", approval);
+        if (bytes is not null)
+        {
+            request.Content = new ByteArrayContent(bytes);
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue(contentType ?? "application/json");
+        }
+        return request;
+    }
+
+    private static JsonNode? ParseNode(byte[] raw)
+    {
+        try
+        {
+            return JsonNode.Parse(raw);
+        }
+        catch (JsonException)
+        {
+            throw TarvenApiException.InvalidResponse();
+        }
+    }
+}

@@ -3,44 +3,44 @@ set -euo pipefail
 umask 077
 
 # Run only after the synthetic full-chain gate, with human approval for the
-# sole exact source supplied in AURELIA_AUTHORIZED_MEDIA_FILE. Never discover it
+# sole exact source supplied in TARVEN_AUTHORIZED_MEDIA_FILE. Never discover it
 # by scanning folders. No file bytes are read before the bounded playback test.
-# Usage: AURELIA_AUTHORIZED_PLAYBACK=BREAKING_BAD_S01E01_10_MINUTES \
-#   AURELIA_AUTHORIZED_MEDIA_FILE='/exact/approved/source' \
-#   AURELIA_CANDIDATE_CLIENT_SOURCE_FINGERPRINT='<captured before candidate build>' \
-#   zsh scripts/test-playback-authorized-source.sh /path/to/signed/fixed/Aurelia.app
+# Usage: TARVEN_AUTHORIZED_PLAYBACK=BREAKING_BAD_S01E01_10_MINUTES \
+#   TARVEN_AUTHORIZED_MEDIA_FILE='/exact/approved/source' \
+#   TARVEN_CANDIDATE_CLIENT_SOURCE_FINGERPRINT='<captured before candidate build>' \
+#   zsh scripts/test-playback-authorized-source.sh /path/to/signed/fixed/Tarven.app
 repository_root=${0:A:h:h}
 source "$repository_root/scripts/workspace-paths.sh"
 source "$repository_root/scripts/playback-evidence-common.sh"
 candidate=${1:-}
 [[ $# == 1 && -d "$candidate/Contents" \
-  && "${AURELIA_AUTHORIZED_PLAYBACK:-}" == BREAKING_BAD_S01E01_10_MINUTES \
-  && -n "${AURELIA_AUTHORIZED_MEDIA_FILE:-}" \
-  && ${#AURELIA_CANDIDATE_CLIENT_SOURCE_FINGERPRINT:-0} == 64 \
-  && "${AURELIA_CANDIDATE_CLIENT_SOURCE_FINGERPRINT:-}" != *[^A-F0-9]* ]] \
+  && "${TARVEN_AUTHORIZED_PLAYBACK:-}" == BREAKING_BAD_S01E01_10_MINUTES \
+  && -n "${TARVEN_AUTHORIZED_MEDIA_FILE:-}" \
+  && ${#TARVEN_CANDIDATE_CLIENT_SOURCE_FINGERPRINT:-0} == 64 \
+  && "${TARVEN_CANDIDATE_CLIENT_SOURCE_FINGERPRINT:-}" != *[^A-F0-9]* ]] \
   || { evidence_fail exact_source_and_explicit_bounded_authorization_required; exit 2; }
 candidate=${candidate:A}
-configuration=${AURELIA_SOURCE_EVIDENCE_CONFIGURATION:-Release}
+configuration=${TARVEN_SOURCE_EVIDENCE_CONFIGURATION:-Release}
 [[ "$configuration" == Release || "$configuration" == Debug ]] \
   || { evidence_fail invalid_source_evidence_configuration; exit 2; }
 architecture=$(uname -m)
 runtime='osx-arm64'
 [[ "$(uname -m)" == x86_64 ]] && runtime='osx-x64'
 [[ "$architecture" == arm64 || "$architecture" == x86_64 ]] || { evidence_fail unsupported_local_architecture; exit 2; }
-server="$candidate/Contents/Resources/Server/$runtime/Aurelia.Server"
+server="$candidate/Contents/Resources/Server/$runtime/Tarven.Server"
 [[ -x "$server" && -x "$DOTNET_BIN" ]] \
   || { evidence_fail packaged_server_or_pinned_dotnet_unavailable; exit 2; }
-runtime_parent="$HOME/Library/Caches/Aurelia/TestRuns"
+runtime_parent="$HOME/Library/Caches/Tarven/TestRuns"
 mkdir -p "$runtime_parent" "$other_root/Test Results" "$other_root/Logs"
 EVIDENCE_RUN_ROOT=$(mktemp -d "$runtime_parent/playback-evidence-authorized-XXXXXXXX")
-export EVIDENCE_RUN_ROOT AURELIA_AUTHORIZED_MEDIA_FILE AURELIA_AUTHORIZED_PLAYBACK
+export EVIDENCE_RUN_ROOT TARVEN_AUTHORIZED_MEDIA_FILE TARVEN_AUTHORIZED_PLAYBACK
 run_id=${EVIDENCE_RUN_ROOT:t}
 server_data="$EVIDENCE_RUN_ROOT/ServerData"
 source_root="$EVIDENCE_RUN_ROOT/Source"
 provisioner_publish="$EVIDENCE_RUN_ROOT/Provisioner"
 derived_data="$EVIDENCE_RUN_ROOT/DerivedData"
 result="$EVIDENCE_RUN_ROOT/Playback-Authorized-Source.xcresult"
-result_prefix="Aurelia-Playback-Authorized-Source-$run_id"
+result_prefix="Tarven-Playback-Authorized-Source-$run_id"
 final_result="$other_root/Test Results/$result_prefix.xcresult"
 final_summary="$other_root/Test Results/$result_prefix.json"
 server_pid=''
@@ -92,8 +92,8 @@ finish() {
       cleanup_failed=true
     fi
   fi
-  if [[ -f "$server_data/aurelia.db" ]]; then
-    progress_rows=$(/usr/bin/sqlite3 -readonly "$server_data/aurelia.db" \
+  if [[ -f "$server_data/tarven.db" ]]; then
+    progress_rows=$(/usr/bin/sqlite3 -readonly "$server_data/tarven.db" \
       'SELECT count(*) FROM PlaybackProgress;' 2>"$EVIDENCE_RUN_ROOT/progress-check.private.log")
     if [[ $? == 0 && "$progress_rows" == 0 ]]; then
       owned_progress_rows_zero=true
@@ -175,12 +175,12 @@ ruby "$repository_root/tools/macos/authorized-playback-source-metadata.rb" befor
   "$EVIDENCE_RUN_ROOT/source-before.private.json"
 source_bytes=$(jq -er '.size | select(. > 0)' "$EVIDENCE_RUN_ROOT/source-before.private.json")
 last_phase='original candidate signatures'
-AURELIA_SIGNING_IDENTITY=$(evidence_signing_identity "$candidate" "$EVIDENCE_RUN_ROOT")
-export AURELIA_SIGNING_IDENTITY
+TARVEN_SIGNING_IDENTITY=$(evidence_signing_identity "$candidate" "$EVIDENCE_RUN_ROOT")
+export TARVEN_SIGNING_IDENTITY
 /usr/bin/codesign --verify --strict "$server" >"$EVIDENCE_RUN_ROOT/server-signature.private.log" 2>&1
 last_phase='owned source-only client snapshot'
 source_fingerprint=$(ruby "$repository_root/tools/macos/playback-client-source-fingerprint.rb" "$repository_root")
-[[ "$source_fingerprint" == "$AURELIA_CANDIDATE_CLIENT_SOURCE_FINGERPRINT" ]] \
+[[ "$source_fingerprint" == "$TARVEN_CANDIDATE_CLIENT_SOURCE_FINGERPRINT" ]] \
   || { evidence_fail candidate_client_source_changed_since_build_provenance_capture; exit 1; }
 ruby "$repository_root/tools/macos/stage-playback-evidence-source.rb" "$repository_root" \
   "$source_root" "$repository_root/tools/macos/PlaybackAuthorizedSourceTests.swift"
@@ -190,33 +190,33 @@ source_provenance_verified=true
 last_phase='offline current-model provisioner build'
 "$DOTNET_BIN" publish "$repository_root/tools/macos/PlaybackEvidenceProvisioner/PlaybackEvidenceProvisioner.csproj" \
   --configuration Release --runtime "$runtime" --self-contained false \
-  -p:AureliaBuildRoot="$EVIDENCE_RUN_ROOT/DotnetProvisionerBuild" \
+  -p:TarvenBuildRoot="$EVIDENCE_RUN_ROOT/DotnetProvisionerBuild" \
   -p:TreatWarningsAsErrors=true --output "$provisioner_publish" \
   >"$EVIDENCE_RUN_ROOT/provisioner-build.private.log" 2>&1
 last_phase='isolated owner setup'
-export AURELIA_EVIDENCE_OWNER_PASSWORD="authorized-source-$(uuidgen)-synthetic-only!"
-print -r -- "$AURELIA_EVIDENCE_OWNER_PASSWORD" \
-  | AURELIA_LAN_ENABLED=false ASPNETCORE_ENVIRONMENT=Production \
+export TARVEN_EVIDENCE_OWNER_PASSWORD="authorized-source-$(uuidgen)-synthetic-only!"
+print -r -- "$TARVEN_EVIDENCE_OWNER_PASSWORD" \
+  | TARVEN_LAN_ENABLED=false ASPNETCORE_ENVIRONMENT=Production \
     "$server" setup-owner --data-dir "$server_data" --username authorized-source-owner \
       --device-name 'Bounded Authorized Playback Evidence' --password-stdin \
       >"$EVIDENCE_RUN_ROOT/owner-output.private" 2>"$EVIDENCE_RUN_ROOT/setup-errors.private"
 tail -n 1 "$EVIDENCE_RUN_ROOT/owner-output.private" >"$EVIDENCE_RUN_ROOT/authentication.private.json"
 jq -e '.token and .sessionId and .user.role == "owner"' "$EVIDENCE_RUN_ROOT/authentication.private.json" >/dev/null
 last_phase='one exact offline source metadata row'
-AURELIA_EVIDENCE_AUTHORIZED_SOURCE_FILE="$AURELIA_AUTHORIZED_MEDIA_FILE" \
+TARVEN_EVIDENCE_AUTHORIZED_SOURCE_FILE="$TARVEN_AUTHORIZED_MEDIA_FILE" \
   "$DOTNET_BIN" "$provisioner_publish/PlaybackEvidenceProvisioner.dll" authorized-personal \
-    "$server_data/aurelia.db" "$EVIDENCE_RUN_ROOT/authorized-source.private.json" \
+    "$server_data/tarven.db" "$EVIDENCE_RUN_ROOT/authorized-source.private.json" \
     >"$EVIDENCE_RUN_ROOT/provisioner-output.private" 2>&1
 http_port=$(ruby -rsocket -e 's = TCPServer.new("127.0.0.1", 0); puts s.addr[1]; s.close')
 https_port=$(ruby -rsocket -e 's = TCPServer.new("127.0.0.1", 0); puts s.addr[1]; s.close')
 [[ "$http_port" != "$https_port" ]] || { evidence_fail isolated_test_ports_collided; exit 1; }
 jq -n --argjson port "$https_port" \
-  '{version:2,serverName:"Aurelia Authorized Playback Evidence",lanAccessEnabled:true,lanHttpsPort:$port,
+  '{version:2,serverName:"Tarven Authorized Playback Evidence",lanAccessEnabled:true,lanHttpsPort:$port,
     revision:1,bonjourEnabled:false,monitoringEnabled:false,automaticBackupsEnabled:false}' \
   >"$server_data/server-settings.json"
 last_phase='owned exact packaged HTTPS server readiness'
-AURELIA_HOST_PARENT_PID=$$ ASPNETCORE_ENVIRONMENT=Production \
-  AURELIA_SERVER_NAME='Aurelia Authorized Playback Evidence' Logging__LogLevel__Default=Warning \
+TARVEN_HOST_PARENT_PID=$$ ASPNETCORE_ENVIRONMENT=Production \
+  TARVEN_SERVER_NAME='Tarven Authorized Playback Evidence' Logging__LogLevel__Default=Warning \
   "$server" --data-dir "$server_data" --urls "http://127.0.0.1:$http_port" \
     --lan --lan-port "$https_port" >"$EVIDENCE_RUN_ROOT/server-output.private" 2>&1 &
 server_pid=$!
@@ -229,7 +229,7 @@ for _ in {1..150}; do
   sleep 0.2
 done
 jq -e --arg version "$server_version" \
-  '.isSetup == true and .version == $version and .name == "Aurelia Authorized Playback Evidence"' \
+  '.isSetup == true and .version == $version and .name == "Tarven Authorized Playback Evidence"' \
   "$EVIDENCE_RUN_ROOT/server-info.private.json" >/dev/null
 evidence_register_server_pid "$server_pid" "$server" "$server_data"
 fingerprint=$(openssl x509 -in "$server_data/server-certificate.pem" -pubkey -noout \
@@ -254,19 +254,19 @@ if [[ "$configuration" == Release ]]; then
   test_build_settings+=("EXCLUDED_SOURCE_FILE_NAMES=ServerSettingsRenderTests.swift ImportPlanningTests.swift MetadataEditorTests.swift")
 fi
 DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
-  -project "$source_root/clients/macos/Aurelia.xcodeproj" -scheme Aurelia \
+  -project "$source_root/clients/macos/Tarven.xcodeproj" -scheme Tarven \
   -configuration "$configuration" -destination "platform=macOS,arch=$architecture" \
   -derivedDataPath "$derived_data" -enableCodeCoverage NO \
   "${test_build_settings[@]}" build-for-testing >"$EVIDENCE_RUN_ROOT/xcodebuild.private.log" 2>&1 &
 EVIDENCE_TOOL_PID=$!
 wait "$EVIDENCE_TOOL_PID"
 EVIDENCE_TOOL_PID=''
-test_host="$derived_data/Build/Products/$configuration/Aurelia.app"
+test_host="$derived_data/Build/Products/$configuration/Tarven.app"
 evidence_copy_test_vlc "$test_host" "$derived_data/Build/Products/$configuration/VLCKit.framework"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$test_host/Contents/Info.plist")" == "$server_version" ]] \
   || { evidence_fail candidate_and_client_snapshot_version_mismatch; exit 1; }
 /usr/bin/codesign --verify --deep --strict "$test_host" >"$EVIDENCE_RUN_ROOT/test-signature.private.log" 2>&1
-[[ "$(evidence_signing_identity "$test_host" "$EVIDENCE_RUN_ROOT")" == "$AURELIA_SIGNING_IDENTITY" ]] \
+[[ "$(evidence_signing_identity "$test_host" "$EVIDENCE_RUN_ROOT")" == "$TARVEN_SIGNING_IDENTITY" ]] \
   || { evidence_fail test_host_signing_identity_changed; exit 1; }
 /usr/bin/codesign --display --entitlements - --xml "$test_host" \
   >"$EVIDENCE_RUN_ROOT/test-entitlements.private.plist" 2>>"$EVIDENCE_RUN_ROOT/test-signature.private.log"
@@ -284,21 +284,21 @@ evidence_require_test_debugger_allowance "$test_host"
 test_debugger_allowance_verified=true
 # No filesystem grant is needed: the app sees only HTTP and never opens the
 # original path. The signed server uses unchanged production read-only access.
-export TEST_RUNNER_AURELIA_UI_TEST_MODE=playback-evidence
-export TEST_RUNNER_AURELIA_PREFLIGHT_TEST=1
-export TEST_RUNNER_AURELIA_DATA_DIR="$server_data"
-export TEST_RUNNER_AURELIA_SOURCE_EVIDENCE_OWNED_STATE=YES
-export TEST_RUNNER_AURELIA_SOURCE_EVIDENCE_AUTHORIZATION="$AURELIA_AUTHORIZED_PLAYBACK"
-export TEST_RUNNER_AURELIA_SOURCE_EVIDENCE_SERVER_URL="https://127.0.0.1:$https_port"
-export TEST_RUNNER_AURELIA_SOURCE_EVIDENCE_FINGERPRINT="$fingerprint"
-export TEST_RUNNER_AURELIA_SOURCE_EVIDENCE_AUTH="$(<"$EVIDENCE_RUN_ROOT/authentication.private.json")"
-export TEST_RUNNER_AURELIA_SOURCE_EVIDENCE_SERVER_VERSION="$server_version"
-export TEST_RUNNER_AURELIA_SOURCE_EVIDENCE_SOURCE_BYTES="$source_bytes"
-export TEST_RUNNER_AURELIA_SOURCE_EVIDENCE_MEDIA_ID=94efcf84-939f-47a8-9d7c-6e0f494c2710
+export TEST_RUNNER_TARVEN_UI_TEST_MODE=playback-evidence
+export TEST_RUNNER_TARVEN_PREFLIGHT_TEST=1
+export TEST_RUNNER_TARVEN_DATA_DIR="$server_data"
+export TEST_RUNNER_TARVEN_SOURCE_EVIDENCE_OWNED_STATE=YES
+export TEST_RUNNER_TARVEN_SOURCE_EVIDENCE_AUTHORIZATION="$TARVEN_AUTHORIZED_PLAYBACK"
+export TEST_RUNNER_TARVEN_SOURCE_EVIDENCE_SERVER_URL="https://127.0.0.1:$https_port"
+export TEST_RUNNER_TARVEN_SOURCE_EVIDENCE_FINGERPRINT="$fingerprint"
+export TEST_RUNNER_TARVEN_SOURCE_EVIDENCE_AUTH="$(<"$EVIDENCE_RUN_ROOT/authentication.private.json")"
+export TEST_RUNNER_TARVEN_SOURCE_EVIDENCE_SERVER_VERSION="$server_version"
+export TEST_RUNNER_TARVEN_SOURCE_EVIDENCE_SOURCE_BYTES="$source_bytes"
+export TEST_RUNNER_TARVEN_SOURCE_EVIDENCE_MEDIA_ID=94efcf84-939f-47a8-9d7c-6e0f494c2710
 # Prevent source paths/approval markers from being inherited by the test host
 # or echoed in XCTest launch environments. Its configuration contains only an
 # opaque owned media ID, numeric size and private test authentication.
-export AURELIA_EVIDENCE_AUTHORIZED_SOURCE_FILE="$AURELIA_AUTHORIZED_MEDIA_FILE"
+export TARVEN_EVIDENCE_AUTHORIZED_SOURCE_FILE="$TARVEN_AUTHORIZED_MEDIA_FILE"
 last_phase='independent bounded-read watchdog validation'
 ruby "$repository_root/scripts/playback-authorized-read-watchdog.rb" "$server_pid" \
   "$server" "$server_data" "$EVIDENCE_RUN_ROOT" "$EVIDENCE_RUN_ROOT/source-read-deadline.private" \
@@ -315,14 +315,14 @@ done
 last_phase='bounded actual authorized-source playback from0 through7m10s'
 test_attempted=true
 set +e
-/usr/bin/env -u AURELIA_AUTHORIZED_MEDIA_FILE -u AURELIA_EVIDENCE_AUTHORIZED_SOURCE_FILE \
-  -u AURELIA_AUTHORIZED_PLAYBACK DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
-  -project "$source_root/clients/macos/Aurelia.xcodeproj" -scheme Aurelia \
+/usr/bin/env -u TARVEN_AUTHORIZED_MEDIA_FILE -u TARVEN_EVIDENCE_AUTHORIZED_SOURCE_FILE \
+  -u TARVEN_AUTHORIZED_PLAYBACK DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
+  -project "$source_root/clients/macos/Tarven.xcodeproj" -scheme Tarven \
   -configuration "$configuration" -destination "platform=macOS,arch=$architecture" \
   -derivedDataPath "$derived_data" -resultBundlePath "$result" \
   -enableCodeCoverage NO -parallel-testing-enabled NO \
   -test-timeouts-enabled YES -maximum-test-execution-time-allowance 600 \
-  -only-testing:AureliaTests/PlaybackAuthorizedSourceTests \
+  -only-testing:TarvenTests/PlaybackAuthorizedSourceTests \
   "${test_build_settings[@]}" test-without-building >>"$EVIDENCE_RUN_ROOT/xcodebuild.private.log" 2>&1 &
 EVIDENCE_TOOL_PID=$!
 wait "$EVIDENCE_TOOL_PID"

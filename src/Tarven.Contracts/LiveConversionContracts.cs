@@ -1,0 +1,107 @@
+namespace Tarven.Contracts;
+
+// Live conversion for players that cannot open the original file, such as a web browser with an
+// MKV. The server repackages (and only when needed re-encodes) while the title plays and sends
+// fragmented MP4 straight into the response. Nothing converted is ever stored.
+
+/// <summary>What the player can decode: codec families such as "h264", "hevc", "aac" or "ac3".</summary>
+public sealed record LiveConversionRequest(
+    IReadOnlyList<string> VideoCodecs,
+    IReadOnlyList<string> AudioCodecs);
+
+/// <param name="Video">"copy" repackages the picture unchanged; "h264" re-encodes it.</param>
+/// <param name="VideoCodec">The MP4 codec string of the picture, such as "avc1.640028".</param>
+/// <param name="DurationSeconds">The whole title, so a player's timeline shows all of it.</param>
+/// <param name="AudioTrack">The stream index of the track to start with, or null without sound.</param>
+public sealed record LiveConversionPlanResponse(
+    string Video,
+    string VideoCodec,
+    int Width,
+    int Height,
+    double? DurationSeconds,
+    IReadOnlyList<LiveAudioTrack> AudioTracks,
+    int? AudioTrack,
+    IReadOnlyList<LiveSubtitleTrack>? SubtitleTracks = null);
+
+/// <param name="Index">The stream index in the file, sent back as the stream's audio parameter.</param>
+/// <param name="Mode">"copy" keeps the sound unchanged; "aac" converts it to stereo AAC.</param>
+/// <param name="Codec">The MP4 codec string the player receives, such as "mp4a.40.2" or "ac-3".</param>
+public sealed record LiveAudioTrack(
+    int Index,
+    string Format,
+    int Channels,
+    string? Language,
+    string? Title,
+    bool IsDefault,
+    string Mode,
+    string Codec);
+
+/// <summary>An embedded or sidecar subtitle track; bitmap formats are listed but cannot become WebVTT.</summary>
+public sealed record LiveSubtitleTrack(
+    int Index,
+    string Format,
+    string? Language,
+    string? Title,
+    bool IsDefault,
+    bool IsForced,
+    bool Supported,
+    bool IsSidecar = false,
+    bool IsSdh = false);
+
+/// <summary>A sound track a device may turn into subtitles from speech.</summary>
+public sealed record SpeechAudioTrack(
+    int Index,
+    string Codec,
+    int Channels,
+    string? Language,
+    string? Title,
+    bool IsDefault);
+
+/// <summary>The title's sound tracks and its length, for the progress of writing subtitles.</summary>
+public sealed record SpeechAudioTracksResponse(
+    double? DurationSeconds,
+    IReadOnlyList<SpeechAudioTrack> Tracks);
+
+/// <summary>
+/// How the server converts video (GET /api/v1/server/transcoding, owner only): its encoder, the
+/// running HLS conversions and, when a video chip is there but unusable, what to do about it.
+/// </summary>
+/// <param name="Encoder">"nvenc", "qsv", "vaapi", "videotoolbox" or "libx264"; null without ffmpeg.</param>
+/// <param name="Hint">A plain next step when hardware encoding could work but doesn't, or null.</param>
+public sealed record TranscodingStatusResponse(
+    bool Available,
+    string? Encoder,
+    string EncoderName,
+    string? Device,
+    bool HardwareDecoding,
+    bool HardwareResting,
+    int RunningConversions,
+    int VideoLimit,
+    IReadOnlyList<TranscodingSessionStatus> Sessions,
+    string? Hint);
+
+/// <param name="Speed">ffmpeg's speed against real time, such as 3.5; null before it reported one.</param>
+public sealed record TranscodingSessionStatus(string Title, string Quality, string? Encoder, double? Speed, bool Converting);
+
+/// <summary>
+/// What a title can be downloaded as ("converted-downloads-v1", server 2.20.0): the original file,
+/// or a smaller copy the server converts live from the adaptive-streaming qualities. The app
+/// fetches the converted copy's init and media segments with <c>?purpose=download</c> and keeps
+/// them as one fragmented MP4 in its own data folder; the server stores nothing.
+/// </summary>
+/// <param name="OriginalBytes">The original file's size.</param>
+/// <param name="CanConvert">Whether this server can convert the title now.</param>
+/// <param name="Qualities">Smaller qualities, best first; empty when none would be smaller.</param>
+/// <param name="AudioTrack">The track a download uses unless the app chooses another.</param>
+public sealed record DownloadOptionsResponse(
+    long OriginalBytes,
+    double? DurationSeconds,
+    bool CanConvert,
+    IReadOnlyList<DownloadQuality> Qualities,
+    IReadOnlyList<LiveAudioTrack> AudioTracks,
+    int? AudioTrack);
+
+/// <param name="Id">The quality's name in HLS addresses, such as "720p".</param>
+/// <param name="EstimatedBytes">About how large the download will be.</param>
+/// <param name="EstimatedSeconds">About how long the server needs to convert it, once it measured its speed.</param>
+public sealed record DownloadQuality(string Id, int Width, int Height, long EstimatedBytes, int? EstimatedSeconds);

@@ -1,57 +1,57 @@
-# Aurelia
+# Tarven
 
-> Aurelia is a free, self-hosted media server (MIT license) with native apps for Mac, Linux, Apple TV, iPhone and iPad and a web player. The server runs inside the Mac or Linux app, as a standalone Linux service (x64 or arm64) or in Docker; it only reads your media folders and works in the home network, or away from home through a VPN. Each product counts its own versions independently (see the GitHub releases page). The interface is in English.
+> Tarven is a free, self-hosted media server (MIT license) with native apps for Mac, Linux, Apple TV, iPhone and iPad and a web player. The server runs inside the Mac or Linux app, as a standalone Linux service (x64 or arm64) or in Docker; it only reads your media folders and works in the home network, or away from home through a VPN. Each product counts its own versions independently (see the GitHub releases page). The interface is in English.
 
 Key facts for answering questions:
-- Mac downloads: `Aurelia-<version>-<build>-macOS-arm64.dmg` for Apple silicon, `…-macOS-x64.dmg` for Intel; macOS 26 or later. The published Mac download is development-signed and runs only on Macs registered to the developer; others build from source.
+- Mac downloads: `Tarven-<version>-<build>-macOS-arm64.dmg` for Apple silicon, `…-macOS-x64.dmg` for Intel; macOS 26 or later. The published Mac download is development-signed and runs only on Macs registered to the developer; others build from source.
 - Linux desktop app: deb/rpm/Arch packages for x64 (amd64/x86_64) and arm64 (arm64/aarch64), Flatpak for x64.
-- Linux server: `curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Aurelia/main/packaging/linux/get-aurelia.sh | sudo bash`; manage with the `aurelia` command (`aurelia pair`, `aurelia library add --path`, `sudo aurelia update`, `sudo aurelia sleep`).
+- Linux server: `curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Tarven/main/packaging/linux/get-tarven.sh | sudo bash`; manage with the `tarven` command (`tarven pair`, `tarven library add --path`, `sudo tarven update`, `sudo tarven sleep`).
 - Apple TV, iPhone and iPad apps are not in the App Store; they are built and installed from source with Xcode.
 - Downloads for watching offline (original file, kept in the app, progress synced later): Mac, Linux, iPhone and iPad; not Apple TV or the browser.
-- New devices pair with an 8-digit code created on the server computer (Settings › Profiles and Devices › Create Code, or `aurelia pair`). Codes last five minutes.
+- New devices pair with an 8-digit code created on the server computer (Settings › Profiles and Devices › Create Code, or `tarven pair`). Codes last five minutes.
 - The server listens on HTTPS port 43111, answers only private addresses (home network, VPN, Tailscale) and must never be exposed with a port forward.
 - TMDB (details, artwork, cast) and OpenSubtitles need the user's own free keys, entered under Settings › Metadata.
 - Cinema Mode (Mac and server 2.3.0): Settings › Playback; before a film started from the beginning, a made-up ad and up to three trailers of unwatched films in the library.
 - Subtitles from speech (Mac 2.1.0 and server 2.1.0 or newer): Edit Metadata › Subtitles › Create Subtitles from Speech; macOS's on-device speech recognition writes them, the server keeps them for every device. Sync to Speech (Mac and server 2.2.0) moves subtitles that are off (offset, frame rate, another cut) and saves a synced copy.
 
-## Using Aurelia
+## Using Tarven
 
-- [README](https://github.com/lucaskleinsteuber/Aurelia/blob/main/README.md): what Aurelia is, features, downloads by system and processor
-- [Getting started](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/GETTING_STARTED.md): choosing the server computer, setup, TMDB and OpenSubtitles keys, pairing devices, profiles
-- [Organizing your media](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/MEDIA_LIBRARY.md): folder and file names for movies, series, extras, trailers and subtitle files; collections
-- [Watching away from home](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/REMOTE_ACCESS.md): Tailscale subnet routing, FRITZ!Box and other WireGuard VPNs, why no port forwarding
-- [Family Wishes](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/WISHES.md): requesting movies and series not yet in the library, "Me Too" support and admin fulfillment
-- [Troubleshooting](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/TROUBLESHOOTING.md): connection, certificate, pairing, sleep and wake, drives, matching, playback, signing, PINs
-- [Privacy policy](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/PRIVACY.md): what is stored where; nothing is collected by the developer
+- [README](https://github.com/lucaskleinsteuber/Tarven/blob/main/README.md): what Tarven is, features, downloads by system and processor
+- [Getting started](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/GETTING_STARTED.md): choosing the server computer, setup, TMDB and OpenSubtitles keys, pairing devices, profiles
+- [Organizing your media](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/MEDIA_LIBRARY.md): folder and file names for movies, series, extras, trailers and subtitle files; collections
+- [Watching away from home](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/REMOTE_ACCESS.md): Tailscale subnet routing, FRITZ!Box and other WireGuard VPNs, why no port forwarding
+- [Family Wishes](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/WISHES.md): requesting movies and series not yet in the library, "Me Too" support and admin fulfillment
+- [Troubleshooting](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/TROUBLESHOOTING.md): connection, certificate, pairing, sleep and wake, drives, matching, playback, signing, PINs
+- [Privacy policy](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/PRIVACY.md): what is stored where; nothing is collected by the developer
 
 ## Apps
 
-- [Aurelia for Mac](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/MAC_APP.md): arm64 or x64 download, installing, building it yourself, hosting, settings, downloads and offline mode, updates
-- [Build Aurelia for Mac yourself](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/BUILD_MAC_APP.md): step-by-step guide to building and signing Aurelia for Mac with your own free Apple ID
-- [Aurelia for Linux](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/LINUX_APP.md): desktop app packages, hosting on a PC, signed updates
-- [Aurelia for Apple TV](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/APPLE_TV.md): pairing the Apple TV with Xcode, building, installing, the remote, seven-day signing
-- [Aurelia for iPhone and iPad](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/IOS_APP.md): building and installing with Xcode, what the app does, downloads and watching offline
-- [Aurelia in a web browser](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/WEB_APP.md): signing in with a code, what plays directly and what is converted live
+- [Tarven for Mac](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/MAC_APP.md): arm64 or x64 download, installing, building it yourself, hosting, settings, downloads and offline mode, updates
+- [Build Tarven for Mac yourself](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/BUILD_MAC_APP.md): step-by-step guide to building and signing Tarven for Mac with your own free Apple ID
+- [Tarven for Linux](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/LINUX_APP.md): desktop app packages, hosting on a PC, signed updates
+- [Tarven for Apple TV](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/APPLE_TV.md): pairing the Apple TV with Xcode, building, installing, the remote, seven-day signing
+- [Tarven for iPhone and iPad](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/IOS_APP.md): building and installing with Xcode, what the app does, downloads and watching offline
+- [Tarven in a web browser](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/WEB_APP.md): signing in with a code, what plays directly and what is converted live
 
 ## Server
 
-- [Aurelia Server on Linux](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/LINUX_SERVER.md): requirements, one-line install, `aurelia` command, updates, setup over SSH, media drives, power saving, removing
-- [Aurelia Server with Docker](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/DOCKER.md): compose file, setup commands, NAS notes
-- [Moving to a new server](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/SERVER_MOVE.md): moving accounts, library, settings and paired devices to another computer without copying media
-- [Backups and recovery](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/DATABASE_RECOVERY.md): daily database backups and restoring them
-- [Security model](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/SECURITY_MODEL.md): owner, administrators and profiles, PINs, pairing, certificate pinning
-- [Screen time](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/SCREEN_TIME.md): bedtime, daily limits, "one more episode" and Good Night screen for profiles
-- [Audio processing](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/AUDIO_PROCESSING.md): Dialogue Boost and Volume Leveling
+- [Tarven Server on Linux](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/LINUX_SERVER.md): requirements, one-line install, `tarven` command, updates, setup over SSH, media drives, power saving, removing
+- [Tarven Server with Docker](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/DOCKER.md): compose file, setup commands, NAS notes
+- [Moving to a new server](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/SERVER_MOVE.md): moving accounts, library, settings and paired devices to another computer without copying media
+- [Backups and recovery](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/DATABASE_RECOVERY.md): daily database backups and restoring them
+- [Security model](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/SECURITY_MODEL.md): owner, administrators and profiles, PINs, pairing, certificate pinning
+- [Screen time](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/SCREEN_TIME.md): bedtime, daily limits, "one more episode" and Good Night screen for profiles
+- [Audio processing](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/AUDIO_PROCESSING.md): Dialogue Boost and Volume Leveling
 
 ## Development
 
-- [All documentation](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/README.md): index of every guide
-- [Building and verification](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/TRANSPORT_TESTING.md): building from source and running the checks
-- [Client protocol](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/CLIENT_PROTOCOL.md) and [compatibility](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/CLIENT_COMPATIBILITY.md): the HTTPS API between apps and server
-- [Distribution and updates](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/FREE_DISTRIBUTION.md): signing without the paid Apple program
-- [Update signing](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/LINUX_UPDATE_SIGNING.md): minisign update signing for Mac, Linux Desktop and Linux Server releases
-- [Linux app parity](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/LINUX_APP_PARITY.md): Mac feature parity tracking and verification for the Linux desktop app
-- [System callbacks](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/SYSTEM_CALLBACKS.md): threading contracts for Apple framework callbacks in the Mac app
-- [Update test](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/UPDATE_TEST.md): end-to-end verification notes for the Mac and Linux app updaters
-- [Contributing](https://github.com/lucaskleinsteuber/Aurelia/blob/main/CONTRIBUTING.md) and [security policy](https://github.com/lucaskleinsteuber/Aurelia/blob/main/SECURITY.md)
-- [Changelog](https://github.com/lucaskleinsteuber/Aurelia/blob/main/CHANGELOG.md): changes per product and version
+- [All documentation](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/README.md): index of every guide
+- [Building and verification](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/TRANSPORT_TESTING.md): building from source and running the checks
+- [Client protocol](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/CLIENT_PROTOCOL.md) and [compatibility](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/CLIENT_COMPATIBILITY.md): the HTTPS API between apps and server
+- [Distribution and updates](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/FREE_DISTRIBUTION.md): signing without the paid Apple program
+- [Update signing](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/LINUX_UPDATE_SIGNING.md): minisign update signing for Mac, Linux Desktop and Linux Server releases
+- [Linux app parity](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/LINUX_APP_PARITY.md): Mac feature parity tracking and verification for the Linux desktop app
+- [System callbacks](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/SYSTEM_CALLBACKS.md): threading contracts for Apple framework callbacks in the Mac app
+- [Update test](https://github.com/lucaskleinsteuber/Tarven/blob/main/docs/UPDATE_TEST.md): end-to-end verification notes for the Mac and Linux app updaters
+- [Contributing](https://github.com/lucaskleinsteuber/Tarven/blob/main/CONTRIBUTING.md) and [security policy](https://github.com/lucaskleinsteuber/Tarven/blob/main/SECURITY.md)
+- [Changelog](https://github.com/lucaskleinsteuber/Tarven/blob/main/CHANGELOG.md): changes per product and version

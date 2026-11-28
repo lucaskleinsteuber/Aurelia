@@ -1,7 +1,7 @@
 // Production player logic with in-memory media objects; no browser or media engine.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Player } from "../../src/Aurelia.Server/WebApp/js/player.js";
+import { Player } from "../../src/Tarven.Server/WebApp/js/player.js";
 
 test("episode navigation explicitly requests a new play from zero", () => {
   const item = { id: "episode-11" };
@@ -15,7 +15,7 @@ test("episode navigation explicitly requests a new play from zero", () => {
   assert.equal(player.closed, true);
 });
 
-import * as logic from "../../src/Aurelia.Server/WebApp/js/logic.js";
+import * as logic from "../../src/Tarven.Server/WebApp/js/logic.js";
 import { deferred, flush } from "./dom-fixture.mjs";
 
 test("Play starts at zero for saved native and converted titles; only Resume reads progress", async (t) => {

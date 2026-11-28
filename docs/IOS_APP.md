@@ -1,4 +1,4 @@
-# Aurelia for iPhone and iPad
+# Tarven for iPhone and iPad
 
 `clients/ios` holds the iPhone and iPad client. It plays your library on iPhone and iPad with
 touch controls, and is installed from source with Xcode like the Apple TV app; it is not in the
@@ -15,10 +15,10 @@ its screens are its own:
 - **Connecting** works exactly like on the Apple TV: the app finds servers with Bonjour or
   takes an address, shows the server's fingerprint to confirm, and asks for the 8-digit code
   that the main device shows (*Settings › Profiles and Devices › Create Code* on a Mac or
-  Linux computer, or `aurelia pair` on a Linux server). The server's certificate is pinned
+  Linux computer, or `tarven pair` on a Linux server). The server's certificate is pinned
   to that fingerprint.
 - **A new server** (`setup-code-v1`) is set up right in the app: the setup code from the server
-  computer (`sudo aurelia setup --browser`), the owner's name, the Server Password and a viewing
+  computer (`sudo tarven setup --browser`), the owner's name, the Server Password and a viewing
   PIN, as in a browser. *Move from Another Server* takes a whole server in instead, with the old
   server's move code and address or its moving file and passphrase, then where the storage
   locations are now (docs/SERVER_MOVE.md).
@@ -27,7 +27,7 @@ its screens are its own:
   Forgot PIN? explains who can reset it (the owner on the server computer with the Server
   Password, everyone else through the owner); this screen never resets a PIN itself.
 - **Reads the app makes by itself** (refreshing after a change elsewhere, polling scans, wishes
-  and devices) carry `X-Aurelia-Background: 1`, so they don't count as use and a server can still
+  and devices) carry `X-Tarven-Background: 1`, so they don't count as use and a server can still
   rest. Changes and pages the person opens always count.
 - **Playback** runs through MobileVLCKit and a small relay on `127.0.0.1` that adds the
   sign-in to each request and streams the bytes through; nothing is stored unless you download
@@ -47,7 +47,7 @@ its screens are its own:
   sound and no subtitles. For AirPlay a second relay listens on the device's Wi-Fi address while
   it lasts, with its own secret, and answers only that ticket's HLS files; the original file and
   its subtitles never leave the device.
-- **Play On…** in a title's More menu starts it on another Aurelia player of the server and turns
+- **Play On…** in a title's More menu starts it on another Tarven player of the server and turns
   the sheet into its remote (play, pause, skipping, position, stop). Other devices' commands also
   pause, resume, seek and skip here.
 - **Collections**: Add to Collection… in a title's menu chooses your own collections or starts a
@@ -123,11 +123,11 @@ server and without a VPN.
 
 1. At home, open a movie and choose **⋯ › Download**, or press and hold an episode and choose
    **Download**. On a series, **⋯ › Download Season N** loads every episode of that season.
-2. The download keeps going while Aurelia is in the background or the screen is locked. Titles
+2. The download keeps going while Tarven is in the background or the screen is locked. Titles
    load one after another, so a season never takes all of a profile's streams and the TV keeps
    playing meanwhile. **Settings › Downloads** shows the progress, the space used and the space
    left; a stopped download continues with **Try Again**.
-3. Away from home, open Aurelia. When the server doesn't answer, **Watch Downloads** opens the
+3. Away from home, open Tarven. When the server doesn't answer, **Watch Downloads** opens the
    downloads in a small library: Continue Watching, movies, and series with their episodes.
    Each profile sees only its own downloads and opens with its PIN, which the device checks
    against a salted value it saved when the profile last opened at home.
@@ -136,19 +136,19 @@ server and without a VPN.
 
 Good to know:
 
-- A download is the original file, or, with Aurelia Server 2.20 or newer, a smaller copy: set
+- A download is the original file, or, with Tarven Server 2.20 or newer, a smaller copy: set
   **Settings › Playback › Download Quality** (Ask Every Time, Original, 1080p, 720p, 480p).
   The server converts the smaller copy while it downloads, with stereo sound; it keeps going
   for a while in the background with the system's progress, and **Try Again** continues where
   it stopped. Either way it comes with the subtitle files next to it, its poster and its
   description. It plays with the normal player: sound tracks, subtitles, speed, Dialogue Boost,
   scrub previews, the sleep timer and Up Next for the next downloaded episode.
-- Downloads live in Aurelia's own storage on the device, are left out of iCloud backups and
+- Downloads live in Tarven's own storage on the device, are left out of iCloud backups and
   are never written next to your media or on the server. Swipe a download in Settings ›
   Downloads to remove it; deleting the app removes all of them.
 - One copy per title and device: a title another profile downloaded on the same device shows
   as already downloaded.
-- Aurelia keeps 1 GB free and refuses a download that would leave less.
+- Tarven keeps 1 GB free and refuses a download that would leave less.
 - Disconnecting the device from its server removes that server's downloads too.
 
 ## Building and testing
@@ -175,15 +175,15 @@ zsh scripts/build-ios.sh
 Builds the app for the iOS Simulator in Release, with warnings as errors.
 
 To look at the app without a server, build the Debug configuration and launch it with the
-argument `--aurelia-ui-testing` and the environment variable
-`AURELIA_IOS_UI_SCENARIO=library`: it shows an invented library and a simulated player.
+argument `--tarven-ui-testing` and the environment variable
+`TARVEN_IOS_UI_SCENARIO=library`: it shows an invented library and a simulated player.
 
 ```bash
 zsh scripts/capture-showcase.sh --ios-only
 ```
 
 Makes the README screenshots of iPhone and iPad from the invented showcase library in
-simulators; `AURELIA_IOS_SHOWCASE_PAGE` (`movies`, `shows` or `detail`) chooses the page.
+simulators; `TARVEN_IOS_SHOWCASE_PAGE` (`movies`, `shows` or `detail`) chooses the page.
 
 ## Installing on your own iPhone
 

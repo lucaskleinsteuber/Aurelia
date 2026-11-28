@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Tarven.Contracts/Tarven.Contracts.csproj" />
+    <Project Path="src/Tarven.Server/Tarven.Server.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Tarven.Server.Tests/Tarven.Server.Tests.csproj" />
+  </Folder>
+</Solution>

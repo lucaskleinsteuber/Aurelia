@@ -1,0 +1,43 @@
+# What Tarven Server does when unused, shared by tarven-autosleep and the tarven command.
+# The settings live in the server's data folder, where the app changes them through Tarven
+# Server. That folder belongs to the server's own user, so the file is only ever parsed as plain
+# KEY=value lines here, never run as a script.
+
+# Reads MODE (off, stop: only Tarven stops, sleep: the computer sleeps, shutdown: the computer
+# turns off), IDLE_MINUTES, AWAKE_FROM, AWAKE_UNTIL and WAKE_ON_ACCESS (on: the network card also
+# wakes the computer when a device sends it anything directly) and AFTER_SLEEP_TIMER (on: power
+# down five minutes after a player's sleep timer ended) from a settings file. Missing or invalid
+# values keep the defaults: off, 15 minutes, no awake hours, magic packets only, after sleep timers.
+read_sleep_settings() {
+  MODE=off IDLE_MINUTES=15 AWAKE_FROM="" AWAKE_UNTIL="" WAKE_ON_ACCESS=off AFTER_SLEEP_TIMER=on
+  local file=$1 key value
+  if [ -f "$file" ] && [ ! -L "$file" ]; then
+    while IFS='=' read -r key value; do
+      case "$key" in
+        MODE)
+          if [[ "$value" =~ ^(off|stop|sleep|shutdown)$ ]]; then MODE=$value; fi ;;
+        IDLE_MINUTES)
+          if [[ "$value" =~ ^[0-9]{1,4}$ ]] && (( 10#$value >= 5 && 10#$value <= 1440 )); then IDLE_MINUTES=$(( 10#$value )); fi ;;
+        AWAKE_FROM)
+          if [[ "$value" =~ ^(([01][0-9]|2[0-3]):[0-5][0-9])?$ ]]; then AWAKE_FROM=$value; fi ;;
+        AWAKE_UNTIL)
+          if [[ "$value" =~ ^(([01][0-9]|2[0-3]):[0-5][0-9])?$ ]]; then AWAKE_UNTIL=$value; fi ;;
+        WAKE_ON_ACCESS)
+          if [[ "$value" =~ ^(on|off)$ ]]; then WAKE_ON_ACCESS=$value; fi ;;
+        AFTER_SLEEP_TIMER)
+          if [[ "$value" =~ ^(on|off)$ ]]; then AFTER_SLEEP_TIMER=$value; fi ;;
+      esac
+    done < <(head -c 4096 "$file")
+  fi
+  if [ -z "$AWAKE_FROM" ] || [ -z "$AWAKE_UNTIL" ]; then AWAKE_FROM="" AWAKE_UNTIL=""; fi
+  return 0
+}
+
+# Writes the current values as the server's user, which must be able to change them later. Root
+# never creates, changes the owner of or moves a file in that user's folder: chown and chmod
+# would follow a link the user placed there in the meantime, onto any file of the computer.
+write_sleep_settings() {
+  printf '# What Tarven Server does when unused, changed in the app or with `sudo tarven sleep`.\nMODE=%s\nIDLE_MINUTES=%s\nAWAKE_FROM=%s\nAWAKE_UNTIL=%s\nWAKE_ON_ACCESS=%s\nAFTER_SLEEP_TIMER=%s\n' \
+    "$MODE" "$IDLE_MINUTES" "$AWAKE_FROM" "$AWAKE_UNTIL" "$WAKE_ON_ACCESS" "$AFTER_SLEEP_TIMER" \
+    | runuser -u tarven -- /bin/sh -c 'umask 077; t=$(mktemp "$1.XXXXXX") && cat > "$t" && mv -f "$t" "$1"' sh "$1"
+}

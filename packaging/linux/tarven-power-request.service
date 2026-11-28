@@ -1,0 +1,6 @@
+[Unit]
+Description=Sleep, turn off or stop Tarven now, as asked in an app
+
+[Service]
+Type=oneshot
+ExecStart=/opt/tarven/tarven-autosleep --now

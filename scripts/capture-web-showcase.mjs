@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { startShowcaseFixture, SHOWCASE_NOW } from "./web-showcase-fixture.mjs";
 
 const require = createRequire(import.meta.url);
-const usage = "Usage: node scripts/capture-web-showcase.mjs --check | --web-root PATH --showcase-root PATH --output PATH [--version VERSION] [--report PATH]\nSet NODE_PATH or AURELIA_PLAYWRIGHT_NODE_MODULES for an existing Playwright installation; AURELIA_CHROMIUM_EXECUTABLE optionally selects a headless Chrome executable.";
+const usage = "Usage: node scripts/capture-web-showcase.mjs --check | --web-root PATH --showcase-root PATH --output PATH [--version VERSION] [--report PATH]\nSet NODE_PATH or TARVEN_PLAYWRIGHT_NODE_MODULES for an existing Playwright installation; TARVEN_CHROMIUM_EXECUTABLE optionally selects a headless Chrome executable.";
 const args = process.argv.slice(2), options = {};
 if (args.includes("--help")) { console.log(usage); process.exit(0); }
 for (let i = 0; i < args.length; i++) {
@@ -22,12 +22,12 @@ for (let i = 0; i < args.length; i++) {
 let chromium;
 try { ({ chromium } = require("playwright")); }
 catch { throw new Error("Playwright is not available. Set NODE_PATH to an existing node_modules folder; this script does not install packages."); }
-const candidates = [process.env.AURELIA_CHROMIUM_EXECUTABLE, chromium.executablePath(),
+const candidates = [process.env.TARVEN_CHROMIUM_EXECUTABLE, chromium.executablePath(),
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
   "/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome"].filter(Boolean);
 let executablePath;
 for (const candidate of candidates) { try { await access(candidate, constants.X_OK); executablePath = candidate; break; } catch { /* Try an available executable. */ } }
-if (!executablePath) throw new Error("No headless Chromium executable is installed. Set AURELIA_CHROMIUM_EXECUTABLE; nothing is downloaded automatically.");
+if (!executablePath) throw new Error("No headless Chromium executable is installed. Set TARVEN_CHROMIUM_EXECUTABLE; nothing is downloaded automatically.");
 if (options.check) { console.log(JSON.stringify({ playwright: require.resolve("playwright"), executablePath, headless: true })); process.exit(0); }
 for (const key of ["web-root", "showcase-root", "output"]) if (!options[key]) throw new Error(usage);
 
@@ -73,7 +73,7 @@ try {
   await page.locator(".rail").first().scrollIntoViewIfNeeded(); await ready(); await page.evaluate(() => scrollTo(0, 0)); await capture("home");
   await page.goto(`${fixture.origin}/title/${featured.id}`); await page.locator(".detail-hero .hero-title").waitFor(); await capture("detail");
   await page.locator(".detail-hero .primary-button").click(); await page.locator(".player.paused").waitFor(); await page.waitForFunction(() => document.querySelector(".player-start")?.hidden && getComputedStyle(document.querySelector(".player-start")).opacity === "0"); await capture("player");
-  const media = await page.evaluate(() => ({ ...globalThis.__aureliaCaptureMedia, paused: document.querySelector("video")?.paused, nativeSource: document.querySelector("video")?.getAttribute("src") }));
+  const media = await page.evaluate(() => ({ ...globalThis.__tarvenCaptureMedia, paused: document.querySelector("video")?.paused, nativeSource: document.querySelector("video")?.getAttribute("src") }));
   if (!media.paused || media.nativeSource || media.simulatedPlayCalls !== 1) throw new Error("The capture must show only a paused simulated player with no native media source.");
   await page.goto(fixture.origin + "/settings/playback"); await page.getByRole("heading", { name: "Playback" }).waitFor(); await capture("settings");
   await context.close();

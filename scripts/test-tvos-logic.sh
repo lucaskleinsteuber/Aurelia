@@ -8,12 +8,12 @@ source "$repository_root/scripts/workspace-paths.sh"
 # Unformatted Swift fails here, before anything is built (scripts/check-swift-format.sh).
 bash "$repository_root/scripts/check-swift-format.sh"
 run_id="tv-logic-$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"
-runtime_root="$HOME/Library/Caches/Aurelia/TestRuns/$run_id"
+runtime_root="$HOME/Library/Caches/Tarven/TestRuns/$run_id"
 derived_data="$runtime_root/DerivedData"
-temporary_result="$runtime_root/AureliaTV-Logic.xcresult"
+temporary_result="$runtime_root/TarvenTV-Logic.xcresult"
 temporary_log="$runtime_root/xcodebuild.log"
-final_result="$other_root/Test Results/AureliaTV-Logic-$run_id.xcresult"
-final_log="$other_root/Logs/AureliaTV-Logic-$run_id.log"
+final_result="$other_root/Test Results/TarvenTV-Logic-$run_id.xcresult"
+final_log="$other_root/Logs/TarvenTV-Logic-$run_id.log"
 mkdir -p "$runtime_root" "$other_root/Test Results" "$other_root/Logs"
 
 finish() {
@@ -29,8 +29,8 @@ trap finish EXIT
 # This scheme contains only TV Core and its tests. It has no app host, UIKit,
 # TVVLCKit, server payload, remote-device target or simulator destination.
 DEVELOPER_DIR="$developer_dir" xcodebuild \
-  -project "$repository_root/clients/tvos/AureliaTV.xcodeproj" \
-  -scheme AureliaTVLogicTests -configuration Debug \
+  -project "$repository_root/clients/tvos/TarvenTV.xcodeproj" \
+  -scheme TarvenTVLogicTests -configuration Debug \
   -destination "platform=macOS,arch=$(uname -m)" \
   -derivedDataPath "$derived_data" \
   -resultBundlePath "$temporary_result" \

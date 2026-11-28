@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- App logic without any UI toolkit, so it can be tested on its own. -->
+  <PropertyGroup>
+    <RootNamespace>Tarven.Linux.Core</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Haukcode.Mdns" />
+    <PackageReference Include="Tmds.DBus.Protocol" />
+    <PackageReference Include="BouncyCastle.Cryptography" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tarven.Linux.Tests" />
+    <InternalsVisibleTo Include="Tarven.Linux.IntegrationTests" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Settings › About shows what changed in this version. -->
+    <EmbeddedResource Include="../../../CHANGELOG.md" LogicalName="CHANGELOG.md" Visible="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/Tarven.Contracts/Tarven.Contracts.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Installs, launches without media under Xvfb, reinstalls and removes Aurelia in disposable
+# Installs, launches without media under Xvfb, reinstalls and removes Tarven in disposable
 # Ubuntu, Fedora and Arch containers. Only synthetic settings are created. No host home,
 # server data, credentials or media are mounted. Run on Linux with rootless Podman:
 #   scripts/test-linux-app-install.sh <directory containing the deb, rpm and Arch packages>
@@ -14,12 +14,12 @@ run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 results="$other_root/Test Results/LinuxAppInstall-$run_id"
 mkdir -p "$results"
 
-distributions="${AURELIA_TEST_DISTRIBUTIONS:-ubuntu fedora arch}"
+distributions="${TARVEN_TEST_DISTRIBUTIONS:-ubuntu fedora arch}"
 for distribution in $distributions; do
   case "$distribution" in
-    ubuntu) image="${AURELIA_TEST_UBUNTU_IMAGE:-docker.io/library/ubuntu:26.04}"; pattern='*.deb' ;;
-    fedora) image="${AURELIA_TEST_FEDORA_IMAGE:-registry.fedoraproject.org/fedora:44}"; pattern='*.rpm' ;;
-    arch) image="${AURELIA_TEST_ARCH_IMAGE:-docker.io/library/archlinux:base}"; pattern='*.pkg.tar.zst' ;;
+    ubuntu) image="${TARVEN_TEST_UBUNTU_IMAGE:-docker.io/library/ubuntu:26.04}"; pattern='*.deb' ;;
+    fedora) image="${TARVEN_TEST_FEDORA_IMAGE:-registry.fedoraproject.org/fedora:44}"; pattern='*.rpm' ;;
+    arch) image="${TARVEN_TEST_ARCH_IMAGE:-docker.io/library/archlinux:base}"; pattern='*.pkg.tar.zst' ;;
     *) echo "Unknown test distribution: $distribution" >&2; exit 1 ;;
   esac
   mapfile -t candidates < <(find "$packages" -maxdepth 1 -type f -name "$pattern")
@@ -48,13 +48,13 @@ case "$DISTRIBUTION" in
     pacman -U --noconfirm "$package"
     ;;
 esac
-test -x /usr/bin/aurelia-desktop
+test -x /usr/bin/tarven-desktop
 command -v pkexec >/dev/null
-test -x /usr/lib/aurelia-desktop/server/Aurelia.Server
-test -f /usr/share/applications/io.github.lucasfd3.Aurelia.desktop
-test -f /usr/share/metainfo/io.github.lucasfd3.Aurelia.metainfo.xml
-cat /usr/lib/aurelia-desktop/VERSION
-for binary in /usr/lib/aurelia-desktop/aurelia-desktop /usr/lib/aurelia-desktop/libSkiaSharp.so; do
+test -x /usr/lib/tarven-desktop/server/Tarven.Server
+test -f /usr/share/applications/org.tarven.Tarven.desktop
+test -f /usr/share/metainfo/org.tarven.Tarven.metainfo.xml
+cat /usr/lib/tarven-desktop/VERSION
+for binary in /usr/lib/tarven-desktop/tarven-desktop /usr/lib/tarven-desktop/libSkiaSharp.so; do
   missing=$(ldd "$binary" | sed -n '/not found/p')
   [ -z "$missing" ] || { printf '%s\n' "$missing" >&2; exit 1; }
 done
@@ -68,22 +68,22 @@ for module in ['libcompressor_plugin.so', 'libequalizer_plugin.so']:
     assert any(path.is_file() for root in ['/usr/lib', '/usr/lib64']
                for path in pathlib.Path(root).glob('**/vlc/plugins/audio_filter/' + module)), module
 PYTHON
-useradd --create-home --home-dir /tmp/aurelia-package-user aurelia-package-test
-runuser -u aurelia-package-test -- bash -s <<'LAUNCH'
+useradd --create-home --home-dir /tmp/tarven-package-user tarven-package-test
+runuser -u tarven-package-test -- bash -s <<'LAUNCH'
 set -euo pipefail
 export XDG_CONFIG_HOME="$HOME/.config" XDG_DATA_HOME="$HOME/.local/share"
 export XDG_CACHE_HOME="$HOME/.cache" XDG_STATE_HOME="$HOME/.local/state"
-mkdir -p "$XDG_CONFIG_HOME/aurelia-desktop"
-printf 'Synthetic settings preservation marker\n' > "$XDG_CONFIG_HOME/aurelia-desktop/package-test-marker"
+mkdir -p "$XDG_CONFIG_HOME/tarven-desktop"
+printf 'Synthetic settings preservation marker\n' > "$XDG_CONFIG_HOME/tarven-desktop/package-test-marker"
 dbus-run-session -- bash -s <<'DESKTOP'
 set -euo pipefail
 Xvfb :91 -screen 0 1280x800x24 -nolisten tcp > "$HOME/xvfb.log" 2>&1 &
 display_pid=$!
 app_pid=''
 trap 'test -z "$app_pid" || kill "$app_pid" 2>/dev/null || true; kill "$display_pid" 2>/dev/null || true' EXIT
-export DISPLAY=:91 AURELIA_DISPLAY_BACKEND=x11
+export DISPLAY=:91 TARVEN_DISPLAY_BACKEND=x11
 for _ in $(seq 1 50); do [ -S /tmp/.X11-unix/X91 ] && break; sleep 0.1; done
-aurelia-desktop > "$HOME/app.log" 2>&1 &
+tarven-desktop > "$HOME/app.log" 2>&1 &
 app_pid=$!
 sleep 8
 if ! kill -0 "$app_pid" 2>/dev/null; then cat "$HOME/app.log" >&2; exit 1; fi
@@ -95,14 +95,14 @@ DESKTOP
 python3 - <<'SERVER'
 import json, os, pathlib, ssl, subprocess, time, urllib.request
 
-server = pathlib.Path('/usr/lib/aurelia-desktop/server/Aurelia.Server')
+server = pathlib.Path('/usr/lib/tarven-desktop/server/Tarven.Server')
 dependencies = json.loads((server.parent / (server.name + '.deps.json')).read_text())
-expected = next(name.split('/', 1)[1] for name in dependencies['libraries'] if name.startswith('Aurelia.Server/'))
+expected = next(name.split('/', 1)[1] for name in dependencies['libraries'] if name.startswith('Tarven.Server/'))
 data = pathlib.Path.home() / 'synthetic-hosted-server'
 data.mkdir(mode=0o700)
 environment = os.environ.copy()
-environment.update(AURELIA_BOOTSTRAP_TOKEN='synthetic-package-startup-bootstrap-token-only',
-                   AURELIA_LAN_ENABLED='false', Aurelia__Ffmpeg='off')
+environment.update(TARVEN_BOOTSTRAP_TOKEN='synthetic-package-startup-bootstrap-token-only',
+                   TARVEN_LAN_ENABLED='false', Tarven__Ffmpeg='off')
 log = pathlib.Path.home() / 'server.log'
 with log.open('w') as output:
     process = subprocess.Popen([str(server), 'run', '--data-dir', str(data), '--urls',
@@ -148,14 +148,14 @@ case "$DISTRIBUTION" in
   fedora) dnf reinstall -y --setopt=install_weak_deps=False "$package" ;;
   arch) pacman -U --noconfirm "$package" ;;
 esac
-test "$(cat /tmp/aurelia-package-user/.config/aurelia-desktop/package-test-marker)" = 'Synthetic settings preservation marker'
+test "$(cat /tmp/tarven-package-user/.config/tarven-desktop/package-test-marker)" = 'Synthetic settings preservation marker'
 case "$DISTRIBUTION" in
-  ubuntu) apt-get remove -y aurelia-desktop ;;
-  fedora) dnf remove -y aurelia-desktop ;;
-  arch) pacman -R --noconfirm aurelia-desktop ;;
+  ubuntu) apt-get remove -y tarven-desktop ;;
+  fedora) dnf remove -y tarven-desktop ;;
+  arch) pacman -R --noconfirm tarven-desktop ;;
 esac
-test ! -e /usr/bin/aurelia-desktop
-test -f /tmp/aurelia-package-user/.config/aurelia-desktop/package-test-marker
+test ! -e /usr/bin/tarven-desktop
+test -f /tmp/tarven-package-user/.config/tarven-desktop/package-test-marker
 echo "PASS: dependencies, headless launch, reinstall preserves settings, uninstall preserves settings."
 CONTAINER
 done

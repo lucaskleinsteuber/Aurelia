@@ -2,12 +2,12 @@
 # Source-only signing-policy checks. No signing identities or running apps needed.
 set -euo pipefail
 repository_root=${0:A:h:h}
-test_parent="$HOME/Library/Caches/Aurelia/TestRuns"
+test_parent="$HOME/Library/Caches/Tarven/TestRuns"
 mkdir -p "$test_parent"
 task_test_root=$(mktemp -d "$test_parent/Profileless-Policy.XXXXXX")
 trap '[[ "$task_test_root" == "$test_parent/Profileless-Policy."* ]] && find "$task_test_root" -depth -delete' EXIT
-source_entitlements="$repository_root/clients/macos/Configuration/Aurelia.entitlements"
-helper_entitlements="$repository_root/clients/macos/Configuration/AureliaServerHost.entitlements"
+source_entitlements="$repository_root/clients/macos/Configuration/Tarven.entitlements"
+helper_entitlements="$repository_root/clients/macos/Configuration/TarvenServerHost.entitlements"
 generated="$task_test_root/profileless.entitlements"
 fixture="$task_test_root/invalid.entitlements"
 validator="$repository_root/scripts/verify-profileless-macos-entitlements.sh"
@@ -49,7 +49,7 @@ for identity in '' malformed; do
   fi
   pass "rejects missing or malformed identity before signing"
 done
-test_app_group="B5N7JVK37J.com.lucas.aurelia.media.test.host"
+test_app_group="B5N7JVK37J.org.tarven.mac.test.host"
 test_app_entitlements="$task_test_root/test-app.entitlements"
 test_helper_entitlements="$task_test_root/test-helper.entitlements"
 /usr/bin/ditto "$source_entitlements" "$test_app_entitlements"
@@ -58,25 +58,25 @@ test_helper_entitlements="$task_test_root/test-helper.entitlements"
 /usr/libexec/PlistBuddy -c "Set :com.apple.security.application-groups:0 $test_app_group" "$test_helper_entitlements"
 /usr/libexec/PlistBuddy -c 'Delete :keychain-access-groups' "$test_app_entitlements"
 /usr/libexec/PlistBuddy -c 'Add :keychain-access-groups array' "$test_app_entitlements"
-/usr/libexec/PlistBuddy -c 'Add :keychain-access-groups:0 string B5N7JVK37J.com.lucas.aurelia.media.test' "$test_app_entitlements"
+/usr/libexec/PlistBuddy -c 'Add :keychain-access-groups:0 string B5N7JVK37J.org.tarven.mac.test' "$test_app_entitlements"
 test_keychain_json=$(/usr/bin/plutil -convert json -o - "$test_app_entitlements")
 if ! print -r -- "$test_keychain_json" | /usr/bin/ruby -rjson -e '
     value = JSON.parse(STDIN.read)
     abort "Unexpected test-edition keychain groups." unless
-      value["keychain-access-groups"] == ["B5N7JVK37J.com.lucas.aurelia.media.test"]
+      value["keychain-access-groups"] == ["B5N7JVK37J.org.tarven.mac.test"]
   '; then
   print -u2 "FAIL: test-edition keychain access group isolation check failed."
   exit 1
 fi
 pass "isolates test-edition keychain access groups away from production"
-if AURELIA_EXPECTED_APP_GROUP="$test_app_group" /bin/zsh "$validator" \
+if TARVEN_EXPECTED_APP_GROUP="$test_app_group" /bin/zsh "$validator" \
   "$test_app_entitlements" "$test_helper_entitlements" >"$task_test_root/result" 2>&1; then
   print -u2 "FAIL: signing policy accepted test-edition profileless entitlements with keychain-access-groups."
   exit 1
 fi
 pass "rejects test-edition profileless entitlements with restricted Keychain declarations"
 /usr/libexec/PlistBuddy -c 'Delete :keychain-access-groups' "$test_app_entitlements"
-AURELIA_EXPECTED_APP_GROUP="$test_app_group" /bin/zsh "$validator" \
+TARVEN_EXPECTED_APP_GROUP="$test_app_group" /bin/zsh "$validator" \
   "$test_app_entitlements" "$test_helper_entitlements"
 pass "accepts test-edition profileless entitlements with isolated App Group and no Keychain groups"
 print "Profileless signing policy passed $checks checks."

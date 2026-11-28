@@ -7,7 +7,7 @@
     "-DCMAKE_COMPILE_WARNING_AS_ERROR=ON"
   ],
   "post-install": [
-    "install -Dm644 LICENSE.LGPL /app/share/doc/aurelia-desktop/notices/libebml/LICENSE.LGPL"
+    "install -Dm644 LICENSE.LGPL /app/share/doc/tarven-desktop/notices/libebml/LICENSE.LGPL"
   ],
   "sources": [
     {

@@ -1,6 +1,6 @@
-# Aurelia Server database recovery
+# Tarven Server database recovery
 
-Aurelia stores its server database as `aurelia.db` in the configured server data
+Tarven stores its server database as `tarven.db` in the configured server data
 directory. The server uses SQLite's online backup API for snapshots, so committed
 changes still in the write-ahead log are included. Do not copy the live `.db`
 file directly as a backup.
@@ -20,12 +20,12 @@ The server retains the newest seven daily and four weekly snapshots by default;
 owners can change interval and retention in Server settings. It also makes a
 verified snapshot immediately before an upgrade migration. Backup files live in the
 private `Backups` subdirectory of the server data directory; their file and directory
-permissions are restricted to the account running Aurelia.
+permissions are restricted to the account running Tarven.
 
-Before any pending migration, Aurelia runs SQLite `quick_check` and
+Before any pending migration, Tarven runs SQLite `quick_check` and
 `foreign_key_check`, checks the recorded migration identifiers, and creates the
 pre-migration snapshot. If verification or the snapshot fails, startup stops
-before the migration. A failed migration also stops startup. Aurelia never
+before the migration. A failed migration also stops startup. Tarven never
 automatically restores a backup after corruption or a failed migration.
 
 These automatic database backups contain only SQLite. They do not contain media files,
@@ -40,27 +40,27 @@ Run commands on the server Mac/account. Use `--data-dir` if the server uses a
 non-default data directory.
 
 ```sh
-dotnet run --project src/Aurelia.Server -- database backup
-dotnet run --project src/Aurelia.Server -- database verify
-dotnet run --project src/Aurelia.Server -- database verify \
-  --from "/path/to/aurelia-database-weekly-<timestamp>.db"
+dotnet run --project src/Tarven.Server -- database backup
+dotnet run --project src/Tarven.Server -- database verify
+dotnet run --project src/Tarven.Server -- database verify \
+  --from "/path/to/tarven-database-weekly-<timestamp>.db"
 ```
 
-To restore, stop Aurelia Server first. Verify the chosen backup, then run the
+To restore, stop Tarven Server first. Verify the chosen backup, then run the
 explicitly confirmed restore command:
 
 ```sh
-dotnet run --project src/Aurelia.Server -- database verify \
-  --from "/path/to/aurelia-database-weekly-<timestamp>.db"
-dotnet run --project src/Aurelia.Server -- database restore \
-  --from "/path/to/aurelia-database-weekly-<timestamp>.db" --confirm
+dotnet run --project src/Tarven.Server -- database verify \
+  --from "/path/to/tarven-database-weekly-<timestamp>.db"
+dotnet run --project src/Tarven.Server -- database restore \
+  --from "/path/to/tarven-database-weekly-<timestamp>.db" --confirm
 ```
 
 Restore acquires the exclusive server lock, verifies the source, stages and
 verifies a SQLite backup copy, and preserves the current database before
 replacing it. A pending explicit restore is resumed safely if the process exits
 during replacement. An invalid source leaves the active database untouched. On
-the next start, Aurelia applies any required forward migrations after creating
+the next start, Tarven applies any required forward migrations after creating
 their own pre-migration snapshot. Explicit database restoration signs out all
 devices and consumes old pairing codes/playback tickets. Normal updates do not.
 

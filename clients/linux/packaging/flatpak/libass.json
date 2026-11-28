@@ -1,7 +1,7 @@
 {
   "name": "libass",
   "post-install": [
-    "install -Dm644 COPYING /app/share/doc/aurelia-desktop/notices/libass/COPYING"
+    "install -Dm644 COPYING /app/share/doc/tarven-desktop/notices/libass/COPYING"
   ],
   "sources": [
     {

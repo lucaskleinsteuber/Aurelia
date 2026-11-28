@@ -1,7 +1,7 @@
-# Aurelia for Apple TV
+# Tarven for Apple TV
 
-A native tvOS 26 client for an Aurelia server on your local network, designed
-like the Aurelia Mac app. Version 2.0.0 includes (installation for everyone: [docs/APPLE_TV.md](../../docs/APPLE_TV.md)):
+A native tvOS 26 client for a Tarven server on your local network, designed
+like the Tarven Mac app. Version 2.0.0 includes (installation for everyone: [docs/APPLE_TV.md](../../docs/APPLE_TV.md)):
 
 - Home with a hero, Continue Watching that resumes directly, genre shelves,
   Favorites, Collections and Recently Added
@@ -19,17 +19,17 @@ like the Aurelia Mac app. Version 2.0.0 includes (installation for everyone: [do
 - Profiles in the Mac style with photos or colored avatars, and a digits-only PIN
   keypad that never hints at how long a PIN is
 - Pairing with the 8-digit code that the Mac or Linux app creates (Create Code)
-  or `aurelia pair` on a Linux server
-- Settings › About with the license texts of Aurelia and TVVLCKit and the privacy
+  or `tarven pair` on a Linux server
+- Settings › About with the license texts of Tarven and TVVLCKit and the privacy
   policy
 - A clear "The Server Is Off" screen when the saved server does not answer: turn
-  it on or open Aurelia on a Mac, and the Apple TV connects again by itself. The
+  it on or open Tarven on a Mac, and the Apple TV connects again by itself. The
   Apple TV also tries to wake the server with a Wake-on-LAN packet sent straight
   to its last address
 - Artwork kept on the Apple TV for each profile, so posters appear at once
   after the app restarts
 
-Open `AureliaTV.xcodeproj` and select the **AureliaTV** scheme. The TV client has
+Open `TarvenTV.xcodeproj` and select the **TarvenTV** scheme. The TV client has
 its own project, bundle identifier and version; it does not share an application
 library with the Mac client. Owners and administrators can manage the server from the Apple TV
 too; protected changes are confirmed on another device or with the Server Password.
@@ -49,10 +49,10 @@ Apple development account and the device's pairing are required. To select an
 already paired Apple TV, add `--device <identifier>`. Together with provisioning
 updates, this allows Xcode to register that selected device for development.
 The build script builds for **Apple TV devices**, never a simulator, and does not install
-or launch the application. `AURELIA_TV_BUILD_ROOT` can select an external output
+or launch the application. `TARVEN_TV_BUILD_ROOT` can select an external output
 directory. Generated files otherwise use `scripts/workspace-paths.sh` defaults.
 
-The TV Home Screen icon and top shelf use the existing Aurelia brand mark in
+The TV Home Screen icon and top shelf use the existing Tarven brand mark in
 a native TV asset catalog. No Mac source files are linked into the app.
 
 TVVLCKit 3.7.3 comes from the [official VideoLAN production archive](https://download.videolan.org/cocoapods/prod/TVVLCKit-3.7.3-319ed2c0-79128878.tar.xz)
@@ -61,8 +61,8 @@ stays external; ignored `Dependencies` symlinks make the project portable.
 `TVVLCKIT_ROOT` can override that dependency directory. The vendor license is
 included in the app's resources.
 
-The **AureliaTVLogicTests** scheme runs platform-neutral TV logic directly
-on the Mac without an app host or TVVLCKit. The **AureliaTVUITests** scheme uses
+The **TarvenTVLogicTests** scheme runs platform-neutral TV logic directly
+on the Mac without an app host or TVVLCKit. The **TarvenTVUITests** scheme uses
 `XCUIRemote` in a dedicated tvOS 26.0 Apple TV simulator for real focus and
 navigation checks, geometry assertions and attached screenshots. Install that
 runtime in Xcode Components before running `scripts/test-tvos-ui.sh`; the script
@@ -75,7 +75,7 @@ The fixture entry point is absent from Release builds. Actual remote navigation
 and video playback still receive separate user acceptance on a physical Apple
 TV; no automated codec, stream or playback gate runs.
 
-The separate **AureliaTVDeviceCheck** scheme and `scripts/test-tvos-device.sh`
+The separate **TarvenTVDeviceCheck** scheme and `scripts/test-tvos-device.sh`
 exist only for the explicitly approved, five-minute check of one episode on a
 paired Apple TV. It requires opt-in environment variables, never runs with the
 simulator tests and removes its test runner afterwards.

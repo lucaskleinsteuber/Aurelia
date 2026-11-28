@@ -78,7 +78,7 @@ for arch in arm64 x86_64; do
     if command -v nasm >/dev/null 2>&1; then arch_options+=(--x86asmexe=nasm); else arch_options+=(--disable-x86asm); fi
   fi
   # The prefix is only a name inside the binary; nothing is installed there.
-  (cd "$source_root" && ./configure --prefix=/opt/aurelia-ffmpeg "${configure_options[@]}" "${arch_options[@]}" >"$work/configure-$arch.log" 2>&1) || {
+  (cd "$source_root" && ./configure --prefix=/opt/tarven-ffmpeg "${configure_options[@]}" "${arch_options[@]}" >"$work/configure-$arch.log" 2>&1) || {
     tail -n 30 "$work/configure-$arch.log" >&2
     exit 1
   }
@@ -96,7 +96,7 @@ done
 staged="$output.new"
 rm -rf "$staged"
 mkdir -p "$staged"
-installed=opt/aurelia-ffmpeg
+installed=opt/tarven-ffmpeg
 for program in ffmpeg ffprobe; do
   lipo -create "$work/root-arm64/$installed/bin/$program" "$work/root-x86_64/$installed/bin/$program" -output "$staged/$program"
   chmod 0755 "$staged/$program"

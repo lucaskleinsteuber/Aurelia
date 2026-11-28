@@ -1,4 +1,4 @@
-From: Aurelia contributors
+From: Tarven contributors
 Subject: Check demux seek failures and preserve valid stream positions
 
 Propagate failed AVI navigation instead of parsing from the wrong position; retain

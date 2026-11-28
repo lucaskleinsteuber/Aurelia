@@ -8,8 +8,8 @@
 #
 # The container gets the lowest CPU weight and runs the packaging under nice and idle I/O priority,
 # so a server running there keeps priority; it publishes no port and touches no other container.
-# Flatpak's runtimes and module cache stay in the Docker volume "aurelia-package-cache" so the next
-# build reuses them; `docker volume rm aurelia-package-cache` removes them. flatpak-builder needs
+# Flatpak's runtimes and module cache stay in the Docker volume "tarven-package-cache" so the next
+# build reuses them; `docker volume rm tarven-package-cache` removes them. flatpak-builder needs
 # its own sandbox (bubblewrap) inside the container, which is why the container is privileged.
 set -euo pipefail
 
@@ -19,7 +19,7 @@ version=${3:?Provide the version.}
 build=${4:?Provide the build number.}
 linux_arch=${5:-x64}
 here=$(cd "$(dirname "$0")" && pwd)
-image=${AURELIA_PACKAGE_IMAGE:-archlinux:base-devel}
+image=${TARVEN_PACKAGE_IMAGE:-archlinux:base-devel}
 docker=(docker)
 docker info >/dev/null 2>&1 || docker=(sudo -n docker)
 "${docker[@]}" info >/dev/null 2>&1 || { echo "Docker isn't usable here (not running, or no permission)." >&2; exit 1; }
@@ -29,10 +29,10 @@ platform=linux/$(uname -m | sed -e s/x86_64/amd64/ -e s/aarch64/arm64/)
 mkdir -p "$here/$output"
 "${docker[@]}" pull --quiet --platform "$platform" "$image" >/dev/null
 "${docker[@]}" run --rm --privileged --platform "$platform" \
-  --name "aurelia-package-$version-$build-$linux_arch" \
+  --name "tarven-package-$version-$build-$linux_arch" \
   --cpu-shares 64 --network bridge \
-  -v "$here:/work" -v aurelia-package-cache:/cache \
-  -e AURELIA_LINUX_PACKAGE_FORMATS="${AURELIA_LINUX_PACKAGE_FORMATS:-deb rpm arch flatpak}" \
+  -v "$here:/work" -v tarven-package-cache:/cache \
+  -e TARVEN_LINUX_PACKAGE_FORMATS="${TARVEN_LINUX_PACKAGE_FORMATS:-deb rpm arch flatpak}" \
   -e ARCHIVE="$archive" -e OUTPUT="$output" -e VERSION="$version" -e BUILD="$build" -e LINUX_ARCH="$linux_arch" \
   "$image" bash -euo pipefail -c '
     # appstreamcli compose loads every libvips module; their libraries make the container match a
@@ -48,9 +48,9 @@ mkdir -p "$here/$output"
     chown builder /cache /cache/home
     chown -R builder /work
     run() { su builder -s /bin/bash -c "export HOME=/cache/home XDG_CACHE_HOME=/cache; cd /work; $1"; }
-    case " $AURELIA_LINUX_PACKAGE_FORMATS " in
+    case " $TARVEN_LINUX_PACKAGE_FORMATS " in
       *" flatpak "*)
-        manifest=packaging/flatpak/io.github.lucasfd3.Aurelia.json
+        manifest=packaging/flatpak/org.tarven.Tarven.json
         branch=$(jq -r ".\"runtime-version\"" "/work/$manifest")
         refs="org.freedesktop.Platform//$branch org.freedesktop.Sdk//$branch"
         for extension in $(jq -r ".\"sdk-extensions\"[]?" "/work/$manifest"); do refs="$refs $extension//$branch"; done

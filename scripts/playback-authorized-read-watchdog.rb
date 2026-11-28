@@ -8,7 +8,7 @@ begin
   owned_run_valid = false
   raise ArgumentError unless ARGV.length == 5
   server_pid, executable, data_root, run, marker = ARGV
-  owned_parent = File.join(Dir.home, 'Library/Caches/Aurelia/TestRuns')
+  owned_parent = File.join(Dir.home, 'Library/Caches/Tarven/TestRuns')
   raise ArgumentError unless server_pid.match?(/\A[1-9][0-9]+\z/) &&
                             run == ENV.fetch('EVIDENCE_RUN_ROOT') &&
                             File.dirname(run) == owned_parent &&

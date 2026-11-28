@@ -8,50 +8,50 @@ source "$repository_root/scripts/workspace-paths.sh"
 # Unformatted Swift fails here, before anything is built (scripts/check-swift-format.sh).
 bash "$repository_root/scripts/check-swift-format.sh"
 dotnet_bin=$DOTNET_BIN
-provisioning_profile=${AURELIA_PROVISIONING_PROFILE:-}
-bundle_identifier=com.lucas.aurelia.media
-# The Apple team that signs the app; its ID prefixes the App Group. AURELIA_TEAM_ID builds Aurelia
+provisioning_profile=${TARVEN_PROVISIONING_PROFILE:-}
+bundle_identifier=org.tarven.mac
+# The Apple team that signs the app; its ID prefixes the App Group. TARVEN_TEAM_ID builds Tarven
 # with someone else's free Apple ID (scripts/build-mac-app-yourself.sh, docs/BUILD_MAC_APP.md).
 owner_team=B5N7JVK37J
-team_identifier=${AURELIA_TEAM_ID:-$owner_team}
-[[ "$team_identifier" =~ '^[A-Z0-9]{10}$' ]] || { echo "AURELIA_TEAM_ID must be a 10-character Apple team ID." >&2; exit 1; }
+team_identifier=${TARVEN_TEAM_ID:-$owner_team}
+[[ "$team_identifier" =~ '^[A-Z0-9]{10}$' ]] || { echo "TARVEN_TEAM_ID must be a 10-character Apple team ID." >&2; exit 1; }
 own_build=0
 [[ "$team_identifier" != "$owner_team" ]] && own_build=1
-distribution=${AURELIA_DISTRIBUTION:-development}
-# AURELIA_TEST_EDITION=1 builds "Aurelia Test": its own bundle identifier, App Group, Keychain entry and
+distribution=${TARVEN_DISTRIBUTION:-development}
+# TARVEN_TEST_EDITION=1 builds "Tarven Test": its own bundle identifier, App Group, Keychain entry and
 # launch agents beside the real app, no self-updates, and Reset App Data in Settings. It is signed
 # without a provisioning profile (profileless-development), auto-selecting the matching Apple Development
-# identity for AURELIA_TEAM_ID unless AURELIA_SIGNING_IDENTITY is set, and never replaces or reads the
+# identity for TARVEN_TEAM_ID unless TARVEN_SIGNING_IDENTITY is set, and never replaces or reads the
 # real app's data.
-test_edition=${AURELIA_TEST_EDITION:-0}
-# One build per architecture (AURELIA_MAC_ARCH=arm64 for Apple silicon, the default, or x64 for
+test_edition=${TARVEN_TEST_EDITION:-0}
+# One build per architecture (TARVEN_MAC_ARCH=arm64 for Apple silicon, the default, or x64 for
 # Intel Macs); each carries only its own server runtime, VLCKit and ffmpeg slice.
-mac_arch=${AURELIA_MAC_ARCH:-arm64}
+mac_arch=${TARVEN_MAC_ARCH:-arm64}
 case "$mac_arch" in
   arm64) xcode_arch=arm64; server_runtime=osx-arm64 ;;
   x64) xcode_arch=x86_64; server_runtime=osx-x64 ;;
-  *) echo "AURELIA_MAC_ARCH must be arm64 or x64." >&2; exit 1 ;;
+  *) echo "TARVEN_MAC_ARCH must be arm64 or x64." >&2; exit 1 ;;
 esac
-app_group=$team_identifier.com.lucas.aurelia.media.host
-app_name=Aurelia
+app_group=$team_identifier.org.tarven.mac.host
+app_name=Tarven
 if (( test_edition )); then
-  bundle_identifier=com.lucas.aurelia.media.test
-  app_group=$team_identifier.com.lucas.aurelia.media.test.host
-  app_name="Aurelia Test"
+  bundle_identifier=org.tarven.mac.test
+  app_group=$team_identifier.org.tarven.mac.test.host
+  app_name="Tarven Test"
   distribution=profileless-development
 fi
 # Another team has no provisioning profile for these bundle identifiers; it signs without one.
 if (( own_build )) && [[ "$distribution" != profileless-development ]]; then
-  echo "A build with your own Apple ID uses AURELIA_DISTRIBUTION=profileless-development (scripts/build-mac-app-yourself.sh sets it)." >&2
+  echo "A build with your own Apple ID uses TARVEN_DISTRIBUTION=profileless-development (scripts/build-mac-app-yourself.sh sets it)." >&2
   exit 1
 fi
 timestamp_option=--timestamp=none
 if [[ "$distribution" != development && "$distribution" != profileless-development && "$distribution" != developer-id ]]; then
-  echo "AURELIA_DISTRIBUTION must be development, profileless-development, or developer-id." >&2
+  echo "TARVEN_DISTRIBUTION must be development, profileless-development, or developer-id." >&2
   exit 1
 fi
 if [[ "$distribution" == developer-id ]]; then
-  if [[ -z "$provisioning_profile" || -z "${AURELIA_SIGNING_IDENTITY:-}" ]]; then
+  if [[ -z "$provisioning_profile" || -z "${TARVEN_SIGNING_IDENTITY:-}" ]]; then
     echo "Developer ID distribution requires an explicit matching profile and signing identity." >&2
     exit 1
   fi
@@ -60,13 +60,13 @@ fi
 build_parent="$other_root/Build"
 build_number=$(sed -n 's/^CURRENT_PROJECT_VERSION = \([0-9][0-9]*\)$/\1/p' "$repository_root/clients/macos/Configuration/BuildNumber.xcconfig")
 if [[ -z "$build_number" ]]; then
-  echo "Unable to read the Aurelia build number." >&2
+  echo "Unable to read the Tarven build number." >&2
   exit 1
 fi
 numbered_root="$build_parent/Build $build_number"
 (( test_edition )) && numbered_root="$build_parent/Build $build_number Test"
 [[ "$mac_arch" == x64 ]] && numbered_root="$numbered_root x64"
-final_root=${AURELIA_CANDIDATE_OUTPUT:-"$numbered_root"}
+final_root=${TARVEN_CANDIDATE_OUTPUT:-"$numbered_root"}
 if [[ "$final_root" != "$numbered_root" && "$final_root" != "$build_parent/Preflight-"* ]]; then
   echo "Candidate output must be the numbered build or a fresh Preflight directory under $build_parent." >&2
   exit 1
@@ -79,9 +79,9 @@ mkdir -p "$build_parent"
 stage_root=$(mktemp -d "$build_parent/.build${build_number}.XXXXXX")
 derived_data="$stage_root/DerivedData"
 publish_root="$stage_root/Server"
-candidate="$stage_root/Aurelia.app"
+candidate="$stage_root/Tarven.app"
 profile_plist="$stage_root/provisioning-profile.plist"
-release_entitlements="$stage_root/Aurelia-release.entitlements"
+release_entitlements="$stage_root/Tarven-release.entitlements"
 
 cleanup() {
   rm -rf -- "$stage_root"
@@ -91,7 +91,7 @@ trap cleanup EXIT
 if [[ "$distribution" == profileless-development ]]; then
   # This is an explicitly selected local mode, never a public package. Its
   # certificate still expires; the short-lived provisioning profile is absent.
-  signing_identity=${AURELIA_SIGNING_IDENTITY:-}
+  signing_identity=${TARVEN_SIGNING_IDENTITY:-}
   if [[ -z "$signing_identity" ]]; then
     # Auto-select the first valid Apple Development identity belonging to team_identifier.
     signing_identity=$(python3 - "$team_identifier" <<'PY'
@@ -144,7 +144,7 @@ PY
   fi
   if [[ -z "$signing_identity" ]]; then
     echo "No Apple Development signing identity for team $team_identifier was found." >&2
-    echo "Set AURELIA_SIGNING_IDENTITY to the 40-character SHA-1 of your Apple Development identity (see: security find-identity -v -p codesigning)." >&2
+    echo "Set TARVEN_SIGNING_IDENTITY to the 40-character SHA-1 of your Apple Development identity (see: security find-identity -v -p codesigning)." >&2
     exit 1
   fi
   /bin/zsh "$repository_root/scripts/verify-profileless-macos-identity.sh" \
@@ -163,7 +163,7 @@ if [[ -z "$provisioning_profile" ]]; then
     done < <(find "$profile_directory" -maxdepth 1 -type f \
       \( -name '*.provisionprofile' -o -name '*.mobileprovision' \) -print0)
   fi
-  profile_candidates+=(/Applications/Aurelia.app/Contents/embedded.provisionprofile)
+  profile_candidates+=(/Applications/Tarven.app/Contents/embedded.provisionprofile)
   selected_expiration=0
   for candidate_profile in "${profile_candidates[@]}"; do
     [[ -r "$candidate_profile" ]] || continue
@@ -194,12 +194,12 @@ if [[ -z "$provisioning_profile" ]]; then
 fi
 
 if [[ ! -r "$provisioning_profile" ]]; then
-  echo "No valid Aurelia provisioning profile is available for $bundle_identifier." >&2
-  echo "Renew it in Xcode or set AURELIA_PROVISIONING_PROFILE to a valid profile." >&2
+  echo "No valid Tarven provisioning profile is available for $bundle_identifier." >&2
+  echo "Renew it in Xcode or set TARVEN_PROVISIONING_PROFILE to a valid profile." >&2
   exit 1
 fi
 if ! /usr/bin/security cms -D -i "$provisioning_profile" >"$profile_plist"; then
-  echo "Unable to decode the Aurelia provisioning profile." >&2
+  echo "Unable to decode the Tarven provisioning profile." >&2
   exit 1
 fi
 
@@ -208,7 +208,7 @@ profile_bundle_identifier=$(/usr/libexec/PlistBuddy \
 profile_team_identifier=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$profile_plist" 2>/dev/null || true)
 if [[ "$profile_bundle_identifier" != "$team_identifier.$bundle_identifier" \
   || "$profile_team_identifier" != "$team_identifier" ]]; then
-  echo "The Aurelia provisioning profile does not match $bundle_identifier and team $team_identifier." >&2
+  echo "The Tarven provisioning profile does not match $bundle_identifier and team $team_identifier." >&2
   exit 1
 fi
 
@@ -216,7 +216,7 @@ profile_expiration=$(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "$profil
 profile_expiration_epoch=$(/bin/date -j -f '%a %b %d %H:%M:%S %Z %Y' \
   "$profile_expiration" +%s 2>/dev/null || true)
 if [[ -z "$profile_expiration_epoch" || "$profile_expiration_epoch" -le $(/bin/date +%s) ]]; then
-  echo "The Aurelia provisioning profile is expired or has an unreadable expiration date." >&2
+  echo "The Tarven provisioning profile is expired or has an unreadable expiration date." >&2
   exit 1
 fi
 
@@ -226,14 +226,14 @@ profile_certificate_fingerprint=$(/usr/bin/security cms -D -i "$provisioning_pro
   | /usr/bin/openssl x509 -inform DER -noout -fingerprint -sha1 \
   | /usr/bin/sed -E 's/^[^=]*=//; s/://g' \
   | /usr/bin/tr '[:lower:]' '[:upper:]')
-signing_identity=${AURELIA_SIGNING_IDENTITY:-$profile_certificate_fingerprint}
+signing_identity=${TARVEN_SIGNING_IDENTITY:-$profile_certificate_fingerprint}
 if [[ -z "$signing_identity" ]]; then
   echo "No valid Apple Development signing identity is available." >&2
   exit 1
 fi
 if [[ "$signing_identity" != "$profile_certificate_fingerprint" ]]; then
-  echo "The selected signing identity is not authorized by the Aurelia provisioning profile." >&2
-  echo "Set AURELIA_SIGNING_IDENTITY to its matching SHA-1 fingerprint." >&2
+  echo "The selected signing identity is not authorized by the Tarven provisioning profile." >&2
+  echo "Set TARVEN_SIGNING_IDENTITY to its matching SHA-1 fingerprint." >&2
   exit 1
 fi
 if ! /usr/bin/security find-identity -v -p codesigning \
@@ -266,9 +266,9 @@ fi
 "$repository_root/scripts/verify-build-number.sh"
 
 for runtime in $server_runtime; do
-  "$dotnet_bin" restore "$repository_root/src/Aurelia.Server/Aurelia.Server.csproj" \
+  "$dotnet_bin" restore "$repository_root/src/Tarven.Server/Tarven.Server.csproj" \
     --runtime "$runtime"
-  "$dotnet_bin" publish "$repository_root/src/Aurelia.Server/Aurelia.Server.csproj" \
+  "$dotnet_bin" publish "$repository_root/src/Tarven.Server/Tarven.Server.csproj" \
     --configuration Release \
     --runtime "$runtime" \
     --self-contained true \
@@ -278,12 +278,12 @@ done
 
 edition_settings=()
 if (( test_edition )); then
-  edition_settings=(AURELIA_BUNDLE_ID_BASE=$bundle_identifier "AURELIA_DISPLAY_NAME=Aurelia Test"
-    SWIFT_ACTIVE_COMPILATION_CONDITIONS=AURELIA_TEST_EDITION)
+  edition_settings=(TARVEN_BUNDLE_ID_BASE=$bundle_identifier "TARVEN_DISPLAY_NAME=Tarven Test"
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS=TARVEN_TEST_EDITION)
 fi
 DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
-  -project "$repository_root/clients/macos/Aurelia.xcodeproj" \
-  -scheme Aurelia \
+  -project "$repository_root/clients/macos/Tarven.xcodeproj" \
+  -scheme Tarven \
   -configuration Release \
   -destination 'generic/platform=macOS' \
   -derivedDataPath "$derived_data" \
@@ -294,16 +294,16 @@ DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
   "${edition_settings[@]}" \
   build
 
-/usr/bin/ditto "$derived_data/Build/Products/Release/Aurelia.app" "$candidate"
+/usr/bin/ditto "$derived_data/Build/Products/Release/Tarven.app" "$candidate"
 # The app and its server helper find their shared App Group here (AppEdition.appGroup).
 for info in "$candidate/Contents/Info.plist" \
-  "$candidate/Contents/Helpers/Aurelia Server Host.app/Contents/Info.plist"; do
-  /usr/bin/plutil -replace AureliaAppGroup -string "$app_group" "$info"
+  "$candidate/Contents/Helpers/Tarven Server Host.app/Contents/Info.plist"; do
+  /usr/bin/plutil -replace TarvenAppGroup -string "$app_group" "$info"
 done
 if (( test_edition )); then
   # The test edition's launch agents carry its own labels, so they never replace the real app's.
   for kind in background login; do
-    real="$candidate/Contents/Library/LaunchAgents/com.lucas.aurelia.media.host.$kind.plist"
+    real="$candidate/Contents/Library/LaunchAgents/org.tarven.mac.host.$kind.plist"
     test_agent="$candidate/Contents/Library/LaunchAgents/$bundle_identifier.host.$kind.plist"
     /bin/mv "$real" "$test_agent"
     /usr/libexec/PlistBuddy -c "Set :Label $bundle_identifier.host.$kind" "$test_agent"
@@ -313,9 +313,9 @@ for agent in $bundle_identifier.host.background $bundle_identifier.host.login; d
   agent_plist="$candidate/Contents/Library/LaunchAgents/$agent.plist"
   /usr/bin/plutil -lint "$agent_plist"
   agent_program=$(/usr/libexec/PlistBuddy -c 'Print :BundleProgram' "$agent_plist")
-  if [[ "$agent_program" != 'Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost' \
+  if [[ "$agent_program" != 'Contents/Helpers/Tarven Server Host.app/Contents/MacOS/TarvenServerHost' \
     || ! -x "$candidate/$agent_program" ]]; then
-    echo "The launch agent does not point to the bundled Aurelia host." >&2
+    echo "The launch agent does not point to the bundled Tarven host." >&2
     exit 1
   fi
 done
@@ -333,10 +333,10 @@ mkdir -p "$candidate/Contents/Resources/ThirdPartyNotices"
 cp "$repository_root/LICENSE" "$candidate/Contents/Resources/LICENSE"
 for runtime in $server_runtime; do
   /usr/bin/ditto "$publish_root/$runtime" "$candidate/Contents/Resources/Server/$runtime"
-  assets_path=$("$dotnet_bin" msbuild "$repository_root/src/Aurelia.Server/Aurelia.Server.csproj" \
+  assets_path=$("$dotnet_bin" msbuild "$repository_root/src/Tarven.Server/Tarven.Server.csproj" \
     -getProperty:ProjectAssetsFile)
   "$repository_root/scripts/collect-third-party-notices.sh" \
-    "$publish_root/$runtime/Aurelia.Server.deps.json" "$assets_path" \
+    "$publish_root/$runtime/Tarven.Server.deps.json" "$assets_path" \
     "$candidate/Contents/Resources/ThirdPartyNotices/$runtime"
 done
 # Live conversion for web browsers uses the app's own LGPL ffmpeg beside both server runtimes;
@@ -372,7 +372,7 @@ for binary in "$candidate/Contents/Resources/Server/ffmpeg/ffmpeg" "$candidate/C
 done
 while IFS= read -r -d '' binary; do
   if file "$binary" | grep -q 'Mach-O'; then
-    if [[ "${binary:t}" == 'Aurelia.Server' ]]; then
+    if [[ "${binary:t}" == 'Tarven.Server' ]]; then
       codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
         --entitlements "$repository_root/clients/macos/Configuration/ServerRuntime.entitlements" \
         "$binary"
@@ -384,28 +384,36 @@ done < <(find "$candidate/Contents/Resources/Server" -type f -print0)
 
 codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
   "$candidate/Contents/Frameworks/VLCKit.framework"
-helper_entitlements="$stage_root/AureliaServerHost-release.entitlements"
-cp "$repository_root/clients/macos/Configuration/AureliaServerHost.entitlements" "$helper_entitlements"
-cp "$repository_root/clients/macos/Configuration/Aurelia.entitlements" "$release_entitlements"
+helper_entitlements="$stage_root/TarvenServerHost-release.entitlements"
+cp "$repository_root/clients/macos/Configuration/TarvenServerHost.entitlements" "$helper_entitlements"
+cp "$repository_root/clients/macos/Configuration/Tarven.entitlements" "$release_entitlements"
 # The App Group carries the signing team's ID (and the test edition's own name).
 for entitlements in "$helper_entitlements" "$release_entitlements"; do
   /usr/libexec/PlistBuddy -c "Set :com.apple.security.application-groups:0 $app_group" "$entitlements"
 done
+# The second group is Aurelia's (Tarven's former name), read once for the settings it left there
+# (Tarven/Security/AureliaHandover.swift). The test edition never reads the real app's data.
 if (( test_edition )); then
-  # Aurelia Test must never share the real app's Data Protection Keychain access groups.
+  /usr/libexec/PlistBuddy -c 'Delete :com.apple.security.application-groups:1' "$release_entitlements"
+else
+  /usr/libexec/PlistBuddy -c "Set :com.apple.security.application-groups:1 $team_identifier.com.lucas.aurelia.media.host" \
+    "$release_entitlements"
+fi
+if (( test_edition )); then
+  # Tarven Test must never share the real app's Data Protection Keychain access groups.
   /usr/libexec/PlistBuddy -c 'Delete :keychain-access-groups' "$release_entitlements"
   /usr/libexec/PlistBuddy -c 'Add :keychain-access-groups array' "$release_entitlements"
   /usr/libexec/PlistBuddy -c "Add :keychain-access-groups:0 string $team_identifier.$bundle_identifier" "$release_entitlements"
 fi
 codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
   --entitlements "$helper_entitlements" \
-  "$candidate/Contents/Helpers/Aurelia Server Host.app"
+  "$candidate/Contents/Helpers/Tarven Server Host.app"
 if [[ "$distribution" == profileless-development ]]; then
   # Existing Mac queries target the ordinary file-based Keychain, not the
   # restricted Data Protection access groups. The sandbox, selected-file
   # permissions, network permissions and team-prefixed App Group stay intact.
   /usr/libexec/PlistBuddy -c 'Delete :keychain-access-groups' "$release_entitlements"
-  AURELIA_EXPECTED_APP_GROUP=$app_group /bin/zsh "$repository_root/scripts/verify-profileless-macos-entitlements.sh" \
+  TARVEN_EXPECTED_APP_GROUP=$app_group /bin/zsh "$repository_root/scripts/verify-profileless-macos-entitlements.sh" \
     "$release_entitlements" "$helper_entitlements"
 else
 /usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $team_identifier.$bundle_identifier" \
@@ -419,23 +427,23 @@ update_repository=${origin#https://github.com/}
 update_repository=${update_repository#git@github.com:}
 update_repository=${update_repository#ssh://git@github.com/}
 update_repository=${update_repository%.git}
-# Aurelia Test never updates itself, so it gets no repository; neither does a build with your own
+# Tarven Test never updates itself, so it gets no repository; neither does a build with your own
 # Apple ID: the published downloads are signed for the owner's Macs and would not start on yours.
 if (( ! test_edition && ! own_build )) && [[ "$update_repository" == */* && "$update_repository" != */*/* ]]; then
-  plutil -replace AureliaUpdateRepository -string "$update_repository" "$candidate/Contents/Info.plist"
+  plutil -replace TarvenUpdateRepository -string "$update_repository" "$candidate/Contents/Info.plist"
 fi
 codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
   --entitlements "$release_entitlements" \
   "$candidate"
 codesign --verify --deep --strict --verbose=2 "$candidate"
 # The app, its helper, VLCKit, ffmpeg (including its libav* libraries), whisper.cpp and the server are built for this architecture only.
-for binary in "$candidate/Contents/MacOS/Aurelia" \
-  "$candidate/Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost" \
+for binary in "$candidate/Contents/MacOS/Tarven" \
+  "$candidate/Contents/Helpers/Tarven Server Host.app/Contents/MacOS/TarvenServerHost" \
   "$candidate/Contents/Frameworks/VLCKit.framework/Versions/A/VLCKit" \
   "$candidate/Contents/Resources/Server/ffmpeg/ffmpeg" "$candidate/Contents/Resources/Server/ffmpeg/ffprobe" \
   "$candidate/Contents/Resources/Server/ffmpeg/"*.dylib(N.) \
   "$candidate/Contents/Resources/Server/whisper/whisper-cli" \
-  "$candidate/Contents/Resources/Server/$server_runtime/Aurelia.Server"; do
+  "$candidate/Contents/Resources/Server/$server_runtime/Tarven.Server"; do
   [[ "$(/usr/bin/lipo -archs "$binary")" == "$xcode_arch" ]] \
     || { echo "${binary#$candidate/} is not built for $xcode_arch only." >&2; exit 1; }
 done
@@ -447,9 +455,9 @@ if [[ "$distribution" == profileless-development ]]; then
   /usr/bin/codesign --display --entitlements - --xml "$candidate" \
     >"$stage_root/SignedApplication.entitlements" 2>/dev/null
   /usr/bin/codesign --display --entitlements - --xml \
-    "$candidate/Contents/Helpers/Aurelia Server Host.app" \
+    "$candidate/Contents/Helpers/Tarven Server Host.app" \
     >"$stage_root/SignedHelper.entitlements" 2>/dev/null
-  AURELIA_EXPECTED_APP_GROUP=$app_group /bin/zsh "$repository_root/scripts/verify-profileless-macos-entitlements.sh" \
+  TARVEN_EXPECTED_APP_GROUP=$app_group /bin/zsh "$repository_root/scripts/verify-profileless-macos-entitlements.sh" \
     "$stage_root/SignedApplication.entitlements" "$stage_root/SignedHelper.entitlements"
 fi
 

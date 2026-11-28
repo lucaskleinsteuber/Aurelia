@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   clockText, driveFacts, driveStateTitle, fileCheckCurrent, fileCheckProgress, fileCheckStatus, fileProblemFacts, fileProblemTitle,
   fileProblemWhere, remainingText, supportsFileChecks,
-} from "../../src/Aurelia.Server/WebApp/js/file-checks.js";
+} from "../../src/Tarven.Server/WebApp/js/file-checks.js";
 
 test("the file watch is offered only by a server that reports it", () => {
   assert.equal(supportsFileChecks({ capabilities: ["file-checks-v1"] }), true);

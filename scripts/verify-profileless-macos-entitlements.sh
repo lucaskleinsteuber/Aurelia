@@ -14,12 +14,15 @@ for entitlements in "$application_entitlements" "$helper_entitlements"; do
         com.apple.security.network.client com.apple.security.network.server]
       value = JSON.parse(STDIN.read)
       abort "Unsupported entitlement in the profileless local mode." unless (value.keys - allowed).empty?
-      expected = ENV.fetch("AURELIA_EXPECTED_APP_GROUP", "B5N7JVK37J.com.lucas.aurelia.media.host")
+      expected = ENV.fetch("TARVEN_EXPECTED_APP_GROUP", "B5N7JVK37J.org.tarven.mac.host")
       # The signing team (the owner, or whoever builds it with their own Apple ID) prefixes it.
       abort "Unexpected App Group." unless
-        expected.match?(/\A[A-Z0-9]{10}\.com\.lucas\.aurelia\.media(\.test)?\.host\z/)
+        expected.match?(/\A[A-Z0-9]{10}\.org\.tarven\.mac(\.test)?\.host\z/)
+      # The real app also reads Aurelia's group once (Tarven's former name, same team).
+      legacy = expected[0, 10] + ".com.lucas.aurelia.media.host"
+      groups = value["com.apple.security.application-groups"]
       abort "The existing team-prefixed App Group must be retained." unless
-        value["com.apple.security.application-groups"] == [expected]
+        groups == [expected] || (!expected.include?(".test.") && groups == [expected, legacy])
     '; then
     exit 1
   fi

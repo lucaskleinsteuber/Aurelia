@@ -1,0 +1,734 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Menus, dropdowns and tooltips open in their own popup windows; they use Tarven's font too. -->
+  <Style Selector="PopupRoot, OverlayPopupHost">
+    <Setter Property="FontFamily" Value="{StaticResource TarvenFontFamily}" />
+  </Style>
+  <!-- A popup surface is a rectangle; left opaque, its corners showed square around the rounded
+       menus on Wayland. Transparent, only the rounded menu itself is drawn. -->
+  <Style Selector="PopupRoot">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="TransparencyLevelHint" Value="Transparent" />
+  </Style>
+  <!-- Menus are dark rounded glass with a soft shadow, like the Mac app's menus. -->
+  <Style Selector="MenuFlyoutPresenter, ContextMenu">
+    <Setter Property="Padding" Value="6" />
+    <Setter Property="Background" Value="#F01B1E22" />
+    <Setter Property="BorderBrush" Value="#26FFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="MinWidth" Value="220" />
+    <Setter Property="MaxWidth" Value="420" />
+  </Style>
+  <!-- Long names (an audio track with its codec and channels) end in "…" instead of running
+       over the menu's edge. -->
+  <Style Selector="MenuItem /template/ ContentPresenter#PART_HeaderPresenter AccessText, MenuItem /template/ ContentPresenter#PART_HeaderPresenter TextBlock">
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+  <Style Selector="MenuFlyoutPresenter /template/ Border, ContextMenu /template/ Border">
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="BoxShadow" Value="0 14 36 0 #8C000000" />
+  </Style>
+  <Style Selector="MenuItem">
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="Padding" Value="10,7" />
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="FontSize" Value="13.5" />
+    <Setter Property="Foreground" Value="#F2FFFFFF" />
+  </Style>
+  <Style Selector="MenuItem /template/ Border#PART_LayoutRoot">
+    <Setter Property="CornerRadius" Value="7" />
+  </Style>
+  <Style Selector="MenuItem:pointerover /template/ Border#PART_LayoutRoot, MenuItem:selected /template/ Border#PART_LayoutRoot">
+    <Setter Property="Background" Value="#24FFFFFF" />
+  </Style>
+  <Style Selector="MenuItem PathIcon">
+    <Setter Property="Width" Value="15" />
+    <Setter Property="Height" Value="15" />
+    <Setter Property="Foreground" Value="#B3FFFFFF" />
+  </Style>
+  <Style Selector="MenuItem.destructive">
+    <Setter Property="Foreground" Value="#FF6B6B" />
+  </Style>
+  <Style Selector="MenuItem.destructive PathIcon">
+    <Setter Property="Foreground" Value="#FF6B6B" />
+  </Style>
+  <!-- Player menus: the chosen entry has a gold checkmark and semibold text; group titles are
+       small and quiet, like the Mac app's section headers, and not hoverable. -->
+  <Style Selector="MenuItem.playerChoice">
+    <Setter Property="MinHeight" Value="30" />
+    <Setter Property="Padding" Value="8,6,14,6" />
+  </Style>
+  <Style Selector="MenuItem.playerChoice PathIcon">
+    <Setter Property="Width" Value="13" />
+    <Setter Property="Height" Value="13" />
+    <Setter Property="Foreground" Value="{StaticResource TarvenAccentBrush}" />
+  </Style>
+  <Style Selector="MenuItem.playerChoice.chosen">
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="#FFFFFFFF" />
+  </Style>
+  <Style Selector="MenuItem.playerChoice:not(.chosen)">
+    <Setter Property="Foreground" Value="#D9FFFFFF" />
+  </Style>
+  <Style Selector="MenuItem.menuSectionTitle, MenuItem.menuNote">
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="MenuItem.menuSectionTitle">
+    <Setter Property="Padding" Value="10,8,10,3" />
+    <Setter Property="FontSize" Value="11.5" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="MenuItem.menuNote">
+    <Setter Property="Padding" Value="10,7" />
+    <Setter Property="FontSize" Value="12.5" />
+  </Style>
+  <Style Selector="MenuItem.menuSectionTitle:disabled /template/ ContentPresenter#PART_HeaderPresenter">
+    <Setter Property="Foreground" Value="#8CFFFFFF" />
+  </Style>
+  <Style Selector="MenuItem.menuNote:disabled /template/ ContentPresenter#PART_HeaderPresenter">
+    <Setter Property="Foreground" Value="#80FFFFFF" />
+  </Style>
+  <Style Selector="MenuItem.menuSectionTitle:pointerover /template/ Border#PART_LayoutRoot, MenuItem.menuNote:pointerover /template/ Border#PART_LayoutRoot">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="MenuFlyoutPresenter Separator, ContextMenu Separator">
+    <Setter Property="Margin" Value="10,5" />
+    <Setter Property="Height" Value="1" />
+    <Setter Property="Background" Value="#1AFFFFFF" />
+  </Style>
+  <Style Selector="ComboBox">
+    <Setter Property="MinHeight" Value="40" />
+    <Setter Property="Padding" Value="12,6,8,6" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="ComboBoxItem">
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Margin" Value="4,1" />
+    <Setter Property="Padding" Value="10,6" />
+  </Style>
+
+  <Style Selector="Window">
+    <Setter Property="FontFamily" Value="{StaticResource TarvenFontFamily}" />
+    <Setter Property="FontSize" Value="{StaticResource TarvenBodyFontSize}" />
+    <Setter Property="Foreground" Value="{StaticResource TarvenPrimaryTextBrush}" />
+  </Style>
+
+  <!-- Typography -->
+  <Style Selector="TextBlock.pageTitle">
+    <Setter Property="FontSize" Value="{StaticResource TarvenPageTitleFontSize}" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+  <Style Selector="TextBlock.heroTitle">
+    <Setter Property="FontSize" Value="{StaticResource TarvenHeroTitleFontSize}" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+  <Style Selector="TextBlock.sectionTitle">
+    <Setter Property="FontSize" Value="{StaticResource TarvenSectionTitleFontSize}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="TextBlock.eyebrow">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="LetterSpacing" Value="1.4" />
+  </Style>
+  <Style Selector=":is(TextBlock).subdued">
+    <Setter Property="Foreground" Value="{StaticResource TarvenSubduedTextBrush}" />
+  </Style>
+
+  <!-- Sidebar rows: tinted symbols, as in the Apple TV app's sidebar; on the selection they turn
+       white so they stay visible on the highlight. -->
+  <Style Selector="ListBox.sidebar">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="12,0" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem">
+    <Setter Property="Padding" Value="10,0" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Margin" Value="0,1" />
+    <Setter Property="MinHeight" Value="38" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Foreground" Value="{StaticResource TarvenPrimaryTextBrush}" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem PathIcon">
+    <Setter Property="Foreground" Value="{StaticResource TarvenAccentBrush}" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource TarvenHoverBrush}" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource TarvenSelectionBrush}" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource TarvenSelectionBrush}" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem:selected TextBlock">
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem:selected PathIcon">
+    <Setter Property="Foreground" Value="{StaticResource TarvenPrimaryTextBrush}" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BorderBrush" Value="{StaticResource TarvenAccentBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+
+  <!-- A round, translucent button over content, like the Mac app's sidebar toggle. -->
+  <Style Selector="Button.chrome">
+    <Setter Property="Width" Value="34" />
+    <Setter Property="Height" Value="34" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="17" />
+    <Setter Property="Background" Value="#66282C2F" />
+    <Setter Property="Foreground" Value="{StaticResource TarvenPrimaryTextBrush}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.chrome:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#99383C40" />
+    <Setter Property="Foreground" Value="{StaticResource TarvenPrimaryTextBrush}" />
+  </Style>
+
+  <!-- The white capsule for a page's main action ("Open", "Play"). -->
+  <Style Selector="Button.primary">
+    <Setter Property="Background" Value="#F5F5F7" />
+    <Setter Property="Foreground" Value="#111316" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Padding" Value="22,0" />
+    <Setter Property="MinHeight" Value="{StaticResource TarvenMinimumControlSize}" />
+    <Setter Property="CornerRadius" Value="22" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#FFFFFF" />
+    <Setter Property="Foreground" Value="#111316" />
+  </Style>
+
+  <!-- Cards on shelves. -->
+  <Style Selector="Border.card">
+    <Setter Property="CornerRadius" Value="{StaticResource TarvenCardRadius}" />
+    <Setter Property="Background" Value="{StaticResource TarvenSurfaceBrush}" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+
+  <!-- Window buttons: small neutral circles that stay visible over artwork. -->
+  <Style Selector="Button.windowButton">
+    <Setter Property="Width" Value="26" />
+    <Setter Property="Height" Value="26" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="13" />
+    <Setter Property="Background" Value="#3D2A2E33" />
+    <Setter Property="Foreground" Value="#E6F5F5F7" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.windowButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#66474C53" />
+    <Setter Property="Foreground" Value="#FFFFFFFF" />
+  </Style>
+  <Style Selector="Button.windowButton:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#80565C64" />
+  </Style>
+
+  <!-- A choice card, as on the Mac's welcome screen. -->
+  <Style Selector="Button.choice">
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="Padding" Value="18" />
+    <Setter Property="MinHeight" Value="82" />
+    <Setter Property="CornerRadius" Value="{StaticResource TarvenCardRadius}" />
+    <Setter Property="Background" Value="{StaticResource TarvenSurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource TarvenHairlineBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="Button.choice.recommended">
+    <Setter Property="Background" Value="{StaticResource TarvenRaisedSurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="#2EFFFFFF" />
+  </Style>
+  <Style Selector="Button.choice:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#33373C" />
+    <Setter Property="BorderBrush" Value="#3DFFFFFF" />
+  </Style>
+  <Style Selector="Button.choice.recommended:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#454A4F" />
+  </Style>
+  <Style Selector="Button.choice:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BorderBrush" Value="{StaticResource TarvenAccentBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <Style Selector="Border.choiceSymbol">
+    <Setter Property="Width" Value="44" />
+    <Setter Property="Height" Value="44" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Background" Value="{StaticResource TarvenRaisedSurfaceBrush}" />
+  </Style>
+  <Style Selector="Button.choice.recommended Border.choiceSymbol">
+    <Setter Property="Background" Value="#F0FFFFFF" />
+  </Style>
+  <Style Selector="Button.choice.recommended Border.choiceSymbol PathIcon">
+    <Setter Property="Foreground" Value="#111316" />
+  </Style>
+
+  <!-- A quiet text button, for links like "Back". -->
+  <Style Selector="Button.link">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{StaticResource TarvenAccentBrush}" />
+    <Setter Property="Padding" Value="6,4" />
+  </Style>
+  <Style Selector="Button.link:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#4DA3FF" />
+  </Style>
+
+  <!-- A profile in "Who's watching?". -->
+  <Style Selector="Button.profile">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="14" />
+    <Setter Property="CornerRadius" Value="{StaticResource TarvenCardRadius}" />
+    <Setter Property="Width" Value="150" />
+  </Style>
+  <Style Selector="Button.profile:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource TarvenHoverBrush}" />
+  </Style>
+  <Style Selector="Button.profile:disabled">
+    <Setter Property="Opacity" Value="0.45" />
+  </Style>
+  <Style Selector="Button.profile:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <!-- The PIN as on the Mac's login window: a rounded glass field with an arrow that turns white. -->
+  <Style Selector="Border.pinCapsule">
+    <Setter Property="CornerRadius" Value="26" />
+    <Setter Property="Background" Value="#59101214" />
+    <Setter Property="BorderBrush" Value="#29FFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="Border.pinCapsule.focused">
+    <Setter Property="BorderBrush" Value="{StaticResource TarvenAccentBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <Style Selector="TextBox.pinField">
+    <Style.Resources>
+      <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+      <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+      <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+      <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+      <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+    </Style.Resources>
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="FontWeight" Value="Medium" />
+  </Style>
+  <Style Selector="TextBox.pinField:pointerover /template/ Border#PART_BorderElement, TextBox.pinField:focus /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="Button.pinArrow">
+    <Setter Property="Width" Value="36" />
+    <Setter Property="Height" Value="36" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="18" />
+    <Setter Property="Background" Value="#FFFFFF" />
+    <Setter Property="Foreground" Value="#000000" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.pinArrow:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#E6FFFFFF" />
+    <Setter Property="Foreground" Value="#000000" />
+  </Style>
+  <Style Selector="Button.pinArrow:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#1FFFFFFF" />
+    <Setter Property="Foreground" Value="#80FFFFFF" />
+  </Style>
+  <Style Selector="Button.profileAvatar">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="48" />
+  </Style>
+  <Style Selector="Button.profileAvatar:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Opacity" Value="0.85" />
+  </Style>
+
+  <!-- The season's name as a menu, like the Mac's borderless season menu. -->
+  <Style Selector="Button.seasonMenu">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="8,4" />
+    <Setter Property="CornerRadius" Value="9" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+  </Style>
+  <Style Selector="Button.seasonMenu:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource TarvenHoverBrush}" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+  <Style Selector="Button.seasonMenu:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource TarvenSelectionBrush}" />
+  </Style>
+
+  <!-- A card inside a card (one person in the metadata editor), and small symbol buttons on it. -->
+  <Style Selector="Border.nestedCard">
+    <Setter Property="Background" Value="#0DFFFFFF" />
+    <Setter Property="BorderBrush" Value="#14FFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="12" />
+  </Style>
+  <Style Selector="Button.iconSmall">
+    <Setter Property="Width" Value="28" />
+    <Setter Property="Height" Value="28" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="14" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#CCFFFFFF" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.iconSmall:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource TarvenHoverBrush}" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+  <Style Selector="Button.iconSmall:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#40FFFFFF" />
+  </Style>
+
+  <Style Selector="Button.sidebarFooter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="Padding" Value="10,0" />
+    <Setter Property="MinHeight" Value="46" />
+    <Setter Property="CornerRadius" Value="12" />
+  </Style>
+  <Style Selector="Button.sidebarFooter:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource TarvenHoverBrush}" />
+  </Style>
+
+  <!-- Text fields on the Tarven surface, also while focused. -->
+  <Style Selector="TextBox">
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Background" Value="{StaticResource TarvenSurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="#33FFFFFF" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="12,8" />
+    <Setter Property="MinHeight" Value="40" />
+  </Style>
+  <!-- Text that spans several lines starts at the top. -->
+  <Style Selector="TextBox[AcceptsReturn=True]">
+    <Setter Property="VerticalContentAlignment" Value="Top" />
+  </Style>
+  <Style Selector="TextBox:pointerover /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="#2E3236" />
+    <Setter Property="BorderBrush" Value="#4DFFFFFF" />
+  </Style>
+  <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="#2E3236" />
+    <Setter Property="BorderBrush" Value="{StaticResource TarvenAccentBrush}" />
+  </Style>
+
+  <!-- A card on a shelf or grid: no button chrome, a gentle lift on hover, pressed down a little. -->
+  <Style Selector="Button.card">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="VerticalAlignment" Value="Top" />
+    <Setter Property="RenderTransformOrigin" Value="50%,50%" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.18" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Button.card /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.card:pointerover">
+    <Setter Property="RenderTransform" Value="scale(1.035) translateY(-3px)" />
+  </Style>
+  <Style Selector="Button.card:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.card:pressed">
+    <Setter Property="RenderTransform" Value="scale(0.96)" />
+  </Style>
+  <Style Selector="Button.card:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BorderBrush" Value="{StaticResource TarvenAccentBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+
+  <!-- The paging arrows on a shelf. -->
+  <Style Selector="Button.railArrow">
+    <Setter Property="Width" Value="28" />
+    <Setter Property="Height" Value="52" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="14" />
+    <Setter Property="Background" Value="#CC23272B" />
+    <Setter Property="Foreground" Value="{StaticResource TarvenPrimaryTextBrush}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.railArrow:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#E6383C40" />
+    <Setter Property="Foreground" Value="#FFFFFFFF" />
+  </Style>
+
+  <!-- A selected choice among chip buttons (Moment or Time Range). -->
+  <Style Selector="Button.chip.selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#F5F5F7" />
+    <Setter Property="Foreground" Value="#111316" />
+  </Style>
+  <!-- A whole row that acts as a button, like a list entry; it only lights up on hover. -->
+  <Style Selector="Button.plain">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="6,4" />
+    <Setter Property="CornerRadius" Value="8" />
+  </Style>
+  <Style Selector="Button.plain:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#14FFFFFF" />
+  </Style>
+  <Style Selector="Button.plain:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#22FFFFFF" />
+  </Style>
+  <!-- A button inside a settings card: lighter than the card, so its shape shows. -->
+  <Style Selector="Button.cardAction">
+    <Setter Property="CornerRadius" Value="15" />
+    <Setter Property="Padding" Value="14,6" />
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Background" Value="#24FFFFFF" />
+    <Setter Property="Foreground" Value="{StaticResource TarvenPrimaryTextBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="FontSize" Value="13" />
+  </Style>
+  <Style Selector="Button.cardAction:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#36FFFFFF" />
+    <Setter Property="Foreground" Value="{StaticResource TarvenPrimaryTextBrush}" />
+  </Style>
+  <Style Selector="Button.cardAction:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#44FFFFFF" />
+  </Style>
+
+  <!-- Filter chips on library pages. -->
+  <Style Selector="ToggleButton.chip, Button.chip">
+    <Setter Property="CornerRadius" Value="15" />
+    <Setter Property="Padding" Value="14,5" />
+    <Setter Property="MinHeight" Value="30" />
+    <Setter Property="Background" Value="{StaticResource TarvenSurfaceBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TarvenPrimaryTextBrush}" />
+    <Setter Property="FontSize" Value="13" />
+  </Style>
+  <Style Selector="ToggleButton.chip:checked /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#F5F5F7" />
+    <Setter Property="Foreground" Value="#111316" />
+  </Style>
+  <Style Selector="ToggleButton.chip:checked:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#FFFFFF" />
+    <Setter Property="Foreground" Value="#111316" />
+  </Style>
+
+  <!-- On a card, a chip is lighter than the card so its shape shows; it had the card's own
+       color and looked like loose text (audit Linux D2). -->
+  <Style Selector="Border.card Button.chip, Border.card ToggleButton.chip">
+    <Setter Property="Background" Value="#24FFFFFF" />
+  </Style>
+  <Style Selector="Border.card Button.chip:pointerover /template/ ContentPresenter#PART_ContentPresenter, Border.card ToggleButton.chip:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#36FFFFFF" />
+  </Style>
+
+  <!-- Check boxes are rounded squares, so a list of choices never looks like round option
+       buttons (audit Linux D2). -->
+  <Style Selector="CheckBox">
+    <Setter Property="CornerRadius" Value="5" />
+  </Style>
+  <!-- Expanders look like the cards they sit in, not like black bars (audit Linux D2). -->
+  <Style Selector="Expander /template/ ToggleButton#ExpanderHeader">
+    <Setter Property="Background" Value="#14FFFFFF" />
+    <Setter Property="CornerRadius" Value="10" />
+  </Style>
+  <Style Selector="Expander /template/ ToggleButton#ExpanderHeader:pointerover /template/ Border#ToggleButtonBackground">
+    <Setter Property="Background" Value="#22FFFFFF" />
+  </Style>
+  <Style Selector="Expander">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+
+  <!-- A round action next to the hero's main button (favorite, watchlist, more). -->
+  <Style Selector="Button.heroAction">
+    <Setter Property="Width" Value="44" />
+    <Setter Property="Height" Value="44" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="22" />
+    <Setter Property="Background" Value="#66383C40" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.heroAction:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#99484C52" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+
+  <!-- A sheet over the dimmed window. -->
+  <Style Selector="Border.sheet">
+    <Setter Property="Background" Value="#2A2E32" />
+    <Setter Property="CornerRadius" Value="{StaticResource TarvenCardRadius}" />
+    <Setter Property="Padding" Value="26" />
+    <Setter Property="BorderBrush" Value="#26FFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BoxShadow" Value="0 20 60 0 #80000000" />
+  </Style>
+  <Style Selector="Button.destructive">
+    <Setter Property="Background" Value="#C8423A" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="CornerRadius" Value="15" />
+    <Setter Property="Padding" Value="16,6" />
+  </Style>
+  <Style Selector="Button.destructive:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#DE4B42" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+
+  <Style Selector="Border.banner">
+    <Setter Property="Background" Value="#F02A2E32" />
+    <Setter Property="CornerRadius" Value="16" />
+    <Setter Property="Padding" Value="18,10" />
+    <Setter Property="BorderBrush" Value="#33FFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BoxShadow" Value="0 10 30 0 #66000000" />
+  </Style>
+
+  <!-- Player controls over the picture, drawn like the Mac's: glass capsules with plain symbols. -->
+  <Style Selector="Border.playerMaterial">
+    <Setter Property="Background" Value="#B3202124" />
+    <Setter Property="BorderBrush" Value="#1FFFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BoxShadow" Value="0 6 24 0 #40000000" />
+  </Style>
+  <Style Selector="Border.playerCapsule">
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="4" />
+  </Style>
+  <Style Selector="Border.playerPill">
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="14,8" />
+  </Style>
+  <Style Selector="Border.playerPanel">
+    <Setter Property="CornerRadius" Value="18" />
+    <Setter Property="Padding" Value="24,20" />
+  </Style>
+  <Style Selector="Button.playerControl">
+    <Setter Property="Width" Value="38" />
+    <Setter Property="Height" Value="38" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="19" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#F2FFFFFF" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.playerControl:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#1FFFFFFF" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+  <Style Selector="Button.playerControl:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#14FFFFFF" />
+    <Setter Property="Foreground" Value="#D1FFFFFF" />
+  </Style>
+  <Style Selector="Button.playerControl:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#4DFFFFFF" />
+  </Style>
+  <Style Selector="Button.playerControl.active">
+    <Setter Property="Foreground" Value="{StaticResource TarvenAccentBrush}" />
+  </Style>
+  <!-- The Back button stands alone in its own glass circle. -->
+  <Style Selector="Button.playerControl.playerMaterial">
+    <Setter Property="Width" Value="44" />
+    <Setter Property="Height" Value="44" />
+    <Setter Property="CornerRadius" Value="22" />
+    <Setter Property="Background" Value="#B3202124" />
+    <Setter Property="BorderBrush" Value="#1FFFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="Button.playerControl.playerMaterial:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#CC2C2D31" />
+  </Style>
+  <Style Selector="Button.playerPrimary">
+    <Setter Property="Width" Value="50" />
+    <Setter Property="Height" Value="50" />
+    <Setter Property="Margin" Value="4,0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="25" />
+    <Setter Property="Background" Value="#FFFFFF" />
+    <Setter Property="Foreground" Value="#000000" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.playerPrimary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#F2FFFFFF" />
+    <Setter Property="Foreground" Value="#000000" />
+  </Style>
+  <Style Selector="Button.playerPrimary:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#D1FFFFFF" />
+    <Setter Property="Foreground" Value="#000000" />
+  </Style>
+  <!-- The timeline and volume: a thin white line on a faint track, as on the Mac. -->
+  <Style Selector="Slider.timeline, Slider.volume">
+    <Style.Resources>
+      <SolidColorBrush x:Key="SliderTrackFill" Color="#40FFFFFF" />
+      <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#59FFFFFF" />
+      <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#59FFFFFF" />
+      <SolidColorBrush x:Key="SliderTrackValueFill" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="SliderThumbBackground" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#E6FFFFFF" />
+    </Style.Resources>
+  </Style>
+  <Style Selector="TextBlock.playerTime">
+    <Setter Property="Foreground" Value="#D9FFFFFF" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontFeatures" Value="+tnum" />
+  </Style>
+  <Style Selector="Button.skipIntro">
+    <Setter Property="MinHeight" Value="58" />
+    <Setter Property="Padding" Value="26,0" />
+    <Setter Property="CornerRadius" Value="29" />
+    <Setter Property="Background" Value="#CC202124" />
+    <Setter Property="BorderBrush" Value="#40FFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.skipIntro:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#E63A3B40" />
+  </Style>
+  <Style Selector="Border.upNext">
+    <Setter Property="Background" Value="#E6202326" />
+    <Setter Property="CornerRadius" Value="{StaticResource TarvenCardRadius}" />
+    <Setter Property="Padding" Value="20" />
+    <Setter Property="BorderBrush" Value="#33FFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="Border.previewBubble">
+    <Setter Property="Background" Value="#E6202326" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Padding" Value="8" />
+  </Style>
+
+  <Style Selector="Button.link:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#4DFFFFFF" />
+  </Style>
+</Styles>

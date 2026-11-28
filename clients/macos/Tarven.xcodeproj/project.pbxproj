@@ -1,0 +1,525 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 71;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		D30000000000000000000F02 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000F02; };
+		F15500000000000000000001 /* HostWatchdogPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15500000000000000000002 /* HostWatchdogPolicy.swift */; };
+		F80000000000000000000001 = {isa = PBXBuildFile; fileRef = F80000000000000000000011; };
+		F80000000000000000000002 = {isa = PBXBuildFile; fileRef = F80000000000000000000012; };
+		F80000000000000000000003 = {isa = PBXBuildFile; fileRef = F80000000000000000000013; };
+		D50000000000000000000001 /* VLCKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D50000000000000000000010 /* VLCKit.xcframework */; };
+		D50000000000000000000002 /* VLCKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = D50000000000000000000010 /* VLCKit.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		D50000000000000000000003 /* VLCKit-COPYING.txt in Resources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000011 /* VLCKit-COPYING.txt */; };
+		D50000000000000000000031 /* CHANGELOG.md in Resources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000030 /* CHANGELOG.md */; };
+		E70000000000000000000001 /* Tarven Server Host.app in Embed Server Host */ = {isa = PBXBuildFile; fileRef = E70000000000000000000002 /* Tarven Server Host.app */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		E7000000000000000000000A /* HostLaunchSecurity.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7000000000000000000000B /* HostLaunchSecurity.swift */; };
+		E7000000000000000000000C /* ServerDataMigrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7000000000000000000000D /* ServerDataMigrator.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B4000000000000000000000F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A4000000000000000000000A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A40000000000000000000006;
+			remoteInfo = Tarven;
+		};
+		B40000000000000000000010 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A4000000000000000000000A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A40000000000000000000006;
+			remoteInfo = Tarven;
+		};
+		E70000000000000000000003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A4000000000000000000000A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E70000000000000000000010;
+			remoteInfo = TarvenServerHost;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		F80000000000000000000020 = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = Contents/Library/LaunchAgents; dstSubfolderSpec = 1; files = (F80000000000000000000001, F80000000000000000000002, ); name = "Embed Launch Agents"; runOnlyForDeploymentPostprocessing = 0; };
+		D50000000000000000000020 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				D50000000000000000000002 /* VLCKit.xcframework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E70000000000000000000004 /* Embed Server Host */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
+			files = (
+				E70000000000000000000001 /* Tarven Server Host.app in Embed Server Host */,
+			);
+			name = "Embed Server Host";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		D20000000000000000000F02 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = Configuration/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
+		F15500000000000000000002 /* HostWatchdogPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tarven/Hosting/HostWatchdogPolicy.swift; sourceTree = "<group>"; };
+		F80000000000000000000011 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = org.tarven.mac.host.background.plist; sourceTree = "<group>"; };
+		F80000000000000000000012 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = org.tarven.mac.host.login.plist; sourceTree = "<group>"; };
+		F80000000000000000000013 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tarven/Hosting/HostServiceSettings.swift; sourceTree = "<group>"; };
+		A40000000000000000000001 /* Tarven.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Tarven.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		B40000000000000000000001 /* TarvenTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TarvenTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B40000000000000000000002 /* TarvenUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TarvenUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C40000000000000000000001 /* Tarven-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Tarven-Info.plist"; sourceTree = "<group>"; };
+		C40000000000000000000002 /* Tarven.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Tarven.entitlements; sourceTree = "<group>"; };
+		C40000000000000000000005 /* TarvenServerHost.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TarvenServerHost.entitlements; sourceTree = "<group>"; };
+		C40000000000000000000003 /* BuildNumber.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = BuildNumber.xcconfig; sourceTree = "<group>"; };
+		D50000000000000000000010 /* VLCKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = VLCKit.xcframework; sourceTree = "<group>"; };
+		D50000000000000000000011 /* VLCKit-COPYING.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "VLCKit-COPYING.txt"; sourceTree = "<group>"; };
+		D50000000000000000000030 /* CHANGELOG.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = CHANGELOG.md; path = ../../CHANGELOG.md; sourceTree = SOURCE_ROOT; };
+		E70000000000000000000002 /* Tarven Server Host.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Tarven Server Host.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		E70000000000000000000005 /* TarvenServerHost-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "TarvenServerHost-Info.plist"; sourceTree = "<group>"; };
+		E7000000000000000000000B /* HostLaunchSecurity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tarven/Hosting/HostLaunchSecurity.swift; sourceTree = "<group>"; };
+		E7000000000000000000000D /* ServerDataMigrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tarven/Hosting/ServerDataMigrator.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		A40000000000000000000002 /* Tarven */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Tarven; sourceTree = "<group>"; };
+		B40000000000000000000003 /* TarvenTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = TarvenTests; sourceTree = "<group>"; };
+		B40000000000000000000004 /* TarvenUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = TarvenUITests; sourceTree = "<group>"; };
+		E70000000000000000000006 /* TarvenServerHost */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = TarvenServerHost; sourceTree = "<group>"; };
+		F99100000000000000000001 /* UpdateHandoff */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = UpdateHandoff; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A40000000000000000000003 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (D50000000000000000000001 /* VLCKit.xcframework in Frameworks */, ); runOnlyForDeploymentPostprocessing = 0; };
+		B40000000000000000000006 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B40000000000000000000009 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		E70000000000000000000007 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A40000000000000000000004 = {
+			isa = PBXGroup;
+			children = (
+				F15500000000000000000002 /* HostWatchdogPolicy.swift */,
+				E7000000000000000000000B /* HostLaunchSecurity.swift */,
+				F80000000000000000000013,
+				E7000000000000000000000D /* ServerDataMigrator.swift */,
+				F99100000000000000000001 /* UpdateHandoff */,
+				A40000000000000000000002 /* Tarven */,
+				E70000000000000000000006 /* TarvenServerHost */,
+				B40000000000000000000003 /* TarvenTests */,
+				B40000000000000000000004 /* TarvenUITests */,
+				C40000000000000000000004 /* Configuration */,
+				D50000000000000000000012 /* Dependencies */,
+				A40000000000000000000005 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A40000000000000000000005 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000001 /* Tarven.app */,
+				E70000000000000000000002 /* Tarven Server Host.app */,
+				B40000000000000000000001 /* TarvenTests.xctest */,
+				B40000000000000000000002 /* TarvenUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		C40000000000000000000004 /* Configuration */ = {
+			isa = PBXGroup;
+			children = (
+				F80000000000000000000011,
+				F80000000000000000000012,
+				C40000000000000000000001 /* Tarven-Info.plist */,
+				E70000000000000000000005 /* TarvenServerHost-Info.plist */,
+				C40000000000000000000002 /* Tarven.entitlements */,
+				C40000000000000000000005 /* TarvenServerHost.entitlements */,
+				C40000000000000000000003 /* BuildNumber.xcconfig */,
+			);
+			path = Configuration;
+			sourceTree = "<group>";
+		};
+		D50000000000000000000012 /* Dependencies */ = {
+			isa = PBXGroup;
+			children = (
+				D50000000000000000000010 /* VLCKit.xcframework */,
+				D50000000000000000000011 /* VLCKit-COPYING.txt */,
+				D50000000000000000000030 /* CHANGELOG.md */,
+			);
+			path = Dependencies;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A40000000000000000000006 /* Tarven */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A40000000000000000000007 /* Build configuration list for PBXNativeTarget "Tarven" */;
+			buildPhases = (
+				A40000000000000000000008 /* Sources */,
+				A40000000000000000000003 /* Frameworks */,
+				D50000000000000000000020 /* Embed Frameworks */,
+				E70000000000000000000004 /* Embed Server Host */,
+				F80000000000000000000020 /* Embed Launch Agents */,
+				A40000000000000000000009 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = (E70000000000000000000011 /* PBXTargetDependency */);
+			fileSystemSynchronizedGroups = (A40000000000000000000002 /* Tarven */, F99100000000000000000001 /* UpdateHandoff */);
+			name = Tarven;
+			packageProductDependencies = ();
+			productName = "Tarven";
+			productReference = A40000000000000000000001 /* Tarven.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B4000000000000000000000B /* TarvenTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B40000000000000000000011 /* Build configuration list for PBXNativeTarget "TarvenTests" */;
+			buildPhases = (
+				B40000000000000000000005 /* Sources */,
+				B40000000000000000000006 /* Frameworks */,
+				B40000000000000000000007 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = (B4000000000000000000000D /* PBXTargetDependency */);
+			fileSystemSynchronizedGroups = (B40000000000000000000003 /* TarvenTests */);
+			name = TarvenTests;
+			packageProductDependencies = ();
+			productName = TarvenTests;
+			productReference = B40000000000000000000001 /* TarvenTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		B4000000000000000000000C /* TarvenUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B40000000000000000000012 /* Build configuration list for PBXNativeTarget "TarvenUITests" */;
+			buildPhases = (
+				B40000000000000000000008 /* Sources */,
+				B40000000000000000000009 /* Frameworks */,
+				B4000000000000000000000A /* Resources */,
+			);
+			buildRules = ();
+			dependencies = (B4000000000000000000000E /* PBXTargetDependency */);
+			fileSystemSynchronizedGroups = (B40000000000000000000004 /* TarvenUITests */);
+			name = TarvenUITests;
+			packageProductDependencies = ();
+			productName = TarvenUITests;
+			productReference = B40000000000000000000002 /* TarvenUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		E70000000000000000000010 /* TarvenServerHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E70000000000000000000012 /* Build configuration list for PBXNativeTarget "TarvenServerHost" */;
+			buildPhases = (
+				E70000000000000000000008 /* Sources */,
+				E70000000000000000000007 /* Frameworks */,
+				E70000000000000000000009 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = ();
+			fileSystemSynchronizedGroups = (E70000000000000000000006 /* TarvenServerHost */, F99100000000000000000001 /* UpdateHandoff */);
+			name = TarvenServerHost;
+			packageProductDependencies = ();
+			productName = "Tarven Server Host";
+			productReference = E70000000000000000000002 /* Tarven Server Host.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A4000000000000000000000A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = {
+					A40000000000000000000006 = {CreatedOnToolsVersion = 27.0;};
+					B4000000000000000000000B = {CreatedOnToolsVersion = 27.0; TestTargetID = A40000000000000000000006;};
+					B4000000000000000000000C = {CreatedOnToolsVersion = 27.0; TestTargetID = A40000000000000000000006;};
+					E70000000000000000000010 = {CreatedOnToolsVersion = 27.0;};
+				};
+			};
+			buildConfigurationList = A4000000000000000000000B /* Build configuration list for PBXProject "Tarven" */;
+			compatibilityVersion = "Xcode 16.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = A40000000000000000000004;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = ();
+			productRefGroup = A40000000000000000000005 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A40000000000000000000006 /* Tarven */,
+				E70000000000000000000010 /* TarvenServerHost */,
+				B4000000000000000000000B /* TarvenTests */,
+				B4000000000000000000000C /* TarvenUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A40000000000000000000009 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (D30000000000000000000F02 /* PrivacyInfo.xcprivacy in Resources */, D50000000000000000000003 /* VLCKit-COPYING.txt in Resources */, D50000000000000000000031 /* CHANGELOG.md in Resources */, ); runOnlyForDeploymentPostprocessing = 0; };
+		B40000000000000000000007 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B4000000000000000000000A /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		E70000000000000000000009 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A40000000000000000000008 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B40000000000000000000005 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B40000000000000000000008 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		E70000000000000000000008 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (F15500000000000000000001 /* HostWatchdogPolicy.swift in Sources */, E7000000000000000000000A /* HostLaunchSecurity.swift in Sources */, E7000000000000000000000C /* ServerDataMigrator.swift in Sources */, F80000000000000000000003, ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B4000000000000000000000D /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = A40000000000000000000006 /* Tarven */; targetProxy = B4000000000000000000000F /* PBXContainerItemProxy */; };
+		B4000000000000000000000E /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = A40000000000000000000006 /* Tarven */; targetProxy = B40000000000000000000010 /* PBXContainerItemProxy */; };
+		E70000000000000000000011 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = E70000000000000000000010 /* TarvenServerHost */; targetProxy = E70000000000000000000003 /* PBXContainerItemProxy */; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		A4000000000000000000000C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = B5N7JVK37J;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				LM_FILTER_WARNINGS = YES;
+				LM_FORCE_LINK_GENERATION = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A4000000000000000000000D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = B5N7JVK37J;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				LM_FILTER_WARNINGS = YES;
+				LM_FORCE_LINK_GENERATION = YES;
+				ONLY_ACTIVE_ARCH = NO;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		A4000000000000000000000E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = C40000000000000000000003 /* BuildNumber.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Configuration/Tarven.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEVELOPMENT_TEAM = B5N7JVK37J;
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_PREVIEWS = YES;
+				EXECUTABLE_NAME = Tarven;
+				ASSETCATALOG_COMPILER_APPICON_NAME = TarvenAppIcon;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Configuration/Tarven-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = "$(TARVEN_BUNDLE_ID_BASE)";
+				PRODUCT_MODULE_NAME = Tarven;
+				PRODUCT_NAME = "Tarven";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		A4000000000000000000000F /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = C40000000000000000000003 /* BuildNumber.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Configuration/Tarven.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				COPY_PHASE_STRIP = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				EXECUTABLE_NAME = Tarven;
+				ASSETCATALOG_COMPILER_APPICON_NAME = TarvenAppIcon;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Configuration/Tarven-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = "$(TARVEN_BUNDLE_ID_BASE)";
+				PRODUCT_MODULE_NAME = Tarven;
+				PRODUCT_NAME = "Tarven";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+		B40000000000000000000013 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = B5N7JVK37J;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@loader_path/../Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = org.tarven.mac.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Tarven.app/Contents/MacOS/Tarven";
+			};
+			name = Debug;
+		};
+		B40000000000000000000014 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@loader_path/../Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = org.tarven.mac.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Tarven.app/Contents/MacOS/Tarven";
+			};
+			name = Release;
+		};
+		B40000000000000000000015 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = B5N7JVK37J;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@loader_path/../Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = org.tarven.mac.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TEST_TARGET_NAME = Tarven;
+			};
+			name = Debug;
+		};
+		B40000000000000000000016 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@loader_path/../Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = org.tarven.mac.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TEST_TARGET_NAME = Tarven;
+			};
+			name = Release;
+		};
+		E70000000000000000000013 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = C40000000000000000000003 /* BuildNumber.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Configuration/TarvenServerHost.entitlements;
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = B5N7JVK37J;
+				ENABLE_HARDENED_RUNTIME = NO;
+				EXECUTABLE_NAME = TarvenServerHost;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Configuration/TarvenServerHost-Info.plist";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(TARVEN_BUNDLE_ID_BASE).server-host";
+				PRODUCT_MODULE_NAME = TarvenServerHost;
+				PRODUCT_NAME = "Tarven Server Host";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		E70000000000000000000014 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = C40000000000000000000003 /* BuildNumber.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Configuration/TarvenServerHost.entitlements;
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				EXECUTABLE_NAME = TarvenServerHost;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Configuration/TarvenServerHost-Info.plist";
+				PRODUCT_BUNDLE_IDENTIFIER = "$(TARVEN_BUNDLE_ID_BASE).server-host";
+				PRODUCT_MODULE_NAME = TarvenServerHost;
+				PRODUCT_NAME = "Tarven Server Host";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A40000000000000000000007 /* Build configuration list for PBXNativeTarget "Tarven" */ = {isa = XCConfigurationList; buildConfigurations = (A4000000000000000000000E /* Debug */, A4000000000000000000000F /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A4000000000000000000000B /* Build configuration list for PBXProject "Tarven" */ = {isa = XCConfigurationList; buildConfigurations = (A4000000000000000000000C /* Debug */, A4000000000000000000000D /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		B40000000000000000000011 /* Build configuration list for PBXNativeTarget "TarvenTests" */ = {isa = XCConfigurationList; buildConfigurations = (B40000000000000000000013 /* Debug */, B40000000000000000000014 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		B40000000000000000000012 /* Build configuration list for PBXNativeTarget "TarvenUITests" */ = {isa = XCConfigurationList; buildConfigurations = (B40000000000000000000015 /* Debug */, B40000000000000000000016 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		E70000000000000000000012 /* Build configuration list for PBXNativeTarget "TarvenServerHost" */ = {isa = XCConfigurationList; buildConfigurations = (E70000000000000000000013 /* Debug */, E70000000000000000000014 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = A4000000000000000000000A /* Project object */;
+}

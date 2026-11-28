@@ -4,17 +4,17 @@ set -euo pipefail
 repository_root=${0:A:h:h}
 source "$repository_root/scripts/workspace-paths.sh"
 build_number=$(sed -n 's/^CURRENT_PROJECT_VERSION = \([0-9][0-9]*\)$/\1/p' "$repository_root/clients/macos/Configuration/BuildNumber.xcconfig")
-source_candidate=${1:-"$other_root/Build/Build $build_number/Aurelia.app"}
+source_candidate=${1:-"$other_root/Build/Build $build_number/Tarven.app"}
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"
-runtime_root="/private/tmp/Aurelia/$run_id"
-candidate="$runtime_root/Aurelia.app"
+runtime_root="/private/tmp/Tarven/$run_id"
+candidate="$runtime_root/Tarven.app"
 result_root="$other_root/Test Results"
 log_root="$other_root/Logs"
-report="$result_root/Aurelia-NativeHost-$run_id.txt"
-copied_log="$log_root/Aurelia-NativeHost-$run_id.log"
-helper="$candidate/Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost"
-application="$candidate/Contents/MacOS/Aurelia"
-server="$candidate/Contents/Resources/Server/osx-$([[ $(uname -m) == arm64 ]] && print arm64 || print x64)/Aurelia.Server"
+report="$result_root/Tarven-NativeHost-$run_id.txt"
+copied_log="$log_root/Tarven-NativeHost-$run_id.log"
+helper="$candidate/Contents/Helpers/Tarven Server Host.app/Contents/MacOS/TarvenServerHost"
+application="$candidate/Contents/MacOS/Tarven"
+server="$candidate/Contents/Resources/Server/osx-$([[ $(uname -m) == arm64 ]] && print arm64 || print x64)/Tarven.Server"
 data_root="$runtime_root/Data"
 host_log_root="$runtime_root/Logs"
 secret="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
@@ -42,7 +42,7 @@ cleanup() {
         "$response_path" >>"$report" 2>/dev/null || true
     done
     if [[ -f "$runtime_root/helper-output.log" ]]; then
-      cp "$runtime_root/helper-output.log" "$log_root/Aurelia-NativeHost-$run_id-helper.log"
+      cp "$runtime_root/helper-output.log" "$log_root/Tarven-NativeHost-$run_id-helper.log"
     fi
     if [[ -f "$host_log_root/server.log" ]]; then
       cp "$host_log_root/server.log" "$copied_log"
@@ -64,7 +64,7 @@ cleanup() {
   [[ -n "$configuration" ]] && rm -f "$configuration"
   [[ -n "$secret_pipe" ]] && rm -f "$secret_pipe"
   [[ -n "$rendezvous" ]] && rm -f "$rendezvous"
-  if [[ "$runtime_root" == /private/tmp/Aurelia/* ]]; then
+  if [[ "$runtime_root" == /private/tmp/Tarven/* ]]; then
     find "$runtime_root" -depth -delete 2>/dev/null || true
   fi
   return "$exit_code"
@@ -84,7 +84,7 @@ fail() {
     tail -3 "$runtime_root/connection-output.jsonl" >>"$report"
   fi
   if [[ -f "$runtime_root/helper-output.log" ]]; then
-    cp "$runtime_root/helper-output.log" "$log_root/Aurelia-NativeHost-$run_id-helper.log"
+    cp "$runtime_root/helper-output.log" "$log_root/Tarven-NativeHost-$run_id-helper.log"
   fi
   if [[ -f "$host_log_root/server.log" ]]; then
     cp "$host_log_root/server.log" "$copied_log"
@@ -122,26 +122,26 @@ chmod 700 "$data_root"
 mkdir -m 700 "$bootstrap_root"
 [[ -d "$source_candidate" ]] || fail "The Build $build_number app candidate does not exist."
 /usr/bin/ditto "$source_candidate" "$candidate"
-[[ -x "$application" ]] || fail "The native Aurelia app is missing."
+[[ -x "$application" ]] || fail "The native Tarven app is missing."
 [[ -x "$helper" ]] || fail "The native server host helper is missing."
 [[ -x "$server" ]] || fail "The embedded server for this Mac's architecture is missing."
 if lsof -nP -iTCP:43110 -sTCP:LISTEN >/dev/null 2>&1; then
   fail "Loopback port 43110 is already occupied; no existing process was stopped."
 fi
 
-print -r -- "Aurelia Build $build_number native host smoke test" >"$report"
+print -r -- "Tarven Build $build_number native host smoke test" >"$report"
 print -r -- "Run: $run_id" >>"$report"
 
 lan_port="$(ruby -rsocket -e 'server = TCPServer.new("127.0.0.1", 0); puts server.addr[1]; server.close')"
-open -n -g --env AURELIA_PREFLIGHT_TEST=1 --env "AURELIA_DATA_DIR=$data_root" \
-  "$candidate" --args -AureliaOperatingMode client
+open -n -g --env TARVEN_PREFLIGHT_TEST=1 --env "TARVEN_DATA_DIR=$data_root" \
+  "$candidate" --args -TarvenOperatingMode client
 for _ in {1..50}; do
   application_pid="$(pgrep -f "^$application( |$)" | tail -1 || true)"
   [[ -n "$application_pid" ]] && kill -0 "$application_pid" 2>/dev/null && break
   sleep 0.1
 done
 [[ -n "$application_pid" ]] && kill -0 "$application_pid" 2>/dev/null \
-  || fail "The isolated parent Aurelia app did not start through Launch Services."
+  || fail "The isolated parent Tarven app did not start through Launch Services."
 
 mkdir -p "$bootstrap_root"
 configuration="$bootstrap_root/launch-$application_pid.json"
@@ -154,14 +154,14 @@ jq -cn \
   --arg secretPipePath "$secret_pipe" \
   --arg dataDirectory "$data_root" \
   --arg logDirectory "$host_log_root" \
-  --arg serverName 'Aurelia Host Smoke' \
+  --arg serverName 'Tarven Host Smoke' \
   --argjson lanPort "$lan_port" \
   '{version:1,parentProcessID:$parentProcessID,rendezvousPath:$rendezvousPath,secretPipePath:$secretPipePath,dataDirectory:$dataDirectory,logDirectory:$logDirectory,serverName:$serverName,lanPort:$lanPort}' \
   >"$configuration"
 chmod 600 "$configuration"
 exec 9<>"$secret_pipe"
 print -rn -- "$secret" >&9
-AURELIA_HOST_BOOTSTRAP_DIR="$bootstrap_root" \
+TARVEN_HOST_BOOTSTRAP_DIR="$bootstrap_root" \
   "$helper" >"$runtime_root/helper-output.log" 2>&1 &
 helper_pid=$!
 [[ -n "$helper_pid" ]] && kill -0 "$helper_pid" 2>/dev/null \
@@ -183,7 +183,7 @@ wrong_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
 bootstrap="$(jq -r '.bootstrapToken // empty' "$runtime_root/status.json")"
 [[ ${#bootstrap} -ge 43 ]] || fail "The helper did not provide a one-time bootstrap token."
 configure_body="$(jq -cn \
-  --arg serverName 'Aurelia Host Smoke' --argjson lanHttpsPort "$lan_port" \
+  --arg serverName 'Tarven Host Smoke' --argjson lanHttpsPort "$lan_port" \
   '{version:1,serverName:$serverName,lanAccessEnabled:true,lanHttpsPort:$lanHttpsPort}')"
 last_phase='initial configuration'
 curl --silent --show-error --fail-with-body \
@@ -197,7 +197,7 @@ setup_body="$(jq -cn \
 last_phase='owner setup'
 curl --silent --show-error --fail-with-body \
   --header 'Content-Type: application/json' \
-  --header "X-Aurelia-Bootstrap-Token: $bootstrap" \
+  --header "X-Tarven-Bootstrap-Token: $bootstrap" \
   --data "$setup_body" \
   'http://127.0.0.1:43110/api/v1/setup/owner' >"$runtime_root/authentication.json"
 
@@ -257,7 +257,7 @@ approved_post() {
   approval_token="$(jq -r '.token' "$runtime_root/operation-approval.json")"
   last_phase="operation: $action_path"
   curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
-    --header "Authorization: Bearer $token" --header "X-Aurelia-Approval: $approval_token" \
+    --header "Authorization: Bearer $token" --header "X-Tarven-Approval: $approval_token" \
     --header 'Content-Type: application/json' --data "$request_body" "$https_base$action_path"
 }
 
@@ -294,7 +294,7 @@ curl --silent --show-error --fail-with-body --insecure \
 approval="$(jq -r '.token' "$runtime_root/approval.json")"
 curl --silent --show-error --fail-with-body --insecure \
   --pinnedpubkey "$curl_pin" \
-  --header "X-Aurelia-Approval: $approval" \
+  --header "X-Tarven-Approval: $approval" \
   --header "Authorization: Bearer $token" --header 'Content-Type: application/json' \
   --data "$library_body" "$https_base/api/v1/libraries" >"$runtime_root/library.json"
 library_id="$(jq -r '.id // empty' "$runtime_root/library.json")"
@@ -477,7 +477,7 @@ curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin
 jq -e --arg id "$note_id" 'length == 1 and .[0].id == $id and .[0].revision == 1 and .[0].text == "Synthetic private scene note"' \
   "$runtime_root/restored-notes.json" >/dev/null || fail "Restore lost private scene note identity, revision or text."
 [[ "$(jq -r '.publicKeyFingerprint' "$runtime_root/server-info.json")" == "$reported_fingerprint" ]] || fail "Restore lost the existing TLS identity."
-[[ "$(sqlite3 "$data_root/aurelia.db" 'SELECT count(*) FROM LibraryRoots;')" == 1 ]] || fail "The isolated library was not restored."
+[[ "$(sqlite3 "$data_root/tarven.db" 'SELECT count(*) FROM LibraryRoots;')" == 1 ]] || fail "The isolated library was not restored."
 curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
   --header "Authorization: Bearer $token" \
   "$https_base/api/v1/media/$media_id/editor" >"$runtime_root/editor-restored.json"
@@ -523,9 +523,9 @@ kill -0 "$helper_pid" 2>/dev/null && fail "The helper did not stop after a grace
 wait "$helper_pid" 2>/dev/null || true
 helper_pid=''
 
-quick_check="$(sqlite3 "$data_root/aurelia.db" 'PRAGMA quick_check;')"
-integrity_check="$(sqlite3 "$data_root/aurelia.db" 'PRAGMA integrity_check;')"
-foreign_keys="$(sqlite3 "$data_root/aurelia.db" 'PRAGMA foreign_key_check;')"
+quick_check="$(sqlite3 "$data_root/tarven.db" 'PRAGMA quick_check;')"
+integrity_check="$(sqlite3 "$data_root/tarven.db" 'PRAGMA integrity_check;')"
+foreign_keys="$(sqlite3 "$data_root/tarven.db" 'PRAGMA foreign_key_check;')"
 [[ "$quick_check" == ok && "$integrity_check" == ok && -z "$foreign_keys" ]] \
   || fail "SQLite integrity verification failed."
 
@@ -551,14 +551,14 @@ jq -cn \
   --arg secretPipePath "$secret_pipe" \
   --arg dataDirectory "$data_root" \
   --arg logDirectory "$host_log_root" \
-  --arg serverName 'Aurelia Host Smoke' \
+  --arg serverName 'Tarven Host Smoke' \
   --argjson lanPort "$lan_port" \
   '{version:1,parentProcessID:$parentProcessID,rendezvousPath:$rendezvousPath,secretPipePath:$secretPipePath,dataDirectory:$dataDirectory,logDirectory:$logDirectory,serverName:$serverName,lanPort:$lanPort}' \
   >"$configuration"
 chmod 600 "$configuration"
 exec 9<>"$secret_pipe"
 print -rn -- "$secret" >&9
-AURELIA_HOST_BOOTSTRAP_DIR="$bootstrap_root" \
+TARVEN_HOST_BOOTSTRAP_DIR="$bootstrap_root" \
   "$helper" >"$runtime_root/helper-output.log" 2>&1 &
 helper_pid=$!
 [[ -n "$helper_pid" ]] && kill -0 "$helper_pid" 2>/dev/null \
@@ -609,12 +609,12 @@ for requested_mode in host client; do
     jq '. + {locallyManaged:true}' "$data_root/connection.json" >"$data_root/connection-next.json"
     mv "$data_root/connection-next.json" "$data_root/connection.json"
   fi
-  open -n -g --env AURELIA_PREFLIGHT_TEST=1 --env AURELIA_PREFLIGHT_CONNECTION_TEST=1 \
-    --env "AURELIA_DATA_DIR=$data_root" --env "AURELIA_LOG_DIR=$host_log_root" \
-    --env "AURELIA_PREFLIGHT_PROFILE=$(jq -c . "$data_root/connection.json")" \
+  open -n -g --env TARVEN_PREFLIGHT_TEST=1 --env TARVEN_PREFLIGHT_CONNECTION_TEST=1 \
+    --env "TARVEN_DATA_DIR=$data_root" --env "TARVEN_LOG_DIR=$host_log_root" \
+    --env "TARVEN_PREFLIGHT_PROFILE=$(jq -c . "$data_root/connection.json")" \
     --stdout "$runtime_root/connection-output.jsonl" \
     "$candidate" --args -ApplePersistenceIgnoreState YES \
-    -AureliaOperatingMode "$requested_mode" -AureliaOperatingModeSelectionVersion 1
+    -TarvenOperatingMode "$requested_mode" -TarvenOperatingModeSelectionVersion 1
   for _ in {1..100}; do
     application_pid="$(pgrep -f "^$application( |$)" | tail -1 || true)"
     [[ -n "$application_pid" ]] && break

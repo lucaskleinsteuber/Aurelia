@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createSceneNotes, formatNoteTime, parseNoteTime, notePayload } from "../../src/Aurelia.Server/WebApp/js/player-notes.js";
-import { ApiError } from "../../src/Aurelia.Server/WebApp/js/api.js";
+import { createSceneNotes, formatNoteTime, parseNoteTime, notePayload } from "../../src/Tarven.Server/WebApp/js/player-notes.js";
+import { ApiError } from "../../src/Tarven.Server/WebApp/js/api.js";
 import { installDOM, flush, deferred, all, button, input } from "./dom-fixture.mjs";
 const note = { id: "note", revision: 7, startMilliseconds: 1500, endMilliseconds: 2500, text: "Synthetic scene" };
 function fixture(t, overrides = {}) {

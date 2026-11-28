@@ -1,5 +1,5 @@
 #!/bin/bash
-# Starts the installed native Aurelia package once on Wayland and once on X11 without
+# Starts the installed native Tarven package once on Wayland and once on X11 without
 # interacting with either window. Synthetic XDG folders and a private D-Bus session isolate the
 # owner's settings/keyring; no server, library or media is opened. Evidence stays in Local.
 # Usage: scripts/test-linux-app-startup.sh --expected-version '1.0.0 (5)' [--verify-instance]
@@ -12,7 +12,7 @@ states, toplevels = {}, {}
 for line in pathlib.Path(sys.argv[1]).read_text(errors='replace').splitlines():
     match = re.search(r'xdg_wm_base[#@]\d+\.get_xdg_surface\(new id xdg_surface[#@](\d+), wl_surface[#@](\d+)\)', line)
     if match:
-        states[match[1]] = dict(surface=match[2], lines=[line], configured=set(), acknowledged=False, attached=False, aurelia=False)
+        states[match[1]] = dict(surface=match[2], lines=[line], configured=set(), acknowledged=False, attached=False, tarven=False)
         continue
     match = re.search(r'xdg_surface[#@](\d+)\.get_toplevel\(new id xdg_toplevel[#@](\d+)\)', line)
     if match and match[1] in states:
@@ -22,7 +22,7 @@ for line in pathlib.Path(sys.argv[1]).read_text(errors='replace').splitlines():
     match = re.search(r'xdg_toplevel[#@](\d+)\.set_app_id\("([^"]+)"\)', line)
     if match and match[1] in toplevels:
         state = toplevels[match[1]]
-        state['aurelia'] = match[2] == 'io.github.lucasfd3.Aurelia'
+        state['tarven'] = match[2] == 'org.tarven.Tarven'
         state['lines'].append(line)
         continue
     match = re.search(r'xdg_surface[#@](\d+)\.(configure|ack_configure)\((\d+)\)', line)
@@ -38,7 +38,7 @@ for line in pathlib.Path(sys.argv[1]).read_text(errors='replace').splitlines():
             if state['surface'] != match[1] or not state['acknowledged']: continue
             if match[2].startswith('attach'): state['attached'] = True
             state['lines'].append(line)
-            if match[2] == 'commit()' and state['attached'] and state['aurelia']:
+            if match[2] == 'commit()' and state['attached'] and state['tarven']:
                 pathlib.Path(sys.argv[2]).write_text('\n'.join(state['lines']) + '\n')
                 sys.exit(0)
 sys.exit(1)
@@ -134,9 +134,9 @@ repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 expected=$2
 verify_instance=false
 [ "${3:-}" != --verify-instance ] || verify_instance=true
-binary=/usr/lib/aurelia-desktop/aurelia-desktop
-[ -x "$binary" ] && [ -r /usr/lib/aurelia-desktop/VERSION ] || { echo "The native Aurelia package is not installed." >&2; exit 1; }
-installed=$(cat /usr/lib/aurelia-desktop/VERSION)
+binary=/usr/lib/tarven-desktop/tarven-desktop
+[ -x "$binary" ] && [ -r /usr/lib/tarven-desktop/VERSION ] || { echo "The native Tarven package is not installed." >&2; exit 1; }
+installed=$(cat /usr/lib/tarven-desktop/VERSION)
 [ "$installed" = "$expected" ] || { echo "Expected $expected, installed $installed; no app was started." >&2; exit 1; }
 for tool in dbus-run-session rg xprop xwininfo timeout awk readlink sha256sum python3; do
   command -v "$tool" >/dev/null || { echo "$tool is required." >&2; exit 1; }
@@ -161,7 +161,7 @@ run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 results="$other_root/Test Results/LinuxAppStartup-$run_id"
 mkdir -p "$results"
 printf 'installed=%s\nchecked-at=%s\n' "$installed" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$results/installed.txt"
-sha256sum "$binary" /usr/lib/aurelia-desktop/aurelia-desktop.dll > "$results/installed.sha256"
+sha256sum "$binary" /usr/lib/tarven-desktop/tarven-desktop.dll > "$results/installed.sha256"
 
 for backend in wayland x11; do
   evidence="$results/$backend"
@@ -189,11 +189,11 @@ BUS
     XDG_STATE_HOME="$synthetic_home/state" XDG_CACHE_HOME="$synthetic_home/cache" \
     XDG_RUNTIME_DIR="$runtime" TMPDIR="$evidence/tmp" XAUTHORITY="$desktop_authority" \
     WAYLAND_DISPLAY="$test_wayland" DISPLAY="$test_display" WAYLAND_DEBUG=client \
-    AURELIA_DISPLAY_BACKEND="$backend" AURELIA_DESKTOP_SERVER="$synthetic_home/server-disabled" \
-    PULSE_SERVER="unix:$evidence/no-audio" PIPEWIRE_REMOTE=aurelia-startup-no-audio \
+    TARVEN_DISPLAY_BACKEND="$backend" TARVEN_DESKTOP_SERVER="$synthetic_home/server-disabled" \
+    PULSE_SERVER="unix:$evidence/no-audio" PIPEWIRE_REMOTE=tarven-startup-no-audio \
     DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     dbus-run-session --config-file "$bus_config" -- bash "$repository_root/scripts/test-linux-app-startup.sh" \
     --session "$backend" "$binary" "$evidence" "$verify_instance" 2>&1 | tee "$evidence/session.log"
 done
-[ "$(cat /usr/lib/aurelia-desktop/VERSION)" = "$installed" ] || { echo "The installed package changed during the check." >&2; exit 1; }
+[ "$(cat /usr/lib/tarven-desktop/VERSION)" = "$installed" ] || { echo "The installed package changed during the check." >&2; exit 1; }
 echo "Installed native startup results: $results"

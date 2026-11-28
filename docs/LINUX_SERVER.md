@@ -1,6 +1,6 @@
-# Aurelia Server on Linux
+# Tarven Server on Linux
 
-Aurelia Server can run on its own on a Linux computer without a screen, for example an old PC
+Tarven Server can run on its own on a Linux computer without a screen, for example an old PC
 or a small home server. The Mac app and the Apple TV app then connect to it over the home
 network. Media files are only read, never changed.
 
@@ -12,7 +12,7 @@ network. Media files are only read, never changed.
 - ICU (`libicu`), which the installer adds through `apt` when it is missing.
 - ffmpeg, which the installer also adds through `apt` when it is missing. Web browsers use it
   to play MKV, AVI and other files the server converts live (see
-  [Aurelia in a web browser](WEB_APP.md#watching)). Without it the server works as before and
+  [Tarven in a web browser](WEB_APP.md#watching)). Without it the server works as before and
   browsers play only files they open themselves.
 - Optional: `whisper.cpp`, which the installer adds through `apt` where the distribution has it
   (Ubuntu 26.04, Debian). With it the server writes subtitles from speech and syncs subtitles to
@@ -24,16 +24,16 @@ network. Media files are only read, never changed.
   for Intel or AMD graphics (`intel-media-va-driver`, `i965-va-driver` for Intel before 2015,
   `mesa-va-drivers`); Nvidia needs its own driver. The server finds the chip by itself;
   **Settings › Server › Video Conversion** shows which one it uses or what is missing.
-  `Aurelia:HardwareEncoding=off` in the server's settings turns it off.
+  `Tarven:HardwareEncoding=off` in the server's settings turns it off.
 - A network cable is recommended for the server.
 
 ## Installing and updating
 
-On Ubuntu or Debian, one line installs Aurelia Server and then asks the setup questions,
+On Ubuntu or Debian, one line installs Tarven Server and then asks the setup questions,
 including whether the computer stays on all the time or saves power:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Aurelia/main/packaging/linux/get-aurelia.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Tarven/main/packaging/linux/get-tarven.sh | sudo bash
 ```
 
 It picks the newest stable server release for this computer (x64 or arm64), checks the
@@ -44,20 +44,20 @@ Run again, it updates an existing installation and asks nothing.
 To do the same by hand, unpack the download on the server and run its installer:
 
 ```sh
-tar -xzf Aurelia-Server-<version>-<build>-linux-x64.tar.gz
-cd Aurelia-Server-<version>-linux-x64
+tar -xzf Tarven-Server-<version>-<build>-linux-x64.tar.gz
+cd Tarven-Server-<version>-linux-x64
 sudo ./install.sh
 ```
 
-The installer creates a system user `aurelia`, puts the program in `/opt/aurelia`, keeps the
-server's data in `/var/lib/aurelia` and starts the `aurelia` service, which also starts with
+The installer creates a system user `tarven`, puts the program in `/opt/tarven`, keeps the
+server's data in `/var/lib/tarven` and starts the `tarven` service, which also starts with
 the computer and restarts after a failure. If `ufw` is active, it allows the server's port 43111
 and Bonjour discovery. Installing a newer package the same way updates only the program; accounts,
 library, progress and settings stay.
 
 Server releases use independent `server-<version>-<build>` tags. The Mac app uses
 its own version and ships betas only, so GitHub's **Latest** release is always the
-newest stable server release. On the stable channel, `aurelia update` reads
+newest stable server release. On the stable channel, `tarven update` reads
 `/releases/latest` first and falls back to the paginated release list when needed; on
 the beta channel (`--beta on`), it reads the paginated release list directly so
 pre-releases are included. Older combined releases remain available under their
@@ -69,24 +69,24 @@ From version 1.8.5 the server updates itself from the GitHub Releases of the rep
 built from:
 
 ```sh
-sudo aurelia update --check   # show the installed and the newest version
-sudo aurelia update           # asks, then downloads and installs the newest version
-sudo aurelia update --yes     # without asking
-sudo aurelia update --beta on # also install test versions (pre-releases); --beta off stops that
+sudo tarven update --check   # show the installed and the newest version
+sudo tarven update           # asks, then downloads and installs the newest version
+sudo tarven update --yes     # without asking
+sudo tarven update --beta on # also install test versions (pre-releases); --beta off stops that
 ```
 
-From version 1.8.7 Aurelia on a Mac shows the installed and the newest version under
+From version 1.8.7 Tarven on a Mac shows the installed and the newest version under
 Settings › Updates › Server Updates and installs an update with one click. The server looks for a new
-version once a day by itself (`aurelia-update-check.timer`); installing always waits for the
-owner. A click leaves a request in `/var/lib/aurelia`, where `aurelia-update-request.path` notices
-it and runs `aurelia update` as root, which reports back in `/var/lib/aurelia/update-status`.
+version once a day by itself (`tarven-update-check.timer`); installing always waits for the
+owner. A click leaves a request in `/var/lib/tarven`, where `tarven-update-request.path` notices
+it and runs `tarven update` as root, which reports back in `/var/lib/tarven/update-status`.
 Restart Server in the app works too: the service ends and systemd starts it again.
 
 It picks the published release with the highest build that has a package for this computer,
 checks the download against the release's `SHA256SUMS`, which must carry the owner's minisign
 signature (checked with openssl, see [LINUX_UPDATE_SIGNING.md](LINUX_UPDATE_SIGNING.md)), and runs
 the package's installer, so accounts, library, progress and settings stay. It never installs an
-older version. When power saving has stopped Aurelia, the update starts it again; power saving
+older version. When power saving has stopped Tarven, the update starts it again; power saving
 then continues as set.
 
 For public repositories, updates download directly without requiring any API token.
@@ -95,71 +95,71 @@ Settings › Developer settings › Personal access tokens › Fine-grained toke
 for only this repository with the permission Contents: Read-only, and save it on the server:
 
 ```sh
-sudo aurelia update --set-token   # paste the token; it is not shown
+sudo tarven update --set-token   # paste the token; it is not shown
 ```
 
-The token is kept in `/etc/aurelia/github-token`, which only root can read. When it expires,
-`aurelia update` says so; save a new one the same way. An empty entry removes the saved token.
+The token is kept in `/etc/tarven/github-token`, which only root can read. When it expires,
+`tarven update` says so; save a new one the same way. An empty entry removes the saved token.
 
 ## Setting up in a browser
 
-`sudo aurelia setup` asks whether to finish in a web browser (recommended) or in the terminal.
+`sudo tarven setup` asks whether to finish in a web browser (recommended) or in the terminal.
 The browser way turns on network access, then shows the server's addresses and a one-time setup
-code; `sudo aurelia setup --browser` goes there directly and `aurelia status` shows the code
+code; `sudo tarven setup --browser` goes there directly and `tarven status` shows the code
 again. Open an address on any computer, phone or tablet at home, type the code, and create the
 owner, the media folders and the TMDB token there. See [the browser app](WEB_APP.md#setting-up-a-new-server).
 
 ## Setting up over SSH
 
 ```sh
-sudo aurelia setup --name "Living Room Server"
+sudo tarven setup --name "Living Room Server"
 ```
 
 This asks for the owner's name and the Server Password (twice), turns on network access and asks
 one question about power use: always on, save power (the computer sleeps after 15 unused minutes
-and Wake-on-LAN wakes it), or stop only Aurelia (for a computer that also does other work). Give
+and Wake-on-LAN wakes it), or stop only Tarven (for a computer that also does other work). Give
 the answer up front with `--power always`, `--power save` or `--power stop-only`; change it later
-with `sudo aurelia sleep` or in Aurelia on a Mac.
+with `sudo tarven sleep` or in Tarven on a Mac.
 Then connect the devices and compare the verification fingerprint they show with the one from
-`aurelia status`:
+`tarven status`:
 
-- **Every device** (Mac, Linux PC, Apple TV, iPhone, iPad, browser): run `aurelia pair` on the
+- **Every device** (Mac, Linux PC, Apple TV, iPhone, iPad, browser): run `tarven pair` on the
   server and type the code it shows on the device. A code works once and for five minutes.
 - **Older Apple TV, iPhone, iPad or browser versions** show a code themselves; approve it with
-  `aurelia approve 12345678`.
+  `tarven approve 12345678`.
 
 The first of these asks for the owner's new viewing PIN. Add media folders with:
 
 ```sh
-aurelia library add --kind automatic --path /mnt/media/Movies
-aurelia library scan --all
+tarven library add --kind automatic --path /mnt/media/Movies
+tarven library scan --all
 ```
 
-`aurelia help` lists all commands, `aurelia logs` follows the server log.
+`tarven help` lists all commands, `tarven logs` follows the server log.
 
 ## Moving to a new server
 
 A whole server moves to another computer with its titles, metadata, artwork, progress, profiles,
 settings, identity and every device's sign-in; media files are never copied. On the old server
-(a Linux server, or Aurelia for Mac or for Linux hosting one) start the move in **Settings › Server
+(a Linux server, or Tarven for Mac or for Linux hosting one) start the move in **Settings › Server
 › Move to a New Server…**, or over SSH as its owner:
 
 ```sh
-aurelia move code                          # a move code for the new server, 15 minutes, one use
-aurelia move export /media/usb/old.aureliamove   # or an encrypted moving file with a passphrase
+tarven move code                          # a move code for the new server, 15 minutes, one use
+tarven move export /media/usb/old.tarvenmove   # or an encrypted moving file with a passphrase
 ```
 
-Install Aurelia Server on the new computer, mount the media drives, then run
-`sudo aurelia setup --move` (or `sudo aurelia setup` and choose to move). It asks for the old
+Install Tarven Server on the new computer, mount the media drives, then run
+`sudo tarven setup --move` (or `sudo tarven setup` and choose to move). It asks for the old
 server's address and code, or the moving file and its passphrase, suggests the folder that now
 holds each storage location's files ("3 of 3 sample files found") and restarts with the moved data.
-The old server then stops answering and points devices to the new one; `aurelia move status`
-shows it, and `sudo aurelia move undo` brings it back (turn the new one off first). See
+The old server then stops answering and points devices to the new one; `tarven move status`
+shows it, and `sudo tarven move undo` brings it back (turn the new one off first). See
 [SERVER_MOVE.md](SERVER_MOVE.md).
 
 ## Media drives
 
-The `aurelia` service may read everything except other users' private folders and writes only
+The `tarven` service may read everything except other users' private folders and writes only
 to its own data folder. A drive with media can be mounted at a fixed place through
 `/etc/fstab`, for example an exFAT drive found by its UUID (`sudo blkid`):
 
@@ -168,37 +168,37 @@ UUID=1234-ABCD  /mnt/media  exfat  ro,nofail,uid=0,gid=0,fmask=0022,dmask=0022  
 ```
 
 `nofail` lets the computer start without the drive. While a drive listed in `/etc/fstab` is
-unplugged, Aurelia shows its storage location as unavailable and keeps its titles, progress and
+unplugged, Tarven shows its storage location as unavailable and keeps its titles, progress and
 favorites; they come back when the drive does. On exFAT, FAT and FUSE drives Linux assigns new
-file numbers at every mount, so Aurelia recognizes files there by their path only: a file that is
+file numbers at every mount, so Tarven recognizes files there by their path only: a file that is
 renamed or moved on such a drive is added again rather than followed.
 
 ## Saving power
 
-When nobody uses Aurelia, the server can save power. Choose it in a browser under
-Settings › Power, in Aurelia on a Mac or Linux under Settings › Server › Power Saving, or over SSH:
+When nobody uses Tarven, the server can save power. Choose it in a browser under
+Settings › Power, in Tarven on a Mac or Linux under Settings › Server › Power Saving, or over SSH:
 
 ```sh
-sudo aurelia sleep server --idle 15   # stop only Aurelia Server; the computer stays on
-sudo aurelia sleep on --idle 15       # put the whole computer to sleep
-sudo aurelia sleep shutdown --idle 30 # turn the computer off
-sudo aurelia sleep on --after-sleep-timer off  # ignore players' sleep timers
-sudo aurelia sleep off                # keep running (the default)
-sudo aurelia sleep status
+sudo tarven sleep server --idle 15   # stop only Tarven Server; the computer stays on
+sudo tarven sleep on --idle 15       # put the whole computer to sleep
+sudo tarven sleep shutdown --idle 30 # turn the computer off
+sudo tarven sleep on --after-sleep-timer off  # ignore players' sleep timers
+sudo tarven sleep off                # keep running (the default)
+sudo tarven sleep status
 ```
 
-These options exist only on a server installed from the Linux package. A server that Aurelia for
-Mac or Aurelia for Linux hosts on a desktop or laptop follows that computer's own energy settings,
+These options exist only on a server installed from the Linux package. A server that Tarven for
+Mac or Tarven for Linux hosts on a desktop or laptop follows that computer's own energy settings,
 so the apps and the browser don't show them there.
 
-- **Stop Aurelia Server** suits a computer that also does other work, such as a NAS. Aurelia
-  Server stops and systemd listens on its port instead (`aurelia-start.socket`). When a Mac or
-  Apple TV connects, Aurelia starts again within seconds; the app's first attempt is dropped and
+- **Stop Tarven Server** suits a computer that also does other work, such as a NAS. Tarven
+  Server stops and systemd listens on its port instead (`tarven-start.socket`). When a Mac or
+  Apple TV connects, Tarven starts again within seconds; the app's first attempt is dropped and
   it tries again by itself.
 - **Put the computer to sleep** suspends it to RAM: fans and disks stop and it uses a few watts.
-  Aurelia on a Mac, Linux PC or iPhone wakes it when you open it (Wake-on-LAN), in about 10 to 20
+  Tarven on a Mac, Linux PC or iPhone wakes it when you open it (Wake-on-LAN), in about 10 to 20
   seconds, because the computer continues where it stopped. An Apple TV
-  cannot send Wake-on-LAN packets: open Aurelia on a Mac first. Someone signed in over SSH or on a
+  cannot send Wake-on-LAN packets: open Tarven on a Mac first. Someone signed in over SSH or on a
   local console keeps the computer awake. Usually the best choice.
 - **Shut down the computer** turns it off and uses almost nothing. Wake-on-LAN starts it again,
   which takes 30 to 60 seconds because the BIOS and Linux start from scratch, and only when the
@@ -212,15 +212,15 @@ so the apps and the browser don't show them there.
   reached the server within roughly the last minutes, because only that device still knows the
   card's network address; others still need Wake-on-LAN. Stray traffic can wake the computer now
   and then; after any wake it powers down again once five minutes pass without anyone using
-  Aurelia. The switch appears only when the card supports it.
-- Either happens after `--idle` minutes (15 by default) in which nobody used Aurelia (browsing,
+  Tarven. The switch appears only when the card supports it.
+- Either happens after `--idle` minutes (15 by default) in which nobody used Tarven (browsing,
   playing, saving progress or changing settings on any device; an app that is merely open does
   not count), and five
   minutes after a player's sleep timer ends on a Mac or Apple TV if nothing played since on any
   device, at any time of day and even if the app is still open.
 - Optional awake hours, for example `--awake 17:00-23:30`, keep it running during those hours; a
   sleeping computer then also wakes itself at their start. `--awake off` removes them.
-- The settings are in `/var/lib/aurelia/sleep-settings`; `aurelia-autosleep.timer` checks them
+- The settings are in `/var/lib/tarven/sleep-settings`; `tarven-autosleep.timer` checks them
   every five minutes.
 
 Wake-on-LAN is allowed by the installer for the network card that leads to the home network.
@@ -230,19 +230,19 @@ computer whose BIOS battery is empty forgets that after a power cut.
 ### Checking Wake-on-LAN
 
 Settings › Power shows a **Wake-on-LAN Check** while the server sleeps or turns off, and
-`sudo aurelia sleep status` prints the same. At every start and before powering down,
-`aurelia-wake-on-lan` notes whether the card is wired or Wi-Fi and how it is set
+`sudo tarven sleep status` prints the same. At every start and before powering down,
+`tarven-wake-on-lan` notes whether the card is wired or Wi-Fi and how it is set
 (`wake-on-lan-status` in the data folder); the server reads which sleep the kernel uses from
 `/sys/power`.
 
 - **Connected by cable**: almost no computer wakes over Wi-Fi, so the server needs a network cable
   to the router.
 - **Wake-on-LAN is on**: the card reports `Wake-on: g`. A card that can't (`Supports Wake-on`
-  without `g`) needs "Stop only Aurelia Server" or another network card or USB adapter.
+  without `g`) needs "Stop only Tarven Server" or another network card or USB adapter.
 - **Real sleep**: `/sys/power/mem_sleep` uses `deep` (suspend to RAM). With only `s2idle` the
   computer sleeps lightly; it may use more power, and some cards don't wake it from there.
 - **Waking from off** can't be read by any program: it depends on the BIOS setting above. Try it
-  once: let the server turn off, then open Aurelia on a Mac, Linux PC or iPhone.
+  once: let the server turn off, then open Tarven on a Mac, Linux PC or iPhone.
 
 Most desktop PCs connected by cable, even old ones, wake from sleep. Wi-Fi, many laptops and some
 USB network adapters can't be woken.
@@ -250,8 +250,8 @@ USB network adapters can't be woken.
 ## Removing
 
 ```sh
-sudo aurelia uninstall                # keeps the server data in /var/lib/aurelia
-sudo aurelia uninstall --remove-data  # asks, then deletes accounts, library and progress
+sudo tarven uninstall                # keeps the server data in /var/lib/tarven
+sudo tarven uninstall --remove-data  # asks, then deletes accounts, library and progress
 ```
 
 Media folders are never touched. Uninstalling also removes the saved GitHub token.
@@ -260,14 +260,14 @@ Media folders are never touched. Uninstalling also removes the saved GitHub toke
 
 On a Mac, `scripts/build-linux-server.sh` builds both downloads into the git-ignored
 `Local/Build/Linux/<version>-<build>/`; each package records the GitHub repository of `origin` for
-`aurelia update`. `scripts/publish-release.sh --server` (with `--beta` for a pre-release) signs
+`tarven update`. `scripts/publish-release.sh --server` (with `--beta` for a pre-release) signs
 `SHA256SUMS` with minisign and publishes the x64 and arm64 archives, `SHA256SUMS` and
 `SHA256SUMS.minisig` as the GitHub Release `server-<version>-<build>` at the pushed `HEAD`; Mac
 releases (`arm64` and `x64` disk images) are published separately under `<version>-<build>` via
 `scripts/publish-release.sh --beta`. `scripts/test-linux-server-install.sh <unpacked package> [--exfat]`
-installs a package on a Linux computer without Aurelia data, checks it with synthetic data only,
+installs a package on a Linux computer without Tarven data, checks it with synthetic data only,
 including an update from a local stand-in for GitHub Releases, and removes everything again. The
 workflow `.github/workflows/linux-server.yml` runs the server tests,
-`scripts/test-server-update-signature.sh`, `scripts/test-get-aurelia.sh` and this install check on
+`scripts/test-server-update-signature.sh`, `scripts/test-get-tarven.sh` and this install check on
 a Linux runner on matching pushes to `main` (unless `[skip ci]` is in the commit message) or when
 triggered manually via `workflow_dispatch`.

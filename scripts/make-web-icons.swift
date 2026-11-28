@@ -1,4 +1,4 @@
-#!/usr/bin/swift  // Generates the browser home-screen icons from Aurelia's existing vector icon. No window opens.
+#!/usr/bin/swift  // Generates the browser home-screen icons from Tarven's existing vector icon. No window opens.
 import AppKit
 import Foundation
 

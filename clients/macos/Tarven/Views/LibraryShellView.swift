@@ -1,0 +1,2586 @@
+import AppKit
+import SwiftUI
+
+/// Cmd-F focuses the library search; coming from Home or a detail page starts a new search.
+private struct FindRequest: Hashable {
+  let id = UUID()
+  let startsNewSearch: Bool
+}
+
+private struct FranchiseSelection: Hashable {
+  let summary: CollectionSummary
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine(summary.id)
+  }
+}
+
+private enum MediaSelection: Hashable {
+  case media(UUID)
+  case collection(UUID, notice: String? = nil)
+  case franchise(FranchiseSelection)
+  case person(PersonSelection)
+}
+
+private struct BrowsePageKey: Equatable, Sendable {
+  let destination: LibraryDestination
+  let findRequest: FindRequest?
+}
+
+private struct DetailPageKey: Equatable, Sendable {
+  let page: MediaSelection
+  let collection: CollectionSummary?
+}
+
+/// A page of the window that is worked out again only when what it is built from changed, not
+/// whenever the window itself changes. Pages hidden beneath a detail page were otherwise worked out
+/// again whenever a title opened or closed. The page still follows the library and its settings itself.
+private struct StablePage<Key: Equatable & Sendable, Content: View>: View, Equatable {
+  let key: Key
+  @ViewBuilder let content: () -> Content
+
+  nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.key == rhs.key }
+
+  var body: some View { content() }
+}
+
+struct LibraryShellView: View {
+  @EnvironmentObject private var model: AppModel
+  @Environment(\.scenePhase) private var scenePhase
+  @State private var destination: LibraryDestination = .home
+  @State private var selection: MediaSelection?
+  /// The detail pages opened from other detail pages (a series, then an actor, then a film), so
+  /// Back returns to the page before instead of to the library.
+  @State private var backStack: [MediaSelection] = []
+  @State private var sidebarVisible = true
+  @AppStorage(GeneralPreferenceKeys.sidebarWidth) private var storedSidebarWidth = Double(
+    TarvenDesign.sidebarWidth)
+  @State private var resizeStartWidth: CGFloat?
+  @State private var hoveringSidebarResize = false
+  @State private var findRequest: FindRequest?
+  @Environment(\.tarvenReduceMotion) private var reduceMotion
+  @AppStorage(GeneralPreferenceKeys.sidebarVisibilityRevision) private
+    var sidebarVisibilityRevision = 0
+  @AppStorage(GeneralPreferenceKeys.sidebarItemOrder) private var sidebarItemOrder = ""
+  @AppStorage(GeneralPreferenceKeys.defaultStartScreen) private var defaultStartScreen =
+    StartScreenPreference.lastScreen.rawValue
+
+  private var sidebarWidth: CGFloat {
+    TarvenDesign.clampedSidebarWidth(CGFloat(storedSidebarWidth))
+  }
+
+  var body: some View {
+    GeometryReader { geometry in
+      // Top-aligned: a vertically centred sidebar would sink below the window by half the
+      // title bar height and cut off the profile at its foot.
+      ZStack(alignment: .topLeading) {
+        TarvenDesign.canvas
+          .ignoresSafeArea()
+        content
+          .environment(\.tarvenSidebarOverlap, sidebarVisible ? sidebarWidth : 0)
+          .safeAreaInset(edge: .leading, spacing: 0) {
+            Color.clear.frame(width: sidebarVisible ? sidebarWidth : 0)
+          }
+          .frame(
+            width: geometry.size.width,
+            height: geometry.size.height + geometry.safeAreaInsets.top
+          )
+          .background(TarvenDesign.canvas)
+          .offset(y: -geometry.safeAreaInsets.top)
+        if sidebarVisible {
+          TarvenSidebarBackground()
+            .frame(
+              width: sidebarWidth,
+              height: geometry.size.height + geometry.safeAreaInsets.top
+            )
+            .clipped()
+            .offset(y: -geometry.safeAreaInsets.top)
+            .contentShape(Rectangle())
+            .onTapGesture {}  // Obscured cards must never receive navigation clicks.
+          sidebar
+            // Clears the 44 pt toggle in both windowed and fullscreen layouts.
+            .padding(
+              .top, max(0, 52 - geometry.safeAreaInsets.top) + geometry.safeAreaInsets.top / 2
+            )
+            .frame(width: sidebarWidth, height: geometry.size.height)
+            .clipped()
+          Color.clear
+            .frame(width: 8, height: geometry.size.height)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+              if hovering && !hoveringSidebarResize {
+                hoveringSidebarResize = true
+                NSCursor.resizeLeftRight.push()
+              } else if !hovering && hoveringSidebarResize {
+                hoveringSidebarResize = false
+                NSCursor.pop()
+              }
+            }
+            .onDisappear {
+              if hoveringSidebarResize {
+                hoveringSidebarResize = false
+                NSCursor.pop()
+              }
+            }
+            .gesture(
+              DragGesture(minimumDistance: 2)
+                .onChanged { value in
+                  if resizeStartWidth == nil { resizeStartWidth = sidebarWidth }
+                  storedSidebarWidth = Double(
+                    TarvenDesign.clampedSidebarWidth(
+                      (resizeStartWidth ?? sidebarWidth) + value.translation.width))
+                }
+                .onEnded { _ in resizeStartWidth = nil }
+            )
+            .offset(x: sidebarWidth - 4)
+            .accessibilityElement()
+            .accessibilityLabel("Resize Sidebar")
+            .accessibilityValue("\(Int(sidebarWidth.rounded())) points")
+            .accessibilityAdjustableAction { direction in
+              let step: CGFloat = direction == .increment ? 16 : -16
+              storedSidebarWidth = Double(TarvenDesign.clampedSidebarWidth(sidebarWidth + step))
+            }
+        }
+      }
+      .overlay(alignment: .topLeading) {
+        sidebarToggle
+          .padding(
+            .leading,
+            sidebarVisible ? sidebarWidth - 52 : (geometry.safeAreaInsets.top > 0 ? 78 : 12)
+          )
+          .padding(.top, 4 - geometry.safeAreaInsets.top)
+      }
+      .tarvenRemoveEmptyWindowToolbar()
+    }
+    .background(TarvenDesign.canvas)
+    .background {
+      LibraryFindShortcut(
+        isBlocked: {
+          model.playback != nil || model.wrappedLaunch != nil
+        },
+        canGoBack: { selection != nil },
+        back: { goBack() }
+      ) {
+        // Wishes and People have their own search; every page without a library search switches
+        // to Library.
+        let searchesHere: Set<LibraryDestination> = [
+          .library, .recentlyAdded, .tvShows, .movies, .wishes, .people,
+        ]
+        let leaving = !searchesHere.contains(destination) || selection != nil
+        if leaving {
+          selection = nil
+          if destination != .wishes && destination != .people { destination = .library }
+        }
+        findRequest = FindRequest(startsNewSearch: leaving)
+      }
+      .frame(width: 0, height: 0)
+    }
+    .overlay(alignment: .bottom) {
+      VStack(spacing: 12) {
+        if let device = model.activeRemotePlayer {
+          MacMiniRemoteView(device: device)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+        if let error = model.visibleErrorMessage {
+          ErrorBanner(
+            message: error,
+            retry: {
+              Task {
+                if model.canRestoreLocalHosting {
+                  await model.restoreLocalHosting()
+                } else if model.serverUnreachable {
+                  // Wakes a sleeping server, then loads what was showing.
+                  await model.retryConnection()
+                } else {
+                  await model.refreshFromUI()
+                }
+              }
+            },
+            retryLabel: model.canRestoreLocalHosting ? "Start Local Server" : "Try Again",
+            retryDisabled: model.isRecoveringLocalHost
+          )
+          .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+      }
+      .frame(maxWidth: .infinity)
+      .padding(.leading, sidebarVisible ? sidebarWidth : 0)
+      .padding(.bottom, 24)
+    }
+    .animation(
+      reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.42, dampingFraction: 0.82),
+      value: model.visibleErrorMessage
+    )
+    .overlayPreferenceValue(TourAnchorKey.self) { anchors in
+      LibraryTourHost(guide: model.setupGuide, anchors: anchors)
+    }
+    .sheet(isPresented: $model.showingCollectionEditor) {
+      CollectionEditorSheet(collection: nil).environmentObject(model)
+    }
+    .onChange(of: scenePhase) {
+      if scenePhase == .active { Task { await model.refreshHome() } }
+    }
+    .onChange(of: model.requestedMediaDetail) { _, id in
+      guard let id else { return }
+      open(.media(id))
+      model.requestedMediaDetail = nil
+    }
+    #if DEBUG
+      .onReceive(AuditRenderSignals.openCollection) { open(.collection($0)) }
+    #endif
+    .onChange(of: model.requestedPersonDetail) { _, person in
+      guard let person else { return }
+      open(.person(person))
+      model.requestedPersonDetail = nil
+    }
+    .onChange(of: model.requestedDestination) { _, target in
+      guard let target else { return }
+      if (target == .wishes && !model.supportsWishes)
+        || (target == .people && !model.supportsPeople)
+      {
+        model.requestedDestination = nil
+        return
+      }
+      selection = nil
+      findRequest = nil
+      destination = target
+      model.requestedDestination = nil
+    }
+    .onChange(of: model.catalogVisibilityRevision) {
+      if case .media(let id) = selection, !model.catalogItems.contains(where: { $0.id == id }) {
+        selection = nil
+      }
+      if case .collection(let id, _) = selection,
+        !model.collections.contains(where: { $0.id == id })
+      {
+        selection = nil
+      }
+    }
+    .onAppear {
+      restoreDestination()
+    }
+    .onChange(of: model.profile?.sessionId) {
+      restoreDestination()
+    }
+    .onChange(of: destination) { _, newDestination in
+      persistDestination(newDestination)
+    }
+  }
+
+  private var visibleSidebarItems: [LibraryDestination] {
+    _ = sidebarVisibilityRevision
+    _ = sidebarItemOrder
+    let order = SidebarPreferences.loadOrder()
+    return order.filter { item in
+      guard SidebarPreferences.isVisible(item) else { return false }
+      if item == .watchlist && !model.supportsWatchlist { return false }
+      if item == .wishes && !model.supportsWishes { return false }
+      if item == .people && !model.supportsPeople { return false }
+      return true
+    }
+  }
+
+  private func restoreDestination() {
+    guard let profile = model.profile else { return }
+    let targetDestination: LibraryDestination
+    switch defaultStartScreen {
+    case "home": targetDestination = .home
+    case "library": targetDestination = .library
+    case "movies": targetDestination = .movies
+    case "series": targetDestination = .tvShows
+    case "continueWatching": targetDestination = .home
+    case "collections": targetDestination = .collections
+    case "watchlist": targetDestination = model.supportsWatchlist ? .watchlist : .library
+    case "recentlyAdded": targetDestination = .recentlyAdded
+    default:
+      let store = LibraryDestinationStore(
+        defaults: LibraryBrowsePreferenceStore.applicationDefaults)
+      let restored = store.load(
+        serverId: profile.serverId, userId: profile.user?.id ?? profile.sessionId)
+      targetDestination =
+        ((restored == .watchlist && !model.supportsWatchlist)
+          || (restored == .wishes && !model.supportsWishes)
+          || (restored == .people && !model.supportsPeople)) ? .home : restored
+    }
+
+    let visible = visibleSidebarItems
+    if visible.contains(targetDestination) {
+      destination = targetDestination
+    } else if let first = visible.first {
+      destination = first
+    } else {
+      destination = .library
+    }
+  }
+
+  private func persistDestination(_ newDestination: LibraryDestination) {
+    guard let profile = model.profile else { return }
+    let store = LibraryDestinationStore(
+      defaults: LibraryBrowsePreferenceStore.applicationDefaults)
+    store.save(
+      newDestination, serverId: profile.serverId, userId: profile.user?.id ?? profile.sessionId)
+  }
+
+  private var sidebar: some View {
+    VStack(spacing: 0) {
+      List(selection: $destination) {
+        ForEach(visibleSidebarItems) { item in
+          sidebarButton(item)
+        }
+      }
+      .listStyle(.sidebar)
+      .scrollContentBackground(.hidden)
+      .tarvenTourTarget(.sidebar)
+      // The profile sits at the foot of the sidebar, like the account in the Apple TV app, with
+      // Settings beside it.
+      HStack(spacing: 6) {
+        if model.profile?.isViewingSession == true {
+          Button {
+            Task { await model.switchWatchingProfile() }
+          } label: {
+            HStack(spacing: 10) {
+              if let user = model.profile?.user {
+                TarvenProfileAvatar(user: user, size: 30)
+              } else {
+                TarvenProfileAvatar(id: nil, name: "?", size: 30)
+              }
+              Text(model.profile?.user?.shownName ?? "Switch Profile")
+                .font(.body.weight(.semibold))
+                .lineLimit(1)
+              Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 46)
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(SidebarFooterButtonStyle())
+          .disabled(model.isSelectingProfile)
+          .help("Switch Profile")
+          .accessibilityLabel("Switch Profile, \(model.profile?.user?.shownName ?? "")")
+          .accessibilityIdentifier("switch-watching-profile")
+          .tarvenTourTarget(.profile)
+        } else {
+          Spacer(minLength: 0)
+        }
+        Button {
+          model.isSettingsPresented = true
+        } label: {
+          Image(systemName: "gearshape")
+            .font(.system(size: 16, weight: .medium))
+            .frame(width: 38, height: 46)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SidebarFooterButtonStyle())
+        .help("Settings (⌘,)")
+        .accessibilityLabel("Settings")
+        .accessibilityIdentifier("sidebar-settings")
+        .tarvenTourTarget(.settings)
+      }
+      // Clears the window's rounded bottom corner.
+      .padding(.horizontal, 12)
+      .padding(.bottom, 16)
+    }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("primary-sidebar")
+  }
+
+  private var sidebarToggle: some View {
+    TarvenIconControl(
+      symbol: "sidebar.left",
+      label: sidebarVisible ? "Hide Sidebar" : "Show Sidebar"
+    ) {
+      sidebarVisible.toggle()
+    }
+    .help(sidebarVisible ? "Hide Sidebar (⌃⌘S)" : "Show Sidebar (⌃⌘S)")
+    .accessibilityIdentifier("toggle-sidebar")
+    .keyboardShortcut("s", modifiers: [.command, .control])
+  }
+
+  private func sidebarButton(_ item: LibraryDestination) -> some View {
+    Button {
+      selection = nil
+      findRequest = nil
+      destination = item
+      if item == .home { Task { await model.refreshHome() } }
+    } label: {
+      HStack(spacing: 8) {
+        Label {
+          Text(item.title).font(.body.weight(destination == item ? .semibold : .regular))
+        } icon: {
+          // Tinted symbols, as in the Apple TV app's sidebar; on the selection they turn white
+          // so they stay visible on the accent highlight.
+          Image(systemName: item.symbol)
+            .foregroundStyle(destination == item ? AnyShapeStyle(.primary) : AnyShapeStyle(.tint))
+        }
+        Spacer(minLength: 4)
+        if item == .wishes && model.wishBadgeCount > 0 {
+          Text("\(model.wishBadgeCount)")
+            .font(.caption2.weight(.semibold))
+            .monospacedDigit()
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Color.accentColor.opacity(destination == item ? 0.35 : 0.2)))
+            .accessibilityIdentifier("sidebar-wishes-badge")
+        }
+      }
+      .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(TarvenPressableButtonStyle())
+    .tag(item)
+    .accessibilityIdentifier("sidebar-\(item.rawValue)")
+  }
+
+  /// The browsing page stays alive underneath a detail page, so going back keeps its scroll
+  /// position and artwork exactly where they were.
+  private var content: some View {
+    ZStack {
+      // Switching pages in the sidebar cross-fades briefly instead of cutting. The page stays as it
+      // is while only the shell changes (a title opens above it, the sidebar is dragged); it still
+      // follows the library and its settings itself.
+      StablePage(key: BrowsePageKey(destination: destination, findRequest: findRequest)) {
+        browsePage
+      }
+      .equatable()
+      .id(destination)
+      .transition(.opacity)
+      .opacity(selection == nil ? 1 : 0)
+      .allowsHitTesting(selection == nil)
+      .accessibilityHidden(selection != nil)
+      // A detail page fades in briefly; going back fades it away over the page. The pages it was
+      // opened from stay alive underneath, hidden, so Back returns to them exactly where they were
+      // scrolled, as the browsing page does. Every animation frame updates this whole window, so
+      // a spring or a zoom here made opening a title stutter (measured 14.11.2026: the same clicks
+      // cost 2.6 s of main-thread work with them and 1.0 s with a short fade).
+      let pages = selection.map { backStack + [$0] } ?? []
+      ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
+        let isTop = index == pages.count - 1
+        StablePage(key: pageKey(page)) { selectedPage(page) }
+          .equatable()
+          .id(page)
+          .opacity(isTop ? 1 : 0)
+          .allowsHitTesting(selection != nil && isTop)
+          .accessibilityHidden(!isTop)
+          .transition(.opacity)
+          .zIndex(Double(index + 1))
+      }
+    }
+    .onExitCommand { if selection != nil { goBack() } }
+    .animation(.easeOut(duration: reduceMotion ? 0.1 : 0.15), value: selection)
+    .animation(.easeOut(duration: reduceMotion ? 0.1 : 0.15), value: destination)
+    .onChange(of: selection) { _, value in
+      if value == nil { backStack.removeAll() }
+      if value == nil, destination == .home { Task { await model.refreshHome() } }
+      // Typing must never reach a search field hidden underneath the detail page.
+      if value != nil { NSApp.keyWindow?.makeFirstResponder(nil) }
+    }
+  }
+
+  /// What a detail page is built from: a collection page also from the collection as it is now.
+  private func pageKey(_ page: MediaSelection) -> DetailPageKey {
+    switch page {
+    case .collection(let id, _):
+      return DetailPageKey(page: page, collection: model.collections.first(where: { $0.id == id }))
+    case .franchise(let franchise):
+      return DetailPageKey(page: page, collection: franchise.summary)
+    default:
+      return DetailPageKey(page: page, collection: nil)
+    }
+  }
+
+  /// Opens a detail page; one opened from another detail page remembers it for Back.
+  private func open(_ next: MediaSelection) {
+    if let current = selection, current != next { backStack.append(current) }
+    selection = next
+  }
+
+  /// Back to the detail page this one was opened from, or to the library.
+  private func goBack() {
+    selection = backStack.popLast()
+  }
+
+  @ViewBuilder
+  private func selectedPage(_ activeSelection: MediaSelection) -> some View {
+    switch activeSelection {
+    case .media(let id):
+      MediaDetailView(
+        mediaId: id,
+        onBack: { goBack() })
+    case .collection(let id, let notice):
+      if let collection = model.collections.first(where: { $0.id == id }) {
+        CollectionDetailView(
+          collection: collection,
+          initialNotice: notice,
+          onBack: { goBack() },
+          onSelect: { open(.media($0)) },
+          onOpenCollection: { id, savedNotice in open(.collection(id, notice: savedNotice)) })
+      } else {
+        // Removed on another device meanwhile: say so instead of an empty page without Back.
+        TarvenUnavailableView(
+          title: "Collection Unavailable",
+          systemImage: "square.stack.3d.up.slash",
+          message: "This collection was removed or is no longer shared with this profile.",
+          secondaryAction: TarvenUnavailableAction(title: "Back", prominent: false, action: goBack)
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      }
+    case .franchise(let franchise):
+      CollectionDetailView(
+        collection: franchise.summary,
+        isFranchise: true,
+        onBack: { goBack() },
+        onSelect: { open(.media($0)) },
+        onOpenCollection: { id, savedNotice in open(.collection(id, notice: savedNotice)) })
+    case .person(let person):
+      PersonDetailView(
+        person: person,
+        onBack: { goBack() },
+        onSelect: { open(.media($0)) })
+    }
+  }
+
+  @ViewBuilder
+  private var browsePage: some View {
+    switch destination {
+    case .home:
+      HomePage(
+        onSelect: { open(.media($0)) },
+        onSelectCollection: { open(.collection($0)) }
+      )
+      .task { await model.refreshHome() }
+    case .library:
+      LibraryPage(
+        section: .library, findRequest: findRequest,
+        onSelect: { open(.media($0)) },
+        onSelectCollection: { open(.collection($0)) })
+    case .watchlist:
+      WatchlistPage(onSelect: { open(.media($0)) })
+    case .wishes:
+      WishesPage(onOpenMedia: { open(.media($0)) }, findRequestID: findRequest?.id)
+    case .people:
+      PeoplePage(onSelectPerson: { open(.person($0)) }, findRequestID: findRequest?.id)
+    case .recentlyAdded:
+      LibraryPage(
+        section: .recentlyAdded, findRequest: findRequest,
+        onSelect: { open(.media($0)) },
+        onSelectCollection: { open(.collection($0)) })
+    case .tvShows:
+      LibraryPage(
+        section: .tvShows, findRequest: findRequest,
+        onSelect: { open(.media($0)) },
+        onSelectCollection: { open(.collection($0)) })
+    case .movies:
+      LibraryPage(
+        section: .movies, findRequest: findRequest,
+        onSelect: { open(.media($0)) },
+        onSelectCollection: { open(.collection($0)) })
+    case .collections:
+      CollectionsPage(
+        onSelectCollection: { open(.collection($0)) },
+        onSelectFranchise: { open(.franchise(FranchiseSelection(summary: $0))) })
+    case .history:
+      HistoryPage(onSelect: { open(.media($0)) })
+    case .statistics:
+      StatisticsPage()
+    case .downloads:
+      DownloadsPage()
+    }
+  }
+}
+
+private struct HomePage: View {
+  // Settings › General changes these pages while they are open.
+  @AppStorage(GeneralPreferenceKeys.posterSize) private var posterSizeSetting = "standard"
+  @AppStorage(GeneralPreferenceKeys.showWatchedInRows) private var showWatchedSetting = true
+  @AppStorage(GeneralPreferenceKeys.hideOfflineTitles) private var hideOfflineSetting = false
+
+  @EnvironmentObject private var model: AppModel
+  let onSelect: (UUID) -> Void
+  let onSelectCollection: (UUID) -> Void
+  @State private var continueWatchingError: String?
+
+  var body: some View {
+    if model.catalogItems.isEmpty, model.home?.recommendation == nil,
+      model.home?.continueWatching.isEmpty != false
+    {
+      Group {
+        if !model.libraryLoaded, model.visibleErrorMessage == nil, !model.isRecoveringLocalHost {
+          // Still loading after a start or sign-in: a ring after a moment, never the empty
+          // library's "add a folder", which flashed before the titles arrived.
+          TarvenDelayedProgress()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityLabel("Loading Library")
+        } else if model.visibleErrorMessage != nil || model.isRecoveringLocalHost {
+          TarvenUnavailableView(
+            title: model.isRecoveringLocalHost ? "Starting Local Server" : "Server Unavailable",
+            systemImage: "server.rack",
+            message:
+              "Your saved connection is intact. Your library will appear when the server is ready."
+          )
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+          EmptyLibraryState(
+            title: "Your Library Is Ready",
+            message: model.canManageMedia
+              ? "Add a folder or drive to begin building your private library."
+              : "There's nothing here yet. Ask the owner to add movies and shows.",
+            action: model.canManageMedia ? { model.showMediaManager() } : nil
+          )
+        }
+      }
+      .accessibilityElement(children: .contain)
+      .accessibilityIdentifier("home-page")
+
+    } else {
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 34) {
+          if let recommendation = model.home?.recommendation {
+            HomeHero(item: recommendation) {
+              // "Continue" continues: a started movie or episode plays on from where it stopped,
+              // as in Continue Watching; anything else opens its page.
+              if recommendation.progressFraction != nil, recommendation.kind != .series,
+                recommendation.isPlayable
+              {
+                model.startPlayback(item: recommendation, intent: .resume)
+              } else {
+                onSelect(recommendation.id)
+              }
+            }
+          }
+          if model.supportsMonthlyWrapped, WrappedStory.monthIsNew() {
+            MonthlyWrappedButton().padding(.horizontal, TarvenDesign.pagePadding)
+          }
+          landscapeRow(
+            "Continue Watching",
+            items: model.home?.continueWatching ?? [])
+          ForEach(model.home?.becauseYouWatched ?? []) { rail in
+            posterRow(
+              "Because You Watched \(rail.sourceTitle)", items: rail.suggestions.map(\.item))
+          }
+          // Computed once per drawing: each pass goes through the whole catalog.
+          let rows = genreRows
+          ForEach(rows) { row in
+            posterRow(row.title, items: row.items, tourTarget: row.id == rows.first?.id)
+          }
+          posterRow("Favorites", items: model.home?.favorites ?? [])
+          collectionRow(model.home?.collections ?? [])
+          posterRow("Recently Added", items: model.home?.recentlyAdded ?? [])
+        }
+        .padding(.bottom, 48)
+      }
+      .scrollClipDisabled()
+      .defaultScrollAnchor(.top)
+      .scrollIndicators(.automatic, axes: .vertical)
+      .tarvenOverlayScrollbars()
+      .accessibilityElement(children: .contain)
+      .accessibilityIdentifier("home-page")
+      .alert(
+        "Couldn't Update Continue Watching",
+        isPresented: Binding(
+          get: { continueWatchingError != nil },
+          set: { if !$0 { continueWatchingError = nil } })
+      ) {
+        Button("OK") { continueWatchingError = nil }
+      } message: {
+        Text(continueWatchingError ?? "")
+      }
+    }
+  }
+
+  private var genreRows: [HomeGenreRow] {
+    HomePresentationLogic.genreRows(from: model.catalogItems)
+  }
+
+  @ViewBuilder
+  private func landscapeRow(
+    _ title: String,
+    items: [CatalogItemSummary]
+  ) -> some View {
+    if !items.isEmpty {
+      VStack(alignment: .leading, spacing: 14) {
+        TarvenSectionHeading(title: title, count: items.count)
+          .padding(.horizontal, TarvenDesign.pagePadding)
+        TarvenHorizontalRail(
+          leadingInset: TarvenDesign.homeRailLeadingInset, cardWidth: 320, itemCount: items.count,
+          title: title
+        ) {
+          ForEach(items) { item in
+            Button {
+              model.startPlayback(item: item, intent: .resume)
+            } label: {
+              // The heading already says Continue Watching; the card says which show and episode.
+              LandscapeMediaCard(
+                item: item, eyebrow: CatalogPlaybackLogic.episodeEyebrow(for: item))
+            }
+            .buttonStyle(TarvenCardButtonStyle())
+            .disabled(!item.isPlayable)
+            .accessibilityLabel(
+              ["Continue \(item.title)", CatalogPlaybackLogic.subtitle(for: item)]
+                .compactMap { $0 }.joined(separator: ", ")
+            )
+            .accessibilityIdentifier("continue-\(item.id.uuidString.lowercased())")
+            .mediaActions(item: item)
+          }
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func posterRow(
+    _ title: String, items allItems: [CatalogItemSummary], tourTarget: Bool = false
+  ) -> some View {
+    let items = LibraryDisplayPreferences.visible(allItems, keepWatched: false)
+    if !items.isEmpty {
+      VStack(alignment: .leading, spacing: 14) {
+        TarvenSectionHeading(title: title, count: items.count)
+          .padding(.horizontal, TarvenDesign.pagePadding)
+        TarvenHorizontalRail(
+          leadingInset: TarvenDesign.homeRailLeadingInset, itemCount: items.count, title: title
+        ) {
+          ForEach(items) { item in
+            Button {
+              onSelect(item.id)
+            } label: {
+              MediaPosterCard(item: item)
+            }
+            .buttonStyle(TarvenCardButtonStyle())
+            .accessibilityIdentifier("media-\(item.id.uuidString)")
+            // The library tour lights up the first poster on Home.
+            .tarvenTourTarget(.firstTitle, isEnabled: tourTarget && item.id == items.first?.id)
+          }
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func collectionRow(_ collections: [CollectionSummary]) -> some View {
+    if !collections.isEmpty {
+      VStack(alignment: .leading, spacing: 14) {
+        TarvenSectionHeading(title: "Collections", count: collections.count)
+          .padding(.horizontal, TarvenDesign.pagePadding)
+        TarvenHorizontalRail(
+          leadingInset: TarvenDesign.homeRailLeadingInset, cardWidth: 210,
+          itemCount: collections.count, title: "Collections"
+        ) {
+          ForEach(collections) { collection in
+            Button {
+              onSelectCollection(collection.id)
+            } label: {
+              CollectionCard(collection: collection)
+            }
+            .buttonStyle(TarvenCardButtonStyle())
+            .accessibilityIdentifier("collection-\(collection.id.uuidString.lowercased())")
+          }
+        }
+      }
+    }
+  }
+}
+
+private struct HomeHero: View {
+  @EnvironmentObject private var model: AppModel
+  let item: CatalogItemSummary
+  let action: () -> Void
+
+  /// Same rule as the action at Home: a started movie or episode plays on.
+  private var continues: Bool {
+    item.progressFraction != nil && item.kind != .series && item.isPlayable
+  }
+
+  var body: some View {
+    heroContent
+      // The hero leads to its detail page; prepare it while Home is shown.
+      .task(id: item.id) { model.prepareDetail(for: item) }
+  }
+
+  private var heroContent: some View {
+    ZStack(alignment: .bottomLeading) {
+      AuthenticatedArtwork(
+        artwork: item.backdrop ?? item.poster,
+        symbol: item.kind == .movie ? "film.fill" : "tv.fill",
+        contentMode: .fill,
+        placeholderSymbolSize: 64
+      )
+      .backgroundExtensionEffect()
+      LinearGradient(
+        stops: [
+          .init(color: .black.opacity(0.88), location: 0),
+          .init(color: .black.opacity(0.54), location: 0.34),
+          .init(color: .clear, location: 0.72),
+        ],
+        startPoint: .leading,
+        endPoint: .trailing)
+      LinearGradient(
+        stops: [
+          .init(color: .clear, location: 0.48),
+          .init(color: TarvenDesign.canvas.opacity(0.35), location: 0.76),
+          .init(color: TarvenDesign.canvas, location: 1),
+        ],
+        startPoint: .top,
+        endPoint: .bottom)
+
+      VStack(alignment: .leading, spacing: 12) {
+        Text(
+          [item.kind == .movie ? "MOVIE" : "TV SHOW", item.year.map(String.init)]
+            .compactMap { $0 }
+            .joined(separator: "  ·  ")
+        )
+        .font(.caption.weight(.bold))
+        .tracking(1)
+        .foregroundStyle(.white.opacity(0.72))
+        .tarvenRiseIn(0)
+
+        Text(item.title)
+          .font(TarvenDesign.heroTitle)
+          .tracking(-0.6)
+          .lineLimit(2)
+          .tarvenRiseIn(1)
+
+        if !item.genres.isEmpty {
+          Text(item.genres.prefix(3).joined(separator: "  ·  "))
+            .font(.callout.weight(.semibold))
+            .foregroundStyle(.white.opacity(0.8))
+            .tarvenRiseIn(2)
+        }
+
+        if let overview = item.overview, !overview.isEmpty {
+          Text(overview)
+            .font(.body)
+            .foregroundStyle(.white.opacity(0.78))
+            .lineLimit(3)
+            .lineSpacing(2)
+            .frame(maxWidth: 610, alignment: .leading)
+            .tarvenRiseIn(3)
+        }
+
+        Button(action: action) {
+          Label(
+            continues ? "Continue" : "Open",
+            systemImage: continues ? "play.fill" : "arrow.right"
+          )
+          .font(.headline)
+          .padding(.horizontal, 5)
+        }
+        .buttonStyle(TarvenPrimaryActionButtonStyle())
+        .accessibilityIdentifier("home-hero-action")
+        .tarvenRiseIn(4)
+      }
+      .padding(TarvenDesign.pagePadding)
+      .padding(.bottom, 22)
+    }
+    .frame(maxWidth: .infinity)
+    .frame(height: 500)
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("home-hero")
+  }
+}
+
+private struct LibraryPage: View {
+  // Settings › General changes these pages while they are open.
+  @AppStorage(GeneralPreferenceKeys.posterSize) private var posterSizeSetting = "standard"
+  @AppStorage(GeneralPreferenceKeys.showWatchedInRows) private var showWatchedSetting = true
+  @AppStorage(GeneralPreferenceKeys.hideOfflineTitles) private var hideOfflineSetting = false
+
+  @EnvironmentObject private var model: AppModel
+  let section: CatalogBrowseSection
+  let findRequest: FindRequest?
+  let onSelect: (UUID) -> Void
+  let onSelectCollection: (UUID) -> Void
+  @StateObject private var browser = LibraryBrowseController()
+  @State private var search = ""
+  @State private var query = CatalogBrowseQuery()
+  @State private var loadedContext = ""
+  @State private var completedRequestKey = ""
+  @State private var retryRevision = 0
+  @State private var showingCollectionEditor = false
+  @State private var showingMetadataReviewQueue = false
+  @FocusState private var searchFocused: Bool
+
+  private var context: String {
+    [
+      model.profile?.serverId.uuidString ?? "none",
+      model.profile?.user?.id.uuidString ?? "none",
+      model.profile?.sessionId.uuidString ?? "none", section.rawValue,
+    ].joined(separator: ":")
+  }
+
+  private var requestKey: String {
+    "\(context):\(loadedContext):\(query.requestKey):\(search):\(model.catalogVisibilityRevision):\(retryRevision)"
+  }
+
+  private var hasFilters: Bool { section.hasUserFilters(query) }
+
+  /// A list for this profile and page is shown; newer requests replace it in place.
+  private var hasResultForContext: Bool {
+    loadedContext == context && completedRequestKey.hasPrefix(context + ":")
+  }
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: TarvenDesign.sectionSpacing) {
+        if loadedContext == context {
+          // Library, Recently Added, Movies and TV Shows rise in like Home, Watchlist and
+          // Collections, so every section arrives the same way.
+          libraryHeader
+            .tarvenRiseIn(0)
+          if section == .library, search.isEmpty, !hasFilters, !model.collections.isEmpty {
+            collectionRow
+              .tarvenRiseIn(1)
+          }
+        } else {
+          Text(section.title)
+            .font(TarvenDesign.pageTitle)
+            .accessibilityIdentifier("library-title")
+        }
+
+        if !hasResultForContext || (browser.items.isEmpty && browser.isLoading) {
+          // Known lists appear at once; a spinner only shows when loading takes a moment.
+          TarvenDelayedProgress()
+            .frame(maxWidth: .infinity, minHeight: 250)
+            .accessibilityLabel("Loading Library")
+        } else if let error = browser.errorMessage {
+          TarvenUnavailableView(
+            title: "Library Unavailable",
+            systemImage: "wifi.exclamationmark",
+            message: error,
+            primaryAction: TarvenUnavailableAction(title: "Try Again") { retryRevision += 1 })
+        } else if browser.items.isEmpty {
+          if !search.isEmpty || hasFilters {
+            TarvenUnavailableView(
+              title: "No Results",
+              systemImage: "magnifyingglass",
+              message: "Try another search or clear your filters.")
+          } else {
+            EmptyCatalogResults(
+              section: section,
+              query: search, canAddMedia: model.canManageMedia,
+              addMedia: { model.showMediaManager() })
+          }
+        } else {
+          resultSections
+            .tarvenRiseIn(2)
+        }
+      }
+      .padding(TarvenDesign.pagePadding)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .tarvenOverlayScrollbars()
+    .accessibilityIdentifier("browse-\(section.rawValue)")
+    #if DEBUG
+      .onReceive(AuditRenderSignals.search) { search = $0 }
+    #endif
+    .task(id: requestKey) {
+      if loadedContext != context {
+        browser.invalidate()
+        search = ""
+        if let profile = model.profile {
+          query = LibraryBrowsePreferenceStore(
+            defaults: LibraryBrowsePreferenceStore.applicationDefaults
+          ).load(
+            serverId: profile.serverId, userId: profile.user?.id ?? profile.sessionId,
+            section: section)
+        } else {
+          query = section.defaultQuery
+        }
+        loadedContext = context
+        return
+      }
+      let profile = model.profile
+      let revision = model.catalogVisibilityRevision
+      let request = requestKey
+      let cached = model.cachedBrowse(section: section, query: query, search: search)
+      if let cached {
+        browser.show(cached)
+        completedRequestKey = request
+      }
+      let loadedQuery = query
+      let loadedSearch = search
+      await browser.load(query: query, search: search, quietly: cached != nil) { query, search in
+        let items = try await model.browseCatalog(query: query, search: search)
+        guard profile?.serverId == model.profile?.serverId,
+          profile?.user?.id == model.profile?.user?.id,
+          profile?.sessionId == model.profile?.sessionId,
+          revision == model.catalogVisibilityRevision
+        else { throw CancellationError() }
+        return items
+      }
+      guard !Task.isCancelled, request == requestKey else { return }
+      if browser.errorMessage == nil {
+        model.storeBrowse(browser.items, section: section, query: loadedQuery, search: loadedSearch)
+      }
+      completedRequestKey = request
+    }
+    .task(id: "\(context):\(loadedContext):\(findRequest?.id.uuidString ?? "none")") {
+      guard loadedContext == context, let findRequest else { return }
+      if findRequest.startsNewSearch { search = "" }
+      searchFocused = false
+      await Task.yield()
+      guard !Task.isCancelled, loadedContext == context else { return }
+      searchFocused = true
+    }
+    .onChange(of: query) {
+      guard loadedContext == context, let profile = model.profile else { return }
+      LibraryBrowsePreferenceStore(defaults: LibraryBrowsePreferenceStore.applicationDefaults).save(
+        query, serverId: profile.serverId, userId: profile.user?.id ?? profile.sessionId,
+        section: section)
+    }
+    .onDisappear { browser.invalidate() }
+    .sheet(isPresented: $showingCollectionEditor) {
+      CollectionEditorSheet(collection: nil).environmentObject(model)
+    }
+    .sheet(isPresented: $showingMetadataReviewQueue) {
+      MetadataReviewQueueSheet().environmentObject(model)
+    }
+  }
+
+  private var libraryHeader: some View {
+    VStack(alignment: .leading, spacing: 18) {
+      TarvenPageHeader(
+        title: section.title,
+        count: hasResultForContext && !(browser.isLoading && browser.items.isEmpty)
+          ? browser.items.count : nil,
+        titleIdentifier: "library-title"
+      ) {
+        if model.canManageMedia, section == .library { managementActions }
+      }
+      HStack(spacing: 10) {
+        TarvenSearchField(
+          prompt: "Search \(section.title)",
+          text: $search,
+          focus: $searchFocused,
+          identifier: "library-search"
+        )
+        .frame(maxWidth: 520)
+        LibrarySortButton(query: $query, isSearching: !search.isEmpty)
+      }
+      LibraryFilterBar(
+        section: section, query: $query, genres: genres, years: years,
+        isSearching: !search.isEmpty, supportsWatchState: model.supportsLibraryState)
+    }
+  }
+
+  private var genres: [String] {
+    Set(model.catalogItems.flatMap(\.genres)).sorted {
+      $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+    }
+  }
+
+  private var years: [Int] { Set(model.catalogItems.compactMap(\.year)).sorted(by: >) }
+
+  private var managementActions: some View {
+    ViewThatFits(in: .horizontal) {
+      HStack(spacing: 8) {
+        reviewMatchesButton(compact: false)
+        createCollectionButton(compact: false)
+        addMediaButton(compact: false)
+      }
+      HStack(spacing: 8) {
+        reviewMatchesButton(compact: true)
+        createCollectionButton(compact: true)
+        addMediaButton(compact: true)
+      }
+    }
+  }
+
+  private func reviewMatchesButton(compact: Bool) -> some View {
+    Button {
+      showingMetadataReviewQueue = true
+    } label: {
+      if compact {
+        Image(systemName: "checklist")
+      } else {
+        Label("Review Matches", systemImage: "checklist")
+      }
+    }
+    .buttonStyle(TarvenSecondaryActionButtonStyle(compact: true))
+    .fixedSize()
+    .help("Review Matches")
+    .accessibilityLabel("Review Matches")
+    .accessibilityIdentifier("library-review-metadata")
+  }
+
+  private func createCollectionButton(compact: Bool) -> some View {
+    Button {
+      showingCollectionEditor = true
+    } label: {
+      if compact {
+        Image(systemName: "rectangle.stack.badge.plus")
+      } else {
+        Label("New Collection", systemImage: "rectangle.stack.badge.plus")
+      }
+    }
+    .buttonStyle(TarvenSecondaryActionButtonStyle(compact: true))
+    .fixedSize()
+    .help("Create Collection")
+    .accessibilityLabel("Create Collection")
+  }
+
+  private func addMediaButton(compact: Bool) -> some View {
+    Button {
+      model.showMediaManager()
+    } label: {
+      if compact {
+        Image(systemName: "plus")
+      } else {
+        Label("Add Media", systemImage: "plus")
+      }
+    }
+    .buttonStyle(TarvenPrimaryActionButtonStyle(compact: true))
+    .fixedSize()
+    .help("Add Media")
+    .accessibilityLabel("Add Media")
+    .accessibilityIdentifier("library-add-media")
+  }
+
+  private var collectionRow: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      TarvenSectionHeading(title: "Collections", count: model.collections.count)
+      TarvenHorizontalRail(
+        cardWidth: 210, itemCount: model.collections.count, title: "Collections"
+      ) {
+        ForEach(model.collections) { collection in
+          Button {
+            onSelectCollection(collection.id)
+          } label: {
+            CollectionCard(collection: collection)
+          }
+          .buttonStyle(TarvenCardButtonStyle())
+        }
+      }
+    }
+  }
+
+  @ViewBuilder private var resultSections: some View {
+    let movies = browser.items.filter { $0.kind == .movie }
+    let shows = browser.items.filter { $0.kind == .series }
+    let episodes = browser.items.filter { $0.kind == .episode }
+    if section == .movies || section == .tvShows
+      || (section == .recentlyAdded && episodes.isEmpty)
+    {
+      posterGrid(browser.items, onSelect: onSelect)
+    } else {
+      VStack(alignment: .leading, spacing: 34) {
+        if !movies.isEmpty {
+          VStack(alignment: .leading, spacing: 16) {
+            TarvenSectionHeading(title: "Movies", count: movies.count)
+            posterGrid(movies, onSelect: onSelect)
+          }
+        }
+        if !shows.isEmpty {
+          VStack(alignment: .leading, spacing: 16) {
+            TarvenSectionHeading(title: "TV Shows", count: shows.count)
+            posterGrid(shows, onSelect: onSelect)
+          }
+        }
+        if !episodes.isEmpty {
+          VStack(alignment: .leading, spacing: 16) {
+            TarvenSectionHeading(title: "Episodes", count: episodes.count)
+            episodeResults(episodes)
+          }
+        }
+      }
+    }
+  }
+
+  private func episodeResults(_ episodes: [CatalogItemSummary]) -> some View {
+    LazyVGrid(
+      columns: [GridItem(.adaptive(minimum: 280, maximum: 340), spacing: 22)],
+      alignment: .leading, spacing: 22
+    ) {
+      ForEach(episodes) { episode in
+        Button {
+          model.startPlayback(item: episode, intent: .play)
+        } label: {
+          LandscapeMediaCard(item: episode, width: 300, eyebrow: episodeSearchEyebrow(episode))
+        }
+        .buttonStyle(TarvenCardButtonStyle())
+        .disabled(!episode.isPlayable)
+        .accessibilityLabel(
+          "\(episode.title), \(CatalogPlaybackLogic.subtitle(for: episode) ?? "Episode")"
+        )
+        .accessibilityIdentifier("search-episode-\(episode.id.uuidString.lowercased())")
+        .mediaActions(item: episode)
+      }
+    }
+  }
+
+  private func episodeSearchEyebrow(_ item: CatalogItemSummary) -> String {
+    let number = [item.seasonNumber.map { "S\($0)" }, item.episodeNumber.map { "E\($0)" }]
+      .compactMap { $0 }.joined(separator: " ")
+    return [item.parentTitle, number.isEmpty ? nil : number].compactMap { $0 }.joined(
+      separator: " · ")
+  }
+}
+
+private struct EmptyLibraryState: View {
+  let title: String
+  let message: String
+  let action: (() -> Void)?
+
+  var body: some View {
+    TarvenUnavailableView(
+      title: title,
+      systemImage: "play.rectangle.on.rectangle",
+      message: message,
+      primaryAction: action.map {
+        TarvenUnavailableAction(title: "Add Media…", identifier: "home-add-media", action: $0)
+      }
+    )
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+}
+
+private struct EmptyCatalogResults: View {
+  let section: CatalogBrowseSection
+  let query: String
+  let canAddMedia: Bool
+  let addMedia: () -> Void
+
+  private var emptyTitle: String {
+    guard query.isEmpty else { return "No Results" }
+    switch section {
+    case .movies: return "No Movies Yet"
+    case .tvShows: return "No TV Shows Yet"
+    case .library, .recentlyAdded: return "No Media Yet"
+    }
+  }
+
+  private var emptyDescription: String {
+    guard query.isEmpty else {
+      return "Try another title, person, genre, season, or episode."
+    }
+    switch section {
+    case .movies: return "Movies appear after a storage location is scanned."
+    case .tvShows: return "TV shows appear after a storage location is scanned."
+    case .library, .recentlyAdded:
+      return "Movies and TV shows appear after a storage location is scanned."
+    }
+  }
+
+  var body: some View {
+    TarvenUnavailableView(
+      title: emptyTitle,
+      systemImage: query.isEmpty ? "rectangle.stack" : "magnifyingglass",
+      message: emptyDescription,
+      primaryAction: query.isEmpty && canAddMedia
+        ? TarvenUnavailableAction(title: "Add Media…", action: addMedia)
+        : nil)
+  }
+}
+
+private struct CollectionCard: View {
+  let collection: CollectionSummary
+  @State private var hovering = false
+  @Environment(\.tarvenReduceMotion) private var reduceMotion
+
+  var body: some View {
+    let total = collection.itemCount > 0 ? collection.itemCount : collection.totalCount
+    VStack(alignment: .leading, spacing: 9) {
+      ZStack(alignment: .topTrailing) {
+        ZStack {
+          RoundedRectangle(cornerRadius: TarvenDesign.cardRadius)
+            .fill(.white.opacity(0.06))
+            .overlay {
+              RoundedRectangle(cornerRadius: TarvenDesign.cardRadius)
+                .stroke(TarvenDesign.hairline, lineWidth: 1)
+            }
+            .frame(width: 196, height: 266)
+            .offset(x: 10, y: -10)
+
+          RoundedRectangle(cornerRadius: TarvenDesign.cardRadius)
+            .fill(.white.opacity(0.09))
+            .overlay {
+              RoundedRectangle(cornerRadius: TarvenDesign.cardRadius)
+                .stroke(TarvenDesign.hairline, lineWidth: 1)
+            }
+            .frame(width: 204, height: 274)
+            .offset(x: 5, y: -5)
+
+          AuthenticatedArtwork(artwork: collection.poster, symbol: "rectangle.stack.fill")
+            .frame(width: 210, height: 280)
+            .clipShape(RoundedRectangle(cornerRadius: TarvenDesign.cardRadius))
+            .overlay(alignment: .bottom) {
+              if total > 0 && collection.watchedCount > 0 {
+                let fraction = min(1.0, max(0.0, Double(collection.watchedCount) / Double(total)))
+                GeometryReader { geo in
+                  ZStack(alignment: .leading) {
+                    Rectangle().fill(.black.opacity(0.45))
+                    Rectangle().fill(Color.accentColor).frame(width: geo.size.width * fraction)
+                  }
+                }
+                .frame(height: 4)
+                .clipShape(RoundedRectangle(cornerRadius: TarvenDesign.cardRadius))
+              }
+            }
+            .overlay {
+              RoundedRectangle(cornerRadius: TarvenDesign.cardRadius)
+                .stroke(hovering ? .white.opacity(0.25) : TarvenDesign.hairline, lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(hovering ? 0.34 : 0), radius: 14, y: 8)
+        }
+        .padding(.top, 10)
+        .padding(.trailing, 10)
+
+        if let providerBadge = BoxSetLogic.providerLabel(collection.provider) {
+          Label(
+            providerBadge,
+            systemImage: collection.provider == "universe"
+              ? "sparkles.square.filled.on.square" : "film.stack"
+          )
+          .font(.caption2.weight(.bold))
+          .padding(.horizontal, 8)
+          .padding(.vertical, 4)
+          .tarvenGlass(in: Capsule())
+          .padding(.top, 20)
+          .padding(.trailing, 20)
+        } else if collection.isSmart {
+          Label("Smart", systemImage: "sparkles")
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .tarvenGlass(in: Capsule())
+            .padding(.top, 20)
+            .padding(.trailing, 20)
+        }
+      }
+      Text(collection.name)
+        .font(.headline)
+        .lineLimit(1)
+        .frame(width: 210, alignment: .leading)
+      Text(BoxSetLogic.cardSubtitle(for: collection))
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .frame(width: 210, alignment: .leading)
+    }
+    .scaleEffect(hovering && !reduceMotion ? 1.012 : 1)
+    .animation(reduceMotion ? nil : TarvenDesign.responsiveSpring, value: hovering)
+    .onHover { hovering = $0 }
+  }
+}
+
+private struct CollectionDetailView: View {
+  @EnvironmentObject private var model: AppModel
+  let collection: CollectionSummary
+  var isFranchise: Bool = false
+  var initialNotice: String? = nil
+  let onBack: () -> Void
+  let onSelect: (UUID) -> Void
+  var onOpenCollection: ((UUID, String?) -> Void)? = nil
+  @State private var detail: CollectionDetail?
+  @State private var expandedMemberIds: Set<UUID> = []
+  @State private var showingEditor = false
+  @State private var isUpdatingOrder = false
+  @State private var isSavingCopy = false
+  @State private var statusNotice: String?
+  @State private var errorMessage: String?
+  /// The collection itself failed to load; its banner then offers Try Again.
+  @State private var loadFailed = false
+
+  private var summary: CollectionSummary { detail?.asSummary ?? collection }
+  private var canEdit: Bool { !isFranchise && (detail?.canEdit ?? collection.canEdit) }
+  private var canSaveAsCollection: Bool {
+    (isFranchise || summary.provider != nil) && !canEdit
+  }
+  private var members: [CollectionMember] { detail?.members ?? [] }
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 30) {
+        collectionHero
+        VStack(alignment: .leading, spacing: 16) {
+          if let statusNotice {
+            HStack(spacing: 10) {
+              Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+              Text(statusNotice)
+                .font(.callout)
+                .frame(maxWidth: .infinity, alignment: .leading)
+              Button("Dismiss") { self.statusNotice = nil }
+                .buttonStyle(.borderless)
+            }
+            .padding(12)
+            .background(
+              Color.green.opacity(0.14),
+              in: RoundedRectangle(cornerRadius: TarvenDesign.compactRadius, style: .continuous))
+          }
+          if let errorMessage {
+            ErrorBanner(message: errorMessage, retry: detailRetry, inline: true)
+          }
+
+          HStack(alignment: .firstTextBaseline) {
+            TarvenSectionHeading(
+              title: "In This Collection",
+              count: detail?.itemCount ?? collection.items.count)
+            Spacer()
+            if let detail {
+              let sortTitle =
+                switch detail.sortMode {
+                case "release": "Sorted by Release Date"
+                case "title": "Sorted by Title"
+                default: "Custom Order"
+                }
+              Text(sortTitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+
+          if let detail {
+            if detail.members.isEmpty {
+              TarvenUnavailableView(
+                title: "No Titles Yet",
+                systemImage: "rectangle.stack",
+                message: canEdit
+                  ? "Edit this collection or use Add to Collection on any title."
+                  : "Matching titles will appear here automatically.",
+                minHeight: 220)
+            } else {
+              VStack(spacing: 12) {
+                ForEach(Array(detail.members.enumerated()), id: \.element.id) { index, member in
+                  memberRow(member, index: index, total: detail.members.count, detail: detail)
+                }
+              }
+            }
+          } else {
+            posterGrid(collection.items, onSelect: onSelect)
+          }
+        }
+        .padding(.horizontal, TarvenDesign.pagePadding)
+      }
+      .padding(.bottom, 48)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .scrollClipDisabled()
+    .tarvenOverlayScrollbars()
+    .tarvenCompactHeader(title: summary.name, threshold: 380, onBack: onBack)
+    .onAppear {
+      if statusNotice == nil, let initialNotice {
+        statusNotice = initialNotice
+      }
+    }
+    .task(id: collection) {
+      await loadDetail()
+    }
+    .onChange(of: showingEditor) { _, open in
+      if !open {
+        Task { await loadDetail() }
+      }
+    }
+    .sheet(isPresented: $showingEditor) {
+      CollectionEditorSheet(collection: summary).environmentObject(model)
+    }
+  }
+
+  private var collectionHero: some View {
+    let heroArtwork =
+      summary.backdrop
+      ?? summary.items.first?.backdrop
+      ?? summary.poster
+    let eyebrow: String = {
+      var parts: [String] = []
+      if let providerLabel = BoxSetLogic.providerLabel(summary.provider) {
+        parts.append(providerLabel.uppercased())
+      } else if summary.isSmart {
+        parts.append("SMART COLLECTION")
+      } else {
+        parts.append("COLLECTION")
+      }
+      if let genres = detail?.genres, !genres.isEmpty {
+        parts.append(genres.prefix(3).joined(separator: " · ").uppercased())
+      }
+      return parts.joined(separator: "  ·  ")
+    }()
+    let playable = BoxSetLogic.playableItems(from: members)
+    let statsText =
+      detail.map(BoxSetLogic.statsLine(for:)) ?? BoxSetLogic.cardSubtitle(for: summary)
+    let totalItems =
+      detail?.itemCount ?? (summary.itemCount > 0 ? summary.itemCount : summary.totalCount)
+    let watchedItems = detail?.watchedCount ?? summary.watchedCount
+
+    return ZStack(alignment: .bottomLeading) {
+      AuthenticatedArtwork(
+        artwork: heroArtwork,
+        symbol: "rectangle.stack.fill",
+        contentMode: .fill
+      )
+      .backgroundExtensionEffect()
+
+      LinearGradient(
+        stops: [
+          .init(color: .black.opacity(0.75), location: 0),
+          .init(color: .black.opacity(0.38), location: 0.48),
+          .init(color: .clear, location: 0.8),
+        ],
+        startPoint: .leading,
+        endPoint: .trailing)
+      LinearGradient(
+        stops: [
+          .init(color: .clear, location: 0.38),
+          .init(color: TarvenDesign.canvas.opacity(0.35), location: 0.65),
+          .init(color: TarvenDesign.canvas.opacity(0.82), location: 0.88),
+          .init(color: TarvenDesign.canvas, location: 1),
+        ],
+        startPoint: .top,
+        endPoint: .bottom)
+
+      HStack(alignment: .bottom, spacing: 24) {
+        AuthenticatedArtwork(artwork: summary.poster, symbol: "rectangle.stack.fill")
+          .frame(width: 140, height: 210)
+          .clipShape(RoundedRectangle(cornerRadius: TarvenDesign.cardRadius))
+          .overlay {
+            RoundedRectangle(cornerRadius: TarvenDesign.cardRadius)
+              .stroke(.white.opacity(0.22), lineWidth: 1)
+          }
+          .shadow(color: .black.opacity(0.45), radius: 18, y: 10)
+          .tarvenRiseIn(0)
+
+        VStack(alignment: .leading, spacing: 10) {
+          Text(eyebrow)
+            .font(.caption.weight(.bold))
+            .tracking(1)
+            .foregroundStyle(.white.opacity(0.74))
+            .tarvenRiseIn(0)
+
+          Text(summary.name)
+            .font(TarvenDesign.heroTitle)
+            .tracking(-0.6)
+            .lineLimit(2)
+            .tarvenRiseIn(1)
+
+          if let overview = summary.overview, !overview.isEmpty {
+            Text(overview)
+              .font(.callout)
+              .foregroundStyle(.white.opacity(0.84))
+              .lineLimit(3)
+              .frame(maxWidth: 640, alignment: .leading)
+              .tarvenRiseIn(1)
+          }
+
+          VStack(alignment: .leading, spacing: 6) {
+            Text(statsText)
+              .font(.callout.weight(.semibold))
+              .foregroundStyle(.white.opacity(0.8))
+            if totalItems > 0 && watchedItems > 0 {
+              ProgressView(value: Double(min(watchedItems, totalItems)), total: Double(totalItems))
+                .progressViewStyle(.linear)
+                .frame(maxWidth: 260)
+            }
+          }
+          .tarvenRiseIn(2)
+
+          HStack(spacing: 12) {
+            if let detail, !playable.isEmpty {
+              Button {
+                Task { await model.startCollectionPlayback(detail: detail) }
+              } label: {
+                Label(BoxSetLogic.playLabel(for: detail.nextItem), systemImage: "play.fill")
+              }
+              .buttonStyle(TarvenPrimaryActionButtonStyle())
+            }
+
+            if canSaveAsCollection {
+              Button {
+                Task { await saveAsEditableCollection() }
+              } label: {
+                Label(
+                  isSavingCopy ? "Saving…" : "Save as Collection",
+                  systemImage: "plus.rectangle.on.rectangle")
+              }
+              .buttonStyle(.bordered)
+              .disabled(isSavingCopy)
+              .accessibilityIdentifier("save-franchise-as-collection")
+            }
+
+            if canEdit {
+              Button {
+                showingEditor = true
+              } label: {
+                Label("Edit Collection", systemImage: "pencil")
+              }
+              .buttonStyle(.bordered)
+            }
+          }
+          .padding(.top, 4)
+          .tarvenRiseIn(3)
+        }
+      }
+      .padding(TarvenDesign.pagePadding)
+      .padding(.bottom, 16)
+
+      VStack {
+        HStack {
+          TarvenIconControl(symbol: "chevron.left", label: "Back", action: onBack)
+          Spacer()
+          if canEdit {
+            TarvenIconControl(
+              symbol: "ellipsis",
+              label: "Edit Collection",
+              action: { showingEditor = true })
+          }
+        }
+        .padding(TarvenDesign.pagePadding)
+        Spacer()
+      }
+    }
+    // Full-bleed like every other hero; artwork continues beneath the sidebar.
+    .frame(maxWidth: .infinity)
+    .frame(height: 500)
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("collection-hero")
+  }
+
+  @ViewBuilder
+  private func memberRow(
+    _ member: CollectionMember, index: Int, total: Int, detail: CollectionDetail
+  ) -> some View {
+    let hasEpisodes = member.episodes?.isEmpty == false
+    let isExpanded = expandedMemberIds.contains(member.id)
+    let canReorder = canEdit && !summary.isSmart
+
+    let rowCard = VStack(alignment: .leading, spacing: 10) {
+      HStack(spacing: 14) {
+        Text("\(index + 1)")
+          .font(.callout.monospacedDigit().weight(.semibold))
+          .foregroundStyle(.secondary)
+          .frame(width: 24, alignment: .trailing)
+
+        AuthenticatedArtwork(
+          artwork: member.item.poster ?? member.item.backdrop,
+          symbol: member.kind == .series ? "tv" : "film"
+        )
+        .frame(width: 48, height: 72)
+        .clipShape(RoundedRectangle(cornerRadius: TarvenDesign.tinyRadius))
+        .overlay {
+          RoundedRectangle(cornerRadius: TarvenDesign.tinyRadius)
+            .stroke(TarvenDesign.hairline, lineWidth: 1)
+        }
+
+        VStack(alignment: .leading, spacing: 4) {
+          HStack(spacing: 8) {
+            Text(member.title)
+              .font(.headline)
+              .lineLimit(1)
+            if let season = member.seasonNumber {
+              Text(season == 0 ? "Specials" : "Season \(season)")
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 2)
+                .background(.white.opacity(0.1), in: Capsule())
+            }
+          }
+
+          HStack(spacing: 10) {
+            Text(memberTypeSubtitle(member))
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            if member.itemCount > 1 {
+              Text("\(member.watchedCount) of \(member.itemCount) watched")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } else if member.watchedCount > 0 {
+              Label("Watched", systemImage: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+          if hasEpisodes {
+            toggleExpanded(member.id)
+          } else {
+            onSelect(member.mediaId)
+          }
+        }
+
+        Spacer()
+
+        if let firstPlayable = BoxSetLogic.playableItems(from: [member]).first {
+          Button {
+            Task { await model.startCollectionPlayback(detail: detail, target: firstPlayable) }
+          } label: {
+            Image(systemName: "play.fill")
+          }
+          .buttonStyle(.bordered)
+          .help("Play from here")
+        }
+
+        Button {
+          onSelect(member.mediaId)
+        } label: {
+          Image(systemName: "info.circle")
+        }
+        .buttonStyle(.bordered)
+        .help("Open Details")
+
+        if hasEpisodes {
+          Button {
+            toggleExpanded(member.id)
+          } label: {
+            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+          }
+          .buttonStyle(.bordered)
+          .help(isExpanded ? "Hide Episodes" : "Show Episodes")
+        }
+
+        if canReorder {
+          Button {
+            Task { await moveMember(from: index, to: index - 1) }
+          } label: {
+            Image(systemName: "arrow.up")
+          }
+          .buttonStyle(.borderless)
+          .disabled(isUpdatingOrder || index == 0)
+          .help("Move Up")
+          .accessibilityLabel("Move \(member.title) Up")
+
+          Button {
+            Task { await moveMember(from: index, to: index + 1) }
+          } label: {
+            Image(systemName: "arrow.down")
+          }
+          .buttonStyle(.borderless)
+          .disabled(isUpdatingOrder || index == total - 1)
+          .help("Move Down")
+          .accessibilityLabel("Move \(member.title) Down")
+
+          Button {
+            guard
+              TarvenConfirm.ask(
+                "Remove “\(member.title)” from “\(summary.name)”?",
+                "The title stays in your library.", action: "Remove")
+            else { return }
+            Task { await removeMember(member) }
+          } label: {
+            Image(systemName: "trash")
+              .foregroundStyle(.secondary)
+          }
+          .buttonStyle(.borderless)
+          .disabled(isUpdatingOrder)
+          .help("Remove from Collection")
+          .accessibilityLabel("Remove \(member.title) from Collection")
+        }
+      }
+
+      if isExpanded, let episodes = member.episodes, !episodes.isEmpty {
+        Divider()
+        VStack(spacing: 6) {
+          ForEach(episodes) { episode in
+            HStack(spacing: 12) {
+              let code =
+                if let s = episode.seasonNumber, let e = episode.episodeNumber {
+                  "S\(String(format: "%02d", s)) E\(String(format: "%02d", e))"
+                } else {
+                  "Episode"
+                }
+              Text(code)
+                .font(.caption.monospacedDigit().weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 68, alignment: .leading)
+              Text(episode.title)
+                .font(.callout)
+                .lineLimit(1)
+              Spacer()
+              if episode.watchState == .completed || episode.progress?.isCompleted == true {
+                Image(systemName: "checkmark.circle.fill")
+                  .foregroundStyle(.secondary)
+                  .font(.caption)
+              }
+              Button {
+                Task { await model.startCollectionPlayback(detail: detail, target: episode) }
+              } label: {
+                Image(systemName: "play.fill")
+              }
+              .buttonStyle(.borderless)
+              .help("Play \(episode.title)")
+            }
+            .padding(.leading, 38)
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+            .onTapGesture { onSelect(episode.id) }
+            .mediaActions(item: episode)
+          }
+        }
+      }
+    }
+    .padding(14)
+    .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: TarvenDesign.cardRadius))
+    .overlay {
+      RoundedRectangle(cornerRadius: TarvenDesign.cardRadius).stroke(
+        TarvenDesign.hairline, lineWidth: 1)
+    }
+
+    if canReorder {
+      rowCard
+        .draggable(member.memberId.uuidString)
+        .dropDestination(for: String.self) { items, _ in
+          guard !isUpdatingOrder, let raw = items.first,
+            let draggedId = UUID(uuidString: raw),
+            let sourceIndex = members.firstIndex(where: { $0.memberId == draggedId }),
+            sourceIndex != index
+          else { return false }
+          Task { await moveMember(from: sourceIndex, to: index) }
+          return true
+        }
+    } else {
+      rowCard
+    }
+  }
+
+  private func memberTypeSubtitle(_ member: CollectionMember) -> String {
+    var parts: [String] = []
+    if member.seasonNumber != nil {
+      parts.append("\(member.itemCount) \(member.itemCount == 1 ? "episode" : "episodes")")
+    } else {
+      switch member.kind {
+      case .movie: parts.append("Movie")
+      case .series: parts.append("TV Show")
+      case .episode:
+        if let s = member.item.seasonNumber, let e = member.item.episodeNumber {
+          parts.append("S\(String(format: "%02d", s)) E\(String(format: "%02d", e))")
+        } else {
+          parts.append("Episode")
+        }
+      default: break
+      }
+    }
+    if let year = member.item.year { parts.append(String(year)) }
+    if member.totalRuntimeSeconds >= 60 {
+      let mins = Int((member.totalRuntimeSeconds + 30) / 60)
+      let hours = mins / 60
+      let rem = mins % 60
+      parts.append(hours > 0 ? (rem > 0 ? "\(hours)h \(rem)m" : "\(hours)h") : "\(rem)m")
+    }
+    return parts.joined(separator: " · ")
+  }
+
+  private func toggleExpanded(_ memberId: UUID) {
+    if expandedMemberIds.contains(memberId) {
+      expandedMemberIds.remove(memberId)
+    } else {
+      expandedMemberIds.insert(memberId)
+    }
+  }
+
+  private func loadDetail() async {
+    do {
+      detail = try await model.collectionDetail(id: collection.id)
+      errorMessage = nil
+      loadFailed = false
+    } catch {
+      guard !(error is CancellationError) else { return }
+      // A detected franchise that is not yet saved may only have its summary items locally.
+      if isFranchise && !collection.items.isEmpty {
+        detail = nil
+        errorMessage = nil
+        loadFailed = false
+        return
+      }
+      errorMessage = "Couldn't load this collection. \(error.localizedDescription)"
+      loadFailed = true
+    }
+  }
+
+  private var detailRetry: (() -> Void)? {
+    guard loadFailed else { return nil }
+    return { Task { await loadDetail() } }
+  }
+
+  private func moveMember(from sourceIndex: Int, to targetIndex: Int) async {
+    guard !isUpdatingOrder, var reordered = detail?.members,
+      reordered.indices.contains(sourceIndex),
+      reordered.indices.contains(targetIndex),
+      sourceIndex != targetIndex
+    else { return }
+    let moved = reordered.remove(at: sourceIndex)
+    reordered.insert(moved, at: targetIndex)
+    isUpdatingOrder = true
+    defer { isUpdatingOrder = false }
+    do {
+      let inputs = reordered.map {
+        CollectionMemberInput(mediaId: $0.mediaId, seasonNumber: $0.seasonNumber)
+      }
+      detail = try await model.updateCollectionOrder(
+        id: collection.id, members: inputs, sortMode: "custom")
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+  }
+
+  private func removeMember(_ member: CollectionMember) async {
+    isUpdatingOrder = true
+    defer { isUpdatingOrder = false }
+    await model.removeMediaFromCollection(
+      collectionId: collection.id, mediaId: member.mediaId, seasonNumber: member.seasonNumber)
+    await loadDetail()
+  }
+
+  private func saveAsEditableCollection() async {
+    guard !isSavingCopy else { return }
+    isSavingCopy = true
+    errorMessage = nil
+    defer { isSavingCopy = false }
+    do {
+      let copied = try await model.createCollectionFromFranchise(collection.id.uuidString)
+      let savedMessage = "Saved “\(copied.name)” to Collections."
+      if let onOpenCollection {
+        onOpenCollection(copied.id, savedMessage)
+      } else {
+        statusNotice = savedMessage
+      }
+    } catch is CancellationError {
+    } catch {
+      errorMessage = "Couldn't save the collection. \(error.localizedDescription)"
+    }
+  }
+}
+
+@ViewBuilder
+@MainActor
+private func posterGrid(_ items: [CatalogItemSummary], onSelect: @escaping (UUID) -> Void)
+  -> some View
+{
+  let width = LibraryDisplayPreferences.posterSize().width
+  LazyVGrid(
+    columns: [GridItem(.adaptive(minimum: width - 26, maximum: width), spacing: 22)],
+    alignment: .leading,
+    spacing: 30
+  ) {
+    ForEach(LibraryDisplayPreferences.visible(items, keepWatched: true)) { item in
+      Button {
+        onSelect(item.id)
+      } label: {
+        MediaPosterCard(item: item)
+      }
+      .buttonStyle(TarvenCardButtonStyle())
+      .accessibilityIdentifier("media-\(item.id.uuidString)")
+      .mediaActions(item: item)
+    }
+  }
+  // Filtering and sorting let cards glide to their new places instead of jumping.
+  .tarvenListMotion(items.map(\.id))
+}
+
+private struct WatchlistPage: View {
+  // Settings › General changes these pages while they are open.
+  @AppStorage(GeneralPreferenceKeys.posterSize) private var posterSizeSetting = "standard"
+  @AppStorage(GeneralPreferenceKeys.showWatchedInRows) private var showWatchedSetting = true
+  @AppStorage(GeneralPreferenceKeys.hideOfflineTitles) private var hideOfflineSetting = false
+
+  @EnvironmentObject private var model: AppModel
+  let onSelect: (UUID) -> Void
+  @State private var hasLoaded = false
+  @State private var loadError: String?
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: TarvenDesign.sectionSpacing) {
+        TarvenPageHeader(title: "Watchlist", count: model.watchlistItems.count)
+          .tarvenRiseIn(0)
+        if let loadError {
+          ErrorBanner(
+            message: "Couldn't load your watchlist. \(loadError)",
+            retry: { Task { await load() } }, inline: true)
+        }
+        if !model.watchlistItems.isEmpty {
+          posterGrid(model.watchlistItems, onSelect: onSelect)
+            .tarvenRiseIn(1)
+        } else if !hasLoaded && loadError == nil {
+          TarvenDelayedProgress()
+            .frame(maxWidth: .infinity, minHeight: 330)
+            .accessibilityLabel("Loading Watchlist")
+        } else if loadError == nil {
+          TarvenUnavailableView(
+            title: "Your Watchlist Is Empty",
+            systemImage: "bookmark",
+            message:
+              "Save movies and TV shows you want to watch later from their detail page or context menu."
+          )
+          .tarvenRiseIn(1)
+        }
+      }
+      .padding(TarvenDesign.pagePadding)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .scrollClipDisabled()
+    .tarvenOverlayScrollbars()
+    .task { await load() }
+    .accessibilityIdentifier("watchlist-page")
+  }
+
+  private func load() async {
+    do {
+      try await model.reloadWatchlist()
+      loadError = nil
+      hasLoaded = true
+    } catch {
+      guard !(error is CancellationError) else { return }
+      loadError = error.localizedDescription
+    }
+  }
+}
+
+private struct PersonLoadKey: Equatable {
+  let person: PersonSelection
+  let retryRevision: Int
+}
+
+private struct PersonDetailView: View {
+  // Settings › General changes these pages while they are open.
+  @AppStorage(GeneralPreferenceKeys.posterSize) private var posterSizeSetting = "standard"
+  @AppStorage(GeneralPreferenceKeys.showWatchedInRows) private var showWatchedSetting = true
+  @AppStorage(GeneralPreferenceKeys.hideOfflineTitles) private var hideOfflineSetting = false
+
+  @EnvironmentObject private var model: AppModel
+  let person: PersonSelection
+  let onBack: () -> Void
+  let onSelect: (UUID) -> Void
+  @State private var detail: PersonDetailResponse?
+  @State private var isLoading = true
+  @State private var errorMessage: String?
+  @State private var retryRevision = 0
+  /// The person's life and other titles from TMDB ("people-v1"); the page never waits for it.
+  @State private var profile: PersonProfileResponse?
+  @State private var biographyExpanded = false
+  @State private var wishing: String?
+  @State private var wishMessage: String?
+  @Environment(\.tarvenContrast) private var contrast
+
+  /// Only a person TMDB identified has a life to show.
+  private var profileKey: String? {
+    guard model.supportsPeople, let key = person.personKey, key.hasPrefix("tmdb:person:") else {
+      return nil
+    }
+    return key
+  }
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 28) {
+        header
+        if let biography = profile?.about?.biography?.trimmingCharacters(
+          in: .whitespacesAndNewlines),
+          !biography.isEmpty
+        {
+          biographySection(biography)
+        }
+        VStack(alignment: .leading, spacing: 16) {
+          if profileKey != nil, let items = detail?.items, !items.isEmpty {
+            TarvenSectionHeading(title: "In Your Library", count: items.count)
+          }
+          titles
+        }
+        if let knownFor = profile?.knownFor, !knownFor.isEmpty {
+          knownForSection(knownFor)
+        }
+      }
+      .padding(TarvenDesign.pagePadding)
+      .padding(.top, 28)
+      .padding(.bottom, 48)
+    }
+    .scrollClipDisabled()
+    .tarvenOverlayScrollbars()
+    .tarvenCompactHeader(title: detail?.name ?? person.name, threshold: 200, onBack: onBack)
+    .task(id: PersonLoadKey(person: person, retryRevision: retryRevision)) {
+      // A person seen a moment ago shows at once; the server is asked again behind it.
+      if let remembered = model.rememberedPersonDetail(person) {
+        detail = remembered
+        isLoading = false
+      } else {
+        detail = nil
+        isLoading = true
+      }
+      errorMessage = nil
+      do {
+        let loaded = try await model.personDetail(person)
+        guard !Task.isCancelled else { return }
+        detail = loaded
+        isLoading = false
+      } catch {
+        // Clicking on before the answer cancels the request, which can arrive as a URL error;
+        // that is not a problem to show, even for a moment.
+        if Task.isCancelled || error is CancellationError
+          || (error as? URLError)?.code == .cancelled
+        {
+          return
+        }
+        if detail == nil {
+          errorMessage = error.localizedDescription
+          isLoading = false
+        }
+      }
+    }
+    .task(id: person.personKey) {
+      biographyExpanded = false
+      wishMessage = nil
+      guard let key = profileKey else {
+        profile = nil
+        return
+      }
+      if let remembered = model.rememberedPersonProfile(key) {
+        profile = remembered
+        return
+      }
+      profile = nil
+      do {
+        let loaded = try await model.personProfile(key)
+        guard !Task.isCancelled else { return }
+        withAnimation(.easeOut(duration: 0.15)) { profile = loaded }
+      } catch {
+        // Without TMDB, or while it is away, the page shows the library's titles only.
+      }
+    }
+    .accessibilityIdentifier("person-detail-page")
+  }
+
+  private var header: some View {
+    HStack(spacing: 18) {
+      TarvenIconControl(symbol: "chevron.left", label: "Back", action: onBack)
+      AuthenticatedArtwork(
+        artwork: detail?.profile ?? person.profile,
+        symbol: "person.fill"
+      )
+      .frame(width: 84, height: 84)
+      .clipShape(Circle())
+      .overlay { Circle().stroke(TarvenDesign.hairline, lineWidth: 1) }
+      VStack(alignment: .leading, spacing: 6) {
+        Text((detail?.subtitle ?? person.subtitle ?? "Cast & Crew").uppercased())
+          .font(.caption.weight(.bold))
+          .tracking(1)
+          .foregroundStyle(.secondary)
+        Text(detail?.name ?? person.name)
+          .font(TarvenDesign.heroTitle)
+          .lineLimit(2)
+        if let life = PeoplePresentation.life(profile?.about) {
+          Text(life)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("person-life")
+        }
+        if let items = detail?.items {
+          Text("\(items.count) \(items.count == 1 ? "title" : "titles") in your library")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+        }
+      }
+      Spacer()
+    }
+  }
+
+  private func biographySection(_ biography: String) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("Biography")
+        .font(TarvenDesign.sectionTitle)
+      Text(biography)
+        .font(.body)
+        .foregroundStyle(.secondary)
+        .lineLimit(biographyExpanded ? nil : 4)
+        .frame(maxWidth: 760, alignment: .leading)
+        .textSelection(.enabled)
+      HStack(spacing: 12) {
+        if biography.count > 320 {
+          Button(biographyExpanded ? "Less" : "More") { biographyExpanded.toggle() }
+            .buttonStyle(.link)
+            .accessibilityIdentifier("person-biography-more")
+        }
+        Text("From TMDB")
+          .font(.caption)
+          .foregroundStyle(TarvenDesign.subtleText(for: contrast))
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var titles: some View {
+    if isLoading {
+      TarvenDelayedProgress()
+        .frame(maxWidth: .infinity, minHeight: 240)
+        .accessibilityLabel("Loading titles")
+    } else if let errorMessage {
+      TarvenUnavailableView(
+        title: "Couldn’t Load Person",
+        systemImage: "exclamationmark.triangle",
+        message: errorMessage,
+        primaryAction: TarvenUnavailableAction(title: "Try Again") { retryRevision += 1 },
+        minHeight: 260)
+    } else if let items = detail?.items, !items.isEmpty {
+      posterGrid(items, onSelect: onSelect)
+    } else {
+      TarvenUnavailableView(
+        title: "No Titles Found",
+        systemImage: "person.crop.circle.badge.questionmark",
+        message: "No accessible movies or TV shows in this library match this person.",
+        minHeight: 260)
+    }
+  }
+
+  private func knownForSection(_ hits: [WishSearchHit]) -> some View {
+    VStack(alignment: .leading, spacing: 14) {
+      TarvenSectionHeading(title: "Known For", count: hits.count)
+      if let wishMessage {
+        Text(wishMessage)
+          .font(.callout)
+          .foregroundStyle(.secondary)
+      }
+      ScrollView(.horizontal) {
+        LazyHStack(alignment: .top, spacing: 18) {
+          ForEach(hits) { hit in
+            knownForCard(hit)
+          }
+        }
+        .padding(.vertical, 4)
+      }
+      .scrollIndicators(.never)
+      .scrollClipDisabled()
+    }
+    .accessibilityIdentifier("person-known-for")
+  }
+
+  private func knownForCard(_ hit: WishSearchHit) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      if let account = model.profile {
+        WishPosterThumbnail(
+          posterPath: hit.posterPath, width: 342, profile: account, cache: model.wishPosterCache
+        )
+        .frame(width: 140, height: 210)
+      }
+      Text(hit.title)
+        .font(.callout.weight(.semibold))
+        .lineLimit(1)
+      Text(
+        [hit.year.map(String.init), WishPresentation.kindLabel(hit.kind)].compactMap { $0 }.joined(
+          separator: " · ")
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .lineLimit(1)
+      if model.supportsWishes {
+        wishControl(hit)
+          .padding(.top, 2)
+      }
+    }
+    .frame(width: 140, alignment: .leading)
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("known-for-\(hit.id)")
+  }
+
+  @ViewBuilder
+  private func wishControl(_ hit: WishSearchHit) -> some View {
+    if hit.alreadyWished && hit.supportedByCaller {
+      Label("Wished", systemImage: "checkmark")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+    } else {
+      Button {
+        Task { await wish(hit) }
+      } label: {
+        Label(hit.alreadyWished ? "Me Too" : "Wish", systemImage: "gift")
+      }
+      .buttonStyle(.bordered)
+      .controlSize(.small)
+      .disabled(wishing != nil)
+    }
+  }
+
+  /// Wishes the title, or adds this profile to someone else's wish for it.
+  private func wish(_ hit: WishSearchHit) async {
+    guard let account = model.profile else { return }
+    wishing = hit.id
+    wishMessage = nil
+    defer { wishing = nil }
+    do {
+      let client = APIClient(profile: account)
+      var wishId = hit.existingWishId
+      if hit.alreadyWished, let existing = hit.existingWishId {
+        _ = try await client.setWishSupport(id: existing, supported: true)
+      } else {
+        switch try await client.createWish(
+          CreateWishRequest(
+            kind: hit.kind, title: hit.title, year: hit.year, provider: hit.provider,
+            providerMediaId: hit.providerMediaId, overview: hit.overview,
+            posterPath: hit.posterPath, note: nil))
+        {
+        case .created(let created):
+          wishId = created.wish.id
+        case .alreadyInLibrary(let problem):
+          wishMessage = problem.message
+          return
+        }
+      }
+      if let current = profile {
+        profile = PersonProfileResponse(
+          about: current.about,
+          knownFor: current.knownFor.map { item in
+            guard item.id == hit.id else { return item }
+            return WishSearchHit(
+              provider: item.provider, providerMediaId: item.providerMediaId, kind: item.kind,
+              title: item.title, year: item.year, overview: item.overview,
+              posterPath: item.posterPath, posterUrl: item.posterUrl,
+              alreadyInLibrary: item.alreadyInLibrary, existingMediaId: item.existingMediaId,
+              alreadyWished: true, existingWishId: wishId, supportedByCaller: true)
+          })
+      }
+      model.forgetPersonProfiles()
+      await model.refreshWishSummary(notify: false)
+    } catch {
+      if error is CancellationError { return }
+      wishMessage = WishPresentation.describeError(error)
+    }
+  }
+}
+
+private struct CollectionsPage: View {
+  @EnvironmentObject private var model: AppModel
+  let onSelectCollection: (UUID) -> Void
+  let onSelectFranchise: (CollectionSummary) -> Void
+  @State private var showingCreate = false
+  @State private var franchises: [CollectionSummary] = []
+  @State private var isLoadingFranchises = false
+  @State private var franchisesError: String?
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: TarvenDesign.sectionSpacing) {
+        TarvenPageHeader(title: "Collections", count: model.collections.count) {
+          Button {
+            showingCreate = true
+          } label: {
+            Label("New Collection", systemImage: "plus")
+          }
+          .buttonStyle(TarvenSecondaryActionButtonStyle(compact: true))
+          .accessibilityIdentifier("new-collection-button")
+        }
+        .tarvenRiseIn(0)
+
+        if model.collections.isEmpty {
+          TarvenUnavailableView(
+            title: "No Collections Yet",
+            systemImage: "square.stack.3d.up",
+            message: "Create manual collections or rule-based smart lists."
+          )
+          .tarvenRiseIn(1)
+        } else {
+          LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 210, maximum: 240), spacing: 22)],
+            alignment: .leading,
+            spacing: 30
+          ) {
+            ForEach(model.collections) { collection in
+              Button {
+                onSelectCollection(collection.id)
+              } label: {
+                CollectionCard(collection: collection)
+              }
+              .buttonStyle(TarvenCardButtonStyle())
+              .accessibilityIdentifier("collection-\(collection.id.uuidString.lowercased())")
+            }
+          }
+          .tarvenListMotion(model.collections.map(\.id))
+          .tarvenRiseIn(1)
+        }
+
+        if let franchisesError {
+          ErrorBanner(
+            message: "Couldn't load franchises in your library. \(franchisesError)",
+            retry: { Task { await loadFranchises() } },
+            retryDisabled: isLoadingFranchises,
+            inline: true)
+        }
+
+        if !franchises.isEmpty {
+          VStack(alignment: .leading, spacing: 14) {
+            TarvenSectionHeading(title: "Franchises in Library", count: franchises.count)
+            Text(
+              "Movie series detected by TMDB. Open any franchise to browse its titles or save it as a collection."
+            )
+            .font(.callout)
+            .foregroundStyle(.secondary)
+
+            LazyVGrid(
+              columns: [GridItem(.adaptive(minimum: 210, maximum: 240), spacing: 22)],
+              alignment: .leading,
+              spacing: 24
+            ) {
+              ForEach(franchises) { franchise in
+                Button {
+                  onSelectFranchise(franchise)
+                } label: {
+                  CollectionCard(collection: franchise)
+                }
+                .buttonStyle(TarvenCardButtonStyle())
+                .accessibilityIdentifier("franchise-\(franchise.id.uuidString.lowercased())")
+              }
+            }
+          }
+          .padding(.top, 16)
+          .transition(.opacity.combined(with: .offset(y: 8)))
+        }
+      }
+      .padding(TarvenDesign.pagePadding)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .tarvenAnimation(TarvenMotion.standard, value: franchises.map(\.id))
+    }
+    .scrollClipDisabled()
+    .tarvenOverlayScrollbars()
+    .task {
+      await loadFranchises()
+    }
+    .sheet(isPresented: $showingCreate) {
+      CollectionEditorSheet(collection: nil).environmentObject(model)
+    }
+    .accessibilityIdentifier("collections-page")
+  }
+
+  private func loadFranchises() async {
+    guard let profile = model.profile else { return }
+    isLoadingFranchises = true
+    defer { isLoadingFranchises = false }
+    do {
+      franchises = try await APIClient(profile: profile).franchises()
+      franchisesError = nil
+    } catch is CancellationError {
+    } catch {
+      franchisesError = error.localizedDescription
+    }
+  }
+}
+
+private struct HistoryPage: View {
+  let onSelect: (UUID) -> Void
+
+  var body: some View {
+    ActivityPageScroll(title: "Watch History") {
+      ActivityHistoryView(onSelect: onSelect)
+    }
+    .accessibilityIdentifier("history-page")
+  }
+}
+
+private struct StatisticsPage: View {
+  var body: some View {
+    ActivityPageScroll(title: "Statistics") {
+      ActivityStatisticsView()
+    }
+    .accessibilityIdentifier("statistics-page")
+  }
+}
+
+/// The library's History and Statistics pages show the same views as Settings › Activity. The
+/// shell already insets its pages beside the sidebar, so they need only the page margin.
+private struct ActivityPageScroll<Content: View>: View {
+  let title: String
+  @ViewBuilder let content: Content
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: TarvenDesign.sectionSpacing) {
+        TarvenPageHeader(title: title)
+          .tarvenRiseIn(0)
+        content.frame(maxWidth: 980, alignment: .leading)
+          .tarvenRiseIn(1)
+      }
+      .padding(TarvenDesign.pagePadding)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .scrollClipDisabled()
+    .tarvenOverlayScrollbars()
+  }
+}
+
+struct MacMiniRemoteView: View {
+  @EnvironmentObject private var model: AppModel
+  let device: RemotePlayerDevice
+  /// The slider's position while it is dragged: one seek is sent on release, and status polls
+  /// can't move the knob under the pointer meanwhile.
+  @State private var scrubPosition: Double?
+
+  var body: some View {
+    HStack(spacing: 16) {
+      VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 6) {
+          Image(systemName: "airplayvideo")
+            .foregroundStyle(Color.accentColor)
+          Text("Playing on \(device.deviceName)")
+            .font(.caption.bold())
+            .foregroundStyle(Color.accentColor)
+        }
+        if let title = model.remotePlaybackTitle {
+          Text(title)
+            .font(.subheadline.bold())
+            .lineLimit(1)
+            .foregroundStyle(.white)
+        }
+      }
+      .frame(minWidth: 140, maxWidth: 220, alignment: .leading)
+
+      HStack(spacing: 12) {
+        Button {
+          model.sendRemotePlaybackCommand(action: "skip", skipSeconds: -10)
+        } label: {
+          Image(systemName: "gobackward.10")
+            .font(.system(size: 14))
+        }
+        .buttonStyle(TarvenPressableButtonStyle())
+        .help("Back 10 Seconds")
+        .accessibilityLabel("Back 10 Seconds")
+
+        Button {
+          model.sendRemotePlaybackCommand(action: model.isRemotePlaying ? "pause" : "resume")
+        } label: {
+          Image(systemName: model.isRemotePlaying ? "pause.fill" : "play.fill")
+            .font(.system(size: 18))
+        }
+        .buttonStyle(TarvenPressableButtonStyle())
+        .help(model.isRemotePlaying ? "Pause" : "Play")
+        .accessibilityLabel(model.isRemotePlaying ? "Pause" : "Play")
+
+        Button {
+          model.sendRemotePlaybackCommand(action: "skip", skipSeconds: 10)
+        } label: {
+          Image(systemName: "goforward.10")
+            .font(.system(size: 14))
+        }
+        .buttonStyle(TarvenPressableButtonStyle())
+        .help("Forward 10 Seconds")
+        .accessibilityLabel("Forward 10 Seconds")
+      }
+
+      if model.remotePlaybackDuration > 0 {
+        Slider(
+          value: Binding(
+            get: { scrubPosition ?? model.remotePlaybackPosition },
+            set: { scrubPosition = $0 }
+          ),
+          in: 0...model.remotePlaybackDuration,
+          onEditingChanged: { editing in
+            guard !editing, let position = scrubPosition else { return }
+            model.sendRemotePlaybackCommand(action: "seek", positionSeconds: position)
+            scrubPosition = nil
+          }
+        )
+        .frame(minWidth: 160, maxWidth: 280)
+        .accessibilityLabel("Playback Position")
+      }
+
+      Button {
+        model.stopRemotePlayback()
+      } label: {
+        Image(systemName: "xmark.circle.fill")
+          .font(.system(size: 16))
+          .foregroundStyle(.secondary)
+      }
+      .buttonStyle(TarvenPressableButtonStyle())
+      .help("Stop Remote Playback")
+      .accessibilityLabel("Stop remote playback")
+    }
+    .padding(.horizontal, 20)
+    .padding(.vertical, 12)
+    .tarvenGlass(
+      in: RoundedRectangle(cornerRadius: TarvenDesign.cardRadius, style: .continuous),
+      opaqueFill: TarvenDesign.surface
+    )
+    .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
+  }
+}

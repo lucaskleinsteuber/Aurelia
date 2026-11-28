@@ -1,0 +1,18 @@
+{
+  "images": [
+    {
+      "filename": "Tarven.png",
+      "idiom": "tv",
+      "scale": "1x"
+    },
+    {
+      "filename": "Tarven@2x.png",
+      "idiom": "tv",
+      "scale": "2x"
+    }
+  ],
+  "info": {
+    "author": "org.tarven.tv",
+    "version": 1
+  }
+}

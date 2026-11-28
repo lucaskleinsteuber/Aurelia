@@ -1,37 +1,38 @@
-# Aurelia documentation
+# Tarven documentation
 
-Start with [Getting started](GETTING_STARTED.md) if Aurelia is new to you. Every guide below is
+Start with [Getting started](GETTING_STARTED.md) if Tarven is new to you. Every guide below is
 written to be followed step by step; the technical pages at the end are for people who build
-Aurelia from source or write their own client.
+Tarven from source or write their own client.
 
-## Using Aurelia
+## Using Tarven
 
 | Guide | What it answers |
 | --- | --- |
+| [Tarven used to be Aurelia](RENAMED.md) | What changes on each device after the rename, and what stays |
 | [Getting started](GETTING_STARTED.md) | Which computer keeps the library, setting it up, adding media, connecting every device |
 | [Organizing your media](MEDIA_LIBRARY.md) | How to name folders and files, extras and trailers, subtitles, TMDB and OpenSubtitles keys, collections |
-| [Watching away from home](REMOTE_ACCESS.md) | Using Aurelia outside the home network with Tailscale or a WireGuard VPN (FRITZ!Box and others) |
+| [Watching away from home](REMOTE_ACCESS.md) | Using Tarven outside the home network with Tailscale or a WireGuard VPN (FRITZ!Box and others) |
 | [Family Wishes](WISHES.md) | Requesting movies and series not yet in the library, "Me Too" support and admin fulfillment |
 | [Troubleshooting](TROUBLESHOOTING.md) | Common problems and questions, from "the app finds no server" to stuttering playback |
-| [Privacy policy](PRIVACY.md) | What Aurelia stores, where, and what it never sends anywhere |
+| [Privacy policy](PRIVACY.md) | What Tarven stores, where, and what it never sends anywhere |
 
 ## The apps
 
 | Guide | What it answers |
 | --- | --- |
-| [Aurelia for Mac](MAC_APP.md) | Which download (Apple silicon or Intel), installing, hosting on the Mac, downloads and the offline mode, updates |
-| [Build Aurelia for Mac yourself](BUILD_MAC_APP.md) | Step by step with a free Apple ID, for Macs the published download doesn't start on |
-| [Aurelia for Linux](LINUX_APP.md) | The desktop app: deb, rpm, Arch and Flatpak packages for x64 and arm64, hosting on a PC, updates |
-| [Aurelia for Apple TV](APPLE_TV.md) | Building and installing the tvOS app with Xcode, pairing, using the remote |
-| [Aurelia for iPhone and iPad](IOS_APP.md) | Building and installing the iOS app with Xcode, what it does |
-| [Aurelia in a web browser](WEB_APP.md) | Signing in at the server's address, what plays in a browser and its limits |
+| [Tarven for Mac](MAC_APP.md) | Which download (Apple silicon or Intel), installing, hosting on the Mac, downloads and the offline mode, updates |
+| [Build Tarven for Mac yourself](BUILD_MAC_APP.md) | Step by step with a free Apple ID, for Macs the published download doesn't start on |
+| [Tarven for Linux](LINUX_APP.md) | The desktop app: deb, rpm, Arch and Flatpak packages for x64 and arm64, hosting on a PC, updates |
+| [Tarven for Apple TV](APPLE_TV.md) | Building and installing the tvOS app with Xcode, pairing, using the remote |
+| [Tarven for iPhone and iPad](IOS_APP.md) | Building and installing the iOS app with Xcode, what it does |
+| [Tarven in a web browser](WEB_APP.md) | Signing in at the server's address, what plays in a browser and its limits |
 
 ## Running the server
 
 | Guide | What it answers |
 | --- | --- |
-| [Aurelia Server on Linux](LINUX_SERVER.md) | One-line install on Ubuntu or Debian, the `aurelia` command, updates, power saving, media drives |
-| [Aurelia Server with Docker](DOCKER.md) | Running the server on a NAS or any Docker host |
+| [Tarven Server on Linux](LINUX_SERVER.md) | One-line install on Ubuntu or Debian, the `tarven` command, updates, power saving, media drives |
+| [Tarven Server with Docker](DOCKER.md) | Running the server on a NAS or any Docker host |
 | [Moving to a new server](SERVER_MOVE.md) | Moving accounts, library, settings and paired devices to another computer without copying media |
 | [Backups and recovery](DATABASE_RECOVERY.md) | The daily database backup and how to restore it |
 | [Security model](SECURITY_MODEL.md) | Profiles, roles, PINs, pairing and what administrators can and cannot see |

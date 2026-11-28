@@ -6,15 +6,15 @@ set -euo pipefail
 repository_root=${0:A:h:h}
 source "$repository_root/scripts/workspace-paths.sh"
 team_identifier=B5N7JVK37J
-bundle_identifier=com.lucas.aurelia.media
-signing_identity=${AURELIA_SIGNING_IDENTITY:-}
-provisioning_profile=${AURELIA_PROVISIONING_PROFILE:-/Applications/Aurelia.app/Contents/embedded.provisionprofile}
+bundle_identifier=org.tarven.mac
+signing_identity=${TARVEN_SIGNING_IDENTITY:-}
+provisioning_profile=${TARVEN_PROVISIONING_PROFILE:-/Applications/Tarven.app/Contents/embedded.provisionprofile}
 [[ -r "$provisioning_profile" ]] || {
   print -u2 "A valid matching baseline provisioning profile is required for this continuity test."
   exit 2
 }
-mkdir -p "$other_root/Logs" "$HOME/Library/Caches/Aurelia/TestRuns"
-probe_root=$(mktemp -d "$HOME/Library/Caches/Aurelia/TestRuns/Profileless-Continuity.XXXXXX")
+mkdir -p "$other_root/Logs" "$HOME/Library/Caches/Tarven/TestRuns"
+probe_root=$(mktemp -d "$HOME/Library/Caches/Tarven/TestRuns/Profileless-Continuity.XXXXXX")
 chmod 700 "$probe_root"
 log="$other_root/Logs/Profileless-Continuity-${probe_root:t}.log"
 candidate="$probe_root/ProfilelessProbe.app"
@@ -76,7 +76,7 @@ cleanup() {
       --entitlements "$baseline_entitlements" "$candidate" >>"$log" 2>&1
     run_probe delete "$identifier" || print "FAIL: synthetic credential cleanup requires inspection." >>"$log"
   fi
-  if [[ "$probe_root" == "$HOME/Library/Caches/Aurelia/TestRuns/Profileless-Continuity."* ]]; then
+  if [[ "$probe_root" == "$HOME/Library/Caches/Tarven/TestRuns/Profileless-Continuity."* ]]; then
     find "$probe_root" -depth -delete
   fi
   print "Continuity probe exit status: $exit_code" >>"$log"
@@ -89,7 +89,7 @@ trap cleanup EXIT
 profile_id=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.application-identifier' "$probe_root/profile.plist")
 profile_team=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$probe_root/profile.plist")
 [[ "$profile_id" == "$team_identifier.$bundle_identifier" && "$profile_team" == "$team_identifier" ]] || {
-  print -u2 "The baseline profile does not authorize Aurelia's identity."
+  print -u2 "The baseline profile does not authorize Tarven's identity."
   exit 1
 }
 profile_expiration=$(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "$probe_root/profile.plist")
@@ -110,14 +110,14 @@ for app in "$candidate" "$helper"; do
   /usr/bin/ditto "$repository_root/tools/macos/ProfilelessProbe-Info.plist" "$app/Contents/Info.plist"
 done
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_identifier" "$candidate/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.aurelia.profileless-probe.host' "$helper/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.tarven.profileless-probe.host' "$helper/Contents/Info.plist"
 DEVELOPER_DIR="$developer_dir" /usr/bin/xcrun swiftc -warnings-as-errors \
   "$repository_root/tools/macos/ProfilelessContinuityProbe.swift" -o "$binary"
 /usr/bin/ditto "$binary" "$helper_binary"
 /usr/bin/codesign --force --sign "$signing_identity" --options runtime --timestamp=none \
   --entitlements "$repository_root/tools/macos/ProfilelessProbe.entitlements" "$helper"
-/usr/bin/ditto "$repository_root/clients/macos/Configuration/Aurelia.entitlements" "$baseline_entitlements"
-/usr/libexec/PlistBuddy -c 'Set :com.apple.security.application-groups:0 B5N7JVK37J.com.aurelia.distribution-probe' "$baseline_entitlements"
+/usr/bin/ditto "$repository_root/clients/macos/Configuration/Tarven.entitlements" "$baseline_entitlements"
+/usr/libexec/PlistBuddy -c 'Set :com.apple.security.application-groups:0 B5N7JVK37J.com.tarven.distribution-probe' "$baseline_entitlements"
 /usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $team_identifier.$bundle_identifier" "$baseline_entitlements"
 /usr/libexec/PlistBuddy -c "Add :com.apple.developer.team-identifier string $team_identifier" "$baseline_entitlements"
 /usr/bin/ditto "$provisioning_profile" "$candidate/Contents/embedded.provisionprofile"

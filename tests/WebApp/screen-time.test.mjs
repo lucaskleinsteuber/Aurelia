@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Player } from "../../src/Aurelia.Server/WebApp/js/player.js";
-import { ApiError } from "../../src/Aurelia.Server/WebApp/js/api.js";
+import { Player } from "../../src/Tarven.Server/WebApp/js/player.js";
+import { ApiError } from "../../src/Tarven.Server/WebApp/js/api.js";
 import { closedLabel, goodNight, isScreenTimeCode, noMoreTitles, rulesFromForm, sameRules, todaySummary, DEFAULT_SCREEN_TIME }
-  from "../../src/Aurelia.Server/WebApp/js/screen-time.js";
-import { screenTimeSection } from "../../src/Aurelia.Server/WebApp/js/screen-time-view.js";
-import { h } from "../../src/Aurelia.Server/WebApp/js/dom.js";
+  from "../../src/Tarven.Server/WebApp/js/screen-time.js";
+import { screenTimeSection } from "../../src/Tarven.Server/WebApp/js/screen-time-view.js";
+import { h } from "../../src/Tarven.Server/WebApp/js/dom.js";
 import { installDOM } from "./dom-fixture.mjs";
 
 // Local times so the expected clock does not depend on the test machine's time zone.
@@ -22,7 +22,7 @@ test("only the last title or a closed profile stops the next one", () => {
   assert.equal(isScreenTimeCode("media_not_found"), false);
 });
 
-test("the good-night screen names the profile and when Aurelia opens", () => {
+test("the good-night screen names the profile and when Tarven opens", () => {
   assert.deepEqual(goodNight(closed(), "Robin"), { title: "Good night, Robin", text: "See you at 07:00." });
   assert.deepEqual(goodNight(closed("limit"), "Robin"), { title: "That's all for today, Robin", text: "See you tomorrow at 07:00." });
   assert.equal(goodNight(null).title, "Good night");

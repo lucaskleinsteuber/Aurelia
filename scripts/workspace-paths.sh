@@ -1,20 +1,20 @@
 #!/bin/sh
 # Shared by build/test scripts. Generated files never belong in the checkout.
-# The workspace is AURELIA_OTHER_ROOT, else the git-ignored Local folder of the checkout, else
+# The workspace is TARVEN_OTHER_ROOT, else the git-ignored Local folder of the checkout, else
 # the per-user cache.
-if [ -z "${AURELIA_OTHER_ROOT:-}" ] && [ -n "${repository_root:-}" ]; then
-  AURELIA_OTHER_ROOT="$repository_root/Local"
-  mkdir -p "$AURELIA_OTHER_ROOT"
+if [ -z "${TARVEN_OTHER_ROOT:-}" ] && [ -n "${repository_root:-}" ]; then
+  TARVEN_OTHER_ROOT="$repository_root/Local"
+  mkdir -p "$TARVEN_OTHER_ROOT"
 fi
-if [ -z "${AURELIA_OTHER_ROOT:-}" ]; then
+if [ -z "${TARVEN_OTHER_ROOT:-}" ]; then
   if [ "$(uname -s)" = Darwin ]; then
-    AURELIA_OTHER_ROOT="$HOME/Library/Caches/Aurelia/Artifacts"
+    TARVEN_OTHER_ROOT="$HOME/Library/Caches/Tarven/Artifacts"
   else
-    AURELIA_OTHER_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/Aurelia/Artifacts"
+    TARVEN_OTHER_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/Tarven/Artifacts"
   fi
 fi
-export AURELIA_OTHER_ROOT
-other_root=$AURELIA_OTHER_ROOT
+export TARVEN_OTHER_ROOT
+other_root=$TARVEN_OTHER_ROOT
 
 if [ -z "${DOTNET_BIN:-}" ]; then
   if command -v dotnet >/dev/null 2>&1; then

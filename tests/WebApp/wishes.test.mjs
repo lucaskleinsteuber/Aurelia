@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApi } from "../../src/Aurelia.Server/WebApp/js/api.js";
-import { normalizePreferences, parseRoute, PLAYBACK_DEFAULTS, routePath } from "../../src/Aurelia.Server/WebApp/js/logic.js";
+import { createApi } from "../../src/Tarven.Server/WebApp/js/api.js";
+import { normalizePreferences, parseRoute, PLAYBACK_DEFAULTS, routePath } from "../../src/Tarven.Server/WebApp/js/logic.js";
 import {
   BoundedFailureCache,
   describeWishError,
@@ -10,8 +10,8 @@ import {
   supportsWishes,
   wishBadgeCount,
   wishPosterUrl,
-} from "../../src/Aurelia.Server/WebApp/js/wishes.js";
-import { createWishesView } from "../../src/Aurelia.Server/WebApp/js/wishes-view.js";
+} from "../../src/Tarven.Server/WebApp/js/wishes.js";
+import { createWishesView } from "../../src/Tarven.Server/WebApp/js/wishes-view.js";
 import { all, button, flush, input, installDOM } from "./dom-fixture.mjs";
 
 test("wishes route and sleep good-night preference preserve backwards defaults", () => {

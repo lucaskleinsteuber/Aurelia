@@ -4,7 +4,7 @@ set -euo pipefail
 repository_root=${0:A:h:h}
 source "$repository_root/scripts/workspace-paths.sh"
 build_number=$(sed -n 's/^CURRENT_PROJECT_VERSION = \([0-9][0-9]*\)$/\1/p' "$repository_root/clients/macos/Configuration/BuildNumber.xcconfig")
-source_candidate=${1:-"$other_root/Build/Build $build_number/Aurelia.app"}
+source_candidate=${1:-"$other_root/Build/Build $build_number/Tarven.app"}
 
 # All credentials stay in a private synthetic configuration and Python memory.
 # Neither a control URL nor a credential is passed as a process argument.
@@ -30,17 +30,17 @@ source = pathlib.Path(sys.argv[1])
 artifacts = pathlib.Path(sys.argv[2])
 build = sys.argv[3]
 run_id = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + str(uuid.uuid4())
-root = pathlib.Path("/private/tmp/Aurelia") / run_id
-candidate = root / "Aurelia.app"
+root = pathlib.Path("/private/tmp/Tarven") / run_id
+candidate = root / "Tarven.app"
 data = root / "Data"
 logs = root / "Logs"
 bootstrap = root / "Host"
 configuration = bootstrap / "preflight.json"
 rendezvous = bootstrap / "background-rendezvous.json"
-report = artifacts / "Test Results" / ("Aurelia-HostWatchdog-" + run_id + ".txt")
-helper = candidate / "Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost"
+report = artifacts / "Test Results" / ("Tarven-HostWatchdog-" + run_id + ".txt")
+helper = candidate / "Contents/Helpers/Tarven Server Host.app/Contents/MacOS/TarvenServerHost"
 architecture = "arm64" if platform.machine() == "arm64" else "x64"
-server = candidate / ("Contents/Resources/Server/osx-" + architecture + "/Aurelia.Server")
+server = candidate / ("Contents/Resources/Server/osx-" + architecture + "/Tarven.Server")
 process = None
 known_children = set()
 helper_output = None
@@ -64,7 +64,7 @@ def process_alive(pid):
 def canonical_command(value):
     # Foundation can preserve macOS's /tmp alias when launching the child.
     # Compare both complete synthetic paths in their canonical spelling.
-    return value.replace("/tmp/Aurelia/", "/private/tmp/Aurelia/")
+    return value.replace("/tmp/Tarven/", "/private/tmp/Tarven/")
 
 def is_owned_child(pid):
     if process is None or not process_alive(pid):
@@ -119,7 +119,7 @@ def wait_until(predicate, seconds, code):
     fail(code)
 
 def record_diagnostics():
-    destination = artifacts / "Logs" / ("Aurelia-HostWatchdog-" + run_id + ".log")
+    destination = artifacts / "Logs" / ("Tarven-HostWatchdog-" + run_id + ".log")
     destination.parent.mkdir(parents=True, exist_ok=True)
     if helper_output is not None:
         helper_output.flush()
@@ -133,17 +133,17 @@ def record_diagnostics():
                     text = text.replace(value, "[redacted]")
             # Secret-bearing output is excluded even if a response was lost
             # before the harness learned its exact value.
-            lines.extend(line for line in text.splitlines() if not re.search(r"token|secret|password|authorization|AURELIA_SERVER_(READY|STOPPING)", line, re.I))
+            lines.extend(line for line in text.splitlines() if not re.search(r"token|secret|password|authorization|TARVEN_SERVER_(READY|STOPPING)", line, re.I))
     destination.write_text("\n".join(lines) + "\n")
     destination.chmod(0o600)
 
 exit_code = 1
 try:
     report.parent.mkdir(parents=True, exist_ok=True)
-    report.write_text("Aurelia Build " + build + " background host watchdog smoke\nRun: " + run_id + "\n")
-    for name in ("Aurelia", "AureliaServerHost"):
+    report.write_text("Tarven Build " + build + " background host watchdog smoke\nRun: " + run_id + "\n")
+    for name in ("Tarven", "TarvenServerHost"):
         if subprocess.run(["/usr/bin/pgrep", "-x", name], stdout=subprocess.DEVNULL).returncode == 0:
-            fail("existing_aurelia_process_no_process_was_stopped")
+            fail("existing_tarven_process_no_process_was_stopped")
     with socket.socket() as probe:
         if probe.connect_ex(("127.0.0.1", 43110)) == 0:
             fail("loopback_port_occupied_no_process_was_stopped")
@@ -161,13 +161,13 @@ try:
         json.dump(description, output)
     del description
     environment = os.environ.copy()
-    environment.update({"AURELIA_PREFLIGHT_TEST": "1", "AURELIA_HOST_PREFLIGHT_CONFIG": str(configuration)})
+    environment.update({"TARVEN_PREFLIGHT_TEST": "1", "TARVEN_HOST_PREFLIGHT_CONFIG": str(configuration)})
     helper_output = (root / "helper-output.log").open("wb")
     process = subprocess.Popen([str(helper), "--background", "--preflight-background"], env=environment, stdin=subprocess.DEVNULL, stdout=helper_output, stderr=helper_output)
     wait_until(lambda: read_status() == "setupRequired" and live() and len(children()) == 1, 40, "initial_background_readiness_timeout")
     original = children()[0]
     known_children.add(original)
-    if subprocess.run(["/usr/bin/pgrep", "-x", "Aurelia"], stdout=subprocess.DEVNULL).returncode == 0:
+    if subprocess.run(["/usr/bin/pgrep", "-x", "Tarven"], stdout=subprocess.DEVNULL).returncode == 0:
         fail("mac_ui_running_during_background_probe")
     if not is_owned_child(original):
         fail("server_child_ownership_changed")
@@ -200,7 +200,7 @@ try:
     if process_alive(replacement):
         fail("server_lifeline_shutdown_timeout")
     verification = subprocess.run(
-        [str(server), "database", "verify", "--data-dir", str(data), "--from", str(data / "aurelia.db")],
+        [str(server), "database", "verify", "--data-dir", str(data), "--from", str(data / "tarven.db")],
         capture_output=True, text=True, timeout=20)
     if verification.returncode != 0 or "Database is valid." not in verification.stdout:
         fail("synthetic_database_integrity_failed")
@@ -250,7 +250,7 @@ finally:
                 os.kill(pid, signal.SIGKILL)
     if helper_output is not None:
         helper_output.close()
-    if root.parent == pathlib.Path("/private/tmp/Aurelia") and root.name == run_id:
+    if root.parent == pathlib.Path("/private/tmp/Tarven") and root.name == run_id:
         shutil.rmtree(root, ignore_errors=True)
 sys.exit(exit_code)
 PY

@@ -1,0 +1,1999 @@
+import SwiftUI
+
+/// Settings › Library: storage locations, scans, import review and library health. Tarven only
+/// reads the media: nothing here moves, renames or deletes a video file.
+struct IOSAdminLibraryView: View {
+  @EnvironmentObject private var admin: IOSAdministrationModel
+
+  struct Overview: Sendable {
+    let libraries: [IOSLibrarySummary]
+    let scans: [IOSLibraryScan]
+    let configuration: IOSServerConfiguration?
+  }
+
+  var body: some View {
+    let owner = admin.permissions.owner
+    IOSAdminLoader { client in
+      async let libraries = client.libraries()
+      async let scans = client.activeScans()
+      async let configuration = owner ? client.serverSettings() : nil
+      return Overview(
+        libraries: try await libraries, scans: try await scans,
+        configuration: try await configuration)
+    } content: { overview, reload in
+      IOSAdminLibraryContent(overview: overview, reload: reload)
+    }
+    .navigationTitle("Library")
+    .navigationBarTitleDisplayMode(.inline)
+  }
+}
+
+private struct IOSAdminLibraryContent: View {
+  @EnvironmentObject private var admin: IOSAdministrationModel
+  let overview: IOSAdminLibraryView.Overview
+  let reload: @MainActor @Sendable () async -> Void
+  @State private var adding = false
+  @State private var reviewing: IOSLibrarySummary?
+  @State private var confirmation: IOSAdminConfirmation?
+
+  private func isScanning(_ library: IOSLibrarySummary) -> Bool {
+    overview.scans.contains { $0.libraryId == library.id && $0.isActive }
+  }
+
+  var body: some View {
+    Form {
+      IOSAdminPageHeader(
+        page: .library,
+        text:
+          "The folders on the server computer that hold your movies and shows. Tarven only reads them: nothing here moves, renames or deletes a video."
+      )
+      Section {
+        if overview.libraries.isEmpty {
+          VStack(alignment: .leading, spacing: 6) {
+            Text("No storage locations yet").font(.headline)
+            Text(
+              "Add the folder on the server computer where your movies or shows are, and Tarven finds them."
+            )
+            .font(.subheadline).foregroundStyle(.secondary)
+          }
+          .padding(.vertical, 4)
+        }
+        ForEach(overview.libraries) { library in
+          NavigationLink {
+            IOSAdminStorageLocationView(libraryID: library.id)
+          } label: {
+            IOSLibraryRow(
+              library: library,
+              scan: overview.scans.first { $0.libraryId == library.id && $0.isActive })
+          }
+          .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+              confirmRemove(library)
+            } label: {
+              Label("Remove", systemImage: "trash")
+            }
+            if !IOSLibraryAdminText.isWaitingForReview(library) {
+              Button {
+                scan(library)
+              } label: {
+                Label("Scan", systemImage: "arrow.clockwise")
+              }
+              .tint(.indigo)
+            }
+          }
+          .contextMenu { menu(for: library) }
+          .accessibilityIdentifier("admin-library-\(library.id.uuidString.lowercased())")
+        }
+        Button {
+          adding = true
+        } label: {
+          Label("Add Storage Location…", systemImage: "plus.circle.fill")
+        }
+        .accessibilityIdentifier("admin-add-library")
+        if !overview.libraries.isEmpty {
+          IOSAdminActionButton(
+            "Scan All", systemImage: "arrow.clockwise",
+            detail: "Looks for new, changed and missing files in every location.",
+            doneText: "Started"
+          ) { _ = try await $0.scanAllLibraries() }
+        }
+      } header: {
+        Text("Storage Locations")
+      } footer: {
+        Text(
+          overview.libraries.isEmpty
+            ? "A storage location is a folder or drive connected to the server computer, not to this \(IOSDesign.deviceName)."
+            : "Tap a location for its details and import review. Swipe it or touch and hold for Scan, Watch for Changes and Remove."
+        )
+      }
+      let active = overview.scans.filter(\.isActive)
+      if !active.isEmpty {
+        Section {
+          ForEach(active) { scan in
+            IOSScanRow(
+              scan: scan,
+              name: overview.libraries.first { $0.id == scan.libraryId }?.name ?? "Storage location"
+            )
+          }
+        } header: {
+          Text("Scanning Now")
+        } footer: {
+          Text("A scan reads only file names and folders. New titles appear while it runs.")
+        }
+      }
+      if let configuration = overview.configuration {
+        Section {
+          IOSPolicyToggle(
+            configuration: configuration, key: "monitoringEnabled",
+            label: "Watch Storage for Changes",
+            detail: "Notices new and changed files by itself, so you rarely need to scan by hand.")
+          NavigationLink {
+            IOSAdminPolicyView(
+              title: "Automatic Scans", groups: [.maintenance], configuration: configuration,
+              explanation:
+                "How often the server scans by itself and when maintenance runs. Each storage location can also watch for changes on its own."
+            )
+          } label: {
+            IOSAdminToggleLabel("Scan Schedule", "When the server checks every location by itself.")
+          }
+        } header: {
+          Text("Automatic Scans")
+        } footer: {
+          Text(
+            "This switch is for the whole server. A location's own “Watch for Changes” only matters while it is on."
+          )
+        }
+      }
+      Section {
+        NavigationLink {
+          IOSAdminLibraryHealthView()
+        } label: {
+          IOSAdminToggleLabel(
+            "Library Health",
+            "Duplicates, titles whose drive is away, and titles without information.")
+        }
+        .accessibilityIdentifier("admin-library-health")
+      }
+      Section {
+        NavigationLink {
+          IOSAdminDangerZoneView()
+        } label: {
+          Label("Reset Library…", systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+        }
+        .accessibilityIdentifier("admin-danger")
+      } footer: {
+        Text("Starts the catalog over for chosen locations. Video files are never touched.")
+      }
+    }
+    .scrollContentBackground(.hidden)
+    .background(IOSDesign.canvas.ignoresSafeArea())
+    .refreshable { await reload() }
+    .adminConfirmation($confirmation)
+    .sheet(isPresented: $adding) {
+      IOSAdminAddLibraryView { added in
+        Task { await afterAdding(added) }
+      }
+    }
+    .sheet(item: $reviewing) { library in
+      NavigationStack { IOSAdminImportPreviewView(library: library) }
+    }
+    .adminPolling(every: 3, while: overview.scans.contains(where: \.isActive), reload: reload)
+  }
+
+  @ViewBuilder
+  private func menu(for library: IOSLibrarySummary) -> some View {
+    let waiting = IOSLibraryAdminText.isWaitingForReview(library)
+    if waiting {
+      Button {
+        reviewing = library
+      } label: {
+        Label("Review Import…", systemImage: "checklist")
+      }
+    } else {
+      Button {
+        scan(library)
+      } label: {
+        Label("Scan Now", systemImage: "arrow.clockwise")
+      }
+      Button {
+        let (id, enabled) = (library.id, !(library.monitoringEnabled ?? false))
+        Task {
+          await admin.perform { _ = try await $0.setLibraryMonitoring(id: id, enabled: enabled) }
+        }
+      } label: {
+        Label(
+          library.monitoringEnabled == true ? "Stop Watching for Changes" : "Watch for Changes",
+          systemImage: library.monitoringEnabled == true ? "eye.slash" : "eye")
+      }
+      Button {
+        reviewing = library
+      } label: {
+        Label("Review Assignments…", systemImage: "checklist")
+      }
+    }
+    Divider()
+    Button(role: .destructive) {
+      confirmRemove(library)
+    } label: {
+      Label("Remove…", systemImage: "trash")
+        // A destructive row is red throughout, its symbol too, as "Reset Library…".
+        .foregroundStyle(.red)
+    }
+  }
+
+  private func scan(_ library: IOSLibrarySummary) {
+    let id = library.id
+    Task {
+      await admin.perform("Scanning \(library.name)…") { _ = try await $0.scanLibrary(id: id) }
+    }
+  }
+
+  private func confirmRemove(_ library: IOSLibrarySummary) {
+    confirmation = IOSAdminConfirmation(
+      title: "Remove “\(library.name)”?",
+      message:
+        "Its titles, watch history and favorites leave Tarven. The folder and its videos stay untouched.",
+      action: "Remove"
+    ) {
+      let id = library.id
+      Task { await admin.perform("Removing…") { try await $0.removeLibrary(id: id) } }
+    }
+  }
+
+  /// After adding: review the first import, or start scanning so something visibly happens.
+  private func afterAdding(_ added: [IOSLibrarySummary]) async {
+    if let first = added.first(where: { $0.importPreviewRequired == true }) {
+      reviewing = first
+      return
+    }
+    let ids = added.map(\.id)
+    await admin.perform("Scanning the new storage location…") { client in
+      for id in ids { _ = try await client.scanLibrary(id: id) }
+    }
+  }
+}
+
+/// A storage location in the list: name, folder and what it is doing now.
+private struct IOSLibraryRow: View {
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  let library: IOSLibrarySummary
+  let scan: IOSLibraryScan?
+
+  var body: some View {
+    HStack(spacing: 12) {
+      Image(
+        systemName: library.isAvailable
+          ? "externaldrive.fill" : "externaldrive.badge.exclamationmark"
+      )
+      .font(.title3)
+      .foregroundStyle(library.isAvailable ? Color.secondary : Color.orange)
+      .frame(minWidth: 28)
+      .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+      .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 3) {
+        HStack(spacing: 6) {
+          Text(library.name).font(.body.weight(.medium))
+          if library.monitoringEnabled == true {
+            Image(systemName: "eye").font(.caption2).foregroundStyle(.secondary)
+              .accessibilityLabel("Watching for changes")
+          }
+        }
+        Text(library.path).font(.caption).foregroundStyle(.secondary)
+          .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+          .truncationMode(.middle)
+        let waiting = IOSLibraryAdminText.isWaitingForReview(library)
+        Text(IOSLibraryAdminText.status(library, scanning: scan != nil))
+          .font(.caption2)
+          .foregroundStyle(waiting || !library.isAvailable ? Color.orange : Color.secondary)
+        if let scan {
+          if let progress = scan.progress { ProgressView(value: progress).tint(.indigo) }
+          Text(IOSLibraryAdminText.summary(scan)).font(.caption2).foregroundStyle(.secondary)
+        }
+      }
+    }
+    .padding(.vertical, 2)
+  }
+}
+
+private struct IOSScanRow: View {
+  @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  let scan: IOSLibraryScan
+  let name: String
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      let info = VStack(alignment: .leading, spacing: 2) {
+        Text(name)
+        Text(
+          [scan.stateTitle, IOSLibraryAdminText.trigger(scan.trigger)].compactMap { $0 }
+            .joined(separator: " · ")
+        )
+        .font(.caption).foregroundStyle(.secondary)
+      }
+      let stopButton = Button("Stop", role: .destructive) {
+        let id = scan.id
+        Task { await admin.perform { try await $0.cancelScan(id: id) } }
+      }
+      .buttonStyle(.borderless)
+      .frame(minHeight: 44)
+      if dynamicTypeSize.isAccessibilitySize {
+        VStack(alignment: .leading, spacing: 6) {
+          info
+          if scan.isActive { stopButton }
+        }
+      } else {
+        HStack {
+          info
+          Spacer()
+          if scan.isActive { stopButton }
+        }
+      }
+      if let progress = scan.progress, scan.isActive { ProgressView(value: progress).tint(.indigo) }
+      Text(IOSLibraryAdminText.summary(scan)).font(.caption).foregroundStyle(.secondary)
+      if let error = scan.error { Text(error).font(.caption).foregroundStyle(.orange) }
+      if !scan.issues.isEmpty {
+        DisclosureGroup("\(scan.issues.count) \(scan.issues.count == 1 ? "Problem" : "Problems")") {
+          ForEach(Array(scan.issues.prefix(10).enumerated()), id: \.offset) { _, issue in
+            VStack(alignment: .leading, spacing: 2) {
+              Text(issue.message).font(.caption)
+              if let path = issue.path {
+                Text(path).font(.caption2).foregroundStyle(.secondary)
+                  .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+              }
+            }
+          }
+        }
+        .font(.caption)
+      }
+    }
+  }
+}
+
+/// One storage location: scanning, watching, import review, left-out items and removing it.
+private struct IOSAdminStorageLocationView: View {
+  let libraryID: UUID
+
+  typealias Loaded = IOSStorageLocationData
+
+  var body: some View {
+    IOSAdminLoader { client in
+      try await IOSStorageLocationData.load(client: client, libraryID: libraryID)
+    } content: { loaded, reload in
+      IOSAdminStorageLocationForm(loaded: loaded, reload: reload)
+    }
+    .navigationTitle("Storage Location")
+    .navigationBarTitleDisplayMode(.inline)
+  }
+}
+
+private struct IOSAdminStorageLocationForm: View {
+  @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.dismiss) private var dismiss
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  let loaded: IOSAdminStorageLocationView.Loaded
+  let reload: @MainActor @Sendable () async -> Void
+  @State private var confirmation: IOSAdminConfirmation?
+  @State private var reviewing = false
+  @State private var assigning: IOSLibraryImportReview?
+
+  var body: some View {
+    let library = loaded.library
+    let waiting = IOSLibraryAdminText.isWaitingForReview(library)
+    let scanning = loaded.scans.contains(where: \.isActive)
+    Form {
+      Section {
+        HStack(spacing: 12) {
+          Image(
+            systemName: library.isAvailable
+              ? "externaldrive.fill" : "externaldrive.badge.exclamationmark"
+          )
+          .font(.title2).foregroundStyle(library.isAvailable ? Color.indigo : Color.orange)
+          VStack(alignment: .leading, spacing: 2) {
+            Text(library.name).font(.headline)
+            Text(library.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+          }
+        }
+        LabeledContent("Contains", value: library.kindTitle)
+        LabeledContent("Status", value: library.availabilityTitle)
+        LabeledContent("Last Scan", value: IOSAdminFormat.relative(library.lastScanCompletedAt))
+        if let error = library.lastError { Text(error).font(.callout).foregroundStyle(.orange) }
+      } footer: {
+        if !library.isAvailable {
+          Text(
+            "The drive isn’t reachable from the server. Titles keep their progress and favorites until it is back."
+          )
+        }
+      }
+      if waiting {
+        Section {
+          Button {
+            reviewing = true
+          } label: {
+            Label("Review Import…", systemImage: "checklist").font(.body.weight(.semibold))
+          }
+          .accessibilityIdentifier("admin-review-import")
+        } header: {
+          Text("Waiting for You")
+        } footer: {
+          Text(
+            "Nothing from this location is in the library yet. Review shows what each folder and file becomes; you can correct it, then import."
+          )
+        }
+      }
+      Section {
+        IOSAdminActionButton(
+          "Scan Now", systemImage: "arrow.clockwise",
+          detail: waiting
+            ? "Available after the import." : "Looks for new, changed and missing files.",
+          doneText: "Started"
+        ) { [id = library.id] client in _ = try await client.scanLibrary(id: id) }
+        .disabled(waiting || scanning)
+        Toggle(
+          isOn: Binding(
+            get: { library.monitoringEnabled ?? false },
+            set: { value in
+              let id = library.id
+              Task {
+                await admin.perform {
+                  _ = try await $0.setLibraryMonitoring(id: id, enabled: value)
+                }
+              }
+            })
+        ) {
+          IOSAdminToggleLabel(
+            "Watch for Changes", "Adds new files and notices changes by itself, without a scan.")
+        }
+        .disabled(waiting)
+        if !waiting {
+          Button {
+            reviewing = true
+          } label: {
+            IOSAdminToggleLabel(
+              "Review Assignments…", "See and correct what each folder and file became.")
+          }
+        }
+      } header: {
+        Text("Scanning")
+      }
+      if !loaded.discoveries.isEmpty {
+        Section {
+          ForEach(loaded.discoveries) { discovery in
+            IOSDiscoveryRow(discovery: discovery)
+          }
+        } header: {
+          Text("Folders to Sort")
+        } footer: {
+          Text(
+            "Tarven wasn’t sure whether these folders hold movies or a TV show. Your choice applies at once."
+          )
+        }
+      }
+      let pending = loaded.reviews.filter { $0.state == "pending" }
+      if !pending.isEmpty {
+        Section {
+          ForEach(pending) { review in
+            VStack(alignment: .leading, spacing: 6) {
+              Text(review.detectedTitle)
+              Text(review.relativePath).font(.caption).foregroundStyle(.secondary)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+              Text(review.reason).font(.caption2).foregroundStyle(.secondary)
+              let actionsLayout =
+                dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                : AnyLayout(HStackLayout(spacing: 16))
+              actionsLayout {
+                Button("Assign to Movie…") { assigning = review }
+                  .frame(minHeight: 44)
+                Button("Leave Out") {
+                  let (id, review) = (library.id, review.id)
+                  Task {
+                    await admin.perform {
+                      _ = try await $0.decideImportReview(library: id, review: review, movieId: nil)
+                    }
+                  }
+                }
+                .frame(minHeight: 44)
+              }
+              .buttonStyle(.borderless)
+              .font(.callout)
+            }
+          }
+        } header: {
+          Text("Files to Check")
+        } footer: {
+          Text(
+            "Files Tarven couldn’t place, such as an extra or a second version of a movie. Assign them to a movie or leave them out."
+          )
+        }
+      }
+      if !loaded.exclusions.isEmpty {
+        Section {
+          ForEach(loaded.exclusions) { excluded in
+            let rowLabel = Label(
+              excluded.relativePath, systemImage: excluded.isDirectory ? "folder" : "film"
+            )
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+            let includeButton = Button("Include") {
+              let (library, id) = (library.id, excluded.id)
+              Task {
+                await admin.perform { try await $0.restoreExclusion(library: library, id: id) }
+              }
+            }
+            .buttonStyle(.borderless)
+            .frame(minHeight: 44)
+            if dynamicTypeSize.isAccessibilitySize {
+              VStack(alignment: .leading, spacing: 6) {
+                rowLabel
+                includeButton
+              }
+            } else {
+              HStack {
+                rowLabel
+                Spacer()
+                includeButton
+              }
+            }
+          }
+        } header: {
+          Text("Left Out")
+        } footer: {
+          Text(
+            "Files and folders you removed from Tarven. Include brings them back with the next scan; the files were never touched."
+          )
+        }
+      }
+      Section {
+        if loaded.scans.isEmpty { Text("No scans yet").foregroundStyle(.secondary) }
+        ForEach(loaded.scans) { scan in
+          IOSScanRow(scan: scan, name: IOSAdminFormat.date(scan.createdAt))
+        }
+      } header: {
+        Text("Recent Scans")
+      }
+      if admin.permissions.owner {
+        Section {
+          NavigationLink {
+            IOSAdminRelocateView(library: library.id, name: library.name, oldPath: library.path) {
+              await reload()
+            }
+          } label: {
+            Label("Location Moved…", systemImage: "arrow.right.doc.on.clipboard")
+          }
+          .accessibilityIdentifier("storage-relocate")
+        } footer: {
+          Text(
+            "When the files now live in another folder, point the location there; titles, progress and favorites stay."
+          )
+        }
+      }
+      Section {
+        Button("Remove Storage Location…", role: .destructive) {
+          confirmation = IOSAdminConfirmation(
+            title: "Remove “\(library.name)”?",
+            message:
+              "Its titles, watch history and favorites leave Tarven. The folder and its videos stay untouched.",
+            action: "Remove"
+          ) {
+            let id = library.id
+            Task {
+              if await admin.perform("Removing…", { try await $0.removeLibrary(id: id) }) {
+                dismiss()
+              }
+            }
+          }
+        }
+      } footer: {
+        Text("Only Tarven forgets the location. The folder and every file in it stay as they are.")
+      }
+    }
+    .scrollContentBackground(.hidden)
+    .background(IOSDesign.canvas.ignoresSafeArea())
+    .refreshable { await reload() }
+    .adminConfirmation($confirmation)
+    .sheet(isPresented: $reviewing) {
+      NavigationStack { IOSAdminImportPreviewView(library: library) }
+    }
+    .sheet(item: $assigning) { review in
+      NavigationStack { IOSAssignToMovieView(library: library, review: review) }
+    }
+    .adminPolling(every: 3, while: scanning, reload: reload)
+  }
+}
+
+/// Assigns a file under review to a movie of the same storage location.
+private struct IOSAssignToMovieView: View {
+  @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.dismiss) private var dismiss
+  let library: IOSLibrarySummary
+  let review: IOSLibraryImportReview
+  @State private var query = ""
+  @State private var results: [IOSCatalogItem] = []
+  @State private var searching = false
+  @State private var error: String?
+
+  var body: some View {
+    List {
+      Section {
+        Text(review.relativePath).font(.caption).foregroundStyle(.secondary)
+      } footer: {
+        Text(
+          "Search for the movie this file belongs to, for example as a second version or an extra.")
+      }
+      if searching { ProgressView() }
+      if let error { Text(error).foregroundStyle(.orange) }
+      if !searching && error == nil && results.isEmpty && !query.isEmpty {
+        Text("No movie found in “\(library.name)”.").foregroundStyle(.secondary)
+      }
+      ForEach(results) { movie in
+        Button {
+          let (libraryID, reviewID, movieID) = (library.id, review.id, movie.id)
+          Task {
+            if await admin.perform(
+              "Assigning…",
+              {
+                _ = try await $0.decideImportReview(
+                  library: libraryID, review: reviewID, movieId: movieID)
+              })
+            {
+              dismiss()
+            }
+          }
+        } label: {
+          VStack(alignment: .leading, spacing: 2) {
+            Text(movie.title).foregroundStyle(.primary)
+            if let year = movie.year {
+              Text(String(year)).font(.caption).foregroundStyle(.secondary)
+            }
+          }
+        }
+      }
+    }
+    .searchable(
+      text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Movie title"
+    )
+    .scrollContentBackground(.hidden)
+    .background(IOSDesign.canvas.ignoresSafeArea())
+    .navigationTitle("Assign to Movie")
+    .navigationBarTitleDisplayMode(.inline)
+    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+    .task(id: query) {
+      error = nil
+      let (typed, id) = (query.trimmingCharacters(in: .whitespaces), library.id)
+      guard !typed.isEmpty else {
+        results = []
+        searching = false
+        return
+      }
+      searching = true
+      do {
+        try await Task.sleep(for: .milliseconds(300))
+        let answer = try await admin.run { try await $0.searchMovies(typed, library: id) }
+        try Task.checkCancellation()
+        results = answer
+        searching = false
+      } catch is CancellationError {
+        return
+      } catch {
+        guard !Task.isCancelled else { return }
+        results = []
+        self.error = IOSAdministrationModel.message(error)
+        searching = false
+      }
+    }
+  }
+}
+
+private struct IOSDiscoveryRow: View {
+  @EnvironmentObject private var admin: IOSAdministrationModel
+  let discovery: IOSLibraryDiscovery
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Text(discovery.detectedTitle)
+      Text(discovery.relativePath).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+      Picker(
+        "Contains",
+        selection: Binding(
+          get: { discovery.decision ?? "" },
+          set: { decision in
+            let (library, id) = (discovery.libraryId, discovery.id)
+            Task {
+              await admin.perform("Saving…") {
+                if decision.isEmpty {
+                  _ = try await $0.resetClassification(library: library, discovery: id)
+                } else {
+                  _ = try await $0.setClassification(
+                    library: library, discovery: id, decision: decision)
+                }
+              }
+            }
+          })
+      ) {
+        Text("Decide Automatically").tag("")
+        Text("A Movie").tag("movie")
+        Text("A TV Show").tag("tvShows")
+        Text("Leave Out").tag("ignore")
+      }
+    }
+  }
+}
+
+/// Add Storage Location: choose one or more folders on the server, then how Tarven reads them.
+private struct IOSAdminAddLibraryView: View {
+  @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.dismiss) private var dismiss
+  let added: ([IOSLibrarySummary]) -> Void
+  @State private var chosen: [IOSServerFolder] = []
+  @State private var browsing = true
+  @State private var folderPath: [String] = []
+  @FocusState private var nameFocused: Bool
+  @State private var name = ""
+  @State private var kind = "automatic"
+  @State private var review = true
+  @State private var problem: String?
+  @State private var saving = false
+
+  var body: some View {
+    NavigationStack(path: $folderPath) {
+      Group {
+        if browsing {
+          IOSServerFolderBrowser(path: nil, chosen: chosen, choose: choose, open: open)
+        } else {
+          IOSAdminForm(title: "Add Storage Location") {
+            Section {
+              ForEach(chosen, id: \.path) { folder in
+                Label {
+                  VStack(alignment: .leading, spacing: 2) {
+                    Text(IOSLibraryAdminText.suggestedName(for: folder.path))
+                    Text(folder.path).font(.caption).foregroundStyle(.secondary)
+                  }
+                } icon: {
+                  Image(systemName: "folder.fill").foregroundStyle(.indigo)
+                }
+              }
+              .onDelete { chosen.remove(atOffsets: $0) }
+              Button {
+                folderPath = []
+                browsing = true
+              } label: {
+                Label("Add Another Folder", systemImage: "plus")
+              }
+            } header: {
+              Text(chosen.count == 1 ? "Folder" : "\(chosen.count) Folders")
+            } footer: {
+              Text("Folders on the server computer. Swipe one to take it off this list.")
+            }
+            Section {
+              if chosen.count == 1 {
+                TextField("Name", text: $name)
+                  .focused($nameFocused)
+                  .submitLabel(.done)
+                  .onSubmit { nameFocused = false }
+              }
+              Picker("Contains", selection: $kind) {
+                Text("Find Out Automatically").tag("automatic")
+                Text("Movies").tag("movies")
+                Text("TV Shows").tag("tvShows")
+              }
+            } footer: {
+              Text(
+                "“Find Out Automatically” sorts movies and shows by their folder and file names. Choose Movies or TV Shows when a folder holds only one kind."
+              )
+            }
+            Section {
+              Toggle(isOn: $review) {
+                IOSAdminToggleLabel(
+                  "Review Before Importing",
+                  "First shows what each folder and file becomes. Nothing is imported until you confirm."
+                )
+              }
+            } footer: {
+              Text(
+                review
+                  ? "After adding, the review opens right away."
+                  : "After adding, the first scan starts right away and titles appear as it finds them."
+              )
+            }
+            if let problem { Section { Text(problem).foregroundStyle(.orange) } }
+          }
+          .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+              if saving {
+                ProgressView()
+              } else {
+                Button("Add") { Task { await add() } }.disabled(chosen.isEmpty)
+              }
+            }
+          }
+        }
+      }
+      .navigationDestination(for: String.self) { path in
+        IOSServerFolderBrowser(path: path, chosen: chosen, choose: choose, open: open)
+      }
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+      }
+    }
+  }
+
+  private func open(_ path: String) {
+    folderPath.append(path)
+  }
+
+  private func choose(_ folder: IOSServerFolder) {
+    if !chosen.contains(where: { $0.path == folder.path }) { chosen.append(folder) }
+    if chosen.count == 1 { name = IOSLibraryAdminText.suggestedName(for: folder.path) }
+    // Every browser level belongs to this explicit path. Choosing a folder returns to the
+    // confirmation form even after several typed paths or child-folder navigation steps.
+    folderPath = []
+    browsing = false
+  }
+
+  private func add() async {
+    guard !saving else { return }
+    saving = true
+    defer { saving = false }
+    let requests = chosen.map { folder in
+      IOSCreateLibraryRequest(
+        name: chosen.count == 1 && !name.trimmingCharacters(in: .whitespaces).isEmpty
+          ? name.trimmingCharacters(in: .whitespaces) : nil,
+        path: folder.path, kind: kind, combineExisting: false, requireImportPreview: review)
+    }
+    var created: [IOSLibrarySummary] = []
+    for request in requests {
+      guard let library = await admin.value(nil, { try await $0.createLibrary(request) }) else {
+        problem =
+          created.isEmpty ? nil : "\(created.count) of \(requests.count) folders were added."
+        if !created.isEmpty { added(created) }
+        return
+      }
+      created.append(library)
+    }
+    dismiss()
+    added(created)
+  }
+}
+
+/// The folders on the server computer, one level at a time, with a way up and a typed path.
+private struct IOSServerFolderBrowser: View {
+  let path: String?
+  let chosen: [IOSServerFolder]
+  let choose: (IOSServerFolder) -> Void
+  let open: (String) -> Void
+  @State private var typing = false
+  @State private var typed = ""
+
+  var body: some View {
+    IOSAdminLoader {
+      try await $0.serverFolders(path: path)
+    } content: { listing, _ in
+      List {
+        if let current = listing.path {
+          Section {
+            Button {
+              choose(
+                IOSServerFolder(
+                  name: IOSLibraryAdminText.suggestedName(for: current), path: current))
+            } label: {
+              Label("Use This Folder", systemImage: "checkmark.circle.fill").font(
+                .body.weight(.semibold))
+            }
+            .accessibilityIdentifier("admin-use-folder")
+            .disabled(chosen.contains { $0.path == current })
+          } header: {
+            Text(current).textCase(nil).font(.caption.monospaced())
+          } footer: {
+            Text("Or open a folder below to go deeper.")
+          }
+        } else {
+          Section {
+            Text(
+              "These are the drives and folders of the server computer, not of this \(IOSDesign.deviceName). Open one to find your movies or shows."
+            )
+            .font(.subheadline).foregroundStyle(.secondary)
+          }
+        }
+        Section {
+          if listing.folders.isEmpty { Text("No folders inside").foregroundStyle(.secondary) }
+          ForEach(listing.folders, id: \.path) { folder in
+            NavigationLink(value: folder.path) {
+              Label {
+                VStack(alignment: .leading, spacing: 2) {
+                  Text(folder.name)
+                  if listing.path == nil {
+                    Text(folder.path).font(.caption).foregroundStyle(.secondary)
+                  }
+                }
+              } icon: {
+                Image(systemName: listing.path == nil ? "externaldrive" : "folder")
+                  .foregroundStyle(.indigo)
+              }
+            }
+            .swipeActions {
+              Button("Use") { choose(folder) }.tint(.indigo)
+            }
+          }
+        } header: {
+          if listing.path == nil { Text("Places") }
+        }
+      }
+      .scrollContentBackground(.hidden)
+      .background(IOSDesign.canvas.ignoresSafeArea())
+      .navigationTitle(
+        listing.path.map { IOSLibraryAdminText.suggestedName(for: $0) } ?? "Server Folders"
+      )
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .primaryAction) {
+          Button {
+            typed = listing.path ?? ""
+            typing = true
+          } label: {
+            Label("Type a Path", systemImage: "character.cursor.ibeam")
+          }
+        }
+      }
+      .alert("Go to Folder", isPresented: $typing) {
+        TextField("/path/on/the/server", text: $typed)
+          .textInputAutocapitalization(.never).autocorrectionDisabled()
+        Button("Go") {
+          if let path = IOSLibraryAdminText.typedPath(typed) { open(path) }
+        }
+        Button("Cancel", role: .cancel) {}
+      } message: {
+        Text("Type a folder path on the server computer, such as /mnt/media.")
+      }
+    }
+  }
+}
+
+/// Import Preview: what each folder and file becomes, corrections for one or many, then import.
+private struct IOSAdminImportPreviewView: View {
+  @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.dismiss) private var dismiss
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  let library: IOSLibrarySummary
+  @State private var summary: IOSImportPreviewSummary?
+  @State private var items: [IOSImportPreviewItem] = []
+  @State private var filter = "all"
+  @State private var search = ""
+  @State private var editing: [IOSImportPreviewItem]?
+  @State private var loading = true
+  @State private var analyzing = false
+  @State private var loadError = false
+  @State private var selecting = false
+  @State private var selection: Set<String> = []
+  @State private var confirmingDiscard = false
+  @State private var confirmingAgain = false
+
+  private var shown: [IOSImportPreviewItem] {
+    let query = search.trimmingCharacters(in: .whitespaces)
+    return items.filter { item in
+      (filter == "all" || item.status == filter)
+        && (query.isEmpty || item.title.localizedCaseInsensitiveContains(query)
+          || item.relativePath.localizedCaseInsensitiveContains(query))
+    }
+  }
+  private var isFirstImport: Bool { library.importPreviewRequired == true }
+
+  private var filterPicker: some View {
+    Picker("Show", selection: $filter) {
+      Text("All").tag("all")
+      Text("Review").accessibilityLabel("Needs Review").tag("pending")
+      Text("Ignored").tag("ignored")
+      Text("Errors").tag("error")
+    }
+  }
+
+  var body: some View {
+    List {
+      Section {
+        Text(
+          isFirstImport
+            ? "Tarven read the folder and file names of “\(library.name)”. Nothing is imported until you tap Import. Tap an item to correct it, or Select to correct several at once."
+            : "What each folder and file of “\(library.name)” became. Tap an item to correct it; Apply saves your corrections."
+        )
+        .font(.subheadline).foregroundStyle(.secondary)
+        if let summary {
+          let counts = summary.counts
+          Text(IOSLibraryAdminText.importSummary(counts))
+          if counts.pending > 0 || counts.errors > 0 {
+            let pendingText =
+              counts.pending == 1 ? "1 needs review" : "\(counts.pending) need review"
+            Text(
+              "\(pendingText) · \(IOSLayoutMetrics.countPhrase(counts.errors, singular: "error", plural: "errors"))"
+            )
+            .foregroundStyle(.orange)
+          }
+          if counts.errors > 0 {
+            Text("Fix the errors first: they would import wrongly.").font(.caption).foregroundStyle(
+              .orange)
+          }
+          if dynamicTypeSize.isAccessibilitySize {
+            filterPicker.pickerStyle(.menu)
+          } else {
+            filterPicker.pickerStyle(.segmented)
+          }
+        } else if loading {
+          ProgressView("Reading file names and folders…")
+        }
+        if loadError {
+          IOSAdminSectionProblem(
+            message: "The complete import preview couldn’t be loaded.", retry: analyze)
+        }
+      }
+      Section {
+        ForEach(shown) { item in
+          Button {
+            if selecting {
+              if selection.contains(item.id) {
+                selection.remove(item.id)
+              } else {
+                selection.insert(item.id)
+              }
+            } else {
+              editing = [item]
+            }
+          } label: {
+            Group {
+              if dynamicTypeSize.isAccessibilitySize {
+                accessibilityImportRow(item)
+              } else {
+                HStack(spacing: 10) {
+                  if selecting {
+                    Image(
+                      systemName: selection.contains(item.id) ? "checkmark.circle.fill" : "circle"
+                    )
+                    .foregroundStyle(selection.contains(item.id) ? Color.accentColor : .secondary)
+                  }
+                  Image(systemName: item.isDirectory ? "folder" : "film").foregroundStyle(
+                    .secondary)
+                  VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title.isEmpty ? item.relativePath : item.title).foregroundStyle(
+                      .primary)
+                    Text(item.relativePath.isEmpty ? "Storage root" : item.relativePath).font(
+                      .caption
+                    )
+                    .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    if item.status == "pending" || item.status == "error", !item.reason.isEmpty {
+                      Text(item.reason).font(.caption2).foregroundStyle(.orange).lineLimit(2)
+                    }
+                  }
+                  Spacer()
+                  Text(Self.kindLabel(item))
+                    .font(.caption)
+                    .foregroundStyle(
+                      item.status == "pending" || item.status == "error" ? Color.orange : .secondary
+                    )
+                }
+              }
+            }
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .accessibilityAddTraits(selecting && selection.contains(item.id) ? .isSelected : [])
+        }
+      }
+    }
+    .searchable(text: $search)
+    .scrollContentBackground(.hidden)
+    .background(IOSDesign.canvas.ignoresSafeArea())
+    .navigationTitle(selecting ? "\(selection.count) Selected" : "Import Preview")
+    .navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      ToolbarItem(placement: .cancellationAction) {
+        Button("Close") {
+          if isFirstImport && summary != nil { confirmingDiscard = true } else { dismiss() }
+        }
+      }
+      ToolbarItem(placement: .confirmationAction) {
+        Button(isFirstImport ? "Import" : "Apply") { confirm() }
+          .disabled(loading || summary == nil || summary?.counts.errors != 0 || selecting)
+      }
+      ToolbarItemGroup(placement: .bottomBar) {
+        if selecting {
+          Button("Done") {
+            selecting = false
+            selection = []
+          }
+          Spacer()
+          Button("Correct \(selection.count)…") {
+            editing = items.filter { selection.contains($0.id) }
+          }
+          .disabled(selection.isEmpty)
+        } else {
+          Button("Select") { selecting = true }.disabled(loading || items.isEmpty)
+          Spacer()
+          Button("Analyze Again") { confirmingAgain = true }.disabled(loading || summary == nil)
+        }
+      }
+    }
+    .confirmationDialog(
+      "Close without importing?", isPresented: $confirmingDiscard, titleVisibility: .visible
+    ) {
+      Button("Close", role: .destructive) { dismiss() }
+      Button("Keep Reviewing", role: .cancel) {}
+    } message: {
+      Text(
+        "Nothing from “\(library.name)” is imported yet. Your corrections are kept for next time.")
+    }
+    .confirmationDialog(
+      "Read the folder again?", isPresented: $confirmingAgain, titleVisibility: .visible
+    ) {
+      Button("Analyze Again") { Task { await analyze() } }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("Use this after adding or renaming files. Corrections you saved stay.")
+    }
+    .task { await analyze() }
+    .sheet(
+      isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })
+    ) {
+      if let editing, let summary {
+        NavigationStack {
+          IOSImportAssignmentEditor(items: editing, targets: summary.targets) { changes in
+            await save(changes)
+          }
+        }
+      }
+    }
+  }
+
+  private func accessibilityImportRow(_ item: IOSImportPreviewItem) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(item.title.isEmpty ? item.relativePath : item.title)
+        .foregroundStyle(.primary)
+      Text(item.relativePath.isEmpty ? "Storage root" : item.relativePath)
+        .font(.caption).foregroundStyle(.secondary)
+      Text(Self.kindLabel(item))
+        .font(.caption)
+        .foregroundStyle(
+          item.status == "pending" || item.status == "error" ? Color.orange : .secondary)
+      if item.status == "pending" || item.status == "error", !item.reason.isEmpty {
+        Text(item.reason).font(.caption2).foregroundStyle(.orange)
+      }
+      if selecting {
+        Label {
+          Text(selection.contains(item.id) ? "Selected" : "Not Selected")
+        } icon: {
+          Image(systemName: selection.contains(item.id) ? "checkmark.circle.fill" : "circle")
+            .frame(minWidth: 44, minHeight: 44)
+        }
+        .font(.caption)
+        .foregroundStyle(selection.contains(item.id) ? Color.accentColor : .secondary)
+        .accessibilityHidden(true)
+      }
+    }
+    .lineLimit(nil)
+    .fixedSize(horizontal: false, vertical: true)
+    .multilineTextAlignment(.leading)
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  static func kindLabel(_ item: IOSImportPreviewItem) -> String {
+    switch item.kind {
+    case "movie": return "Movie"
+    case "series": return "Series"
+    case "episode":
+      return "S\(item.seasonNumber ?? 0) E\(item.episodeNumber ?? 0)"
+    case "extra": return "Extra"
+    case "trailer": return "Trailer"
+    default:
+      return item.status == "ignored"
+        ? "Ignored" : item.status == "error" ? "Error" : "Needs Review"
+    }
+  }
+
+  private func analyze() async {
+    guard !analyzing else { return }
+    analyzing = true
+    loading = true
+    loadError = false
+    self.summary = nil
+    items = []
+    defer {
+      loading = false
+      analyzing = false
+    }
+    let id = library.id
+    guard let summary = await admin.value(nil, { try await $0.analyzeImport(library: id) }) else {
+      loadError = !Task.isCancelled
+      return
+    }
+    guard let loaded = await loadItems(summary), !Task.isCancelled else {
+      loadError = !Task.isCancelled
+      return
+    }
+    items = loaded
+    self.summary = summary
+  }
+
+  private func loadItems(_ summary: IOSImportPreviewSummary) async -> [IOSImportPreviewItem]? {
+    let (library, preview) = (library.id, summary.previewId)
+    var all: [IOSImportPreviewItem] = []
+    var offset = 0
+    while true {
+      let start = offset
+      guard
+        let page = await admin.value(
+          nil,
+          {
+            try await $0.importPreviewItems(library: library, preview: preview, offset: start)
+          })
+      else { return nil }
+      guard !Task.isCancelled else { return nil }
+      all += page.items
+      offset += page.items.count
+      if page.items.isEmpty || offset >= page.totalCount { break }
+    }
+    return all
+  }
+
+  private func save(_ changes: [IOSImportAssignment]) async {
+    guard let summary, !loading else { return }
+    loading = true
+    defer { loading = false }
+    let (library, preview, revision) = (library.id, summary.previewId, summary.revision)
+    if let updated = await admin.value(
+      "Saving…",
+      {
+        try await $0.updateImportPreview(
+          library: library, preview: preview, revision: revision, assignments: changes)
+      })
+    {
+      self.summary = nil
+      items = []
+      editing = nil
+      selecting = false
+      selection = []
+      guard let loaded = await loadItems(updated), !Task.isCancelled else {
+        loadError = !Task.isCancelled
+        return
+      }
+      loadError = false
+      items = loaded
+      self.summary = updated
+    }
+  }
+
+  private func confirm() {
+    guard let summary, !loading else { return }
+    loading = true
+    let (library, preview, revision) = (library.id, summary.previewId, summary.revision)
+    Task {
+      defer { loading = false }
+      if await admin.perform(
+        "Importing…",
+        {
+          _ = try await $0.confirmImportPreview(
+            library: library, preview: preview, revision: revision)
+        })
+      {
+        dismiss()
+      }
+    }
+  }
+}
+
+/// What the chosen files or folders become.
+private struct IOSImportAssignmentEditor: View {
+  @Environment(\.dismiss) private var dismiss
+  let items: [IOSImportPreviewItem]
+  let targets: [IOSImportPreviewTarget]
+  let save: ([IOSImportAssignment]) async -> Void
+  @State private var form: IOSImportRules.Form
+  @State private var problem: String?
+
+  init(
+    items: [IOSImportPreviewItem], targets: [IOSImportPreviewTarget],
+    save: @escaping ([IOSImportAssignment]) async -> Void
+  ) {
+    self.items = items
+    self.targets = targets
+    self.save = save
+    _form = State(initialValue: IOSImportRules.Form(start: items))
+  }
+
+  private var needsParent: Bool { ["episode", "extra", "trailer"].contains(form.choice) }
+  private var parent: IOSImportPreviewTarget? {
+    targets.first { $0.relativePath == form.parentPath }
+  }
+
+  var body: some View {
+    IOSAdminForm(
+      title: items.count == 1
+        ? (items[0].title.isEmpty ? "Item" : items[0].title) : "\(items.count) Items"
+    ) {
+      Section {
+        Picker("This Is", selection: $form.choice) {
+          ForEach(IOSImportRules.choices(for: items)) { Text($0.label).tag($0.id) }
+        }
+      } footer: {
+        Text(
+          items.count == 1
+            ? (items[0].relativePath.isEmpty ? "The storage root" : items[0].relativePath)
+            : "The choice applies to all \(items.count) items.")
+      }
+      if needsParent {
+        Section {
+          Picker("Belongs To", selection: $form.parentPath) {
+            Text("Choose…").tag("")
+            ForEach(targets) { Text($0.title).tag($0.relativePath) }
+          }
+          if parent?.kind == "series" {
+            if form.choice != "episode" { Toggle("For the Whole Series", isOn: $form.entireSeries) }
+            if form.choice == "episode" || !form.entireSeries {
+              Stepper("Season \(form.season)", value: $form.season, in: 0...99)
+            }
+            if form.choice == "episode" {
+              Stepper("Episode \(form.episode)", value: $form.episode, in: 1...999)
+            }
+          }
+          if form.choice != "episode" { TextField("Category (optional)", text: $form.category) }
+        } footer: {
+          Text("Episodes, extras and trailers belong to a movie or show of this location.")
+        }
+      }
+      if items.count == 1 && !items[0].isDirectory {
+        Section { TextField("Title (optional)", text: $form.title) }
+      }
+      if let problem { Section { Text(problem).foregroundStyle(.orange) } }
+      Section {
+        Button("Use Automatic Detection") {
+          let changes = items.map {
+            IOSImportAssignment(
+              relativePath: $0.relativePath, isDirectory: $0.isDirectory, kind: nil,
+              useAutomaticDetection: true)
+          }
+          Task { await save(changes) }
+        }
+      } footer: {
+        Text("Forgets your correction and lets Tarven decide from the names again.")
+      }
+    }
+    .toolbar {
+      ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+      ToolbarItem(placement: .confirmationAction) {
+        Button("Save") {
+          do {
+            let changes = try IOSImportRules.changes(items: items, form: form, targets: targets)
+            problem = nil
+            Task { await save(changes) }
+          } catch {
+            problem = error.localizedDescription
+          }
+        }
+      }
+    }
+  }
+}
+
+/// Library Health: duplicates to combine, titles whose drive is away, and titles without
+/// information to match. Each part loads on its own, so one problem doesn't hide the others.
+private struct IOSAdminLibraryHealthView: View {
+  @EnvironmentObject private var admin: IOSAdministrationModel
+  @EnvironmentObject private var model: IOSAppModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @State private var problems: Result<[IOSFileProblem], Error>?
+  @State private var drives: Result<IOSDriveHealthResponse, Error>?
+  @State private var duplicates: Result<[IOSDuplicateGroup], Error>?
+  @State private var offline: Result<[IOSHealthOfflineTitle], Error>?
+  @State private var unmatched: Result<[IOSUnmatchedTitle], Error>?
+  @State private var offlineDays = 30
+  @State private var confirmation: IOSAdminConfirmation?
+  @State private var matching: IOSUnmatchedTitle?
+
+  var body: some View {
+    Form {
+      IOSAdminPageHeader(
+        systemImage: "stethoscope", title: "Library Health",
+        text: "Things worth tidying up. Nothing here deletes a file: only Tarven’s entries change."
+      )
+      duplicatesSection
+      offlineSection
+      unmatchedSection
+      if model.supportsFileChecks {
+        fileProblemsSection
+        drivesSection
+      }
+    }
+    .scrollContentBackground(.hidden)
+    .background(IOSDesign.canvas.ignoresSafeArea())
+    .navigationTitle("Library Health")
+    .navigationBarTitleDisplayMode(.inline)
+    .refreshable { await loadAll() }
+    .adminConfirmation($confirmation)
+    .task { await loadAll() }
+    .onChange(of: offlineDays) { _, _ in Task { await loadOffline() } }
+    .sheet(item: $matching) { title in
+      NavigationStack {
+        IOSMetadataMatchView(title: title) { Task { await loadUnmatched() } }
+      }
+    }
+  }
+
+  private var duplicatesSection: some View {
+    Section {
+      switch duplicates {
+      case nil: ProgressView()
+      case .failure(let error):
+        IOSAdminSectionProblem(message: IOSAdministrationModel.message(error)) {
+          await loadDuplicates()
+        }
+      case .success(let groups):
+        if groups.isEmpty {
+          Label("No duplicates", systemImage: "checkmark.circle").foregroundStyle(.secondary)
+        }
+        ForEach(groups) { group in duplicateGroup(group) }
+      }
+    } header: {
+      Text("Duplicates")
+    } footer: {
+      Text(
+        "The same title found more than once. Keep one: the others are combined into it with their watch history and favorites."
+      )
+    }
+  }
+
+  private var offlineSection: some View {
+    Section {
+      Picker("Away For", selection: $offlineDays) {
+        ForEach(IOSLibraryAdminText.offlineChoices, id: \.self) { Text("\($0) days").tag($0) }
+      }
+      switch offline {
+      case nil: ProgressView()
+      case .failure(let error):
+        IOSAdminSectionProblem(message: IOSAdministrationModel.message(error)) {
+          await loadOffline()
+        }
+      case .success(let titles):
+        if titles.isEmpty {
+          Label("Nothing away that long", systemImage: "checkmark.circle").foregroundStyle(
+            .secondary)
+        }
+        ForEach(titles) { title in offlineRow(title) }
+      }
+    } header: {
+      Text("Drive Away")
+    } footer: {
+      Text(
+        "Titles keep their progress and favorites while their drive is away. Remove only those that won’t come back."
+      )
+    }
+  }
+
+  private func offlineRow(_ title: IOSHealthOfflineTitle) -> some View {
+    let info = VStack(alignment: .leading, spacing: 2) {
+      Text(title.title)
+      Text(
+        "\(title.libraryName) · away for \(IOSLayoutMetrics.countPhrase(title.daysOffline, singular: "day", plural: "days"))"
+      )
+      .font(.caption).foregroundStyle(.secondary)
+    }
+    let removeButton = Button("Remove", role: .destructive) { confirmRemove(title) }
+      .buttonStyle(.borderless)
+      .frame(minHeight: 44)
+    return Group {
+      if dynamicTypeSize.isAccessibilitySize {
+        VStack(alignment: .leading, spacing: 6) {
+          info
+          removeButton
+        }
+      } else {
+        HStack {
+          info
+          Spacer()
+          removeButton
+        }
+      }
+    }
+  }
+
+  private func confirmRemove(_ title: IOSHealthOfflineTitle) {
+    let id = title.id
+    confirmation = IOSAdminConfirmation(
+      title: "Remove “\(title.title)” from Tarven?",
+      message: "Only the entry goes; if the drive comes back, a scan adds the title again.",
+      action: "Remove"
+    ) {
+      Task {
+        let removed = await admin.perform { try await $0.removeHealthEntry(mediaId: id) }
+        if removed { await loadOffline() }
+      }
+    }
+  }
+
+  private var unmatchedSection: some View {
+    Section {
+      switch unmatched {
+      case nil: ProgressView()
+      case .failure(let error):
+        IOSAdminSectionProblem(message: IOSAdministrationModel.message(error)) {
+          await loadUnmatched()
+        }
+      case .success(let titles):
+        if titles.isEmpty {
+          Label("Every title has information", systemImage: "checkmark.circle").foregroundStyle(
+            .secondary)
+        }
+        ForEach(titles) { title in
+          let info = VStack(alignment: .leading, spacing: 2) {
+            Text(title.title)
+            Text(title.fileName).font(.caption).foregroundStyle(.secondary)
+              .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+          }
+          let matchButton = Button("Match…") { matching = title }
+            .buttonStyle(.borderless)
+            .frame(minHeight: 44)
+          if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 6) {
+              info
+              matchButton
+            }
+          } else {
+            HStack {
+              info
+              Spacer()
+              matchButton
+            }
+          }
+        }
+      }
+    } header: {
+      Text("Without Information")
+    } footer: {
+      Text(
+        "Tarven couldn’t find these on TMDB by their file names. Match one to give it a poster and description."
+      )
+    }
+  }
+
+  @ViewBuilder
+  private func duplicateGroup(_ group: IOSDuplicateGroup) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text([group.title, group.year.map(String.init)].compactMap { $0 }.joined(separator: " · "))
+        .font(.headline)
+      ForEach(group.items) { item in
+        let info = VStack(alignment: .leading, spacing: 2) {
+          Text(item.fileName).font(.caption)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+          Text(
+            item.availability == "available" ? IOSAdminText.bytes(item.fileSize) : "Drive away"
+          )
+          .font(.caption2).foregroundStyle(.secondary)
+        }
+        let keepButton = Button("Keep") {
+          let target = item.id
+          let sources = group.items.map(\.id).filter { $0 != target }
+          confirmation = IOSAdminConfirmation(
+            title: "Keep this one?",
+            message:
+              "The others are combined into it, with their watch history and favorites. No file is deleted.",
+            action: "Combine",
+            isDestructive: false
+          ) {
+            Task {
+              if await admin.perform(
+                "Combining…",
+                { client in
+                  for source in sources {
+                    try await client.mergeDuplicates(source: source, target: target)
+                  }
+                })
+              {
+                await loadDuplicates()
+              }
+            }
+          }
+        }
+        .buttonStyle(.borderless)
+        .frame(minHeight: 44)
+        if dynamicTypeSize.isAccessibilitySize {
+          VStack(alignment: .leading, spacing: 6) {
+            info
+            if group.items.count > 1 { keepButton }
+          }
+          .padding(.vertical, 2)
+        } else {
+          HStack {
+            info
+            Spacer()
+            if group.items.count > 1 { keepButton }
+          }
+          .padding(.vertical, 2)
+        }
+      }
+    }
+  }
+
+  private func loadAll() async {
+    async let first: Void = loadDuplicates()
+    async let second: Void = loadOffline()
+    async let third: Void = loadUnmatched()
+    async let fourth: Void = loadFileWatch()
+    _ = await (first, second, third, fourth)
+  }
+
+  private func loadFileWatch(refreshDrives: Bool = false) async {
+    guard model.supportsFileChecks else { return }
+    problems = await load { try await $0.fileProblems() }
+    drives = await load { try await $0.drives(refresh: refreshDrives) }
+  }
+
+  private var fileProblemsSection: some View {
+    Section {
+      switch problems {
+      case nil: ProgressView()
+      case .failure(let error):
+        IOSAdminSectionProblem(message: IOSAdministrationModel.message(error)) {
+          await loadFileWatch()
+        }
+      case .success(let list):
+        if list.isEmpty {
+          Label("No file has a problem", systemImage: "checkmark.shield").foregroundStyle(
+            .secondary)
+        }
+        ForEach(list) { problem in fileProblemRow(problem) }
+      }
+    } header: {
+      Text("File Problems")
+    } footer: {
+      Text(
+        "Files the file watch found a problem in. Play a title to check it, replace a damaged file from a backup, then choose Examine Again. Turn the watch on in Settings › Server › File Watch."
+      )
+    }
+  }
+
+  private func fileProblemRow(_ problem: IOSFileProblem) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Label(
+        "\(problem.title) · \(IOSFileWatchText.problemTitle(problem.state))",
+        systemImage: IOSFileWatchText.problemSymbol(problem.state)
+      )
+      .font(.headline)
+      Text(problem.fileName).font(.caption).foregroundStyle(.secondary)
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+      if let detail = problem.detail { Text(detail).font(.caption) }
+      let facts = IOSFileWatchText.facts(problem)
+      if !facts.isEmpty { Text(facts).font(.caption2).foregroundStyle(.secondary) }
+      let examineButton = Button("Examine Again") {
+        let id = problem.mediaId
+        Task {
+          if await admin.perform(nil, { try await $0.recheckFile(mediaId: id) }) {
+            await loadFileWatch()
+          }
+        }
+      }
+      .frame(minHeight: 44)
+      let setAsideButton = Button("Set Aside") {
+        let id = problem.mediaId
+        Task {
+          if await admin.perform(
+            nil, { try await $0.setFileProblemIgnored(mediaId: id, ignored: true) })
+          {
+            await loadFileWatch()
+          }
+        }
+      }
+      .frame(minHeight: 44)
+      if dynamicTypeSize.isAccessibilitySize {
+        VStack(alignment: .leading, spacing: 6) {
+          examineButton
+          setAsideButton
+        }
+        .buttonStyle(.borderless)
+        .font(.callout)
+      } else {
+        HStack {
+          examineButton
+          Spacer()
+          setAsideButton
+        }
+        .buttonStyle(.borderless)
+        .font(.callout)
+      }
+    }
+  }
+
+  private var drivesSection: some View {
+    Section {
+      switch drives {
+      case nil: ProgressView()
+      case .failure(let error):
+        IOSAdminSectionProblem(message: IOSAdministrationModel.message(error)) {
+          await loadFileWatch()
+        }
+      case .success(let answer):
+        if answer.drives.isEmpty {
+          Label("No drives reported", systemImage: "externaldrive").foregroundStyle(.secondary)
+        }
+        ForEach(answer.drives) { drive in
+          VStack(alignment: .leading, spacing: 2) {
+            Label(
+              "\(drive.name) · \(IOSFileWatchText.driveTitle(drive.state))",
+              systemImage: drive.state == "failing" || drive.state == "warning"
+                ? "externaldrive.badge.exclamationmark" : "externaldrive"
+            )
+            .foregroundStyle(
+              drive.state == "failing"
+                ? Color.red : drive.state == "warning" ? Color.orange : Color.primary)
+            Text(drive.libraries.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+            if let detail = drive.detail { Text(detail).font(.caption) }
+            let facts = IOSFileWatchText.driveFacts(drive)
+            if !facts.isEmpty { Text(facts).font(.caption2).foregroundStyle(.secondary) }
+          }
+        }
+        Button("Ask the Drives Again") { Task { await loadFileWatch(refreshDrives: true) } }
+      }
+    } header: {
+      Text("Drives")
+    } footer: {
+      Text(
+        "How the drives with your storage locations are doing, as they report it themselves. Many USB cases and network shares don’t report it."
+      )
+    }
+  }
+
+  private func loadDuplicates() async {
+    duplicates = await load { try await $0.healthDuplicates() }
+  }
+  private func loadOffline() async {
+    let days = offlineDays
+    let answer = await load { try await $0.healthOffline(days: days) }
+    guard days == offlineDays, !Task.isCancelled else { return }
+    offline = answer
+  }
+  private func loadUnmatched() async {
+    unmatched = await load { try await $0.healthUnmatched() }
+  }
+
+  private func load<Value: Sendable>(_ work: @Sendable (IOSAPIClient) async throws -> Value) async
+    -> Result<Value, Error>?
+  {
+    do {
+      return .success(try await admin.run(work))
+    } catch is CancellationError {
+      return nil
+    } catch {
+      return .failure(error)
+    }
+  }
+}
+
+/// Finds a title on TMDB by name and gives it that information.
+private struct IOSMetadataMatchView: View {
+  @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.dismiss) private var dismiss
+  let title: IOSUnmatchedTitle
+  let matched: () -> Void
+  @State private var query: String
+  @State private var candidates: [IOSMetadataCandidate] = []
+  @State private var searching = false
+  @State private var error: String?
+
+  init(title: IOSUnmatchedTitle, matched: @escaping () -> Void) {
+    self.title = title
+    self.matched = matched
+    _query = State(initialValue: title.title)
+  }
+
+  var body: some View {
+    List {
+      Section {
+        Text(title.fileName).font(.caption).foregroundStyle(.secondary)
+      } footer: {
+        Text("Search by the movie’s or show’s real name, then choose the right one.")
+      }
+      if searching { ProgressView() }
+      if let error { Text(error).foregroundStyle(.orange) }
+      if !searching && error == nil && candidates.isEmpty {
+        Text("No results. Try another spelling or the original title.").foregroundStyle(.secondary)
+      }
+      ForEach(candidates) { candidate in
+        Button {
+          let id = title.id
+          Task {
+            if await admin.perform(
+              "Matching…", { try await $0.selectMetadataMatch(mediaId: id, candidate: candidate) })
+            {
+              matched()
+              dismiss()
+            }
+          }
+        } label: {
+          VStack(alignment: .leading, spacing: 3) {
+            Text(
+              [candidate.title, candidate.year.map(String.init)].compactMap { $0 }.joined(
+                separator: " · ")
+            )
+            .foregroundStyle(.primary)
+            Text(candidate.mediaType == "tv" ? "TV Show" : "Movie").font(.caption).foregroundStyle(
+              .secondary)
+            if let overview = candidate.overview, !overview.isEmpty {
+              Text(overview).font(.caption2).foregroundStyle(.secondary).lineLimit(3)
+            }
+          }
+        }
+      }
+    }
+    .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always))
+    .scrollContentBackground(.hidden)
+    .background(IOSDesign.canvas.ignoresSafeArea())
+    .navigationTitle("Match “\(title.title)”")
+    .navigationBarTitleDisplayMode(.inline)
+    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+    .task(id: query) {
+      error = nil
+      let (typed, id) = (query.trimmingCharacters(in: .whitespaces), title.id)
+      guard !typed.isEmpty else {
+        candidates = []
+        searching = false
+        return
+      }
+      searching = true
+      do {
+        try await Task.sleep(for: .milliseconds(400))
+        let answer = try await admin.run { try await $0.searchMetadata(mediaId: id, query: typed) }
+        try Task.checkCancellation()
+        candidates = answer
+        searching = false
+      } catch is CancellationError {
+        return
+      } catch {
+        guard !Task.isCancelled else { return }
+        candidates = []
+        self.error = IOSAdministrationModel.message(error)
+        searching = false
+      }
+    }
+  }
+}
+
+/// Storage Location Moved: points a location at the folder that now holds its files. Tarven
+/// compares a few sample files first; only the server's database changes, the media is only read.
+private struct IOSAdminRelocateView: View {
+  @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.dismiss) private var dismiss
+  let library: UUID
+  let name: String
+  let oldPath: String
+  let moved: @MainActor @Sendable () async -> Void
+
+  @State private var suggestions: IOSMoveLocationSuggestions?
+  @State private var path = ""
+  @State private var preview: IOSMoveLocationMatch?
+  @State private var confirmedEmpty = false
+  @State private var busy = false
+  @State private var error: String?
+  @State private var done: IOSRelocateResult?
+
+  private var decision: IOSRelocateDecision {
+    IOSRelocateDecision(preview: preview, confirmedEmpty: confirmedEmpty)
+  }
+
+  var body: some View {
+    Form {
+      Section {
+        LabeledContent("Was", value: oldPath).font(.footnote)
+      }
+      Section {
+        if let suggestions {
+          if suggestions.suggestions.isEmpty {
+            Text("No folder with these files was found. Type the new folder below.")
+              .foregroundStyle(.secondary)
+          }
+          ForEach(suggestions.suggestions) { suggestion in
+            Button {
+              choose(suggestion.path)
+              preview = IOSMoveLocationMatch(
+                sampled: suggestions.sampled, matched: suggestion.matched)
+            } label: {
+              VStack(alignment: .leading, spacing: 2) {
+                Text(suggestion.path).font(.footnote.monospaced()).foregroundStyle(.primary)
+                Text(IOSRelocateDecision.matchText(suggestion.matched, of: suggestions.sampled))
+                  .font(.caption).foregroundStyle(.secondary)
+              }
+            }
+          }
+        } else {
+          HStack {
+            ProgressView()
+            Text("Looking for the files…").foregroundStyle(.secondary)
+          }
+        }
+      } header: {
+        Text("Suggestions")
+      }
+      Section {
+        TextField("New Folder, with Its Whole Path", text: Binding(get: { path }, set: choose))
+          .font(.footnote.monospaced())
+          .textInputAutocapitalization(.never).autocorrectionDisabled()
+          .accessibilityIdentifier("relocate-path")
+        Button("Check Folder") { Task { await check() } }
+          .disabled(path.trimmingCharacters(in: .whitespaces).isEmpty || busy)
+      } footer: {
+        Text(decision.text)
+      }
+      Section {
+        if decision.needsSecondConfirmation, !confirmedEmpty, preview != nil {
+          Button("Use Anyway…", role: .destructive) { confirmedEmpty = true }
+        }
+        Button {
+          Task { await relocate() }
+        } label: {
+          HStack {
+            Text("Use This Folder")
+            if busy {
+              Spacer()
+              ProgressView()
+            }
+          }
+        }
+        .disabled(!decision.canConfirm || busy)
+        .accessibilityIdentifier("relocate-confirm")
+      } footer: {
+        if let done {
+          Text(
+            done.titles == 1
+              ? "1 title now points at the new folder. A scan checks it."
+              : "\(done.titles) titles now point at the new folder. A scan checks them.")
+        } else if let error {
+          Text(error).foregroundStyle(.orange)
+        }
+      }
+    }
+    .scrollDismissesKeyboard(.interactively)
+    .scrollContentBackground(.hidden)
+    .background(IOSDesign.canvas.ignoresSafeArea())
+    .navigationTitle("\(name) Moved")
+    .navigationBarTitleDisplayMode(.inline)
+    .task {
+      let id = library
+      do {
+        suggestions = try await admin.run { try await $0.relocateSuggestions(library: id) }
+      } catch is CancellationError {
+      } catch {
+        suggestions = IOSMoveLocationSuggestions(sampled: 0, suggestions: [])
+        self.error = IOSServerMoveText.message(error)
+      }
+    }
+  }
+
+  private func choose(_ value: String) {
+    path = value
+    preview = nil
+    confirmedEmpty = false
+  }
+
+  private func check() async {
+    busy = true
+    defer { busy = false }
+    let id = library
+    let folder = path.trimmingCharacters(in: .whitespaces)
+    do {
+      preview = try await admin.run { try await $0.relocatePreview(library: id, path: folder) }
+      error = nil
+    } catch is CancellationError {
+    } catch {
+      self.error = IOSServerMoveText.message(error)
+    }
+  }
+
+  private func relocate() async {
+    busy = true
+    defer { busy = false }
+    let id = library
+    let folder = path.trimmingCharacters(in: .whitespaces)
+    let force = decision.force
+    do {
+      done = try await admin.run { try await $0.relocate(library: id, path: folder, force: force) }
+      error = nil
+      await moved()
+      dismiss()
+    } catch is CancellationError {
+    } catch {
+      self.error = IOSServerMoveText.message(error)
+    }
+  }
+}

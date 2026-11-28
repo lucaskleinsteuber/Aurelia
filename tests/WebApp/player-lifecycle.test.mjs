@@ -1,9 +1,9 @@
 // The production Player methods with fake media objects: no decoder, browser or playback runs.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Player } from "../../src/Aurelia.Server/WebApp/js/player.js";
-import { createTrackChoices } from "../../src/Aurelia.Server/WebApp/js/track-choices.js";
-import { createApi } from "../../src/Aurelia.Server/WebApp/js/api.js";
+import { Player } from "../../src/Tarven.Server/WebApp/js/player.js";
+import { createTrackChoices } from "../../src/Tarven.Server/WebApp/js/track-choices.js";
+import { createApi } from "../../src/Tarven.Server/WebApp/js/api.js";
 import { installDOM } from "./dom-fixture.mjs";
 function player(overrides = {}) {
   const instance = Object.create(Player.prototype);
@@ -82,7 +82,7 @@ test("notes and sleep API wrappers forward revisions, cancellation and cookie au
   assert.equal(calls[2].path, "/api/v1/media/a%2Fb/notes/n%2Fo?revision=7"); assert.equal(calls[2].method, "DELETE");
   for (const call of calls.slice(0, 3)) assert.equal(call.signal, controller.signal);
   assert.equal(calls[3].path, "/api/v1/playback/sleep-timer-ended"); assert.equal(calls[3].keepalive, true); assert.equal(calls[3].method, "POST");
-  for (const call of calls) { assert.equal(call.credentials, "same-origin"); assert.equal(call.headers["X-Aurelia-Web"], "profile"); }
+  for (const call of calls) { assert.equal(call.credentials, "same-origin"); assert.equal(call.headers["X-Tarven-Web"], "profile"); }
 });
 test("native subtitle lists may be array-like without an iterator", () => {
   const subtitle = { language: "en", label: "Main", kind: "subtitles", mode: "showing" };
@@ -113,7 +113,7 @@ test("scrub preview hover debounces rapid timeline movement and reuses the bucke
 });
 
 test("a failed ticket renewal is tried again while the old ticket still plays", async () => {
-  const { ApiError } = await import("../../src/Aurelia.Server/WebApp/js/api.js");
+  const { ApiError } = await import("../../src/Tarven.Server/WebApp/js/api.js");
   const scheduled = []; const failures = []; let calls = 0;
   const p = player({
     item: { id: "film" }, source: { id: "old", streamPath: "/api/v1/streams/old", expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() },
@@ -130,7 +130,7 @@ test("a failed ticket renewal is tried again while the old ticket still plays", 
 });
 
 test("a refused or late ticket renewal ends playback with the error", async () => {
-  const { ApiError } = await import("../../src/Aurelia.Server/WebApp/js/api.js");
+  const { ApiError } = await import("../../src/Tarven.Server/WebApp/js/api.js");
   for (const [status, minutesLeft] of [[401, 10], [0, 0.5]]) {
     const scheduled = []; const failures = [];
     const p = player({
@@ -144,7 +144,7 @@ test("a refused or late ticket renewal ends playback with the error", async () =
 });
 
 test("the player ends the session for a revoked profile like the rest of the app", async () => {
-  const { ApiError } = await import("../../src/Aurelia.Server/WebApp/js/api.js");
+  const { ApiError } = await import("../../src/Tarven.Server/WebApp/js/api.js");
   const ended = []; const notices = [];
   const live = player({ onSessionEnded: (error) => ended.push(error.code), showNotice: (text) => notices.push(text) });
   live.liveFailed(403, "profile_session_revoked");
@@ -176,7 +176,7 @@ test("returning to the tab takes the screen wake lock again while a title plays"
 });
 
 test("cinema mode plans an ad, the other films' trailers and the curtain, only for a film from its start", async () => {
-  const { cinemaActs, cinemaWanted, nextAd } = await import("../../src/Aurelia.Server/WebApp/js/cinema.js");
+  const { cinemaActs, cinemaWanted, nextAd } = await import("../../src/Tarven.Server/WebApp/js/cinema.js");
   assert.equal(nextAd(null), "iceCream");
   assert.equal(nextAd("iceCream"), "popcorn");
   assert.equal(nextAd("phones"), "iceCream");
@@ -201,7 +201,7 @@ test("cinema mode plans an ad, the other films' trailers and the curtain, only f
 
 test("sleep timer with Good Night enabled keeps player open, releases wake lock, updates server sleep note, and dismisses after 5m or key/click", async (t) => {
   installDOM(t);
-  const { SLEEP_GOOD_NIGHT_CLOSE_MS } = await import("../../src/Aurelia.Server/WebApp/js/player.js");
+  const { SLEEP_GOOD_NIGHT_CLOSE_MS } = await import("../../src/Tarven.Server/WebApp/js/player.js");
   assert.equal(SLEEP_GOOD_NIGHT_CLOSE_MS, 5 * 60_000);
 
   let released = false;

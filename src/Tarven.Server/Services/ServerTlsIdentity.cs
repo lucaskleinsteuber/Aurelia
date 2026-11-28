@@ -1,0 +1,234 @@
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+
+namespace Tarven.Server.Services;
+
+public sealed class ServerTlsIdentity : IDisposable
+{
+    private readonly ServerRuntimeOptions? runtime;
+    private readonly object renewal = new();
+    private X509Certificate2? certificate;
+
+    private ServerTlsIdentity(
+        bool isEnabled,
+        X509Certificate2? certificate,
+        string? publicKeyFingerprint,
+        string? displayFingerprint,
+        ServerRuntimeOptions? runtime = null)
+    {
+        IsEnabled = isEnabled;
+        this.certificate = certificate;
+        PublicKeyFingerprint = publicKeyFingerprint;
+        DisplayFingerprint = displayFingerprint;
+        this.runtime = runtime;
+    }
+
+    public bool IsEnabled { get; }
+
+    /// <summary>The certificate HTTPS shows now; it changes when <see cref="RenewIfDue"/> renews it.</summary>
+    public X509Certificate2? Certificate => Volatile.Read(ref certificate);
+
+    /// <summary>
+    /// Renews the certificate with the same key while the server runs, once fewer than 30 days are
+    /// left: a server running past its ten years no longer shows an expired certificate to browsers
+    /// until its next start (audit S-X12). Apps pin the key, which stays the same.
+    /// </summary>
+    public bool RenewIfDue(DateTime utcNow)
+    {
+        if (runtime is null) return false;
+        lock (renewal)
+        {
+            var current = Certificate;
+            if (current is null || current.NotAfter.ToUniversalTime() >= utcNow.AddDays(30)) return false;
+            using (var key = current.GetECDsaPrivateKey() ?? throw new InvalidOperationException("The TLS private key is unavailable."))
+                CreateCertificate(runtime, key);
+            // UsableForTls keeps or replaces the loaded certificate itself. The previous one stays
+            // undisposed: a handshake may still be using it.
+            Volatile.Write(ref certificate, UsableForTls(X509Certificate2.CreateFromPemFile(runtime.CertificatePath, runtime.PrivateKeyPath)));
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// A server that moved to another computer (docs/SERVER_MOVE.md) brings its key along: a new
+    /// certificate names this computer and its addresses but is made with the same key, so every
+    /// device that pins the key keeps trusting the server. Does nothing without both identity files.
+    /// </summary>
+    public static bool ReissueForThisComputer(ServerRuntimeOptions runtime)
+    {
+        if (!File.Exists(runtime.CertificatePath) || !File.Exists(runtime.PrivateKeyPath)) return false;
+        using var current = X509Certificate2.CreateFromPemFile(runtime.CertificatePath, runtime.PrivateKeyPath);
+        using var key = current.GetECDsaPrivateKey() ?? throw new InvalidOperationException("The TLS private key is unavailable.");
+        CreateCertificate(runtime, key);
+        return true;
+    }
+
+    public string? PublicKeyFingerprint { get; }
+
+    public string? DisplayFingerprint { get; }
+
+    public static ServerTlsIdentity Disabled { get; } = new(false, null, null, null);
+
+    public static ServerTlsIdentity LoadOrCreate(ServerRuntimeOptions runtime)
+    {
+        if (!runtime.LanAccessEnabled && !runtime.LocalHttpsEnabled && !File.Exists(runtime.CertificatePath))
+        {
+            return Disabled;
+        }
+
+        if (File.Exists(runtime.CertificatePath) != File.Exists(runtime.PrivateKeyPath))
+        {
+            throw new InvalidOperationException(
+                "The server TLS identity is incomplete. Restore both identity files or remove both and pair clients again.");
+        }
+
+        if (!File.Exists(runtime.CertificatePath))
+        {
+            Create(runtime);
+        }
+
+        PrivateFilePermissions.ProtectFile(runtime.CertificatePath);
+        PrivateFilePermissions.ProtectFile(runtime.PrivateKeyPath);
+
+        var certificate = X509Certificate2.CreateFromPemFile(
+            runtime.CertificatePath,
+            runtime.PrivateKeyPath);
+        if (certificate.NotAfter.ToUniversalTime() < DateTime.UtcNow.AddDays(30))
+        {
+            // Renew with the existing private key: paired clients pin its SPKI,
+            // so a routine certificate renewal is not a new server identity.
+            using var existingKey = certificate.GetECDsaPrivateKey()
+                ?? throw new InvalidOperationException("The TLS private key is unavailable.");
+            CreateCertificate(runtime, existingKey);
+            certificate.Dispose();
+            certificate = X509Certificate2.CreateFromPemFile(runtime.CertificatePath, runtime.PrivateKeyPath);
+        }
+        using var publicKey = certificate.GetECDsaPublicKey()
+            ?? throw new InvalidOperationException("The server certificate does not contain an ECDSA public key.");
+        var fingerprint = Convert.ToHexString(
+            SHA256.HashData(publicKey.ExportSubjectPublicKeyInfo()));
+        return new ServerTlsIdentity(
+            true,
+            UsableForTls(certificate),
+            fingerprint,
+            FormatDisplayFingerprint(fingerprint),
+            runtime);
+    }
+
+    /// <summary>
+    /// Windows TLS (SChannel) cannot sign with a key that exists only in memory, which is what
+    /// loading PEM files gives. A PKCS#12 round trip stores the same key where SChannel can use it,
+    /// as Kestrel does for its own PEM certificates; the key and fingerprint are unchanged.
+    /// </summary>
+    private static X509Certificate2 UsableForTls(X509Certificate2 certificate)
+    {
+        if (!OperatingSystem.IsWindows()) return certificate;
+        using (certificate)
+        {
+            return X509CertificateLoader.LoadPkcs12(certificate.Export(X509ContentType.Pkcs12), null, X509KeyStorageFlags.DefaultKeySet);
+        }
+    }
+
+    public void Dispose()
+    {
+        if (!ReferenceEquals(this, Disabled))
+        {
+            Certificate?.Dispose();
+        }
+    }
+
+    private static void Create(ServerRuntimeOptions runtime)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        WritePrivateFile(runtime.PrivateKeyPath, key.ExportPkcs8PrivateKeyPem());
+        CreateCertificate(runtime, key);
+    }
+    private static void CreateCertificate(ServerRuntimeOptions runtime, ECDsa key)
+    {
+        var request = new CertificateRequest(
+            "CN=Tarven Server",
+            key,
+            HashAlgorithmName.SHA256);
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(
+            certificateAuthority: false,
+            hasPathLengthConstraint: false,
+            pathLengthConstraint: 0,
+            critical: true));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(
+            X509KeyUsageFlags.DigitalSignature,
+            critical: true));
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
+            new OidCollection
+            {
+                new("1.3.6.1.5.5.7.3.1"),
+            },
+            critical: false));
+
+        var names = new SubjectAlternativeNameBuilder();
+        names.AddDnsName("localhost");
+        names.AddIpAddress(IPAddress.Loopback);
+        names.AddIpAddress(IPAddress.IPv6Loopback);
+        if (!string.IsNullOrWhiteSpace(Environment.MachineName))
+        {
+            names.AddDnsName(Environment.MachineName);
+        }
+
+        foreach (var address in LocalAddresses())
+        {
+            names.AddIpAddress(address);
+        }
+
+        request.CertificateExtensions.Add(names.Build());
+        using var certificate = request.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddDays(-1),
+            DateTimeOffset.UtcNow.AddYears(10));
+
+        WritePrivateFile(runtime.CertificatePath, certificate.ExportCertificatePem());
+    }
+
+    private static IEnumerable<IPAddress> LocalAddresses()
+    {
+        return NetworkInterface.GetAllNetworkInterfaces()
+            .Where(network => network.OperationalStatus == OperationalStatus.Up)
+            .SelectMany(network => network.GetIPProperties().UnicastAddresses)
+            .Select(address => address.Address)
+            .Where(address => address.AddressFamily is AddressFamily.InterNetwork
+                or AddressFamily.InterNetworkV6)
+            .Where(address => !IPAddress.IsLoopback(address))
+            .Distinct();
+    }
+
+    private static void WritePrivateFile(string path, string contents)
+    {
+        var temporaryPath = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            using (var file = PrivateFilePermissions.OpenNewPrivateFile(temporaryPath))
+            {
+                using var writer = new StreamWriter(file, leaveOpen: true);
+                writer.Write(contents);
+                writer.Flush();
+                file.Flush(flushToDisk: true);
+            }
+            File.Move(temporaryPath, path, true);
+            PrivateFilePermissions.ProtectFile(path);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    private static string FormatDisplayFingerprint(string fingerprint)
+    {
+        return string.Join(
+            '-',
+            Enumerable.Range(0, 6).Select(index => fingerprint.Substring(index * 4, 4)));
+    }
+}

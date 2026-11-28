@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { ApiError, createApi, loadAllPages } from "../../src/Aurelia.Server/WebApp/js/api.js";
+import { ApiError, createApi, loadAllPages } from "../../src/Tarven.Server/WebApp/js/api.js";
 
 function fakeFetch(answer) {
   const calls = [];
@@ -21,8 +21,8 @@ test("every call names its credential and sends no token", async () => {
   const api = createApi(fetch);
   await api.profiles();
   await api.home();
-  assert.equal(calls[0].headers["X-Aurelia-Web"], "device");
-  assert.equal(calls[1].headers["X-Aurelia-Web"], "profile");
+  assert.equal(calls[0].headers["X-Tarven-Web"], "device");
+  assert.equal(calls[1].headers["X-Tarven-Web"], "profile");
   assert.equal(calls[0].credentials, "same-origin");
   for (const call of calls) assert.equal("Authorization" in call.headers, false);
 });
@@ -116,12 +116,12 @@ test("an unlocked mutation binds one approval to its exact method, encoded path 
   assert.equal("password" in approval, false);
   assert.equal(calls[1].path, path);
   assert.equal(calls[1].method, "PUT");
-  assert.equal(calls[1].headers["X-Aurelia-Approval"], "synthetic-one-time-grant");
+  assert.equal(calls[1].headers["X-Tarven-Approval"], "synthetic-one-time-grant");
   assert.deepEqual(JSON.parse(calls[1].body), { name: 'Synthetic Ω "profile" 1', note: "line one\nline two", enabled: false });
   for (const call of calls) {
     assert.equal(call.signal, controller.signal);
     assert.equal(call.credentials, "same-origin");
-    assert.equal(call.headers["X-Aurelia-Web"], "profile");
+    assert.equal(call.headers["X-Tarven-Web"], "profile");
     assert.equal("Authorization" in call.headers, false);
   }
 });
@@ -134,8 +134,8 @@ test("successive guarded changes obtain distinct one-time grants and empty chang
   await api.removeTitle("synthetic-two");
   assert.equal(grants, 2);
   assert.equal(calls.length, 4);
-  assert.equal(calls[1].headers["X-Aurelia-Approval"], "synthetic-grant-1");
-  assert.equal(calls[3].headers["X-Aurelia-Approval"], "synthetic-grant-2");
+  assert.equal(calls[1].headers["X-Tarven-Approval"], "synthetic-grant-1");
+  assert.equal(calls[3].headers["X-Tarven-Approval"], "synthetic-grant-2");
   for (const offset of [0, 2]) {
     const proof = JSON.parse(calls[offset].body);
     assert.equal(proof.action, `DELETE ${calls[offset + 1].path}`);
@@ -198,7 +198,7 @@ test("storage and profile changes run without approval by default and upgrade on
     assert.equal(call.method, method);
     assert.equal(call.body, body === undefined ? undefined : JSON.stringify(body));
     assert.equal(call.signal, controller.signal);
-    assert.equal("X-Aurelia-Approval" in call.headers, false);
+    assert.equal("X-Tarven-Approval" in call.headers, false);
 
     if (upgradeable) {
       let attempt = 0;
@@ -209,7 +209,7 @@ test("storage and profile changes run without approval by default and upgrade on
       await invoke(createApi(upgraded.fetch), controller.signal);
       assert.equal(upgraded.calls.length, 3, `${method} ${path} upgrades on approval_required`);
       assert.equal(upgraded.calls[1].path, "/api/v1/management/approval");
-      assert.equal(upgraded.calls[2].headers["X-Aurelia-Approval"], "synthetic-route-grant");
+      assert.equal(upgraded.calls[2].headers["X-Tarven-Approval"], "synthetic-route-grant");
     }
   }
 });
@@ -225,7 +225,7 @@ test("settings refresh reads forward cancellation without changing credential mo
   for (const call of calls) {
     assert.equal(call.method, "GET");
     assert.equal(call.signal, controller.signal);
-    assert.equal(call.headers["X-Aurelia-Web"], "profile");
+    assert.equal(call.headers["X-Tarven-Web"], "profile");
   }
 });
 
@@ -364,13 +364,13 @@ test("uploadPhoto and profilePhoto honor onChange cache invalidation and server_
   const uploaded = await api.uploadPhoto(blob);
   assert.equal(uploaded.pictureRevision, 2);
   assert.deepEqual(changes, [["PUT", "/api/v1/profile/picture/photo"]]);
-  assert.equal(calls[0].headers["X-Aurelia-Web"], "profile");
+  assert.equal(calls[0].headers["X-Tarven-Web"], "profile");
   assert.equal(calls[0].headers["Content-Type"], "image/jpeg");
 
   const fetched = await api.profilePhoto("a/b", 2);
   assert.equal(fetched, blob);
   assert.equal(calls[1].path, "/api/v1/profiles/a%2Fb/picture?rev=2");
-  assert.equal(calls[1].headers["X-Aurelia-Web"], "device");
+  assert.equal(calls[1].headers["X-Tarven-Web"], "device");
   assert.equal(calls[1].headers.Accept, "image/jpeg");
   assert.equal(calls[1].cache, undefined, "revisioned profile photos remain browser-cacheable");
 

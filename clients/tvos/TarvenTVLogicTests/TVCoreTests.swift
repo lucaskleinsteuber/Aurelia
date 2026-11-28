@@ -1,0 +1,697 @@
+import Foundation
+import Testing
+
+@Suite("TV client contracts and transport")
+struct TVCoreTests {
+  @Test func wrappedInkStaysReadableOnEveryColorField() {
+    // WCAG contrast for normal text (4.5:1); the eyebrow and facts use the ink at full strength.
+    func luminance(_ hex: UInt32) -> Double {
+      [16, 8, 0].map { shift -> Double in
+        let channel = Double((hex >> UInt32(shift)) & 0xFF) / 255
+        return channel <= 0.039_28 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
+      }.enumerated().map { [0.2126, 0.7152, 0.0722][$0.offset] * $0.element }.reduce(0, +)
+    }
+    #expect(TVWrapped.accents.count == 8)
+    for (name, accent) in TVWrapped.accents {
+      let (a, b) = (luminance(accent.ink), luminance(accent.field))
+      let ratio = (max(a, b) + 0.05) / (min(a, b) + 0.05)
+      #expect(ratio >= 4.5, "\(name): \(ratio)")
+    }
+  }
+
+  @Test func remoteCommandsDecodeAsTheServerWritesThem() throws {
+    let json = #"""
+      [{"commandId":"5f0c2f1e-4c7b-4a39-9a3e-0d6c1c2b8a11","action":"play","mediaId":"0b6f6a8e-2d9c-4b43-8d55-3f1a4c5e6d70","positionSeconds":null,"skipSeconds":null,"createdAt":"2026-10-31T16:50:00.1234567+00:00"}]
+      """#
+    let commands = try JSONDecoder().decode([TVRemotePlaybackCommand].self, from: Data(json.utf8))
+    #expect(commands.first?.action == "play")
+  }
+
+  @Test func untitledTracksDecodeAndOnlyTextSidecarFilesAreAdded() throws {
+    let json = #"""
+      [{"index":2,"format":"subrip","language":null,"title":null,"isDefault":false,"isForced":false,"supported":true,"isSidecar":false,"isSdh":false},
+       {"index":1000,"format":"subrip","language":null,"title":null,"isDefault":false,"isForced":false,"supported":true,"isSidecar":true,"isSdh":false},
+       {"index":1001,"format":"vobsub","language":"en","title":"English","isDefault":false,"isForced":false,"supported":false,"isSidecar":true,"isSdh":false}]
+      """#
+    let tracks = try JSONDecoder().decode([TVLiveSubtitleTrack].self, from: Data(json.utf8))
+    #expect(tracks.count == 3)
+    #expect(TVLiveSubtitleTrack.sidecarFiles(tracks).map(\.index) == [1000])
+  }
+
+  @Test func pastMonthsOfWrappedAreListedByYear() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "UTC")!
+    let today = calendar.date(from: DateComponents(year: 2026, month: 11, day: 12, hour: 12))!
+    #expect(TVWrapped.readyMonths(year: 2026, today: today, calendar: calendar) == Array(1...10))
+    #expect(TVWrapped.readyMonths(year: 2025, today: today, calendar: calendar) == Array(1...12))
+    #expect(TVWrapped.readyMonths(year: 2027, today: today, calendar: calendar).isEmpty)
+    #expect(
+      TVWrapped.wrappedYears(activityYears: [2024, 2026, 2027], today: today, calendar: calendar)
+        == [2026, 2024])
+  }
+
+  @Test func picturesUseTheirOwnConnectionsBesideTheData() {
+    #expect(TVConnectionLane(path: "/api/v1/artwork/0f0e") == .artwork)
+    #expect(TVConnectionLane(path: "/api/v1/media/0f0e/playback-plan") == .api)
+    let pool = TVPinnedSessionPool()
+    let data = pool.lease(host: "tv.local", fingerprint: "aa")
+    let pictures = pool.lease(host: "tv.local", fingerprint: "aa", lane: .artwork)
+    #expect(data.session !== pictures.session)
+    #expect(
+      pool.lease(host: "tv.local", fingerprint: "AA", lane: .artwork).session === pictures.session)
+  }
+
+  @Test func pinnedSessionsAreReusedPerIdentityAndBounded() {
+    let pool = TVPinnedSessionPool()
+    let first = pool.lease(host: "tv.local", fingerprint: "aa")
+    #expect(pool.lease(host: "tv.local", fingerprint: "AA").session === first.session)
+    #expect(pool.lease(host: "tv.local", fingerprint: "bb").session !== first.session)
+    for index in 0..<8 { _ = pool.lease(host: "host\(index).local", fingerprint: "cc") }
+    #expect(pool.count == TVPinnedSessionPool.capacity)
+    pool.discard(host: "host7.local", fingerprint: "cc")
+    #expect(pool.count == TVPinnedSessionPool.capacity - 1)
+    #expect(pool.lease(host: "tv.local", fingerprint: "aa").session !== first.session)
+  }
+
+  @Test func aGenericDeviceNameGetsAStableTag() {
+    let tag = UUID(uuidString: "AB12CD34-0000-4000-8000-000000000001")!
+    #expect(TVDeviceName.display(systemName: "iPhone", model: "iPhone", tag: tag) == "iPhone AB12")
+    #expect(
+      TVDeviceName.display(systemName: "Lucas’s iPad", model: "iPad", tag: tag) == "Lucas’s iPad")
+    #expect(TVDeviceName.display(systemName: "Apple TV", model: "Apple TV", tag: nil) == "Apple TV")
+  }
+
+  @Test func onlyASilentServerCountsAsAsleep() {
+    #expect(TVServerReachability.isUnreachable(URLError(.cannotConnectToHost)))
+    #expect(TVServerReachability.isUnreachable(URLError(.timedOut)))
+    // A server that answers with an error, or another failure, is not asleep.
+    #expect(
+      !TVServerReachability.isUnreachable(
+        TVCoreError.server(status: 503, code: nil, message: nil, retryAfter: nil)))
+    #expect(!TVServerReachability.isUnreachable(TVCoreError.identityMismatch))
+    #expect(!TVServerReachability.isUnreachable(URLError(.cancelled)))
+  }
+
+  private static let fingerprint = String(repeating: "A", count: 64)
+  private static let serverID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
+  private static let profileID = UUID(uuidString: "20000000-0000-0000-0000-000000000001")!
+  private static let mediaID = UUID(uuidString: "30000000-0000-0000-0000-000000000001")!
+  private static let mutationID = UUID(uuidString: "40000000-0000-0000-0000-000000000001")!
+  private static let baseURL = URL(string: "https://synthetic-server.local:43111")!
+  private static var connection: TVStoredConnection {
+    TVStoredConnection(
+      serverID: serverID, name: "Synthetic server", baseURL: baseURL,
+      fingerprint: fingerprint, deviceToken: String(repeating: "D", count: 43),
+      deviceSessionID: UUID())
+  }
+  private static var session: TVProfileSession {
+    TVProfileSession(
+      user: TVUser(id: profileID, username: "Viewer", role: "user"),
+      sessionId: UUID(), token: String(repeating: "P", count: 43), expiresAt: "2099-01-01T00:00:00Z"
+    )
+  }
+
+  @Test func addressDefaultsToHTTPSAndAcceptsIPv6() throws {
+    #expect(
+      try TVServerAddress.normalize("media-mac.local").absoluteString
+        == "https://media-mac.local:43111")
+    #expect(try TVServerAddress.normalize(" https://media-mac.local:54321/ ").port == 54321)
+    #expect(try TVServerAddress.normalize("https://[fe80::1%25en0]:54321").port == 54321)
+    #expect(
+      TVServerAddress.trustHost("[fe80::1%25en0]") == TVServerAddress.trustHost("fe80::1%en0"))
+  }
+
+  @Test(arguments: [
+    "http://example.local", "https://user:password@example.local", "https://example.local/path",
+    "https://example.local?token=value", "https://example.local#fragment",
+    "https://example.local:0",
+  ])
+  func invalidAddressesAreRejected(_ value: String) {
+    #expect(throws: TVCoreError.invalidAddress) { try TVServerAddress.normalize(value) }
+  }
+
+  @Test func fingerprintUsesSubjectPublicKeyInfoRatherThanRawKey() throws {
+    #expect(
+      try TVServerIdentity.fingerprint(rawP256Key: Data([4] + Array(0...63)))
+        == "0131DDA9654FEF86D57812B9960F260523C27A40C3A18FA8ECC7303510E78C22")
+    #expect(throws: TVCoreError.identityMismatch) {
+      try TVServerIdentity.fingerprint(rawP256Key: Data(repeating: 0, count: 65))
+    }
+  }
+
+  @Test func capabilitiesUseProtocolNotIndependentTVMarketingVersion() throws {
+    let capabilities = try decode(
+      TVCapabilities.self,
+      """
+      {"formatVersion":2,"minimumClientVersion":"1.5.1",
+       "capabilities":["device-authorization-v1","library-state-v1","artwork-variants-v1"],"future":true}
+      """)
+    try capabilities.validate()
+    #expect(capabilities.supportsArtworkVariants)
+    let older = TVCapabilities(formatVersion: 2, minimumClientVersion: "1.0", capabilities: [])
+    #expect(throws: TVCoreError.unsupportedServer) { try older.validate() }
+    let future = TVCapabilities(
+      formatVersion: 99, minimumClientVersion: "1.5.1", capabilities: capabilities.capabilities)
+    #expect(throws: TVCoreError.outdatedClient) { try future.validate() }
+    let ancient = TVCapabilities(
+      formatVersion: 0, minimumClientVersion: "1.0", capabilities: capabilities.capabilities)
+    #expect(throws: TVCoreError.unsupportedServer) { try ancient.validate() }
+  }
+
+  @Test func inspectDoesNotSendCredentialsAndChecksCapturedIdentity() async throws {
+    let transport = TVCoreFakeTransport(responses: [response(infoJSON)])
+    let inspected = try await TVAPIClient.inspect(baseURL: Self.baseURL, transport: transport)
+    #expect(inspected.info.serverId == Self.serverID)
+    let request = try #require(await transport.requests.first)
+    #expect(request.request.value(forHTTPHeaderField: "Authorization") == nil)
+    #expect(request.trust == .inspect)
+    let wrong = TVCoreFakeTransport(responses: [
+      response(infoJSON, fingerprint: String(repeating: "B", count: 64))
+    ])
+    await #expect(throws: TVCoreError.identityMismatch) {
+      try await TVAPIClient.inspect(baseURL: Self.baseURL, transport: wrong)
+    }
+    // A server that is closed to the home network says so, not that its identity changed.
+    let closed = TVCoreFakeTransport(responses: [
+      response(
+        infoJSON.replacingOccurrences(
+          of: "\"lanAccessEnabled\":true", with: "\"lanAccessEnabled\":false"))
+    ])
+    await #expect(throws: TVCoreError.lanAccessDisabled) {
+      try await TVAPIClient.inspect(baseURL: Self.baseURL, transport: closed)
+    }
+  }
+
+  @Test func relocationRequiresBothStableIDAndSavedPublicKey() throws {
+    let info = try decode(TVServerInfo.self, infoJSON)
+    let inspected = TVInspectedServer(
+      baseURL: URL(string: "https://192.0.2.20:43111")!,
+      info: info, fingerprint: Self.fingerprint.lowercased())
+    try inspected.validate(against: Self.connection)
+    var other = Self.connection
+    other = TVStoredConnection(
+      serverID: UUID(), name: other.name, baseURL: other.baseURL,
+      fingerprint: other.fingerprint, deviceToken: other.deviceToken,
+      deviceSessionID: other.deviceSessionID)
+    #expect(throws: TVCoreError.identityMismatch) { try inspected.validate(against: other) }
+    let wrongKey = TVInspectedServer(
+      baseURL: inspected.baseURL, info: info,
+      fingerprint: String(repeating: "B", count: 64))
+    #expect(throws: TVCoreError.identityMismatch) {
+      try wrongKey.validate(against: Self.connection)
+    }
+  }
+
+  @Test func trailersAndSuggestionsSendTheirLimitAsAQuery() async throws {
+    let media = UUID()
+    let transport = TVCoreFakeTransport(responses: [
+      response(#"{"trailers":[]}"#),
+      response(#"{"mediaId":"\#(media.uuidString)","suggestions":[]}"#),
+    ])
+    let client = TVAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    _ = try await client.cinemaTrailers(mediaID: media, count: 2)
+    _ = try await client.suggestions(mediaID: media, limit: 3)
+    let urls = await transport.requests.compactMap(\.request.url)
+    #expect(
+      urls.map(\.path) == [
+        "/api/v1/media/\(media.uuidString.lowercased())/cinema-trailers",
+        "/api/v1/media/\(media.uuidString.lowercased())/suggestions",
+      ])
+    #expect(urls.map(\.query) == ["count=2", "limit=3"])
+  }
+
+  @Test func readsTheAppMakesByItselfAreMarkedAsBackground() async throws {
+    let transport = TVCoreFakeTransport(
+      responses: Array(repeating: response(emptyPageJSON), count: 4))
+    let client = TVAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    _ = try await client.catalogPage(kind: .movie, offset: 0)
+    try await TVAPIClient.withBackgroundRequests {
+      _ = try await client.catalogPage(kind: .movie, offset: 0)
+      // Child tasks carry it too.
+      let child = Task { try await client.catalogPage(kind: .movie, offset: 0) }
+      _ = try await child.value
+    }
+    // A reload someone asked for counts again.
+    try await TVAPIClient.withBackgroundRequests(false) {
+      _ = try await client.catalogPage(kind: .movie, offset: 0)
+    }
+    let requests = await transport.requests.map(\.request)
+    #expect(
+      requests.map { $0.value(forHTTPHeaderField: "X-Tarven-Background") }
+        == [nil, "1", "1", nil])
+  }
+
+  @Test func profileAndCatalogUseDifferentCredentials() async throws {
+    let transport = TVCoreFakeTransport(responses: [response(pickerJSON), response(emptyPageJSON)])
+    let client = TVAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    _ = try await client.profiles()
+    _ = try await client.catalogPage(kind: .movie, offset: 0)
+    let requests = await transport.requests
+    #expect(
+      requests[0].request.value(forHTTPHeaderField: "Authorization")
+        == "Bearer \(Self.connection.deviceToken)")
+    #expect(
+      requests[1].request.value(forHTTPHeaderField: "Authorization")
+        == "Bearer \(Self.session.token)")
+    #expect(requests.allSatisfy { $0.trust == .pinned(Self.fingerprint) })
+    let deviceOnly = TVAPIClient(connection: Self.connection, transport: transport)
+    await #expect(throws: TVCoreError.profileRequired) {
+      try await deviceOnly.catalogPage(kind: .movie, offset: 0)
+    }
+  }
+
+  @Test func noPINProfilesAndMissingOptionalFieldsRemainCompatible() throws {
+    let picker = try decode(TVProfilePicker.self, pickerJSON)
+    try picker.validate()
+    #expect(picker.profiles.first?.pinProtectionEnabled == true)
+    #expect(TVProfilePIN.isValid("1234"))
+    #expect(TVProfilePIN.isValid("12345678"))
+    #expect(!TVProfilePIN.isValid("123"))
+    #expect(!TVProfilePIN.isValid("１２３４"))
+    #expect(!TVProfilePIN.isValid("12 34"))
+  }
+
+  @Test func profileColorsMatchTheMacAndInitialsAreUppercase() {
+    #expect(TVProfileColor.index(for: nil) == 0)
+    let id = UUID(uuidString: "00000000-0000-4000-8000-000000000002")!
+    // Bytes 0x40 + 0x80 + 0x02 = 194, and 194 % 7 = 5, as on the Mac.
+    #expect(TVProfileColor.index(for: id) == 5)
+    #expect(TVProfileColor.initial(of: "  lucas") == "L")
+    #expect(TVProfileColor.initial(of: " ") == "?")
+  }
+
+  @Test func unlockValidatesResponseBelongsToSelectedProfile() async throws {
+    let profile = Self.session
+    let transport = TVCoreFakeTransport(responses: [try encodedResponse(profile)])
+    let client = TVAPIClient(connection: Self.connection, transport: transport)
+    await #expect(throws: TVCoreError.invalidResponse) {
+      try await client.unlockProfile(id: UUID(), pin: "1234")
+    }
+    let requests = await transport.requests
+    #expect(requests.count == 1)
+    #expect(requests[0].request.httpMethod == "POST")
+  }
+
+  @Test func malformedPINDoesNotReachServer() async throws {
+    let transport = TVCoreFakeTransport(responses: [])
+    let client = TVAPIClient(connection: Self.connection, transport: transport)
+    do {
+      _ = try await client.unlockProfile(id: Self.profileID, pin: "abcd")
+      Issue.record("Invalid PIN must fail locally")
+    } catch let error as TVCoreError {
+      #expect(error.code == "invalid_profile_pin")
+      #expect(error.localizedDescription == TVProfilePIN.incorrect)
+    }
+    do {
+      _ = try await client.unlockProfile(id: Self.profileID, pin: "12")
+      Issue.record("A short PIN must fail locally")
+    } catch let error as TVCoreError {
+      #expect(error.localizedDescription == TVProfilePIN.incorrect, "No hint about the length.")
+    }
+    #expect(await transport.requests.isEmpty)
+  }
+
+  @Test func expiredProfileIsReportedWithoutSendingItsToken() async throws {
+    let transport = TVCoreFakeTransport(responses: [])
+    let current = Self.session
+    let expired = TVProfileSession(
+      user: current.user, sessionId: current.sessionId,
+      token: current.token, expiresAt: "2000-01-01T00:00:00Z")
+    let client = TVAPIClient(connection: Self.connection, session: expired, transport: transport)
+    do {
+      _ = try await client.catalogPage(kind: .movie, offset: 0)
+      Issue.record("Expired profiles must return to selection")
+    } catch let error as TVCoreError {
+      #expect(error.isAuthenticationFailure)
+      #expect(error.code == "profile_session_expired")
+    }
+    #expect(await transport.requests.isEmpty)
+  }
+
+  @Test func pairingSecretsStayInBodiesAndStatusIsFutureSafe() async throws {
+    let transport = TVCoreFakeTransport(responses: [
+      response(
+        """
+        {"state":"futureState","expiresAt":"2099-01-01T00:00:00Z","pollIntervalSeconds":5,"acknowledged":false}
+        """)
+    ])
+    let info = try decode(TVServerInfo.self, infoJSON)
+    let client = TVAPIClient(
+      inspected: TVInspectedServer(
+        baseURL: Self.baseURL, info: info,
+        fingerprint: Self.fingerprint), transport: transport)
+    let secret = String(repeating: "S", count: 43)
+    let status = try await client.pairingStatus(id: UUID(), secret: secret)
+    #expect(status.state == .unknown)
+    let request = try #require(await transport.requests.first?.request)
+    #expect(request.httpMethod == "POST")
+    #expect(request.url?.query == nil)
+    #expect(request.url?.absoluteString.contains(secret) == false)
+    #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+    let payload =
+      try JSONSerialization.jsonObject(with: #require(request.httpBody)) as? [String: String]
+    #expect(payload?["secret"] == secret)
+  }
+
+  @Test func receiptRoundTripPreservesCredentialBeforeAcknowledgement() throws {
+    var connection = Self.connection
+    connection.pendingAcknowledgement = TVPendingPairingAcknowledgement(
+      id: UUID(),
+      secret: String(repeating: "S", count: 43), expiresAt: "2099-01-01T00:00:00Z")
+    let encoded = try JSONEncoder().encode(connection)
+    let reloaded = try JSONDecoder().decode(TVStoredConnection.self, from: encoded)
+    #expect(reloaded == connection)
+    #expect(
+      reloaded.relocating(to: Self.baseURL).pendingAcknowledgement
+        == connection.pendingAcknowledgement)
+    let oldJSON =
+      try JSONSerialization.jsonObject(with: JSONEncoder().encode(Self.connection))
+      as? [String: Any]
+    #expect(oldJSON?["pendingAcknowledgement"] == nil)
+  }
+
+  @Test func throttlingKeepsServerCodeAndRetryDelay() async throws {
+    let transport = TVCoreFakeTransport(responses: [
+      TVHTTPResponse(
+        statusCode: 429,
+        headers: ["retry-after": "5"],
+        body: Data(
+          "{\"code\":\"device_pairing_slow_down\",\"message\":\"Wait before checking again.\"}".utf8
+        ),
+        fingerprint: Self.fingerprint)
+    ])
+    let client = TVAPIClient(connection: Self.connection, transport: transport)
+    do {
+      _ = try await client.pairingStatus(id: UUID(), secret: String(repeating: "S", count: 43))
+      Issue.record("Rate limit must be reported")
+    } catch let error as TVCoreError {
+      #expect(error.statusCode == 429)
+      #expect(error.code == "device_pairing_slow_down")
+      #expect(error.retryDelay == 5)
+    }
+  }
+
+  @Test func cancellationRejectsEvenAnUncooperativeLateResponse() async throws {
+    let transport = TVCoreFakeTransport(responses: [response(pickerJSON)], delay: .milliseconds(30))
+    let task = Task {
+      try await TVAPIClient(connection: Self.connection, transport: transport).profiles()
+    }
+    await transport.waitForFirstRequest()
+    task.cancel()
+    await #expect(throws: CancellationError.self) { try await task.value }
+  }
+
+  @Test func paginationRejectsDuplicateIDsAndMixedRevisions() throws {
+    let item = try decode(TVCatalogItem.self, itemJSON)
+    let page = TVPage(items: [item], offset: 60, limit: 60, total: 61, revision: "second")
+    #expect(throws: TVCoreError.invalidResponse) {
+      try TVCatalogPageValidator.validate(
+        page, kind: .movie, offset: 60, revision: nil,
+        existingIDs: [item.id])
+    }
+    do {
+      try TVCatalogPageValidator.validate(page, kind: .movie, offset: 60, revision: "first")
+      Issue.record("Mixed catalog revisions must not be appended")
+    } catch let error as TVCoreError { #expect(error.isConflict) }
+  }
+
+  @Test func pageRequestsEscapeRevisionAndRetainExplicitSort() async throws {
+    let transport = TVCoreFakeTransport(responses: [
+      response(
+        """
+        {"items":[],"offset":0,"limit":60,"total":0,"revision":"a&kind=series"}
+        """)
+    ])
+    let client = TVAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    _ = try await client.catalogPage(kind: .movie, offset: 0, revision: "a&kind=series")
+    let request = try #require(await transport.requests.first?.request)
+    let url = try #require(request.url)
+    let query = try #require(
+      URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+    #expect(query.filter { $0.name == "kind" }.map(\.value) == ["movie"])
+    #expect(query.first { $0.name == "revision" }?.value == "a&kind=series")
+    #expect(query.first { $0.name == "sort" }?.value == "title")
+  }
+
+  @Test func anEndedSleepTimerIsReportedToTheServer() async throws {
+    let transport = TVCoreFakeTransport(responses: [
+      TVHTTPResponse(statusCode: 204, headers: [:], body: Data(), fingerprint: Self.fingerprint)
+    ])
+    let client = TVAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    try await client.sleepTimerEnded()
+    let captured = try #require(await transport.requests.first)
+    #expect(captured.request.httpMethod == "POST")
+    #expect(captured.request.url?.path == "/api/v1/playback/sleep-timer-ended")
+    #expect(captured.trust == .pinned(Self.fingerprint))
+  }
+
+  @Test func unavailableDriveDisablesTheConcreteTarget() throws {
+    let item = try decode(
+      TVCatalogItem.self,
+      itemJSON.replacingOccurrences(
+        of: "\"libraryAvailability\":\"available\"",
+        with: "\"libraryAvailability\":\"unavailable\""))
+    #expect(!item.isPlayable)
+    #expect(item.availabilityMessage == "Media drive disconnected")
+  }
+
+  @Test func explicitEpisodeCannotBeReplacedByAnotherTarget() throws {
+    let item = try decode(TVCatalogItem.self, itemJSON)
+    let plan = TVPlaybackPlan(
+      target: item, seriesId: UUID(), queue: [], action: .play,
+      continueWatchingEligible: false)
+    #expect(throws: TVCoreError.invalidResponse) { try plan.validate(requestedID: UUID()) }
+  }
+
+  @Test func ticketAndArtworkPathsCannotEscapePinnedServer() throws {
+    let client = TVAPIClient(connection: Self.connection, session: Self.session)
+    let valid = "/api/v1/streams/" + String(repeating: "T", count: 43)
+    #expect(try client.validatedStreamURL(path: valid).host == Self.baseURL.host)
+    for path in [
+      "https://attacker.invalid/api/v1/streams/token", valid + "?token=bad", valid + "/../other",
+      valid + "%2Fother",
+    ] {
+      #expect(throws: TVCoreError.invalidResponse) { try client.validatedStreamURL(path: path) }
+    }
+    let artwork = TVArtwork(
+      id: Self.mediaID, kind: "poster", path: "https://attacker.invalid/image",
+      contentType: "image/jpeg", contentLength: 100, revision: 1)
+    #expect(throws: TVCoreError.invalidResponse) {
+      try client.artworkRequest(artwork: artwork, width: 320)
+    }
+  }
+
+  @Test func artworkUsesFixedWidthAndKeepsRevisionOutOfURL() throws {
+    let client = TVAPIClient(connection: Self.connection, session: Self.session)
+    let artwork = TVArtwork(
+      id: Self.mediaID, kind: "poster",
+      path: "/api/v1/artwork/\(Self.mediaID.uuidString.lowercased())",
+      contentType: "image/jpeg", contentLength: 100, revision: 7)
+    let request = try client.artworkRequest(artwork: artwork, width: 640)
+    #expect(request.url?.query == "width=640")
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer \(Self.session.token)")
+    #expect(throws: TVCoreError.invalidResponse) {
+      try client.artworkRequest(artwork: artwork, width: 999)
+    }
+  }
+
+  @Test func guardedProgressUsesStableMutationAndVerifiesReceipt() async throws {
+    let progress = TVPlaybackProgress(
+      mediaId: Self.mediaID, positionMilliseconds: 20_000,
+      durationMilliseconds: 60_000, isCompleted: false, lastPlayedAt: nil, updatedAt: nil,
+      revision: 8, lastMutationId: Self.mutationID)
+    let transport = TVCoreFakeTransport(responses: [try encodedResponse(progress)])
+    let client = TVAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    let saved = try await client.saveProgress(
+      mediaID: Self.mediaID, position: 20_000, duration: 60_000,
+      finished: false, expectedRevision: 7, mutationID: Self.mutationID)
+    #expect(saved.revision == 8)
+    let request = try #require(await transport.requests.first?.request)
+    let body = try #require(request.httpBody)
+    let payload = try #require(
+      JSONSerialization.jsonObject(with: body) as? [String: Any])
+    #expect(payload["enforceRevision"] as? Bool == true)
+    #expect(payload["expectedRevision"] as? Int == 7)
+    #expect(payload["clientMutationId"] as? String == Self.mutationID.uuidString)
+  }
+
+  @Test func capabilitiesExposeWatchlistAndScrubPreviews() throws {
+    let caps = try decode(
+      TVCapabilities.self,
+      """
+      {"formatVersion":2,"minimumClientVersion":"1.0",
+       "capabilities":["device-authorization-v1","library-state-v1","watchlist-people-v1","scrub-previews-v1"]}
+      """)
+    #expect(caps.supportsWatchlistAndPeople)
+    #expect(caps.supportsScrubPreviews)
+
+    let plain = try decode(
+      TVCapabilities.self,
+      """
+      {"formatVersion":2,"minimumClientVersion":"1.0",
+       "capabilities":["device-authorization-v1","library-state-v1"]}
+      """)
+    #expect(!plain.supportsWatchlistAndPeople)
+    #expect(!plain.supportsScrubPreviews)
+  }
+
+  @Test func watchlistEndpointsRequestCorrectPathsAndDecodePayloads() async throws {
+    let watchlistJSON = """
+      {"items":[\(itemJSON)],"mediaIds":["\(Self.mediaID.uuidString)"]}
+      """
+    let updateJSON = """
+      {"mediaId":"\(Self.mediaID.uuidString)","isWatchlisted":true}
+      """
+    let transport = TVCoreFakeTransport(responses: [
+      response(watchlistJSON),
+      response(updateJSON),
+    ])
+    let client = TVAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+
+    let list = try await client.watchlist()
+    #expect(list.items.count == 1)
+    #expect(list.mediaIds == [Self.mediaID])
+
+    let updated = try await client.setWatchlist(mediaID: Self.mediaID, isWatchlisted: true)
+    #expect(updated.mediaId == Self.mediaID)
+    #expect(updated.isWatchlisted == true)
+
+    let requests = await transport.requests
+    #expect(requests.count == 2)
+    #expect(requests[0].request.url?.path == "/api/v1/watchlist")
+    #expect(requests[0].request.httpMethod == "GET")
+    #expect(requests[1].request.url?.path == "/api/v1/media/\(Self.mediaID.uuidString)/watchlist")
+    #expect(requests[1].request.httpMethod == "PUT")
+  }
+
+  @Test func personDetailEndpointRequestsEncodedNameAndDecodesResponse() async throws {
+    let personJSON = """
+      {"name":"Jane Doe","subtitle":"Actor","profile":null,"items":[\(itemJSON)]}
+      """
+    let transport = TVCoreFakeTransport(responses: [response(personJSON)])
+    let client = TVAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+
+    let person = try await client.personDetail(name: "Jane Doe")
+    #expect(person.name == "Jane Doe")
+    #expect(person.subtitle == "Actor")
+    #expect(person.items.count == 1)
+
+    let requests = await transport.requests
+    #expect(requests.count == 1)
+    #expect(requests[0].request.url?.path == "/api/v1/catalog/person")
+    #expect(requests[0].request.url?.query == "name=Jane%20Doe")
+  }
+
+  @Test func scrubPreviewFrameRequestsCorrectPath() async throws {
+    let jpegBytes = Data([0xFF, 0xD8, 0xFF, 0xE0])
+    let transport = TVCoreFakeTransport(responses: [
+      TVHTTPResponse(
+        statusCode: 200, headers: ["Content-Type": "image/jpeg"],
+        body: jpegBytes, fingerprint: Self.fingerprint)
+    ])
+    let client = TVAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+
+    let frame = try await client.scrubPreviewFrame(mediaID: Self.mediaID, seconds: 45)
+    #expect(frame == jpegBytes)
+
+    let requests = await transport.requests
+    #expect(requests.count == 1)
+    #expect(
+      requests[0].request.url?.path
+        == "/api/v1/media/\(Self.mediaID.uuidString.lowercased())/scrub-previews/45")
+    #expect(requests[0].request.httpMethod == "GET")
+  }
+
+  @Test func serviceResolutionUsesActualHostAndPortAndMergesInterfaces() throws {
+    let service = TVBonjourService(
+      name: "Display Name Is Not A Host", type: "_tarven._tcp", domain: "local.",
+      displayName: "Living Room", serverID: Self.serverID)
+    let resolved = try #require(
+      service.resolved(
+        host: "actual-machine.local.", port: 54321,
+        numericHosts: ["192.0.2.20", "fe80::1%en0"]))
+    #expect(resolved.baseURL.host == "actual-machine.local.")
+    #expect(resolved.baseURL.port == 54321)
+    #expect(resolved.addresses.count == 3)
+    let alternate = TVDiscoveredServer(
+      id: resolved.id, name: resolved.name, serverID: Self.serverID,
+      baseURL: URL(string: "https://192.0.2.21:54321")!)
+    let merged = TVBonjourBrowser.merged([resolved, alternate])
+    #expect(merged.count == 1)
+    #expect(merged[0].addresses.count == 4)
+  }
+
+  private func decode<Value: Decodable>(_ type: Value.Type, _ value: String) throws -> Value {
+    try JSONDecoder().decode(type, from: Data(value.utf8))
+  }
+  private func response(_ json: String, fingerprint: String = Self.fingerprint) -> TVHTTPResponse {
+    TVHTTPResponse(
+      statusCode: 200, headers: ["Content-Type": "application/json"],
+      body: Data(json.utf8), fingerprint: fingerprint)
+  }
+  private func encodedResponse(_ value: some Encodable) throws -> TVHTTPResponse {
+    TVHTTPResponse(
+      statusCode: 200, headers: ["Content-Type": "application/json"],
+      body: try JSONEncoder().encode(value), fingerprint: Self.fingerprint)
+  }
+  private var infoJSON: String {
+    """
+    {"serverId":"\(Self.serverID)","name":"Synthetic server","version":"1.5.6","isSetup":true,
+    "lanAccessEnabled":true,"lanHttpsPort":43111,"publicKeyFingerprint":"\(Self.fingerprint)",
+    "capabilities":["device-authorization-v1","library-state-v1"]}
+    """
+  }
+  private var pickerJSON: String {
+    """
+    {"formatVersion":2,"minimumClientVersion":"1.5.1","managementSetupRequired":false,
+    "profiles":[{"id":"\(Self.profileID)","name":"Viewer","role":"user","needsPinSetup":false}]}
+    """
+  }
+  private var emptyPageJSON: String {
+    "{\"items\":[],\"offset\":0,\"limit\":60,\"total\":0,\"revision\":\"first\"}"
+  }
+  private var itemJSON: String {
+    """
+    {"id":"\(Self.mediaID)","kind":"movie","title":"Synthetic movie","genres":[],
+    "availability":"available","isFavorite":false,"addedAt":"2026-10-16T00:00:00Z",
+    "libraryAvailability":"available"}
+    """
+  }
+}
+
+private actor TVCoreFakeTransport: TVHTTPTransport {
+  struct Captured: Sendable {
+    let request: URLRequest
+    let trust: TVTrustMode
+  }
+  private var responses: [TVHTTPResponse]
+  private let delay: Duration
+  private var firstRequestWaiters: [CheckedContinuation<Void, Never>] = []
+  private(set) var requests: [Captured] = []
+  init(responses: [TVHTTPResponse], delay: Duration = .zero) {
+    self.responses = responses
+    self.delay = delay
+  }
+  func execute(_ request: URLRequest, trust: TVTrustMode) async throws -> TVHTTPResponse {
+    requests.append(Captured(request: request, trust: trust))
+    for waiter in firstRequestWaiters { waiter.resume() }
+    firstRequestWaiters.removeAll()
+    if delay != .zero { try? await Task.sleep(for: delay) }
+    guard !responses.isEmpty else { throw TVCoreError.invalidResponse }
+    return responses.removeFirst()
+  }
+
+  func waitForFirstRequest() async {
+    if !requests.isEmpty { return }
+    await withCheckedContinuation { firstRequestWaiters.append($0) }
+  }
+}

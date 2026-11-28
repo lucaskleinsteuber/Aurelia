@@ -1,8 +1,8 @@
 {
   "name": "libvlc",
   "post-install": [
-    "install -Dm644 COPYING /app/share/doc/aurelia-desktop/notices/libvlc/COPYING.GPLv2",
-    "install -Dm644 COPYING.LIB /app/share/doc/aurelia-desktop/notices/libvlc/COPYING.LGPLv2.1",
+    "install -Dm644 COPYING /app/share/doc/tarven-desktop/notices/libvlc/COPYING.GPLv2",
+    "install -Dm644 COPYING.LIB /app/share/doc/tarven-desktop/notices/libvlc/COPYING.LGPLv2.1",
     "/app/lib/vlc/vlc-cache-gen /app/lib/vlc/plugins",
     "sh verify-libvlc.sh"
   ],

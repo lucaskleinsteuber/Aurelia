@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ACCENTS, accentFor, countTarget, countValue, stepFrom, readyMonth, readyMonths, wrappedYears, monthIsNew, openWrapped } from "../../src/Aurelia.Server/WebApp/js/wrapped.js";
+import { ACCENTS, accentFor, countTarget, countValue, stepFrom, readyMonth, readyMonths, wrappedYears, monthIsNew, openWrapped } from "../../src/Tarven.Server/WebApp/js/wrapped.js";
 import { installDOM, all, flush } from "./dom-fixture.mjs";
 
 // Wrapped's rules in the browser; the slides themselves come from the server.

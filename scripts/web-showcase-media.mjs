@@ -7,7 +7,7 @@ export function installCaptureMedia({ now, poster, duration }) {
     constructor(...args) { super(...(args.length ? args : [now])); }
     static now() { return now; }
   };
-  globalThis.__aureliaCaptureMedia = { simulatedPlayCalls: 0, simulatedLoadCalls: 0 };
+  globalThis.__tarvenCaptureMedia = { simulatedPlayCalls: 0, simulatedLoadCalls: 0 };
   const state = new WeakMap();
   const own = (element) => { if (!state.has(element)) state.set(element, { source: "", currentTime: 0 }); return state.get(element); };
   const metadata = (element) => {
@@ -22,8 +22,8 @@ export function installCaptureMedia({ now, poster, duration }) {
   const set = media.setAttribute, remove = media.removeAttribute;
   media.setAttribute = function(name, value) { if (String(name).toLowerCase() === "src") { this.src = value; return; } return set.call(this, name, value); };
   media.removeAttribute = function(name) { if (String(name).toLowerCase() === "src") { own(this).source = ""; return; } return remove.call(this, name); };
-  media.load = function() { globalThis.__aureliaCaptureMedia.simulatedLoadCalls++; if (own(this).source) metadata(this); };
-  media.play = async function() { globalThis.__aureliaCaptureMedia.simulatedPlayCalls++; metadata(this); this.dispatchEvent(new Event("playing")); this.dispatchEvent(new Event("pause")); };
+  media.load = function() { globalThis.__tarvenCaptureMedia.simulatedLoadCalls++; if (own(this).source) metadata(this); };
+  media.play = async function() { globalThis.__tarvenCaptureMedia.simulatedPlayCalls++; metadata(this); this.dispatchEvent(new Event("playing")); this.dispatchEvent(new Event("pause")); };
   media.pause = function() { this.dispatchEvent(new Event("pause")); };
   for (const [name, value] of Object.entries({ videoWidth: 1920, videoHeight: 1080 })) Object.defineProperty(HTMLVideoElement.prototype, name, { configurable: true, get: () => value });
   Object.defineProperty(globalThis, "MediaSource", { configurable: true, value: undefined });

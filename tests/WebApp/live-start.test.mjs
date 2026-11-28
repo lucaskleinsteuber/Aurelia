@@ -9,7 +9,7 @@ class FakeMediaSource extends EventTarget {
   addSourceBuffer() { throw new DOMException("Refused after all", "NotSupportedError"); }
 }
 globalThis.MediaSource = FakeMediaSource;
-const { Player, UNPLAYABLE } = await import("../../src/Aurelia.Server/WebApp/js/player.js");
+const { Player, UNPLAYABLE } = await import("../../src/Tarven.Server/WebApp/js/player.js");
 
 const plan = { video: "copy", videoCodec: "avc1.640028", audioTracks: [{ index: 1, codec: "mp4a.40.2", mode: "aac" }], audioTrack: 1, durationSeconds: 600 };
 

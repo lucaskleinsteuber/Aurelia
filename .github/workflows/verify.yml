@@ -12,7 +12,7 @@ on:
       - "scripts/**"
       - ".config/**"
       - ".github/workflows/verify.yml"
-      - "Aurelia.slnx"
+      - "Tarven.slnx"
       - "Directory.Build.props"
       - "Directory.Packages.props"
       - "NuGet.Config"
@@ -26,7 +26,7 @@ on:
       - "scripts/**"
       - ".config/**"
       - ".github/workflows/verify.yml"
-      - "Aurelia.slnx"
+      - "Tarven.slnx"
       - "Directory.Build.props"
       - "Directory.Packages.props"
       - "NuGet.Config"
@@ -72,12 +72,12 @@ jobs:
             exit 0
           fi
           server=false
-          if git diff --name-only "$base" HEAD | grep -E '^(src/|tests/|tools/|\.config/|\.github/workflows/verify\.yml$|Aurelia\.slnx$|Directory\.Packages\.props$|NuGet\.Config$|global\.json$|scripts/test-server-transport\.sh$)' >/dev/null; then
+          if git diff --name-only "$base" HEAD | grep -E '^(src/|tests/|tools/|\.config/|\.github/workflows/verify\.yml$|Tarven\.slnx$|Directory\.Packages\.props$|NuGet\.Config$|global\.json$|scripts/test-server-transport\.sh$)' >/dev/null; then
             server=true
           fi
           # Directory.Build.props also carries build settings; only version lines may skip the server job.
           if git diff -U0 "$base" HEAD -- Directory.Build.props | grep -E '^[+-][^+-]' \
-            | grep -vE '<(AureliaBuildNumber|Version|FileVersion|InformationalVersion)>' >/dev/null; then
+            | grep -vE '<(TarvenBuildNumber|Version|FileVersion|InformationalVersion)>' >/dev/null; then
             server=true
           fi
           echo "server=$server" | tee -a "$GITHUB_OUTPUT"
@@ -95,13 +95,13 @@ jobs:
           global-json-file: global.json
       - name: Verify formatting, build, and tests
         env:
-          AURELIA_REQUIRE_FFMPEG: "1"
+          TARVEN_REQUIRE_FFMPEG: "1"
         run: |
           command -v ffmpeg >/dev/null || brew install ffmpeg
           dotnet tool restore
-          dotnet restore Aurelia.slnx
-          dotnet format Aurelia.slnx --verify-no-changes --no-restore
-          dotnet build Aurelia.slnx --configuration Release --no-restore
-          dotnet test Aurelia.slnx --configuration Release --no-build
+          dotnet restore Tarven.slnx
+          dotnet format Tarven.slnx --verify-no-changes --no-restore
+          dotnet build Tarven.slnx --configuration Release --no-restore
+          dotnet test Tarven.slnx --configuration Release --no-build
       - name: Verify real-socket TLS, sessions, and Direct Play transport
         run: sh scripts/test-server-transport.sh 30 2

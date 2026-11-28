@@ -1,0 +1,5269 @@
+import AppKit
+import Combine
+import Foundation
+import OSLog
+import ServiceManagement
+
+@MainActor
+final class AppModel: ObservableObject {
+  /// A one-shot detail route shared by library menus and the player.
+  @Published var requestedMediaDetail: UUID?
+  @Published var requestedPersonDetail: PersonSelection?
+  @Published var preselectedCollectionItem: CatalogItemSummary?
+  @Published var preselectedCollectionSeasonNumber: Int?
+  @Published var showingCollectionEditor = false
+  /// Wrapped over the whole window: a year, or one month.
+  @Published var wrappedLaunch: WrappedLaunch?
+
+  func presentNewCollection(with item: CatalogItemSummary? = nil, seasonNumber: Int? = nil) {
+    preselectedCollectionItem = item
+    preselectedCollectionSeasonNumber = seasonNumber
+    showingCollectionEditor = true
+  }
+
+  static var active: AppModel?
+  @Published private(set) var operatingMode: OperatingMode?
+  @Published private(set) var profile: StoredServerProfile? {
+    didSet {
+      guard
+        oldValue?.serverId != profile?.serverId || oldValue?.sessionId != profile?.sessionId
+          || oldValue?.token != profile?.token
+      else { return }
+      if !Self.isTestProcess, !NativePreflightIsolation.isRequested {
+        PlaybackProgressOutbox.shared.deactivate()
+      }
+      synchronizationErrorMessage = nil
+      homeErrorMessage = nil
+      invalidateLibraryWork()
+      artworkLoader.removeAll()
+    }
+  }
+  @Published private(set) var inspectedServer: InspectedServer?
+  /// The setup assistant: introduction, guided setup and the library tour.
+  let setupGuide: SetupGuide
+  private var setupGuideObservation: AnyCancellable?
+  private var activationObservation: AnyCancellable?
+  @Published private(set) var deviceConnection: StoredServerProfile?
+  @Published private(set) var watchingProfiles: [WatchingProfile] = []
+  @Published private(set) var managementSetupRequired = false
+  @Published private(set) var profileSelectionError: String?
+  @Published private(set) var isSelectingProfile = false
+  @Published private(set) var isSwitchingProfile = false
+  @Published private(set) var managementExpiresAt: Date? {
+    didSet {
+      if oldValue != managementExpiresAt { invalidateAdministrationWork() }
+    }
+  }
+  @Published private(set) var administrationGeneration = UUID()
+  @Published private(set) var administrationErrorMessage: String?
+  private var administrationCancellations: [UUID: () -> Void] = [:]
+  private var managementAttempt = UUID()
+  private let profileSelectionOverride: Bool?
+  private let profileUnlocker:
+    (@MainActor (StoredServerProfile, UUID, String) async throws -> ProfileSessionResponse)?
+  private let profileSessionEnder: (@MainActor (StoredServerProfile) async throws -> Void)?
+  private let profileSnapshotRefresher: (@MainActor (StoredServerProfile) async throws -> Void)?
+  private let managementUnlocker: (@MainActor (StoredServerProfile, String) async throws -> String)?
+  private let managementLocker: (@MainActor (StoredServerProfile) async throws -> Void)?
+  private var profileExpiryTask: Task<Void, Never>?
+  private var managementExpiryTask: Task<Void, Never>?
+  private var profileSelectionGeneration = UUID()
+  private var networkConfirmationDeadline: Date?
+  private var hasPendingNetworkConfirmation: Bool {
+    (networkConfirmationDeadline ?? .distantPast) > Date()
+  }
+
+  private var usesProfileSelection: Bool {
+    if let profileSelectionOverride { return profileSelectionOverride }
+    #if DEBUG
+      if Self.uiTestMode == "profiles" || Self.uiTestMode == "profile-management" { return true }
+      if Self.isTestProcess || Self.uiTestMode != nil { return false }
+    #endif
+    return true
+  }
+  var requiresProfileSelection: Bool {
+    usesProfileSelection && profile != nil && profile?.isViewingSession != true
+  }
+  var managementUnlocked: Bool {
+    !usesProfileSelection
+      || (profile?.isViewingSession == true && (managementExpiresAt ?? .distantPast) > Date())
+  }
+  /// "macApp" or "linuxApp" when the current server runs inside Tarven on another computer.
+  var currentServerAppHost: String? {
+    guard operatingMode != .host, let serverId = deviceConnection?.serverId ?? profile?.serverId
+    else { return nil }
+    return WakeOnLan.appHost(for: serverId)
+  }
+
+  var canWakeCurrentServer: Bool {
+    guard operatingMode != .host, let serverId = deviceConnection?.serverId ?? profile?.serverId
+    else { return false }
+    return !WakeOnLan.addresses(for: serverId).isEmpty
+  }
+  @Published private(set) var movies: [MovieSummary] = []
+  @Published private(set) var series: [SeriesSummary] = []
+  @Published private(set) var catalogItems: [CatalogItemSummary] = []
+  @Published private(set) var home: HomeResponse?
+  /// Whether this profile's library arrived at least once. Until then an empty catalog means
+  /// "still loading", not "add a storage location", which flashed on every start.
+  @Published private(set) var libraryLoaded = false
+  @Published private(set) var collections: [CollectionSummary] = []
+  @Published private(set) var watchlistItems: [CatalogItemSummary] = []
+  @Published private(set) var watchlistIds: Set<UUID> = []
+  @Published private(set) var wishSummary: WishSummaryResponse?
+  @Published var requestedDestination: LibraryDestination?
+  @Published private(set) var playback: PlaybackPresentation?
+  @Published private(set) var sceneNotesVersion: UInt64 = 0
+  @Published private(set) var catalogVisibilityRevision: UInt64 = 0
+  @Published private(set) var libraryCapabilities: Set<String> = [] {
+    didSet {
+      PlaybackPreferencesStore.shared.adaptiveStreamingAvailable =
+        libraryCapabilities.contains(ServerFeatureNames.adaptiveStreaming)
+    }
+  }
+  var supportsLibraryState: Bool {
+    #if DEBUG
+      if LibraryStateUITestFixture.enabled { return true }
+    #endif
+    return libraryCapabilities.contains("library-state-v1")
+  }
+  var supportsWatchlist: Bool {
+    libraryCapabilities.contains("watchlist-people-v1")
+  }
+  var supportsWishes: Bool {
+    libraryCapabilities.contains(ServerFeatureNames.wishes)
+  }
+  var supportsPeople: Bool {
+    libraryCapabilities.contains(ServerFeatureNames.people)
+  }
+  var isWishAdmin: Bool {
+    WishPresentation.isAdministrator(profile?.user)
+  }
+  var wishBadgeCount: Int {
+    WishPresentation.badgeCount(summary: wishSummary, isAdmin: isWishAdmin)
+  }
+  func openWishes() {
+    requestedDestination = .wishes
+  }
+  func updateWishSummary(_ summary: WishSummaryResponse) {
+    wishSummary = summary
+  }
+  func refreshWishSummary(notify: Bool) async {
+    guard let profile, supportsWishes, !requiresProfileSelection else {
+      wishSummary = nil
+      return
+    }
+    let generation = connectionGeneration
+    let sessionUserId = profile.user?.id
+    let previous = wishSummary
+    guard let next = try? await APIClient(profile: profile).wishSummary() else { return }
+    guard isCurrent(generation), self.profile?.user?.id == sessionUserId else { return }
+    if notify,
+      WishPresentation.notificationEvent(
+        previous: previous, current: next, isAdmin: isWishAdmin) != nil,
+      WishNotificationCenter.shared.isEnabledInSettings
+    {
+      let latestList = try? await APIClient(profile: profile).wishes(limit: 5)
+      let matchedWish: WishSummary? =
+        next.newlyFulfilledCount > (previous?.newlyFulfilledCount ?? 0)
+        ? latestList?.wishes.first {
+          $0.state == .fulfilled && $0.seenByWisherAt == nil
+        }
+        : latestList?.wishes.first { $0.state == .open }
+      if let detailed = WishPresentation.notificationEvent(
+        previous: previous, current: next, isAdmin: isWishAdmin, latestWish: matchedWish)
+      {
+        await WishNotificationCenter.shared.notify(detailed)
+      }
+    }
+    guard isCurrent(generation), self.profile?.user?.id == sessionUserId else { return }
+    wishSummary = next
+  }
+  @Published private(set) var hostSnapshot: NativeHostSnapshot = .stopped
+  @Published private(set) var libraries: [LibrarySummary] = []
+  @Published private(set) var activeScans: [LibraryScanSummary] = []
+  @Published private(set) var scanStatusUnavailable: Set<UUID> = []
+  @Published private(set) var recentScans: [LibraryScanSummary] = []
+
+  // MARK: Remote Playback / Device Coordination
+  @Published private(set) var activeRemotePlayer: RemotePlayerDevice?
+  @Published private(set) var remotePlaybackTitle: String?
+  @Published private(set) var remotePlaybackPosition: Double = 0
+  @Published private(set) var remotePlaybackDuration: Double = 0
+  @Published private(set) var isRemotePlaying: Bool = false
+
+  private var remoteDeviceHeartbeatTask: Task<Void, Never>?
+  private var remoteDeviceCommandTask: Task<Void, Never>?
+  private var remoteDeviceStatusTask: Task<Void, Never>?
+  var hasActiveRemoteDeviceTasks: Bool {
+    remoteDeviceHeartbeatTask != nil || remoteDeviceCommandTask != nil
+      || remoteDeviceStatusTask != nil
+  }
+  /// A seek sent to the remote player; status polls older than it would move the slider back.
+  private var remoteSeekSentAt: Date?
+
+  let macDeviceId: String
+
+  static func loadOrCreateMacDeviceId(defaults: UserDefaults = .standard) -> String {
+    if let saved = defaults.string(forKey: "TarvenMacDeviceId"), !saved.isEmpty {
+      return saved
+    }
+    let newId = UUID().uuidString
+    defaults.set(newId, forKey: "TarvenMacDeviceId")
+    return newId
+  }
+  @Published private(set) var libraryDiscoveries: [LibraryDiscoverySummary] = []
+  @Published private(set) var libraryImportReviews: [LibraryImportReviewSummary] = []
+  @Published private(set) var pairingCode: PairingCodeResponse?
+  @Published private(set) var sessions: [DeviceSessionSummary] = []
+  @Published private(set) var metadataProvider: MetadataProviderStatus?
+  @Published private(set) var metadataJob: MetadataJobSummary?
+  @Published private(set) var needsInitialLibrarySetup = false
+  @Published private(set) var isStarting = true
+  /// What connecting to a remote server is doing right now, shown instead of a bare spinner.
+  @Published private(set) var connectionStatus: ServerConnectionStatus?
+  /// The server stayed silent even after being woken: shown as a calm hint with Try Again.
+  @Published private(set) var serverUnreachable = false
+  var serverWakeUp = ServerWakeUp()
+  /// Tarven let go of its server after a while without use; see `TarvenRest`.
+  @Published private(set) var isResting = false
+  /// Using Tarven again: the server is woken and the library loads.
+  @Published private(set) var isLeavingRest = false
+  /// Whether the connected server saves power when unused (false when unknown or off).
+  @Published private(set) var serverPowerSavingEnabled = false
+  var restDefaults: UserDefaults = .standard
+  /// Whether a title plays now; the player reports it.
+  private(set) var playerIsPlaying = false
+  var secondsWithoutUse: @MainActor () -> TimeInterval = {
+    TarvenUseClock.shared.secondsWithoutUse
+  }
+  private var restWatchTask: Task<Void, Never>?
+  private var serverWakeTask: Task<Bool, Never>?
+  /// When Tarven last had to wake the server and it answered. Right after waking, the first
+  /// library requests can still fail while its network settles, so they are tried again.
+  private var serverWokeAt: Date?
+  @Published private(set) var isWorking = false
+  @Published private(set) var isRecoveringLocalHost = false
+  @Published var errorMessage: String?
+  @Published private(set) var synchronizationErrorMessage: String?
+  @Published private(set) var homeErrorMessage: String?
+  var visibleErrorMessage: String? {
+    errorMessage ?? synchronizationErrorMessage ?? homeErrorMessage
+  }
+  @Published var isMediaManagerPresented = false
+  @Published var isKeyboardShortcutsPresented = false
+  /// Settings show inside the window, over the library, rather than in a window of their own.
+  @Published var isSettingsPresented = false
+  /// The settings page to show when Settings opens next (Settings clears it).
+  @Published var requestedSettingsCategory: SettingsCategory?
+
+  func openSettings(_ category: SettingsCategory) {
+    requestedSettingsCategory = category
+    isSettingsPresented = true
+  }
+  @Published var importPreviewLibrary: LibrarySummary?
+
+  let artworkLoader = ArtworkLoader()
+  let wishPosterCache = WishPosterCache()
+
+  private let store: any ServerProfileStore
+  private let serverHost: NativeServerHost
+  private let syncController: LibrarySyncController
+  private let homeRefresher = HomeRefreshCoordinator()
+  /// The last list of every library page (without search), so switching pages shows it at once.
+  private var browseResults: [String: [CatalogItemSummary]] = [:]
+  private var browseWarmup: Task<Void, Never>?
+  private struct PreparedDetail {
+    let detail: CatalogDetailPresentation
+    let plan: PlaybackPlanResponse?
+    let sessionID: UUID
+    let revision: UInt64
+    let preparedAt: Date
+  }
+  /// Details prepared while the pointer rested on a title; valid for one session and revision.
+  private var preparedDetails: [UUID: PreparedDetail] = [:]
+  private var detailPreparations: [UUID: Task<Void, Never>] = [:]
+  private static let preparedDetailLifetime: TimeInterval = 30
+  private var hasStarted = false
+  /// The offline mode: downloads only, without the server; see `openOfflineMode`.
+  @Published private(set) var offlineMode: OfflineModeState?
+  /// Cached offline profile choices so SwiftUI bodies never hit Keychain on every render.
+  @Published private(set) var offlineProfileChoices: [OfflineProfileChoice] = []
+  lazy var offlineProfileStore: any OfflineProfileStoring =
+    Self.isTestProcess ? MemoryOfflineProfileStore() : KeychainOfflineProfileStore()
+  private var hostPollTask: Task<Void, Never>?
+  private var homeRefreshTask: Task<Void, Never>?
+  private var scanPollTask: Task<Void, Never>?
+  private var scanPollingRun = UUID()
+  private var syncStartTask: Task<Void, Never>?
+  private var connectionGeneration = UUID()
+  private let reconnectCoordinator: ServerReconnectCoordinator
+  private var reconnectTask: Task<Void, Never>?
+  private var playbackPlanningTask: Task<Void, Never>?
+  private var playbackPlanningGeneration = UUID()
+  private let libraryStateClientFactory:
+    (@MainActor (StoredServerProfile) -> any LibraryStateServing)?
+  private var inspectionGeneration = UUID()
+  private let administrationFetcher:
+    (@MainActor (StoredServerProfile) async throws -> AdministrationSnapshot)?
+  private let backgroundHostingDisabler: (@MainActor () async -> Void)?
+
+  struct AdministrationSnapshot: Sendable {
+    var libraries: [LibrarySummary] = []
+    var sessions: [DeviceSessionSummary] = []
+    var scans: [LibraryScanSummary] = []
+    var history: [LibraryScanSummary] = []
+    var discoveries: [LibraryDiscoverySummary] = []
+    var reviews: [LibraryImportReviewSummary] = []
+    var metadataProvider: MetadataProviderStatus?
+  }
+
+  private func isCurrent(_ generation: UUID) -> Bool {
+    connectionGeneration == generation && profile != nil && !isSwitchingProfile && !Task.isCancelled
+  }
+
+  private func invalidateLibraryWork() {
+    libraryCapabilities = []
+    invalidateAdministrationWork()
+    let retired = connectionGeneration
+    connectionGeneration = UUID()
+    cancelConnectionWork()
+    let controller = syncController
+    Task { await controller.stop(runID: retired) }
+    homeRefresher.invalidate()
+  }
+
+  private func invalidateAdministrationWork() {
+    administrationGeneration = UUID()
+    let cancellations = Array(administrationCancellations.values)
+    administrationCancellations.removeAll()
+    for cancel in cancellations { cancel() }
+  }
+
+  func isCurrentAdministration(_ generation: UUID) -> Bool {
+    administrationGeneration == generation && canManageMedia && !Task.isCancelled
+  }
+
+  func currentAdministration<T: Sendable>(
+    _ operation: @escaping @MainActor () async throws -> T
+  ) async throws -> T {
+    guard canManageMedia else { throw CancellationError() }
+    let run = administrationGeneration
+    let connection = connectionGeneration
+    let id = UUID()
+    let task = Task { try await operation() }
+    administrationCancellations[id] = { task.cancel() }
+    defer { administrationCancellations.removeValue(forKey: id) }
+    do {
+      let result = try await withTaskCancellationHandler {
+        try await task.value
+      } onCancel: {
+        task.cancel()
+      }
+      guard isCurrentAdministration(run), isCurrent(connection) else { throw CancellationError() }
+      return result
+    } catch {
+      guard isCurrentAdministration(run), isCurrent(connection) else { throw CancellationError() }
+      throw error
+    }
+  }
+
+  private func reportAdministrationFailure(_ error: Error) {
+    guard !(error is CancellationError), error as? APIClientError != .supersededSnapshot else {
+      return
+    }
+    if handleSessionFailure(error) { return }
+    if let failure = error as? APIClientError, failure.isManagementLocked {
+      managementExpiresAt = nil
+      clearAdministrationState()
+      administrationErrorMessage = nil
+    } else if error as? APIClientError == .serverIdentityMismatch {
+      errorMessage = failureMessage(error)
+    } else {
+      administrationErrorMessage = error.localizedDescription
+    }
+  }
+
+  func handleAdministrationFailure(_ error: Error, generation: UUID) {
+    guard administrationGeneration == generation, !Task.isCancelled else { return }
+    reportAdministrationFailure(error)
+  }
+
+  private func currentConnection<T>(_ operation: @MainActor () async throws -> T) async throws -> T
+  {
+    let generation = connectionGeneration
+    do {
+      let value = try await operation()
+      guard isCurrent(generation) else { throw CancellationError() }
+      return value
+    } catch {
+      guard isCurrent(generation) else { throw CancellationError() }
+      throw error
+    }
+  }
+
+  private func cancelConnectionWork() {
+    reconnectTask?.cancel()
+    reconnectTask = nil
+    reconnectCoordinator.cancel()
+    playbackPlanningGeneration = UUID()
+    playbackPlanningTask?.cancel()
+    playbackPlanningTask = nil
+    homeRefreshTask?.cancel()
+    homeRefreshTask = nil
+    scanPollTask?.cancel()
+    scanPollTask = nil
+    scanPollingRun = UUID()
+    scanStatusUnavailable = []
+    syncStartTask?.cancel()
+    syncStartTask = nil
+    stopRemoteDeviceTasks()
+    clearRemotePlaybackState()
+  }
+
+  private func clearRemotePlaybackState() {
+    remoteDeviceStatusTask?.cancel()
+    remoteDeviceStatusTask = nil
+    activeRemotePlayer = nil
+    remotePlaybackTitle = nil
+    remotePlaybackPosition = 0
+    remotePlaybackDuration = 0
+    isRemotePlaying = false
+    remoteSeekSentAt = nil
+  }
+
+  private func stopRemoteDeviceTasks() {
+    remoteDeviceHeartbeatTask?.cancel()
+    remoteDeviceHeartbeatTask = nil
+    remoteDeviceCommandTask?.cancel()
+    remoteDeviceCommandTask = nil
+    remoteDeviceStatusTask?.cancel()
+    remoteDeviceStatusTask = nil
+  }
+  private var isTerminationProtectionActive = false
+  private var hostHealth = HostHealthPolicy()
+  private static let hostLogger = Logger(subsystem: "org.tarven.mac", category: "Hosting")
+  private static let operatingModeKey = "TarvenOperatingMode"
+  private static let operatingModeSelectionVersionKey = "TarvenOperatingModeSelectionVersion"
+
+  var canManageMedia: Bool { profile?.user?.role.canManageLibraries == true }
+  var canEditMetadata: Bool { profile?.user?.role.canManageLibraries == true }
+  var canManageStorage: Bool {
+    canManageMedia
+      && (profile?.user?.role == .owner || profile?.user?.accessMode != .selectedTitles)
+  }
+  var isLocalHost: Bool { operatingMode == .host }
+  var canRestoreLocalHosting: Bool {
+    guard let profile else { return false }
+    return OperatingModePolicy.isLocal(profile.baseURL) && operatingMode != .host
+  }
+  var isImportPreviewUITest: Bool {
+    #if DEBUG
+      Self.uiTestMode == "import-preview"
+    #else
+      false
+    #endif
+  }
+
+  func showMediaManager() {
+    isMediaManagerPresented = true
+  }
+
+  init(
+    store: (any ServerProfileStore)? = nil,
+    serverHost: NativeServerHost = NativeServerHost(),
+    initialProfile: StoredServerProfile? = nil,
+    syncController: LibrarySyncController = LibrarySyncController(),
+    profileSelectionEnabled: Bool? = nil,
+    profileUnlocker: (
+      @MainActor (StoredServerProfile, UUID, String) async throws -> ProfileSessionResponse
+    )? = nil,
+    profileSessionEnder: (@MainActor (StoredServerProfile) async throws -> Void)? = nil,
+    profileSnapshotRefresher: (@MainActor (StoredServerProfile) async throws -> Void)? = nil,
+    initialManagementExpiry: Date? = nil,
+    managementUnlocker: (@MainActor (StoredServerProfile, String) async throws -> String)? = nil,
+    managementLocker: (@MainActor (StoredServerProfile) async throws -> Void)? = nil,
+    administrationFetcher: (
+      @MainActor (StoredServerProfile) async throws -> AdministrationSnapshot
+    )? = nil,
+    initialLibraryCapabilities: Set<String> = [],
+    libraryStateClientFactory: (@MainActor (StoredServerProfile) -> any LibraryStateServing)? = nil,
+    reconnectCoordinator: ServerReconnectCoordinator = ServerReconnectCoordinator(),
+    backgroundHostingDisabler: (@MainActor () async -> Void)? = nil
+  ) {
+    self.store = store ?? Self.defaultStore
+    self.serverHost = serverHost
+    self.syncController = syncController
+    self.reconnectCoordinator = reconnectCoordinator
+    self.backgroundHostingDisabler = backgroundHostingDisabler
+    self.profileSelectionOverride = profileSelectionEnabled
+    self.profileUnlocker = profileUnlocker
+    self.profileSessionEnder = profileSessionEnder
+    self.profileSnapshotRefresher = profileSnapshotRefresher
+    self.managementUnlocker = managementUnlocker
+    self.managementLocker = managementLocker
+    self.managementExpiresAt = initialManagementExpiry
+    self.administrationFetcher = administrationFetcher
+    self.libraryStateClientFactory = libraryStateClientFactory
+    self.profile = initialProfile
+    self.serverPowerSavingEnabled = initialProfile?.powerSavingEnabled ?? false
+    self.libraryCapabilities = initialLibraryCapabilities
+    self.macDeviceId = Self.loadOrCreateMacDeviceId(
+      defaults: Self.isTestProcess
+        ? (UserDefaults(suiteName: "TarvenTestDeviceId") ?? .standard) : .standard)
+    let savedMode = UserDefaults.standard.string(forKey: Self.operatingModeKey)
+      .flatMap(OperatingMode.init(rawValue:))
+    self.operatingMode = savedMode
+    // Tests and UI fixtures never write the app's own preferences and start past the assistant,
+    // except the fixture that shows it.
+    let assistantFixture = Self.uiTestMode == "assistant"
+    self.setupGuide = SetupGuide(
+      defaults: Self.isTestProcess
+        ? (UserDefaults(suiteName: "TarvenTestSetupGuide") ?? .standard) : .standard,
+      alreadySetUp: savedMode != nil || (Self.isTestProcess && !assistantFixture))
+    if assistantFixture { setupGuide.resetForFixture() }
+    Self.active = self
+    // The root view follows the assistant through the model.
+    setupGuideObservation = setupGuide.objectWillChange.sink { [weak self] _ in
+      self?.objectWillChange.send()
+    }
+    activationObservation = NotificationCenter.default.publisher(
+      for: NSApplication.didBecomeActiveNotification
+    )
+    .receive(on: DispatchQueue.main)
+    .sink { [weak self] _ in
+      guard let self else { return }
+      TarvenUseClock.shared.noteActive()
+      if self.isResting {
+        Task { await self.leaveRest() }
+      }
+    }
+    ProfilePhotoCache.shared.loader = { [weak self] id, revision in
+      guard let self, let connection = self.photoConnection else {
+        throw APIClientError.invalidResponse
+      }
+      return try await APIClient(profile: connection).profilePhoto(id: id, revision: revision)
+    }
+  }
+
+  /// Profile photos are read with the paired device's credential, so the picker shows them before
+  /// a profile is unlocked.
+  private var photoConnection: StoredServerProfile? {
+    if let deviceConnection { return deviceConnection }
+    if let profile, !profile.isViewingSession { return profile }
+    return nil
+  }
+
+  /// Tarven Test's Reset App Data: stops and unregisters its own server host, erases the test edition's
+  /// Keychain entry, preferences and files (its own container and App Group), then opens it again from the
+  /// beginning. Only the test edition can do this; the real app, its data and media are never touched.
+  func resetTestEditionData() async {
+    guard AppEdition.isTest, Bundle.main.bundleIdentifier == AppEdition.bundleIdentifier else {
+      return
+    }
+    await PlaybackShutdownCoordinator.shared.shutdown()
+    hostPollTask?.cancel()
+    hostPollTask = nil
+    await serverHost.resetTestEditionServerData()
+    for startAtLogin in [false, true] {
+      try? await SMAppService.agent(
+        plistName: AppEdition.agentName(startAtLogin: startAtLogin) + ".plist"
+      )
+      .unregister()
+    }
+    try? store.delete()
+    PasskeyStore.removeAll()
+    KeychainOfflineProfileStore().forgetAll()
+    UserDefaults.standard.removePersistentDomain(forName: AppEdition.bundleIdentifier)
+    UserDefaults.standard.synchronize()
+    let files = FileManager.default
+    var folders = [
+      files.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
+      files.urls(for: .cachesDirectory, in: .userDomainMask).first,
+    ]
+    folders.append(files.containerURL(forSecurityApplicationGroupIdentifier: AppEdition.appGroup))
+    for folder in folders.compactMap({ $0 }) {
+      // Only folders inside this test app's own sandbox container or App Group.
+      guard
+        folder.path.contains(AppEdition.bundleIdentifier)
+          || folder.path.contains(AppEdition.appGroup),
+        let items = try? files.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+      else { continue }
+      for item in items { try? files.removeItem(at: item) }
+    }
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.createsNewApplicationInstance = true
+    let bundle = Bundle.main.bundleURL
+    Task.detached {
+      try? await Task.sleep(for: .milliseconds(600))
+      _ = try? await NSWorkspace.shared.openApplication(at: bundle, configuration: configuration)
+    }
+    NSApplication.shared.terminate(nil)
+  }
+
+  /// A profile was renamed or got a new picture: the signed-in profile and the picker show it.
+  func updateProfileUser(_ user: UserSummary) {
+    if let profile, profile.user?.id == user.id {
+      self.profile = profile.changingUser(user)
+    }
+    if let index = watchingProfiles.firstIndex(where: { $0.id == user.id }) {
+      let old = watchingProfiles[index]
+      watchingProfiles[index] = WatchingProfile(
+        id: old.id, name: user.shownName, role: user.role, needsPinSetup: old.needsPinSetup,
+        pinProtectionEnabled: old.pinProtectionEnabled, pictureKey: user.pictureKey,
+        pictureRevision: user.pictureRevision, ageLimit: user.ageLimit)
+    }
+  }
+
+  var supportsProfilePersonalization: Bool {
+    libraryCapabilities.contains(ServerFeatureNames.profilePersonalization)
+  }
+  var supportsAgeLimits: Bool {
+    libraryCapabilities.contains(ServerFeatureNames.ageLimits)
+  }
+  var supportsScreenTime: Bool {
+    libraryCapabilities.contains(ServerFeatureNames.screenTime)
+  }
+  var supportsWrapped: Bool { libraryCapabilities.contains(ServerFeatureNames.yearWrapped) }
+  var supportsMonthlyWrapped: Bool {
+    libraryCapabilities.contains(ServerFeatureNames.monthlyWrapped)
+  }
+  var supportsAdaptiveStreaming: Bool {
+    libraryCapabilities.contains(ServerFeatureNames.adaptiveStreaming)
+  }
+  var supportsMediaSegments: Bool {
+    libraryCapabilities.contains(ServerFeatureNames.mediaSegments)
+  }
+
+  func start() async {
+    guard !hasStarted else { return }
+    hasStarted = true
+    if NativePreflightIsolation.isRequested {
+      Self.hostLogger.notice(
+        "Preflight isolation active: \(NativePreflightIsolation.isActive); bundle: \(Bundle.main.bundleURL.path, privacy: .public)"
+      )
+      guard NativePreflightIsolation.isActive else {
+        operatingMode = .client
+        errorMessage =
+          "The isolated test launch was rejected. No saved account or host settings were accessed."
+        isStarting = false
+        return
+      }
+    }
+
+    #if DEBUG
+      if AuditRenderFixture.enabled {
+        // Draws screens offscreen with their own models; this window's model stays starting.
+        AuditScreenRenderer.launch()
+        return
+      }
+      // UI test fixtures set their library directly; it counts as loaded.
+      if Self.uiTestMode != nil { libraryLoaded = true }
+      if Self.uiTestMode == "profile-management" {
+        operatingMode = .client
+        let device = Self.previewOwnerProfile
+        deviceConnection = device
+        profile = StoredServerProfile(
+          serverId: device.serverId, name: device.name, baseURL: device.baseURL,
+          publicKeyFingerprint: device.publicKeyFingerprint,
+          token: "synthetic-only-management-profile",
+          sessionId: UUID(), expiresAt: "2099-01-01T00:00:00Z", user: device.user,
+          locallyManaged: false, viewingSession: true)
+        catalogItems = Self.previewCatalog
+        home = Self.previewHome
+        isStarting = false
+        return
+      }
+      if Self.uiTestMode == "profiles" {
+        let localRecovery =
+          ProcessInfo.processInfo.environment["TARVEN_PROFILE_LOCAL_RECOVERY_UI_TESTS"] == "1"
+        operatingMode = localRecovery ? .host : .client
+        profile =
+          localRecovery
+          ? Self.previewOwnerProfile.retainingLocalHosting() : Self.previewOwnerProfile
+        deviceConnection = profile
+        watchingProfiles = Self.watchingProfileFixture
+        isStarting = false
+        return
+      }
+      if Self.uiTestMode == "local-host-recovery" {
+        operatingMode = .client
+        profile = Self.previewOwnerProfile
+        errorMessage = "The saved local server is not running. Your account is still connected."
+        isStarting = false
+        return
+      }
+      if Self.uiTestMode == "import-preview" {
+        operatingMode = .client
+        profile = Self.previewOwnerProfile
+        isStarting = false
+        return
+      }
+      if Self.uiTestMode == "server-settings" {
+        operatingMode = .client
+        profile = Self.previewOwnerProfile
+        if ProcessInfo.processInfo.environment["TARVEN_DEVICE_APPROVAL_UI_TESTS"] == "1" {
+          libraryCapabilities = [
+            "server-readiness-v1", "device-authorization-v1", "artwork-variants-v1",
+          ]
+        }
+        isStarting = false
+        if let path = ProcessInfo.processInfo.environment["TARVEN_SERVER_SETTINGS_RENDER"] {
+          do {
+            let writesDescriptor =
+              ProcessInfo.processInfo.environment["TARVEN_SERVER_SETTINGS_RENDER_STDOUT"] == "1"
+            let destination = try ServerSettingsVisualProbe.validatedOutput(
+              path, allowsEmptyOutputDescriptor: writesDescriptor)
+            let png = try await ServerSettingsVisualProbe.render()
+            if writesDescriptor {
+              // The sandbox can write the output descriptor supplied by Launch
+              // Services without granting access to an external test directory.
+              try FileHandle.standardOutput.write(contentsOf: png)
+            } else {
+              try png.write(to: destination, options: .atomic)
+            }
+            NSApplication.shared.terminate(nil)
+          } catch {
+            fputs("Isolated server settings render failed: \(error.localizedDescription)\n", stderr)
+            exit(2)
+          }
+        }
+        return
+      }
+      if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" {
+        operatingMode = .client
+        profile =
+          Self.uiTestMode == "library-admin" ? Self.previewOwnerProfile : Self.previewProfile
+        movies = [
+          MovieSummary(
+            id: UUID(uuidString: "10000000-0000-0000-0000-000000000001")!,
+            title: "El Camino",
+            year: 2019,
+            availability: .available)
+        ]
+        series = [
+          SeriesSummary(
+            id: UUID(uuidString: "20000000-0000-0000-0000-000000000001")!,
+            title: "Breaking Bad",
+            availability: .available,
+            seasonCount: 5,
+            episodeCount: 62)
+        ]
+        catalogItems = Self.previewCatalog
+        home = CinemaUITestFixture.home(Self.previewHome)
+        collections = home?.collections ?? Self.previewHome.collections
+        if LibraryStateUITestFixture.enabled { updateLibraryStateFixture() }
+        if ShowcaseUITestFixture.enabled {
+          profile = ShowcaseUITestFixture.profile
+          movies = ShowcaseUITestFixture.movies
+          series = ShowcaseUITestFixture.series
+          catalogItems = ShowcaseUITestFixture.catalog
+          home = ShowcaseUITestFixture.home
+          collections = home?.collections ?? []
+        }
+        isStarting = false
+        return
+      }
+      if Self.uiTestMode == "pairing" {
+        operatingMode = .client
+        isStarting = false
+        return
+      }
+      if Self.uiTestMode == "welcome" || Self.uiTestMode == "assistant" {
+        operatingMode = nil
+        isStarting = false
+        return
+      }
+      if Self.uiTestMode == "host-setup" {
+        operatingMode = .host
+        hostSnapshot = NativeHostSnapshot(
+          state: .setupRequired,
+          message: nil,
+          bootstrapToken: "ui-test-bootstrap-token",
+          serverInfo: nil)
+        isStarting = false
+        return
+      }
+      if Self.uiTestMode == "host-starting" || Self.uiTestMode == "host-failed" {
+        operatingMode = .host
+        hostSnapshot = NativeHostSnapshot(
+          state: Self.uiTestMode == "host-starting" ? .starting : .failed,
+          message: Self.uiTestMode == "host-failed" ? "The test server could not start." : nil,
+          bootstrapToken: nil,
+          serverInfo: nil)
+        isStarting = false
+        return
+      }
+      if Self.uiTestMode == "library-setup" {
+        operatingMode = .host
+        profile = Self.previewOwnerProfile
+        hostSnapshot = Self.previewHostSnapshot
+        needsInitialLibrarySetup = true
+        isStarting = false
+        return
+      }
+      if Self.uiTestMode == "media-manager" {
+        operatingMode = .host
+        profile = Self.previewOwnerProfile
+        hostSnapshot = Self.previewHostSnapshot
+        let libraryID = UUID(uuidString: "30000000-0000-0000-0000-000000000001")!
+        libraries = [
+          LibrarySummary(
+            id: libraryID,
+            name: "Archive Drive",
+            path: "/Volumes/Archive",
+            kind: .movies,
+            availability: .unavailable,
+            createdAt: "2026-09-15T12:00:00Z",
+            lastScanStartedAt: "2026-09-15T12:01:00Z",
+            lastScanCompletedAt: nil,
+            lastError: "The library directory is unavailable.",
+            monitoringEnabled: true,
+            lastObservedAt: "2026-09-15T12:01:00Z",
+            health: .waitingForStorage)
+        ]
+        activeScans = [
+          LibraryScanSummary(
+            id: UUID(uuidString: "30000000-0000-0000-0000-000000000002")!,
+            libraryId: libraryID,
+            state: .waitingForStorage,
+            createdAt: "2026-09-15T12:01:00Z",
+            startedAt: nil,
+            completedAt: nil,
+            filesDiscovered: 0,
+            filesProcessed: 0,
+            addedFiles: 0,
+            updatedFiles: 0,
+            missingFiles: 0,
+            skippedFiles: 0,
+            error: "The library directory is unavailable.",
+            issues: [],
+            trigger: .scheduled,
+            attempt: 2,
+            targetRelativePath: nil)
+        ]
+        isStarting = false
+        return
+      }
+      if Self.uiTestMode == "metadata-settings" {
+        operatingMode = .host
+        profile = Self.previewOwnerProfile
+        hostSnapshot = Self.previewHostSnapshot
+        metadataProvider = MetadataProviderStatus(
+          enabled: true,
+          hasToken: true,
+          language: "en-US",
+          artworkBytes: 42,
+          artworkLimitBytes: 1_073_741_824,
+          provider: "TMDB",
+          attribution: "This product uses the TMDB API but is not endorsed or certified by TMDB.")
+        isStarting = false
+        return
+      }
+    #endif
+
+    #if DEBUG
+      if Self.isTestProcess && Self.uiTestMode == nil {
+        operatingMode = .client
+        isStarting = false
+        return
+      }
+    #endif
+
+    do {
+      profile = try store.load()
+      deviceConnection = profile
+      serverPowerSavingEnabled = profile?.powerSavingEnabled ?? false
+      operatingMode = OperatingModePolicy.resolve(
+        storedMode: operatingMode,
+        storedSelectionVersion: UserDefaults.standard.integer(
+          forKey: Self.operatingModeSelectionVersionKey),
+        profile: profile)
+      persistOperatingMode(explicit: false)
+      Self.hostLogger.info(
+        "Resolved startup mode: \(self.operatingMode?.rawValue ?? "unselected", privacy: .public); managed connection: \(self.profile?.locallyManaged == true)"
+      )
+      if operatingMode == .host {
+        await startNativeHost()
+      } else if let profile {
+        await wakeServerIfAsleep(profile)
+        try await refreshSettlingAfterWake()
+        syncOfflineProgress()
+        startSync()
+      }
+    } catch {
+      if !handleSessionFailure(error) {
+        serverUnreachable = ServerReconnectPolicy.isConnectivityFailure(error)
+        errorMessage = failureMessage(error)
+        beginReconnectIfNeeded(after: error)
+      }
+    }
+    connectionStatus = nil
+    isStarting = false
+    watchForRest()
+  }
+
+  // MARK: Rest
+
+  static func isLoopbackHost(_ url: URL) -> Bool {
+    TarvenRest.isLoopbackHost(url)
+  }
+
+  private var isRemoteNonLoopbackServer: Bool {
+    guard operatingMode != .host, let profile, !Self.isLoopbackHost(profile.baseURL) else {
+      return false
+    }
+    if let deviceConnection, Self.isLoopbackHost(deviceConnection.baseURL) {
+      return false
+    }
+    return true
+  }
+
+  func noteServerPowerSaving(_ enabled: Bool) {
+    serverPowerSavingEnabled = enabled
+    // Saved only when it changed, not on every connection.
+    if let current = profile, current.powerSavingEnabled != enabled {
+      let updated = current.changingPowerSaving(enabled)
+      profile = updated
+      if deviceConnection == nil, !updated.isViewingSession { try? store.save(updated) }
+    }
+    if let paired = deviceConnection, paired.powerSavingEnabled != enabled {
+      let updated = paired.changingPowerSaving(enabled)
+      deviceConnection = updated
+      if !updated.isViewingSession { try? store.save(updated) }
+    }
+    if !enabled, isResting {
+      Task { await leaveRest() }
+    }
+  }
+
+  func noteServerPowerSettings(_ settings: ServerPowerSettings) {
+    noteServerPowerSaving(settings.available && settings.mode != "off")
+  }
+
+  func reportPlayerPlaying(_ playing: Bool) {
+    playerIsPlaying = playing
+  }
+
+  /// Checks twice a minute whether Tarven should let go of its server.
+  private func watchForRest() {
+    // Starts counting from now when Tarven has not been in front yet, as after login.
+    _ = TarvenUseClock.shared
+    restWatchTask?.cancel()
+    restWatchTask = Task { [weak self] in
+      while !Task.isCancelled {
+        do { try await Task.sleep(for: .seconds(30)) } catch { return }
+        guard let self else { return }
+        if self.shouldRest() { await self.enterRest() }
+      }
+    }
+  }
+
+  func shouldRest() -> Bool {
+    !isResting && !isLeavingRest && !isStarting && offlineMode == nil
+      && TarvenRest.shouldRest(
+        enabled: TarvenRest.isEnabled(defaults: restDefaults),
+        minutes: TarvenRest.minutes(defaults: restDefaults),
+        secondsWithoutInput: secondsWithoutUse(),
+        playing: playerIsPlaying,
+        connectedElsewhere: isRemoteNonLoopbackServer,
+        serverPowerSavingEnabled: serverPowerSavingEnabled)
+  }
+
+  /// Lets go of the server: a paused title closes with its progress saved, and no requests,
+  /// reconnects or Wake-on-LAN packets go out until Tarven is used again.
+  func enterRest() async {
+    guard !isResting, TarvenRest.isEnabled(defaults: restDefaults),
+      isRemoteNonLoopbackServer, serverPowerSavingEnabled
+    else { return }
+    isResting = true
+    if playback != nil { dismissPlayback() }
+    connectionStatus = nil
+    await systemWillSleep()
+    PinnedSessionPool.shared.removeAll()
+  }
+
+  /// Using Tarven again after a rest: wake the server and load what was showing.
+  func leaveRest() async {
+    guard isResting else { return }
+    isResting = false
+    isLeavingRest = true
+    defer { isLeavingRest = false }
+    await retryConnection()
+  }
+
+  /// Wakes a sleeping server before the first request, so opening Tarven shows its progress
+  /// instead of waiting for a request to time out. Opening the app counts as someone present.
+  private func wakeServerIfAsleep(_ profile: StoredServerProfile) async {
+    connectionStatus = .connecting
+    let wakeUp = serverWakeUp
+    let attempt = Task { @MainActor in
+      await wakeUp.run(serverId: profile.serverId, address: profile.baseURL) {
+        self.connectionStatus = .waking(since: Date())
+      }
+    }
+    serverWakeTask = attempt
+    let answers = await attempt.value
+    serverWakeTask = nil
+    noteWake(answers: answers)
+    connectionStatus = answers ? .loading : nil
+  }
+
+  /// After a wake, connections opened before the server slept are dead; new ones are made.
+  private func noteWake(answers: Bool) {
+    guard answers, case .waking = connectionStatus else { return }
+    serverWokeAt = Date()
+    PinnedSessionPool.shared.removeAll()
+  }
+
+  /// Loads the library. When the server was just woken, a connection failure is tried again a
+  /// few times on new connections, so a server that is awake never shows "Could not connect".
+  private func refreshSettlingAfterWake() async throws {
+    let generation = connectionGeneration
+    do {
+      try await refresh(requireCompleteSnapshot: true)
+    } catch  where failedWhileServerSettles(error) {
+      for attempt in 1...3 {
+        try await Task.sleep(for: .seconds(2))
+        guard isCurrent(generation) else { throw CancellationError() }
+        PinnedSessionPool.shared.removeAll()
+        do {
+          try await refresh(requireCompleteSnapshot: true)
+          return
+        } catch  where attempt < 3 && failedWhileServerSettles(error) {}
+      }
+    }
+  }
+
+  /// True for a connection failure within a minute after the server was woken.
+  private func failedWhileServerSettles(_ error: Error) -> Bool {
+    guard let woke = serverWokeAt, Date().timeIntervalSince(woke) < 60 else { return false }
+    return ServerReconnectPolicy.isConnectivityFailure(error)
+  }
+
+  /// Before a request someone is waiting for, such as opening a profile: a quick check whether
+  /// the server answers, and if it sleeps, waking it with the progress shown, instead of letting
+  /// the request run into a timeout. Returns whether the server answers.
+  private func ensureServerAwake(_ device: StoredServerProfile) async -> Bool {
+    guard offlineMode == nil else { return false }
+    guard operatingMode != .host, connectionStatus == nil, serverWakeTask == nil else {
+      return true
+    }
+    let wakeUp = serverWakeUp
+    let attempt = Task { @MainActor in
+      await wakeUp.run(serverId: device.serverId, address: device.baseURL) {
+        self.connectionStatus = .waking(since: Date())
+      }
+    }
+    serverWakeTask = attempt
+    let answers = await attempt.value
+    serverWakeTask = nil
+    noteWake(answers: answers)
+    connectionStatus = nil
+    if answers { serverUnreachable = false }
+    return answers
+  }
+
+  /// Stop Waiting while a server is woken: Tarven continues at once and shows that the server
+  /// did not answer, with Try Again.
+  func stopWaitingForServer() {
+    serverWakeTask?.cancel()
+  }
+
+  /// Try Again after the server stayed silent: wake it once more and reload what was showing.
+  func retryConnection() async {
+    guard operatingMode != .host, let device = deviceConnection ?? profile,
+      connectionStatus == nil
+    else { return }
+    reconnectTask?.cancel()
+    reconnectTask = nil
+    reconnectCoordinator.cancel()
+    serverUnreachable = false
+    errorMessage = nil
+    profileSelectionError = nil
+    await wakeServerIfAsleep(device)
+    defer { connectionStatus = nil }
+    if requiresProfileSelection {
+      await reloadWatchingProfiles()
+    } else {
+      await refreshFromUI()
+    }
+  }
+
+  func selectClientMode() {
+    operatingMode = .client
+    persistOperatingMode(explicit: true)
+    errorMessage = nil
+  }
+
+  /// Starts the existing local server without signing out, redeeming a code, or setting up an owner.
+  func restoreLocalHosting() async {
+    guard canRestoreLocalHosting, !isRecoveringLocalHost else { return }
+    errorMessage = nil
+    #if DEBUG
+      if Self.uiTestMode == "local-host-recovery" {
+        isRecoveringLocalHost = true
+        defer { isRecoveringLocalHost = false }
+        try? await Task.sleep(for: .milliseconds(400))
+        profile = profile?.retainingLocalHosting()
+        hostSnapshot = Self.previewHostSnapshot
+        operatingMode = .host
+        home = Self.previewHome
+        catalogItems = Self.previewCatalog
+        return
+      }
+    #endif
+    if await startNativeHost() {
+      operatingMode = .host
+      persistOperatingMode(explicit: true)
+      await reloadAdministration()
+    }
+  }
+
+  func selectHostMode() async {
+    if let profile, !OperatingModePolicy.isLocal(profile.baseURL) {
+      await disconnect()
+      guard self.profile == nil else { return }
+    }
+    operatingMode = .host
+    persistOperatingMode(explicit: true)
+    await startNativeHost()
+  }
+
+  func switchToClientMode() async {
+    await disconnect()
+    guard profile == nil else { return }
+    await PlaybackShutdownCoordinator.shared.shutdown()
+    hostPollTask?.cancel()
+    hostPollTask = nil
+    await serverHost.stop()
+    if let backgroundHostingDisabler {
+      await backgroundHostingDisabler()
+    } else if !Self.isTestProcess {
+      await BackgroundHostingController.disableAll()
+    }
+    endTerminationProtection()
+    hostSnapshot = .stopped
+    operatingMode = .client
+    persistOperatingMode(explicit: true)
+  }
+
+  func setupLocalOwner(
+    serverName: String,
+    username: String,
+    password: String,
+    confirmation: String,
+    lanPort: Int
+  ) async -> Bool {
+    guard password == confirmation else {
+      errorMessage = "The passwords do not match."
+      return false
+    }
+    guard password.count >= 12 else {
+      errorMessage = "The password must contain at least 12 characters."
+      return false
+    }
+    guard let bootstrapToken = hostSnapshot.bootstrapToken else {
+      errorMessage = "Native setup authorization is unavailable. Restart the server host."
+      return false
+    }
+    let generation = connectionGeneration
+    isWorking = true
+    errorMessage = nil
+    defer { isWorking = false }
+    do {
+      try await serverHost.configure(name: serverName, lanPort: lanPort)
+      try await requireOwnLocalServer(accepting: [.setupRequired])
+      let authentication = try await APIClient.setupOwner(
+        username: username,
+        password: password,
+        deviceName: TarvenDeviceName.current,
+        bootstrapToken: bootstrapToken)
+      guard connectionGeneration == generation, !Task.isCancelled else { return false }
+      try await finishLocalAuthentication(
+        authentication, lanPort: lanPort, expectedGeneration: generation)
+      guard profile != nil else { return false }
+      needsInitialLibrarySetup = true
+      return true
+    } catch {
+      errorMessage = failureMessage(error)
+      return false
+    }
+  }
+
+  /// Taking over another server while this Mac's own server waits for setup. Like the owner
+  /// setup, it talks to 127.0.0.1 only while this app's host reports its server waiting there.
+  func localSetupMoveClient() async throws -> LocalSetupMoveClient {
+    guard let token = hostSnapshot.bootstrapToken else {
+      throw NativeServerHostError.localServerNotReady
+    }
+    try await requireOwnLocalServer(accepting: [.setupRequired])
+    return LocalSetupMoveClient(bootstrapToken: token)
+  }
+
+  /// The password travels over plain HTTP on 127.0.0.1, so it is sent only while this app's own
+  /// server host reports its server in the expected state: then that server holds the port, not
+  /// another program that took it while the server was stopped or restarting.
+  private func requireOwnLocalServer(accepting states: Set<NativeHostState>) async throws {
+    for attempt in 0..<20 {
+      let snapshot = try await serverHost.status()
+      if states.contains(snapshot.state) { return }
+      guard OperatingModePolicy.isAwaitingReadiness(snapshot.state), attempt < 19 else { break }
+      try await Task.sleep(for: .milliseconds(250))
+    }
+    throw NativeServerHostError.localServerNotReady
+  }
+
+  func loginToLocalServer(username: String, password: String) async -> Bool {
+    let generation = connectionGeneration
+    isWorking = true
+    errorMessage = nil
+    defer { isWorking = false }
+    do {
+      try await requireOwnLocalServer(accepting: [.running])
+      let authentication = try await APIClient.loginLocally(
+        username: username,
+        password: password,
+        deviceName: TarvenDeviceName.current)
+      guard connectionGeneration == generation, !Task.isCancelled else { return false }
+      let port = hostSnapshot.serverInfo?.lanHttpsPort ?? AppEdition.defaultLanPort
+      try await finishLocalAuthentication(
+        authentication, lanPort: port, restart: false, expectedGeneration: generation)
+      return true
+    } catch {
+      errorMessage = failureMessage(error)
+      return false
+    }
+  }
+
+  /// Opening Tarven starts a server that stopped itself for being unused (Power settings).
+  func resumeIdleHost() async {
+    guard operatingMode == .host, let live = try? await serverHost.status(), live.state == .idle
+    else { return }
+    do {
+      try await serverHost.restart()
+      hostSnapshot = NativeHostSnapshot(
+        state: .restarting, message: nil, bootstrapToken: nil, serverInfo: nil)
+      startHostPolling()
+    } catch { errorMessage = failureMessage(error) }
+  }
+
+  func restartNativeHost() async {
+    errorMessage = nil
+    hostHealth = HostHealthPolicy()
+    #if DEBUG
+      if Self.uiTestMode == "host-failed" {
+        hostSnapshot = NativeHostSnapshot(
+          state: .starting,
+          message: nil,
+          bootstrapToken: nil,
+          serverInfo: nil)
+        await Task.yield()
+        hostSnapshot = NativeHostSnapshot(
+          state: .setupRequired,
+          message: nil,
+          bootstrapToken: "ui-test-retry-bootstrap-token",
+          serverInfo: nil)
+        return
+      }
+    #endif
+    if hostSnapshot.state == .failed || hostSnapshot.state == .stopped {
+      let live: NativeHostSnapshot
+      do { live = try await serverHost.status() } catch {
+        _ = await startNativeHost()
+        return
+      }
+      if live.state == .failed || live.state == .idle {
+        // Only an explicit retry may reset the independent host's recovery budget.
+        do {
+          try await serverHost.restart()
+          hostSnapshot = NativeHostSnapshot(
+            state: .restarting, message: nil, bootstrapToken: nil, serverInfo: nil)
+          startHostPolling()
+        } catch { errorMessage = failureMessage(error) }
+        return
+      }
+      _ = await startNativeHost()
+      return
+    }
+    do {
+      if let profile {
+        _ = try await APIClient(profile: profile).restartServer()
+      } else {
+        try await serverHost.restart()
+      }
+    } catch { errorMessage = failureMessage(error) }
+  }
+
+  func completeInitialLibrarySetup() {
+    needsInitialLibrarySetup = false
+  }
+
+  func createStorageLocations(_ locations: [StorageLocationDraft]) async -> Bool {
+    guard let profile, canManageStorage else { return false }
+    let generation = connectionGeneration
+    let administration = administrationGeneration
+    isWorking = true
+    administrationErrorMessage = nil
+    defer { isWorking = false }
+    do {
+      let client = APIClient(profile: profile)
+      let (registered, first) = try await currentAdministration { [self] in
+        var created: [LibrarySummary] = []
+        for location in locations {
+          guard isCurrentAdministration(administration) else { throw CancellationError() }
+          let library = try await client.createLibrary(
+            name: location.resolvedName,
+            path: location.path,
+            kind: location.kind,
+            requireImportPreview: true)
+          created.append(library)
+        }
+        guard isCurrentAdministration(administration) else { throw CancellationError() }
+        return try await (client.libraries(), created.first)
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return false }
+      libraries = registered
+      importPreviewLibrary = first
+      return true
+    } catch {
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return false }
+      reportAdministrationFailure(error)
+      guard isCurrentAdministration(administration) else { return false }
+      if let registered = try? await currentAdministration({
+        try await APIClient(profile: profile).libraries()
+      }) {
+        guard isCurrent(generation), isCurrentAdministration(administration) else { return false }
+        libraries = registered
+      }
+      return false
+    }
+  }
+
+  func reloadAdministration() async {
+    #if DEBUG
+      if Self.uiTestMode == "local-host-recovery" { return }
+    #endif
+    guard let profile, canManageStorage else { return }
+    let generation = connectionGeneration
+    do {
+      let snapshot = try await currentAdministration { [self] in
+        if let administrationFetcher { return try await administrationFetcher(profile) }
+        let client = APIClient(profile: profile)
+        async let loadedLibraries = client.libraries()
+        async let loadedSessions = client.sessions()
+        let freshLibraries = try await loadedLibraries
+        let freshSessions = try await loadedSessions
+        let freshScans = try await client.activeLibraryScans()
+        var history: [LibraryScanSummary] = []
+        for library in freshLibraries {
+          history.append(contentsOf: try await client.libraryScans(id: library.id))
+        }
+        return try await AdministrationSnapshot(
+          libraries: freshLibraries, sessions: freshSessions, scans: freshScans, history: history,
+          discoveries: loadDiscoveries(client: client, libraries: freshLibraries),
+          reviews: loadImportReviews(client: client, libraries: freshLibraries),
+          metadataProvider: profile.user?.role == .owner ? client.metadataProviderStatus() : nil)
+      }
+      guard isCurrent(generation) else { return }
+      libraries = snapshot.libraries
+      sessions = snapshot.sessions
+      activeScans = snapshot.scans
+      scanStatusUnavailable.formIntersection(Set(snapshot.scans.map(\.id)))
+      recentScans = Self.uniqueScans(snapshot.history).sorted { $0.createdAt > $1.createdAt }
+      libraryDiscoveries = snapshot.discoveries
+      libraryImportReviews = snapshot.reviews
+      metadataProvider = snapshot.metadataProvider
+      administrationErrorMessage = nil
+      startScanPolling()
+    } catch { if isCurrent(generation) { reportAdministrationFailure(error) } }
+  }
+
+  /// Folders on the connected server, for choosing a storage location on another computer.
+  func serverFolders(at path: String?) async throws -> ServerFolderListing {
+    guard let profile, canManageStorage else { throw APIClientError.invalidResponse }
+    return try await APIClient(profile: profile).serverFolders(path: path)
+  }
+
+  func addStorageLocations(
+    _ locations: [StorageLocationDraft],
+    combineExisting: Bool = false
+  ) async -> Bool {
+    guard let profile, canManageStorage else { return false }
+    let generation = connectionGeneration
+    let administration = administrationGeneration
+    isWorking = true
+    administrationErrorMessage = nil
+    defer { isWorking = false }
+    do {
+      let client = APIClient(profile: profile)
+      let (registered, first) = try await currentAdministration { [self] in
+        var created: [LibrarySummary] = []
+        for location in locations {
+          guard isCurrentAdministration(administration) else { throw CancellationError() }
+          let library = try await client.createLibrary(
+            name: location.resolvedName,
+            path: location.path,
+            kind: location.kind,
+            combineExisting: combineExisting,
+            requireImportPreview: true)
+          created.append(library)
+        }
+        guard isCurrentAdministration(administration) else { throw CancellationError() }
+        return try await (client.libraries(), created.first)
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return false }
+      libraries = registered
+      importPreviewLibrary = first
+      return true
+    } catch {
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return false }
+      reportAdministrationFailure(error)
+      guard isCurrentAdministration(administration) else { return false }
+      if let registered = try? await currentAdministration({
+        try await APIClient(profile: profile).libraries()
+      }) {
+        guard isCurrent(generation), isCurrentAdministration(administration) else { return false }
+        libraries = registered
+      }
+      return false
+    }
+  }
+
+  func didConfirmImport(scan: LibraryScanSummary) async {
+    guard canManageStorage else { return }
+    let administration = administrationGeneration
+    activeScans = Self.uniqueScans(activeScans + [scan])
+    startScanPolling()
+    await reloadAdministration()
+    guard isCurrentAdministration(administration) else { return }
+    if !libraries.contains(where: { $0.importPreviewRequired == true }) {
+      needsInitialLibrarySetup = false
+    }
+  }
+
+  func classifyDiscovery(_ discovery: LibraryDiscoverySummary, as decision: ClassificationDecision)
+    async
+  {
+    guard let profile, canManageStorage else { return }
+    let generation = connectionGeneration
+    let administration = administrationGeneration
+    do {
+      let scan = try await currentAdministration {
+        try await APIClient(profile: profile).updateClassification(
+          libraryId: discovery.libraryId,
+          discoveryId: discovery.id,
+          decision: decision)
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
+      activeScans.append(scan)
+      libraryDiscoveries.removeAll { $0.id == discovery.id }
+      startScanPolling()
+    } catch {
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
+    }
+  }
+
+  func reviewIgnoredDiscovery(_ discovery: LibraryDiscoverySummary) async {
+    guard let profile, canManageStorage else { return }
+    let generation = connectionGeneration
+    let administration = administrationGeneration
+    do {
+      let scan = try await currentAdministration {
+        try await APIClient(profile: profile).resetClassification(
+          libraryId: discovery.libraryId,
+          discoveryId: discovery.id)
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
+      activeScans.append(scan)
+      if let index = libraryDiscoveries.firstIndex(where: { $0.id == discovery.id }) {
+        libraryDiscoveries[index] = LibraryDiscoverySummary(
+          id: discovery.id,
+          libraryId: discovery.libraryId,
+          relativePath: discovery.relativePath,
+          detectedTitle: discovery.detectedTitle,
+          suggestedKind: discovery.suggestedKind,
+          reason: discovery.reason,
+          decision: nil)
+      }
+      startScanPolling()
+    } catch {
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
+    }
+  }
+
+  func removeLibrary(id: UUID) async {
+    guard let profile, canManageStorage else { return }
+    let generation = connectionGeneration
+    let administration = administrationGeneration
+    do {
+      let client = APIClient(profile: profile)
+      let result = try await currentAdministration { [self] in
+        let preview = try await client.previewReset(libraries: [id])
+        guard isCurrentAdministration(administration) else { throw CancellationError() }
+        return try await client.resetLibrary(preview: preview)
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
+      // The location is gone once the reset ran; artwork the server still has to clean up is its
+      // own business and doesn't make the removal look failed (it keeps the location listed).
+      libraries.removeAll { $0.id == id }
+      do {
+        try await refresh()
+      } catch is CancellationError {
+        return
+      } catch {
+        if isCurrent(generation), isCurrentAdministration(administration) {
+          administrationErrorMessage =
+            "The storage location was removed, but the library list could not be refreshed: \(failureMessage(error))"
+        }
+        return
+      }
+      if result.state != "completed" {
+        administrationErrorMessage =
+          "The storage location was removed. The server finishes cleaning up its artwork later"
+          + (result.error.map { ": \($0)" } ?? ".")
+      }
+    } catch {
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
+    }
+  }
+
+  func scanLibrary(id: UUID) async {
+    guard let profile, canManageStorage else { return }
+    let generation = connectionGeneration
+    let administration = administrationGeneration
+    do {
+      let scan = try await currentAdministration {
+        try await APIClient(profile: profile).startLibraryScan(id: id)
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
+      activeScans.append(scan)
+      startScanPolling()
+    } catch {
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
+    }
+  }
+
+  func setMonitoring(libraryID: UUID, enabled: Bool) async {
+    guard let profile, canManageStorage else { return }
+    let generation = connectionGeneration
+    let administration = administrationGeneration
+    do {
+      let updated = try await currentAdministration {
+        try await APIClient(profile: profile).updateLibraryMonitoring(
+          id: libraryID, enabled: enabled)
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
+      if let index = libraries.firstIndex(where: { $0.id == libraryID }) {
+        libraries[index] = updated
+      }
+    } catch {
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
+    }
+  }
+
+  func cancelScan(id: UUID) async {
+    guard let profile, canManageStorage else { return }
+    let generation = connectionGeneration
+    let administration = administrationGeneration
+    do {
+      let latest = try await currentAdministration { [self] in
+        let client = APIClient(profile: profile)
+        try await client.cancelScan(id: id)
+        guard isCurrentAdministration(administration) else { throw CancellationError() }
+        return try await client.scan(id: id)
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
+      if [.queued, .running, .waitingForStorage].contains(latest.state) {
+        activeScans = activeScans.map { $0.id == id ? latest : $0 }
+      } else {
+        activeScans.removeAll { $0.id == id }
+        recentScans = Self.uniqueScans([latest] + recentScans)
+      }
+      scanStatusUnavailable.remove(id)
+    } catch {
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
+    }
+  }
+
+  func generatePairingCode() async {
+    guard let profile, canManageMedia else { return }
+    let generation = connectionGeneration
+    let administration = administrationGeneration
+    do {
+      let code = try await currentAdministration {
+        try await APIClient(profile: profile).createPairingCode()
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
+      pairingCode = code
+    } catch {
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
+    }
+  }
+
+  func revokeSession(id: UUID) async {
+    guard let profile, canManageMedia else { return }
+    let generation = connectionGeneration
+    let administration = administrationGeneration
+    do {
+      try await currentAdministration {
+        try await APIClient(profile: profile).revokeSession(id: id)
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
+      sessions.removeAll { $0.id == id }
+      await reloadDevices()
+    } catch {
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
+    }
+  }
+
+  func configureMetadata(token: String) async {
+    guard let profile, canManageMedia else { return }
+    let generation = connectionGeneration
+    do {
+      let provider = try await currentAdministration {
+        try await APIClient(profile: profile).configureMetadata(token: token, enabled: true)
+      }
+      guard isCurrent(generation) else { return }
+      metadataProvider = provider
+    } catch { if isCurrent(generation) { reportAdministrationFailure(error) } }
+  }
+
+  func disableMetadata() async {
+    guard let profile, canManageMedia else { return }
+    let generation = connectionGeneration
+    do {
+      let provider = try await currentAdministration {
+        try await APIClient(profile: profile).removeMetadataToken()
+      }
+      guard isCurrent(generation) else { return }
+      metadataProvider = provider
+    } catch {
+      if isCurrent(generation) { reportAdministrationFailure(error) }
+    }
+  }
+
+  static func combinedMetadataJob(_ jobs: [MetadataJobSummary]) -> MetadataJobSummary? {
+    guard let last = jobs.last else { return nil }
+    guard jobs.count > 1 else { return last }
+    let state: MetadataJobState
+    if jobs.contains(where: { $0.state == .running }) {
+      state = .running
+    } else if jobs.contains(where: { $0.state == .queued }) {
+      state = .queued
+    } else if jobs.contains(where: { $0.state == .failed }) {
+      state = .failed
+    } else if jobs.contains(where: { $0.state == .interrupted }) {
+      state = .interrupted
+    } else if jobs.contains(where: { $0.state == .cancelled }) {
+      state = .cancelled
+    } else {
+      state = .completed
+    }
+    var seenErrors = Set<String>()
+    let errors = jobs.compactMap(\.error).map {
+      $0.trimmingCharacters(in: .whitespacesAndNewlines)
+    }.filter { !$0.isEmpty && seenErrors.insert($0).inserted }
+    let skippedValues = jobs.compactMap(\.itemsSkipped)
+    return MetadataJobSummary(
+      id: last.id,
+      libraryId: nil,
+      mediaId: nil,
+      state: state,
+      itemsTotal: jobs.reduce(0) { $0 + $1.itemsTotal },
+      itemsProcessed: jobs.reduce(0) { $0 + $1.itemsProcessed },
+      itemsMatched: jobs.reduce(0) { $0 + $1.itemsMatched },
+      itemsNeedingReview: jobs.reduce(0) { $0 + $1.itemsNeedingReview },
+      itemsFailed: jobs.reduce(0) { $0 + $1.itemsFailed },
+      error: errors.isEmpty ? nil : errors.joined(separator: "; "),
+      createdAt: jobs.first?.createdAt ?? last.createdAt,
+      startedAt: jobs.compactMap(\.startedAt).first,
+      completedAt: (state != .queued && state != .running)
+        ? jobs.compactMap(\.completedAt).last : nil,
+      mode: last.mode,
+      attempt: jobs.compactMap(\.attempt).max(),
+      nextAttemptAt: jobs.compactMap(\.nextAttemptAt).first,
+      waitReason: jobs.compactMap(\.waitReason).first,
+      itemsSkipped: skippedValues.isEmpty ? nil : skippedValues.reduce(0, +))
+  }
+
+  func enrichLibrary() async {
+    guard let profile, canManageStorage else { return }
+    let generation = connectionGeneration
+    let administration = administrationGeneration
+    do {
+      let client = APIClient(profile: profile)
+      var jobs: [MetadataJobSummary] = []
+      if profile.user?.role == .owner {
+        let job = try await currentAdministration { try await client.startMetadataJob() }
+        guard isCurrent(generation) else { return }
+        jobs = [job]
+        metadataJob = job
+      } else {
+        // Administrators can request only explicitly shared libraries, never a
+        // server-wide metadata refresh or a change to provider credentials.
+        for library in libraries {
+          guard isCurrentAdministration(administration) else { return }
+          let job = try await currentAdministration {
+            try await client.startMetadataJob(libraryId: library.id)
+          }
+          guard isCurrent(generation) else { return }
+          jobs.append(job)
+          metadataJob = Self.combinedMetadataJob(jobs)
+        }
+      }
+      guard !jobs.isEmpty else { return }
+      while jobs.contains(where: { !$0.isFinished }) {
+        try await Task.sleep(for: .seconds(1))
+        guard isCurrent(generation), isCurrentAdministration(administration) else { return }
+        for index in jobs.indices where !jobs[index].isFinished {
+          let jobID = jobs[index].id
+          let updated = try await currentAdministration {
+            try await APIClient(profile: profile).metadataJob(id: jobID)
+          }
+          guard isCurrent(generation) else { return }
+          jobs[index] = updated
+        }
+        metadataJob = Self.combinedMetadataJob(jobs)
+      }
+      if profile.user?.role == .owner {
+        guard isCurrentAdministration(administration) else { return }
+        let provider = try await currentAdministration { try await client.metadataProviderStatus() }
+        guard isCurrent(generation) else { return }
+        metadataProvider = provider
+      }
+    } catch { if isCurrent(generation) { reportAdministrationFailure(error) } }
+  }
+
+  func pruneArtwork() async {
+    guard let profile, canManageMedia else { return }
+    let generation = connectionGeneration
+    do {
+      let provider = try await currentAdministration {
+        try await APIClient(profile: profile).pruneArtwork()
+        return try await APIClient(profile: profile).metadataProviderStatus()
+      }
+      guard isCurrent(generation) else { return }
+      metadataProvider = provider
+    } catch { if isCurrent(generation) { reportAdministrationFailure(error) } }
+  }
+
+  /// Only the updater changes this; background-host preferences remain untouched.
+  var isPreparingApplicationUpdate = false
+
+  func shutdown() async {
+    profileSelectionGeneration = UUID()
+    isSelectingProfile = true
+    connectionGeneration = UUID()
+    cancelConnectionWork()
+    await PlaybackShutdownCoordinator.shared.shutdown()
+    if let profile, profile.isViewingSession {
+      // Updating the client must not depend on a remote server responding.
+      try? await APIClient(profile: profile).endProfileSession(
+        timeout: isPreparingApplicationUpdate ? 2 : 15)
+    }
+    profileExpiryTask?.cancel()
+    managementExpiryTask?.cancel()
+    hostPollTask?.cancel()
+    homeRefreshTask?.cancel()
+    scanPollTask?.cancel()
+    await syncController.stop()
+    if AppUpdateLogic.shouldStopHost(
+      isHosting: operatingMode == .host, isBackgroundService: serverHost.isBackgroundService,
+      installingUpdate: isPreparingApplicationUpdate)
+    {
+      await serverHost.stop()
+    }
+    endTerminationProtection()
+  }
+  func saveHostingSettings(_ settings: HostServiceSettings) async throws {
+    guard isLocalHost, profile?.user?.role == .owner else { throw NativeServerHostError.rejected }
+    guard let profile else { throw NativeServerHostError.rejected }
+    let operation = try await APIClient(profile: profile).authorizeHostingChange(settings)
+    let wasBackground = serverHost.isBackgroundService
+    let previous = try HostServiceSettings.load()
+    if wasBackground && (!settings.backgroundEnabled || previous.agentName != settings.agentName) {
+      // Release the old independent host before unregistering its agent; report
+      // completion through the new host, not a control channel macOS just removed.
+      await serverHost.stop()
+      _ = try await BackgroundHostingController.save(settings)
+      await startNativeHost()
+      guard hostSnapshot.state != .failed else { throw NativeServerHostError.couldNotLaunch }
+      try await serverHost.hostingSettingsApplied(
+        operationID: operation.id,
+        permitted: !settings.backgroundEnabled || BackgroundHostingController.permitted)
+      return
+    }
+    let permitted = try await BackgroundHostingController.save(settings)
+    try await serverHost.hostingSettingsApplied(
+      operationID: operation.id, permitted: !settings.backgroundEnabled || permitted)
+    if settings.backgroundEnabled && permitted {
+      let handedOff = !serverHost.isBackgroundService
+      if handedOff { try await serverHost.handoffToBackground() }
+      await startNativeHost(skipKickstart: handedOff)
+    } else if !settings.backgroundEnabled {
+      await serverHost.stop()
+      await startNativeHost()
+    }
+  }
+
+  func acceptConfirmedNetwork(
+    profile updated: StoredServerProfile, device: StoredServerProfile? = nil,
+    managementExpiry: String? = nil
+  ) throws {
+    guard profile?.serverId == updated.serverId, profile?.user?.id == updated.user?.id,
+      profile?.publicKeyFingerprint == updated.publicKeyFingerprint
+    else { throw APIClientError.invalidResponse }
+    let paired =
+      device ?? (deviceConnection ?? updated).changingAddress(updated.baseURL, name: updated.name)
+    guard !paired.isViewingSession, paired.serverId == updated.serverId,
+      paired.publicKeyFingerprint == updated.publicKeyFingerprint
+    else { throw APIClientError.invalidResponse }
+    try store.save(paired)
+    if profile?.baseURL != updated.baseURL { invalidateLibraryWork() }
+    deviceConnection = paired
+    profile = updated
+    managementExpiresAt = managementExpiry.flatMap(Self.sessionDate)
+    networkConfirmationDeadline = nil
+    profileExpiryTask?.cancel()
+    managementExpiryTask?.cancel()
+    if let date = Self.sessionDate(updated.expiresAt), updated.isViewingSession {
+      profileExpiryTask = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(max(0, date.timeIntervalSinceNow)))
+        guard !Task.isCancelled, self?.profile?.sessionId == updated.sessionId else { return }
+        await self?.switchWatchingProfile()
+      }
+    }
+    if let date = managementExpiresAt {
+      managementExpiryTask = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(max(0, date.timeIntervalSinceNow)))
+        guard !Task.isCancelled, self?.profile?.sessionId == updated.sessionId else { return }
+        self?.managementExpiresAt = nil
+        self?.clearAdministrationState()
+      }
+    }
+    startSync()
+  }
+  func beginNetworkConfirmation(until value: String?) {
+    networkConfirmationDeadline = value.flatMap(Self.sessionDate) ?? Date().addingTimeInterval(60)
+  }
+
+  func inspect(address: String) async {
+    let generation = UUID()
+    inspectionGeneration = generation
+    isWorking = true
+    errorMessage = nil
+    inspectedServer = nil
+    defer { if inspectionGeneration == generation { isWorking = false } }
+    do {
+      let baseURL = try APIClient.normalizedServerURL(address)
+      let inspected = try await APIClient.inspect(baseURL: baseURL)
+      guard inspectionGeneration == generation, !Task.isCancelled else { return }
+      inspectedServer = inspected
+    } catch {
+      if inspectionGeneration == generation, !Task.isCancelled {
+        errorMessage = failureMessage(error)
+      }
+    }
+  }
+
+  func inspect(discovered: DiscoveredServer) async {
+    for address in [discovered.baseURL] + discovered.alternativeURLs {
+      await inspect(address: address.absoluteString)
+      if inspectedServer != nil { return }
+      guard !Task.isCancelled else { return }
+    }
+  }
+
+  func cancelInspection() {
+    inspectionGeneration = UUID()
+    inspectedServer = nil
+    errorMessage = nil
+  }
+
+  func pair(code: String) async -> Bool {
+    guard let inspectedServer else { return false }
+    var generation = connectionGeneration
+    let inspection = inspectionGeneration
+    let normalizedCode = code.filter(\.isNumber)
+    guard normalizedCode.count == 8 else {
+      errorMessage = "Enter the eight-digit pairing code."
+      return false
+    }
+
+    isWorking = true
+    errorMessage = nil
+    defer { isWorking = false }
+    do {
+      let paired = try await APIClient.pair(
+        inspected: inspectedServer,
+        code: normalizedCode,
+        deviceName: TarvenDeviceName.current)
+      guard connectionGeneration == generation, inspectionGeneration == inspection,
+        !Task.isCancelled
+      else { return false }
+      try store.save(paired)
+      deviceConnection = paired
+      profile = paired
+      serverPowerSavingEnabled = paired.powerSavingEnabled
+      generation = connectionGeneration
+      self.inspectedServer = nil
+      try await refresh()
+      startSync()
+      return true
+    } catch {
+      if connectionGeneration == generation, !Task.isCancelled {
+        errorMessage = failureMessage(error)
+      }
+      return false
+    }
+  }
+
+  func refresh(requireCompleteSnapshot: Bool = false) async throws {
+    #if DEBUG
+      if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin"
+        || AuditRenderFixture.enabled
+      {
+        return
+      }
+    #endif
+    guard let profile, !isSwitchingProfile else { return }
+    if requiresProfileSelection {
+      try await loadWatchingProfiles()
+      return
+    }
+    if profile.isViewingSession, let profileSnapshotRefresher {
+      try await profileSnapshotRefresher(profile)
+      return
+    }
+    let generation = connectionGeneration
+    isWorking = true
+    defer { isWorking = false }
+    let homeRequest = homeRefresher.beginSnapshot()
+    defer {
+      if homeRefresher.endSnapshot() { Task { await self.refreshHome() } }
+    }
+    let client = APIClient(profile: profile)
+    let info = try await client.serverInfo()
+    guard info.serverId == profile.serverId else {
+      throw APIClientError.serverIdentityMismatch
+    }
+    WakeOnLan.remember(info)
+    guard isCurrent(generation)
+    else { return }
+    noteServerPowerSaving(info.powerSavingEnabled ?? false)
+    if profile.user == nil || profile.isViewingSession {
+      let user = try await client.currentUser()
+      guard isCurrent(generation)
+      else { return }
+      guard profile.user == nil || user.id == profile.user?.id else {
+        throw APIClientError.invalidResponse
+      }
+      let updated = StoredServerProfile(
+        serverId: profile.serverId,
+        name: info.name,
+        baseURL: profile.baseURL,
+        publicKeyFingerprint: profile.publicKeyFingerprint,
+        token: profile.token,
+        sessionId: profile.sessionId,
+        expiresAt: profile.expiresAt,
+        user: user,
+        locallyManaged: profile.locallyManaged, viewingSession: profile.viewingSession,
+        powerSavingEnabled: self.serverPowerSavingEnabled)
+      if !updated.isViewingSession { try store.save(updated) }
+      self.profile = updated
+    }
+    let catalogClient = client.pagingCatalog(for: info.capabilities)
+    async let loadedMovies = catalogClient.movies()
+    async let loadedSeries = catalogClient.series()
+    async let loadedCatalog = catalogClient.catalogItems()
+    async let loadedHome = homeRefresher.load(request: homeRequest, profile: profile)
+    async let loadedCollections = catalogClient.collections()
+    // Home answers long before every catalog page has arrived; on the first load it shows at once
+    // while the rest loads, instead of waiting for the whole library.
+    let earlyHome = try await loadedHome
+    if home == nil, let earlyHome, isCurrent(generation), homeRefresher.isCurrent(homeRequest) {
+      home = earlyHome
+    }
+    let (newMovies, newSeries, newCatalog, newHome, newCollections) = try await (
+      loadedMovies, loadedSeries, loadedCatalog, earlyHome, loadedCollections
+    )
+    guard isCurrent(generation)
+    else { return }
+    guard let newHome, homeRefresher.isCurrent(homeRequest) else {
+      if Task.isCancelled { throw CancellationError() }
+      if requireCompleteSnapshot { throw APIClientError.supersededSnapshot }
+      return
+    }
+    movies = newMovies
+    series = newSeries
+    if catalogItems != newCatalog { catalogVisibilityRevision &+= 1 }
+    catalogItems = newCatalog
+    libraryCapabilities = Set(info.capabilities ?? [])
+    collections = newCollections
+    home = newHome
+    libraryLoaded = true
+    prefetchArtwork()
+    if (info.capabilities ?? []).contains("watchlist-people-v1"),
+      let loadedWatchlist = try? await client.watchlist(), isCurrent(generation)
+    {
+      watchlistItems = loadedWatchlist.items
+      watchlistIds = Set(loadedWatchlist.mediaIds)
+    }
+    await refreshWishSummary(notify: false)
+    scheduleHomeRefresh()
+    warmLibraryBrowsing()
+    if !Self.isTestProcess, !NativePreflightIsolation.isRequested, let current = self.profile {
+      PlaybackProgressOutbox.shared.activate(profile: current)
+      PlaybackProgressOutbox.shared.retryAfterReconnect()
+    }
+  }
+
+  func refreshHome() async {
+    #if DEBUG
+      if AuditRenderFixture.enabled {
+        if !AuditRenderFixture.failing { home = AuditRenderFixture.home }
+        return
+      }
+      if ShowcaseUITestFixture.enabled {
+        home = ShowcaseUITestFixture.home
+        return
+      }
+      if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" {
+        home = LibraryStateUITestFixture.home(
+          CinemaUITestFixture.home(Self.previewHome), catalog: catalogItems)
+        scheduleHomeRefresh()
+        return
+      }
+      if Self.uiTestMode != nil { return }
+    #endif
+    // The library view can appear as soon as its saved profile is loaded.
+    // Its task/activation must not supersede the initial coherent snapshot.
+    guard !isResting, !isStarting, !isRecoveringLocalHost else { return }
+    guard !requiresProfileSelection else { return }
+    guard let profile else { return }
+    let generation = connectionGeneration
+    guard let request = homeRefresher.beginHomeOnlyRequest() else { return }
+    do {
+      guard let refreshed = try await homeRefresher.load(request: request, profile: profile),
+        isCurrent(generation)
+      else { return }
+      home = refreshed
+      homeErrorMessage = nil
+      scheduleHomeRefresh()
+    } catch {
+      if isCurrent(generation), !(error is CancellationError) {
+        homeErrorMessage = failureMessage(error)
+      }
+    }
+  }
+
+  func searchCatalog(_ query: String) async throws -> [CatalogItemSummary] {
+    let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty { return catalogItems }
+    #if DEBUG
+      if AuditRenderFixture.enabled {
+        return LibraryStateUITestFixture.browse(
+          catalogItems + AuditRenderFixture.episodes(season: 1), query: CatalogBrowseQuery(),
+          search: trimmed)
+      }
+      if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" {
+        let candidates =
+          ShowcaseUITestFixture.enabled ? catalogItems : catalogItems + [Self.previewSearchEpisode]
+        return candidates.filter { item in
+          ([item.title, item.originalTitle ?? "", item.overview ?? ""] + item.genres)
+            .joined(separator: " ")
+            .localizedCaseInsensitiveContains(trimmed)
+        }
+      }
+    #endif
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await currentConnection {
+      try await APIClient(profile: profile).searchCatalog(trimmed)
+    }
+  }
+
+  func browseCatalog(query: CatalogBrowseQuery, search: String) async throws -> [CatalogItemSummary]
+  {
+    #if DEBUG
+      if AuditRenderFixture.enabled {
+        if AuditRenderFixture.failing {
+          throw APIClientError.serverRejected(
+            code: "audit_unreachable", message: "The server could not be reached.")
+        }
+        return LibraryStateUITestFixture.browse(catalogItems, query: query, search: search)
+      }
+      if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" {
+        let items =
+          LibraryStateUITestFixture.enabled || ShowcaseUITestFixture.enabled
+          ? catalogItems : catalogItems + [Self.previewSearchEpisode]
+        return LibraryStateUITestFixture.browse(items, query: query, search: search)
+      }
+    #endif
+    guard let profile else { throw CancellationError() }
+    let client = APIClient(profile: profile).pagingCatalog(for: Array(libraryCapabilities))
+    return try await currentConnection {
+      try await client.browseCatalog(query: query, search: search)
+    }
+  }
+
+  private func browseKey(section: CatalogBrowseSection, query: CatalogBrowseQuery, search: String)
+    -> String?
+  {
+    guard let profile, search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      return nil
+    }
+    return "\(profile.serverId):\(profile.sessionId):\(section.rawValue):\(query.requestKey)"
+  }
+
+  /// The last loaded list of a library page; shown at once and refreshed in the background.
+  func cachedBrowse(section: CatalogBrowseSection, query: CatalogBrowseQuery, search: String)
+    -> [CatalogItemSummary]?
+  {
+    browseKey(section: section, query: query, search: search).flatMap { browseResults[$0] }
+  }
+
+  func storeBrowse(
+    _ items: [CatalogItemSummary], section: CatalogBrowseSection, query: CatalogBrowseQuery,
+    search: String
+  ) {
+    guard let key = browseKey(section: section, query: query, search: search) else { return }
+    if browseResults.count >= 24, browseResults[key] == nil { browseResults.removeAll() }
+    browseResults[key] = items
+  }
+
+  /// Loads every library page's current list in the background after a refresh, so switching
+  /// between Movies, TV Shows and the Library shows them at once, as on the Apple TV.
+  private func warmLibraryBrowsing() {
+    browseWarmup?.cancel()
+    guard let profile else { return }
+    let store = LibraryBrowsePreferenceStore(
+      defaults: LibraryBrowsePreferenceStore.applicationDefaults)
+    browseWarmup = Task { [weak self] in
+      for section in [CatalogBrowseSection.movies, .tvShows, .library, .recentlyAdded] {
+        guard let self, !Task.isCancelled, self.profile == profile else { return }
+        let query = store.load(
+          serverId: profile.serverId, userId: profile.user?.id ?? profile.sessionId,
+          section: section)
+        guard let items = try? await browseCatalog(query: query, search: "") else { continue }
+        guard !Task.isCancelled, self.profile == profile else { return }
+        storeBrowse(items, section: section, query: query, search: "")
+      }
+    }
+  }
+
+  private func libraryStateClient(_ profile: StoredServerProfile) -> any LibraryStateServing {
+    libraryStateClientFactory?(profile) ?? APIClient(profile: profile)
+  }
+
+  private func requireLibraryState() throws {
+    guard supportsLibraryState else {
+      throw APIClientError.serverRejected(
+        code: "server_update_required",
+        message: "Update Tarven Server to 1.5.3 to use watch states and improved resume.")
+    }
+  }
+
+  func playbackPlan(mediaId: UUID) async throws -> PlaybackPlanResponse {
+    try requireLibraryState()
+    #if DEBUG
+      if LibraryStateUITestFixture.enabled {
+        return try LibraryStateUITestFixture.playbackPlan(mediaId: mediaId, catalog: catalogItems)
+      }
+    #endif
+    guard let profile else { throw CancellationError() }
+    return try await currentConnection {
+      try await self.libraryStateClient(profile).playbackPlan(mediaId: mediaId)
+    }
+  }
+
+  /// Starts what the plan says. A page that already shows the title's plan passes it as
+  /// `known`, so the player opens at once instead of after another request to the server, as
+  /// on iPhone and Apple TV; the playback ticket still brings the current progress.
+  func startPlannedPlayback(
+    mediaId: UUID, intent: PlaybackStartIntent? = nil, known: PlaybackPlanResponse? = nil
+  ) async throws {
+    let request = beginPlaybackIntent()
+    let plan: PlaybackPlanResponse
+    if let known, known.target != nil {
+      plan = known
+    } else {
+      plan = try await playbackPlan(mediaId: mediaId)
+    }
+    let previous = await previousPlaybackItems(for: plan)
+    guard !Task.isCancelled, playbackPlanningGeneration == request else {
+      throw CancellationError()
+    }
+    guard let presentation = plan.makePresentation(intent: intent, previousItems: previous) else {
+      throw APIClientError.serverRejected(
+        code: "media_unavailable", message: "This media is currently unavailable.")
+    }
+    playback = presentation
+  }
+
+  private func previousPlaybackItems(for plan: PlaybackPlanResponse) async -> [PlaybackQueueItem] {
+    guard let target = plan.target, target.kind == .episode, (target.seasonNumber ?? 0) > 0,
+      let seriesID = plan.seriesId
+    else { return [] }
+    if let cached = preparedDetail(id: seriesID)?.detail {
+      return CatalogPlaybackLogic.previousEpisodes(in: cached, before: target.id)
+    }
+    // Older/offline servers can still start the requested title if this optional catalog read fails.
+    guard let detail = try? await seriesDetail(id: seriesID), !Task.isCancelled else { return [] }
+    return CatalogPlaybackLogic.previousEpisodes(in: detail, before: target.id)
+  }
+
+  func watchState(mediaId: UUID, scope: WatchStateScope = .title, seasonNumber: Int? = nil)
+    async throws -> WatchStateResponse
+  {
+    try requireLibraryState()
+    #if DEBUG
+      if LibraryStateUITestFixture.enabled {
+        return try LibraryStateUITestFixture.watchState(
+          mediaId: mediaId, scope: scope, seasonNumber: seasonNumber, catalog: catalogItems)
+      }
+    #endif
+    guard let profile else { throw CancellationError() }
+    return try await currentConnection {
+      try await self.libraryStateClient(profile).watchState(
+        mediaId: mediaId, scope: scope, seasonNumber: seasonNumber)
+    }
+  }
+
+  @discardableResult
+  func setWatchState(
+    mediaId: UUID, isWatched: Bool, scope: WatchStateScope = .title,
+    seasonNumber: Int? = nil, stateToken: String, clientMutationId: UUID = UUID()
+  ) async throws -> WatchStateResponse {
+    try requireLibraryState()
+    let generation = connectionGeneration
+    let request = SetWatchStateRequest(
+      isWatched: isWatched, scope: scope, seasonNumber: seasonNumber,
+      stateToken: stateToken, clientMutationId: clientMutationId)
+    #if DEBUG
+      if LibraryStateUITestFixture.enabled {
+        let result = try LibraryStateUITestFixture.setWatchState(
+          mediaId: mediaId, request: request, catalog: catalogItems)
+        updateLibraryStateFixture()
+        return result
+      }
+    #endif
+    guard let profile else { throw CancellationError() }
+    do {
+      let result = try await currentConnection {
+        try await self.libraryStateClient(profile).setWatchState(mediaId: mediaId, request: request)
+      }
+      await refreshAfterLibraryStateChange(generation: generation, saved: true)
+      return result
+    } catch {
+      if (error as? APIClientError)?.httpStatus == 409 {
+        await refreshAfterLibraryStateChange(generation: generation, saved: false)
+      }
+      throw error
+    }
+  }
+
+  @discardableResult
+  func setContinueWatchingHidden(mediaId: UUID, isHidden: Bool) async throws -> WatchStateResponse {
+    try requireLibraryState()
+    let generation = connectionGeneration
+    let item =
+      catalogItems.first { $0.id == mediaId } ?? home?.continueWatching.first { $0.id == mediaId }
+    // Continue Watching belongs to the movie or series. A known episode maps to its series here;
+    // any other title is sent as it is, and the server maps it to its series.
+    var target = mediaId
+    if let item, item.kind != .movie, item.kind != .series, let parent = item.parentId {
+      target = parent
+    }
+    let snapshot = try await watchState(mediaId: target)
+    let request = SetContinueWatchingRequest(
+      isHidden: isHidden, stateToken: snapshot.stateToken, clientMutationId: UUID())
+    #if DEBUG
+      if LibraryStateUITestFixture.enabled {
+        let result = try LibraryStateUITestFixture.setContinueWatchingHidden(
+          mediaId: target, request: request, catalog: catalogItems)
+        updateLibraryStateFixture()
+        return result
+      }
+    #endif
+    guard let profile else { throw CancellationError() }
+    do {
+      let result = try await currentConnection {
+        try await self.libraryStateClient(profile).setContinueWatchingHidden(
+          mediaId: target, request: request)
+      }
+      await refreshAfterLibraryStateChange(generation: generation, saved: true)
+      return result
+    } catch {
+      if (error as? APIClientError)?.httpStatus == 409 {
+        await refreshAfterLibraryStateChange(generation: generation, saved: false)
+      }
+      throw error
+    }
+  }
+
+  /// What to say when the library could not be reloaded after a watched or Continue Watching
+  /// change. A newer reload that replaced this one, usually the sync the change itself caused,
+  /// shows the change anyway, so it is no failure.
+  nonisolated static func libraryStateRefreshFailure(_ error: Error, saved: Bool) -> String? {
+    if error is CancellationError || error as? APIClientError == .supersededSnapshot { return nil }
+    return saved
+      ? "The change was saved. Reload the library to see it. \(error.localizedDescription)"
+      : "The library changed. Reconnect and reload before trying again. \(error.localizedDescription)"
+  }
+
+  private func refreshAfterLibraryStateChange(generation: UUID, saved: Bool) async {
+    guard isCurrent(generation) else { return }
+    if !saved {
+      errorMessage =
+        "The library changed on another device. Review the current status before trying again."
+    }
+    if libraryStateClientFactory == nil {
+      do { try await refresh(requireCompleteSnapshot: true) } catch {
+        if isCurrent(generation),
+          let message = Self.libraryStateRefreshFailure(error, saved: saved)
+        {
+          errorMessage = message
+        }
+      }
+    }
+    guard isCurrent(generation) else { return }
+    catalogVisibilityRevision &+= 1
+  }
+
+  #if DEBUG
+    private func updateLibraryStateFixture() {
+      catalogItems = catalogItems.map { LibraryStateUITestFixture.decorate($0) }
+      home = LibraryStateUITestFixture.home(
+        CinemaUITestFixture.home(Self.previewHome), catalog: catalogItems)
+      catalogVisibilityRevision &+= 1
+    }
+  #endif
+
+  func searchMoviesForImportReview(
+    _ query: String,
+    libraryId: UUID
+  ) async throws -> [CatalogItemSummary] {
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await currentConnection {
+      try await APIClient(profile: profile).searchMoviesForImportReview(query, libraryId: libraryId)
+    }
+  }
+
+  func resolveImportReview(
+    _ review: LibraryImportReviewSummary,
+    action: LibraryImportReviewAction,
+    movieId: UUID? = nil
+  ) async {
+    guard let profile, canManageMedia else { return }
+    let generation = connectionGeneration
+    let administration = administrationGeneration
+    do {
+      let scan = try await currentAdministration {
+        try await APIClient(profile: profile).updateLibraryImportReview(
+          libraryId: review.libraryId,
+          reviewId: review.id,
+          action: action,
+          movieId: movieId)
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
+      activeScans.append(scan)
+      libraryImportReviews.removeAll { $0.id == review.id }
+      startScanPolling()
+    } catch {
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
+    }
+  }
+
+  /// Prepares a title's detail page while the pointer rests on it: details, the playback plan
+  /// and the hero artwork. Each title is prepared at most once per 30 seconds.
+  func prepareDetail(for item: CatalogItemSummary) {
+    guard item.kind == .movie || item.kind == .series, let profile,
+      detailPreparations[item.id] == nil, preparedDetail(id: item.id) == nil
+    else { return }
+    let revision = catalogVisibilityRevision
+    if let backdrop = item.backdrop { prefetchHeroArtwork(backdrop) }
+    detailPreparations[item.id] = Task { [weak self] in
+      defer { self?.detailPreparations[item.id] = nil }
+      guard let self else { return }
+      do {
+        async let loadedPlan = optionalPlaybackPlan(mediaId: item.id)
+        let detail = try await catalogDetail(id: item.id)
+        if let hero = Self.heroArtwork(detail), hero.id != item.backdrop?.id {
+          prefetchHeroArtwork(hero)
+        }
+        let plan = try await loadedPlan
+        guard self.profile?.sessionId == profile.sessionId, catalogVisibilityRevision == revision
+        else { return }
+        preparedDetails = preparedDetails.filter {
+          Date().timeIntervalSince($0.value.preparedAt) < Self.preparedDetailLifetime
+        }
+        preparedDetails[item.id] = PreparedDetail(
+          detail: detail, plan: plan, sessionID: profile.sessionId, revision: revision,
+          preparedAt: Date())
+      } catch {}
+    }
+  }
+
+  /// A detail prepared in the last 30 seconds for this session and catalog revision.
+  func preparedDetail(id: UUID) -> (detail: CatalogDetailPresentation, plan: PlaybackPlanResponse?)?
+  {
+    guard let entry = preparedDetails[id], entry.sessionID == profile?.sessionId,
+      entry.revision == catalogVisibilityRevision,
+      Date().timeIntervalSince(entry.preparedAt) < Self.preparedDetailLifetime
+    else { return nil }
+    return (entry.detail, entry.plan)
+  }
+
+  /// The list entry for a title the user just selected, from data already on screen.
+  func listedItem(id: UUID) -> CatalogItemSummary? {
+    if let item = catalogItems.first(where: { $0.id == id }) { return item }
+    let home =
+      [home?.recommendation].compactMap { $0 } + (home?.recentlyAdded ?? [])
+      + (home?.favorites ?? []) + (home?.continueWatching ?? [])
+    return home.first { $0.id == id }
+      ?? collections.lazy.flatMap(\.items).first { $0.id == id }
+  }
+
+  /// A detail page built from a list entry, shown until the full details arrive.
+  static func provisionalDetail(_ item: CatalogItemSummary) -> CatalogDetailPresentation {
+    CatalogDetailPresentation(
+      item: item,
+      metadata: MediaMetadataSummary(
+        mediaId: item.id, title: item.title, originalTitle: item.originalTitle,
+        overview: item.overview, releaseDate: nil, year: item.year, runtimeMinutes: nil,
+        rating: nil, contentRating: nil, genres: item.genres, studios: [], countries: [],
+        credits: [], poster: item.poster, backdrop: item.backdrop, still: nil, provider: nil,
+        providerMediaId: nil, reviewState: .matched),
+      seasons: [], supplements: [])
+  }
+
+  /// The artwork a detail page shows full width at the top.
+  static func heroArtwork(_ detail: CatalogDetailPresentation) -> ArtworkSummary? {
+    detail.metadata.backdrop ?? detail.metadata.still ?? detail.item.backdrop
+  }
+
+  /// Starts loading hero artwork at the widest prepared size, which serves every window size.
+  func prefetchHeroArtwork(_ artwork: ArtworkSummary) {
+    guard let profile else { return }
+    let width = libraryCapabilities.contains("artwork-variants-v1") ? 1920 : nil
+    Task { _ = try? await artworkLoader.image(for: artwork, profile: profile, width: width) }
+  }
+
+  func optionalPlaybackPlan(mediaId: UUID) async throws -> PlaybackPlanResponse? {
+    supportsLibraryState ? try await playbackPlan(mediaId: mediaId) : nil
+  }
+
+  func catalogDetail(id: UUID) async throws -> CatalogDetailPresentation {
+    #if DEBUG
+      if AuditRenderFixture.enabled {
+        guard !AuditRenderFixture.failing, let detail = AuditRenderFixture.detail(id) else {
+          throw APIClientError.serverRejected(
+            code: "audit_unreachable", message: "The server could not be reached.")
+        }
+        return detail
+      }
+      if ShowcaseUITestFixture.enabled {
+        guard let detail = ShowcaseUITestFixture.detail(id) else {
+          throw APIClientError.invalidResponse
+        }
+        return detail
+      }
+      if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin",
+        let item = Self.previewCatalog.first(where: { $0.id == id })
+      {
+        if LibraryStateUITestFixture.enabled { return LibraryStateUITestFixture.detail(item) }
+        return Self.previewDetail(for: item)
+      }
+    #endif
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await currentConnection {
+      try await APIClient(profile: profile).catalogDetail(id: id)
+    }
+  }
+
+  func setFavorite(mediaId: UUID, isFavorite: Bool) async -> Bool {
+    guard let profile else { return false }
+    let generation = connectionGeneration
+    do {
+      _ = try await APIClient(profile: profile).setFavorite(
+        mediaId: mediaId, isFavorite: isFavorite)
+      guard isCurrent(generation) else { return false }
+      try await refresh()
+      return isCurrent(generation)
+    } catch {
+      if isCurrent(generation) { errorMessage = failureMessage(error) }
+      return false
+    }
+  }
+
+  func isWatchlisted(_ mediaId: UUID) -> Bool {
+    watchlistIds.contains(mediaId)
+  }
+
+  func refreshWatchlist() async {
+    try? await reloadWatchlist()
+  }
+
+  /// The Watchlist page's load: it throws, so the page can tell loading, failure and an empty
+  /// list apart instead of calling a failed load empty.
+  func reloadWatchlist() async throws {
+    guard let profile, supportsWatchlist else { return }
+    let generation = connectionGeneration
+    let loaded = try await APIClient(profile: profile).watchlist()
+    guard isCurrent(generation) else { throw CancellationError() }
+    watchlistItems = loaded.items
+    watchlistIds = Set(loaded.mediaIds)
+  }
+
+  func setWatchlist(mediaId: UUID, isWatchlisted: Bool) async -> Bool {
+    guard let profile else { return false }
+    let generation = connectionGeneration
+    do {
+      _ = try await APIClient(profile: profile).setWatchlist(
+        mediaId: mediaId, isWatchlisted: isWatchlisted)
+      guard isCurrent(generation) else { return false }
+      if isWatchlisted {
+        watchlistIds.insert(mediaId)
+      } else {
+        watchlistIds.remove(mediaId)
+        watchlistItems.removeAll { $0.id == mediaId }
+      }
+      await refreshWatchlist()
+      return isCurrent(generation)
+    } catch {
+      if isCurrent(generation) { errorMessage = failureMessage(error) }
+      return false
+    }
+  }
+
+  func personDetail(_ selection: PersonSelection) async throws -> PersonDetailResponse {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let detail = try await currentConnection {
+      try await APIClient(profile: profile).personDetail(
+        name: selection.name, personKey: selection.personKey)
+    }
+    rememberPersonDetail(detail, for: selection)
+    return detail
+  }
+
+  /// The last people opened, for two minutes, so clicking back and forth between them is instant.
+  private var personDetails: [String: (detail: PersonDetailResponse, at: Date)] = [:]
+
+  func rememberedPersonDetail(_ selection: PersonSelection) -> PersonDetailResponse? {
+    guard let entry = personDetails[Self.personKey(selection)],
+      Date().timeIntervalSince(entry.at) < 120
+    else { return nil }
+    return entry.detail
+  }
+
+  private func rememberPersonDetail(_ detail: PersonDetailResponse, for selection: PersonSelection)
+  {
+    if personDetails.count >= 40,
+      let oldest = personDetails.min(by: { $0.value.at < $1.value.at })?.key
+    {
+      personDetails.removeValue(forKey: oldest)
+    }
+    personDetails[Self.personKey(selection)] = (detail, Date())
+  }
+
+  private static func personKey(_ selection: PersonSelection) -> String {
+    selection.personKey ?? "name:\(selection.name.lowercased())"
+  }
+
+  /// A person's life and other titles from TMDB, kept for ten minutes. The server keeps them for
+  /// 30 days; this only spares the request when someone clicks back and forth.
+  private var personProfiles: [String: (profile: PersonProfileResponse, at: Date)] = [:]
+
+  func rememberedPersonProfile(_ personKey: String) -> PersonProfileResponse? {
+    guard let entry = personProfiles[personKey], Date().timeIntervalSince(entry.at) < 600 else {
+      return nil
+    }
+    return entry.profile
+  }
+
+  func personProfile(_ personKey: String) async throws -> PersonProfileResponse {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let loaded = try await currentConnection {
+      try await APIClient(profile: profile).personProfile(personKey: personKey)
+    }
+    if personProfiles.count >= 40,
+      let oldest = personProfiles.min(by: { $0.value.at < $1.value.at })?.key
+    {
+      personProfiles.removeValue(forKey: oldest)
+    }
+    personProfiles[personKey] = (loaded, Date())
+    return loaded
+  }
+
+  /// A wish made from a person's page shows on it at once and the next time it opens.
+  func forgetPersonProfiles() {
+    personProfiles.removeAll()
+  }
+
+  func people(query: String, offset: Int, limit: Int) async throws -> PeoplePageResponse {
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await currentConnection {
+      try await APIClient(profile: profile).people(query: query, offset: offset, limit: limit)
+    }
+  }
+
+  func saveMetadata(id: UUID, request: UpdateMediaMetadataRequest) async throws
+    -> MediaMetadataSummary
+  {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let generation = connectionGeneration
+    let result = try await APIClient(profile: profile).updateMediaMetadata(id: id, request: request)
+    guard isCurrent(generation) else { throw CancellationError() }
+    try await refresh()
+    guard isCurrent(generation) else { throw CancellationError() }
+    return result
+  }
+
+  func removeMedia(id: UUID) async throws {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let generation = connectionGeneration
+    let result = try await APIClient(profile: profile).removeMedia(id: id)
+    guard isCurrent(generation) else { throw CancellationError() }
+    try await refresh()
+    guard isCurrent(generation) else { throw CancellationError() }
+    guard result.state == "completed" else {
+      throw APIClientError.serverRejected(
+        code: "cleanup_pending",
+        message: result.error
+          ?? "The title was removed. Artwork cleanup is pending and will be retried automatically.")
+    }
+  }
+
+  func reloadDevices() async {
+    #if DEBUG
+      if Self.uiTestMode == "local-host-recovery" { return }
+    #endif
+    guard let profile, canManageMedia, !isResting else { return }
+    let generation = connectionGeneration
+    do {
+      let updated = try await currentAdministration {
+        try await APIClient(profile: profile).sessions()
+      }
+      guard isCurrent(generation) else { return }
+      sessions = updated
+    } catch {
+      if isCurrent(generation) { reportAdministrationFailure(error) }
+    }
+  }
+
+  func metadataCandidates(mediaId: UUID, query: String) async throws
+    -> [MetadataCandidateSummary]
+  {
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await currentConnection {
+      try await APIClient(profile: profile).metadataCandidates(mediaId: mediaId, query: query)
+    }
+  }
+
+  func selectMetadataMatch(
+    mediaId: UUID,
+    providerMediaId: String,
+    mediaType: String
+  ) async throws -> MediaMetadataSummary {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let generation = connectionGeneration
+    let result = try await currentConnection {
+      try await APIClient(profile: profile).selectMetadataMatch(
+        mediaId: mediaId, providerMediaId: providerMediaId, mediaType: mediaType)
+    }
+    try await refresh()
+    guard isCurrent(generation) else { throw CancellationError() }
+    return result
+  }
+
+  func clearMetadataMatch(mediaId: UUID) async throws -> MediaMetadataSummary {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let generation = connectionGeneration
+    let result = try await currentConnection {
+      try await APIClient(profile: profile).clearMetadataMatch(mediaId: mediaId)
+    }
+    try await refresh()
+    guard isCurrent(generation) else { throw CancellationError() }
+    return result
+  }
+
+  func metadataReviews() async throws -> [MetadataReviewSummary] {
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await currentConnection { try await APIClient(profile: profile).metadataReviews() }
+  }
+
+  func collectionDetail(id: UUID) async throws -> CollectionDetail {
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await currentConnection { try await APIClient(profile: profile).collection(id: id) }
+  }
+
+  func collectionNext(id: UUID) async throws -> CollectionNextResponse {
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await currentConnection {
+      try await APIClient(profile: profile).collectionNext(id: id)
+    }
+  }
+
+  func updateCollectionOrder(
+    id: UUID, members: [CollectionMemberInput], sortMode: String? = "custom"
+  ) async throws -> CollectionDetail {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let generation = connectionGeneration
+    let updated = try await APIClient(profile: profile).updateCollectionOrder(
+      id: id, members: members, sortMode: sortMode)
+    guard isCurrent(generation) else { throw CancellationError() }
+    try await refresh()
+    return updated
+  }
+
+  func startCollectionPlayback(
+    detail: CollectionDetail,
+    target explicitTarget: CatalogItemSummary? = nil,
+    intent explicitIntent: PlaybackStartIntent? = nil
+  ) async {
+    guard profile != nil else { return }
+    let playlist = BoxSetLogic.playableItems(from: detail.members)
+    guard !playlist.isEmpty else { return }
+
+    let resolvedTarget: CatalogItemSummary
+    let resolvedIntent: PlaybackStartIntent
+    if let explicitTarget {
+      resolvedTarget = explicitTarget
+      if let explicitIntent {
+        resolvedIntent = explicitIntent
+      } else {
+        let canResume =
+          explicitTarget.progress?.isCompleted != true
+          && explicitTarget.watchState != .completed
+          && ((explicitTarget.progress?.positionMilliseconds ?? 0) > 0
+            || explicitTarget.watchState == .inProgress)
+        resolvedIntent = canResume ? .resume : .play
+      }
+    } else {
+      let next = (try? await collectionNext(id: detail.id)) ?? detail.nextItem
+      resolvedTarget = next?.item ?? playlist[0]
+      resolvedIntent = (next?.resume == true) ? .resume : .play
+    }
+
+    let slices = BoxSetLogic.queueSlices(for: resolvedTarget, in: playlist)
+    let subtitle: String?
+    if resolvedTarget.kind == .episode, let s = resolvedTarget.seasonNumber,
+      let e = resolvedTarget.episodeNumber
+    {
+      subtitle = "S\(String(format: "%02d", s)) E\(String(format: "%02d", e))"
+    } else {
+      subtitle = resolvedTarget.year.map(String.init)
+    }
+    startPlayback(
+      mediaId: resolvedTarget.id,
+      title: resolvedTarget.title,
+      subtitle: subtitle,
+      queue: slices.upcoming,
+      previousItems: slices.previous,
+      startIntent: resolvedIntent,
+      trackScope: resolvedTarget.kind == .episode ? resolvedTarget.parentId : nil,
+      artwork: resolvedTarget.backdrop ?? resolvedTarget.poster ?? detail.poster)
+  }
+
+  @discardableResult
+  func saveCollection(
+    id: UUID?,
+    name: String,
+    mediaIds: [UUID] = [],
+    isSmart: Bool = false,
+    isShared: Bool = false,
+    rulesJson: String? = nil,
+    overview: String? = nil,
+    sortMode: String? = nil,
+    members: [CollectionMemberInput]? = nil,
+    posterUpload: (uploadId: UUID?, data: Data?, crop: ArtworkCrop)? = nil,
+    backdropUpload: (uploadId: UUID?, data: Data?, crop: ArtworkCrop)? = nil,
+    removePoster: Bool = false,
+    removeBackdrop: Bool = false
+  ) async throws -> CollectionSummary {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let generation = connectionGeneration
+    let client = APIClient(profile: profile)
+    let saved: CollectionSummary
+    if let id {
+      saved = try await client.updateCollection(
+        id: id, name: name, mediaIds: members == nil ? mediaIds : nil, isSmart: isSmart,
+        isShared: isShared, rulesJson: rulesJson, overview: overview, sortMode: sortMode,
+        members: members)
+    } else {
+      saved = try await client.createCollection(
+        name: name, mediaIds: members == nil ? mediaIds : nil, isSmart: isSmart,
+        isShared: isShared, rulesJson: rulesJson, overview: overview, sortMode: sortMode,
+        members: members)
+    }
+
+    for (kind, pending, shouldRemove) in [
+      ("poster", posterUpload, removePoster),
+      ("backdrop", backdropUpload, removeBackdrop),
+    ] {
+      if shouldRemove, id != nil {
+        try? await client.deleteCollectionArtwork(id: saved.id, kind: kind)
+      } else if let pending {
+        var resolvedUploadId = pending.uploadId
+        if resolvedUploadId == nil, let bytes = pending.data {
+          resolvedUploadId = try await client.uploadCollectionEditorImage(id: saved.id, png: bytes)
+            .id
+        }
+        if let resolvedUploadId {
+          _ = try await client.saveCollectionArtwork(
+            id: saved.id, kind: kind,
+            request: SaveCollectionArtworkRequest(uploadId: resolvedUploadId, crop: pending.crop))
+        }
+      }
+    }
+
+    guard isCurrent(generation) else { throw CancellationError() }
+    try await refresh()
+    return saved
+  }
+
+  func addMediaToCollection(collectionId: UUID, mediaId: UUID, seasonNumber: Int? = nil) async {
+    guard let profile else { return }
+    let generation = connectionGeneration
+    do {
+      try await APIClient(profile: profile).addCollectionItem(
+        collectionId: collectionId, mediaId: mediaId, seasonNumber: seasonNumber)
+      guard isCurrent(generation) else { return }
+      try await refresh()
+    } catch {
+      // Shown in the library's error banner instead of the click silently doing nothing.
+      if isCurrent(generation), !(error is CancellationError) {
+        errorMessage = "Couldn't add it to the collection. \(error.localizedDescription)"
+      }
+    }
+  }
+
+  func removeMediaFromCollection(collectionId: UUID, mediaId: UUID, seasonNumber: Int? = nil)
+    async
+  {
+    guard let profile else { return }
+    let generation = connectionGeneration
+    do {
+      try await APIClient(profile: profile).removeCollectionItem(
+        collectionId: collectionId, mediaId: mediaId, seasonNumber: seasonNumber)
+      guard isCurrent(generation) else { return }
+      try await refresh()
+    } catch {
+      if isCurrent(generation), !(error is CancellationError) {
+        errorMessage = "Couldn't remove it from the collection. \(error.localizedDescription)"
+      }
+    }
+  }
+
+  func createCollectionFromFranchise(_ franchiseId: String) async throws -> CollectionSummary {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let generation = connectionGeneration
+    let result = try await APIClient(profile: profile).createCollectionFromFranchise(
+      franchiseId: franchiseId)
+    guard isCurrent(generation) else { throw CancellationError() }
+    try await refresh()
+    return result
+  }
+
+  func deleteCollection(id: UUID) async throws {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let generation = connectionGeneration
+    try await APIClient(profile: profile).deleteCollection(id: id)
+    guard isCurrent(generation) else { throw CancellationError() }
+    try await refresh()
+  }
+
+  func refreshFromUI() async {
+    let generation = connectionGeneration
+    let selection = profileSelectionGeneration
+    let viewingSession = profile?.isViewingSession == true ? profile : nil
+    guard !isRecoveringLocalHost, !isResting else { return }
+    if operatingMode == .host,
+      hostSnapshot.state == .failed || hostSnapshot.state == .stopped
+    {
+      errorMessage = nil
+      hostHealth = HostHealthPolicy()
+      await restartNativeHost()
+      return
+    }
+    errorMessage = nil
+    do {
+      try await refreshSettlingAfterWake()
+      serverUnreachable = false
+      syncOfflineProgress()
+      guard isCurrent(generation), selection == profileSelectionGeneration,
+        viewingSession.map({ ProfilePickerProtocol.isSameSession(profile, as: $0) }) ?? true
+      else { return }
+      startSync()
+    } catch is CancellationError {
+    } catch {
+      guard isCurrent(generation), selection == profileSelectionGeneration,
+        viewingSession.map({ ProfilePickerProtocol.isSameSession(profile, as: $0) }) ?? true
+      else { return }
+      if !handleSessionFailure(error) {
+        errorMessage = failureMessage(error)
+        beginReconnectIfNeeded(after: error)
+      }
+    }
+  }
+
+  func setApplicationActive(_ active: Bool) async {
+    #if DEBUG
+      // Synthetic UI fixtures have no live host or transport to observe.
+      // Keep real lifecycle observation enabled for unit and preflight tests.
+      if Self.uiTestMode != nil { return }
+    #endif
+    if active {
+      TarvenUseClock.shared.noteActive()
+      if isResting {
+        await leaveRest()
+        return
+      }
+    }
+    if isResting { return }
+    let canObserve = !isStarting && !isRecoveringLocalHost && !requiresProfileSelection
+    // Opening Tarven while its server sleeps wakes it now instead of at the next retry.
+    if active, operatingMode != .host, reconnectTask != nil {
+      reconnectTask?.cancel()
+      reconnectTask = nil
+      reconnectCoordinator.cancel()
+      beginReconnectIfNeeded(after: URLError(.networkConnectionLost))
+    }
+    if active, canObserve, operatingMode == .host, hostPollTask == nil { startHostPolling() }
+    if active, canObserve, !activeScans.isEmpty, scanPollTask == nil { startScanPolling() }
+    let generation = connectionGeneration
+    await syncController.setForeground(
+      active, profile: canObserve ? profile : nil, runID: generation,
+      onFailure: { [weak self] error in
+        guard let self, self.isCurrent(generation) else { return }
+        self.synchronizationErrorMessage = self.failureMessage(error)
+        _ = self.handleSessionFailure(error)
+      },
+      onSuccess: { [weak self] in
+        guard let self, self.isCurrent(generation) else { return }
+        self.synchronizationErrorMessage = nil
+      },
+      onTransportFailure: { [weak self] in
+        guard let self, self.isCurrent(generation) else { return }
+        self.beginReconnectIfNeeded(after: URLError(.networkConnectionLost))
+      },
+      onChanges: { [weak self] changes in
+        guard let self, self.isCurrent(generation) else { throw CancellationError() }
+        try await self.handleSyncChanges(changes)
+      }
+    )
+  }
+
+  func systemWillSleep() async {
+    await PlaybackShutdownCoordinator.shared.pauseForSystemSleep()
+    reconnectTask?.cancel()
+    reconnectTask = nil
+    reconnectCoordinator.cancel()
+    serverWakeTask?.cancel()
+    serverWakeTask = nil
+    hostPollTask?.cancel()
+    hostPollTask = nil
+    homeRefreshTask?.cancel()
+    homeRefreshTask = nil
+    scanPollTask?.cancel()
+    scanPollTask = nil
+    scanPollingRun = UUID()
+    syncStartTask?.cancel()
+    syncStartTask = nil
+    stopRemoteDeviceTasks()
+    browseWarmup?.cancel()
+    browseWarmup = nil
+    for task in detailPreparations.values { task.cancel() }
+    detailPreparations.removeAll()
+    for task in artworkPrefetch { task.cancel() }
+    artworkPrefetch.removeAll()
+    await syncController.stop(runID: connectionGeneration)
+  }
+
+  func systemDidWake() async {
+    #if DEBUG
+      if Self.uiTestMode != nil { return }
+    #endif
+    if isResting { return }
+    // Waking does not prove a server failure. Resume observation first and
+    // require the normal confirmation policy before attempting recovery.
+    if operatingMode == .host { startHostPolling() }
+    if !activeScans.isEmpty { startScanPolling() }
+    await setApplicationActive(NSApplication.shared.isActive)
+    if !isResting, !requiresProfileSelection, profile != nil {
+      startRemoteDeviceService()
+      if let device = activeRemotePlayer { startRemoteStatusPolling(device: device) }
+      scheduleHomeRefresh()
+    }
+    if operatingMode != .host, profile != nil { await refreshFromUI() }
+  }
+
+  func movieDetail(id: UUID) async throws -> MovieDetailResponse {
+    #if DEBUG
+      if Self.uiTestMode == "library" {
+        return MovieDetailResponse(
+          id: id,
+          title: "El Camino - A Breaking Bad Movie",
+          year: 2019,
+          availability: .available,
+          supplements: [
+            SupplementSummary(
+              id: UUID(uuidString: "10000000-0000-0000-0000-000000000010")!,
+              title: "Official Trailer",
+              kind: .trailer,
+              category: "Trailers",
+              seasonNumber: nil,
+              availability: .available)
+          ])
+      }
+    #endif
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await currentConnection { try await APIClient(profile: profile).movie(id: id) }
+  }
+
+  func seriesDetail(id: UUID) async throws -> SeriesDetailResponse {
+    #if DEBUG
+      if Self.uiTestMode == "library" {
+        return SeriesDetailResponse(
+          id: id,
+          title: "Breaking Bad",
+          availability: .available,
+          seasons: [
+            SeasonSummary(
+              number: 1,
+              episodes: [
+                EpisodeSummary(
+                  id: UUID(uuidString: "20000000-0000-0000-0000-000000000010")!,
+                  title: "Pilot",
+                  seasonNumber: 1,
+                  episodeNumber: 1,
+                  availability: .available)
+              ],
+              supplements: [])
+          ],
+          supplements: [
+            SupplementSummary(
+              id: UUID(uuidString: "20000000-0000-0000-0000-000000000020")!,
+              title: "Behind the Scenes",
+              kind: .extra,
+              category: "Special Features",
+              seasonNumber: nil,
+              availability: .available)
+          ])
+      }
+    #endif
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await currentConnection { try await APIClient(profile: profile).series(id: id) }
+  }
+
+  func startPlayback(
+    mediaId: UUID,
+    title: String,
+    subtitle: String? = nil,
+    queue: [PlaybackQueueItem] = [],
+    previousItems: [PlaybackQueueItem] = [],
+    startIntent: PlaybackStartIntent = .play,
+    trackScope: UUID? = nil,
+    artwork: ArtworkSummary? = nil
+  ) {
+    guard profile != nil else { return }
+    beginPlaybackIntent()
+    playback = PlaybackPresentation(
+      mediaId: mediaId,
+      title: title,
+      subtitle: subtitle,
+      queue: queue, previousItems: previousItems, startIntent: startIntent,
+      trackScope: trackScope, artwork: artwork)
+  }
+
+  func startPlayback(item: CatalogItemSummary, intent: PlaybackStartIntent? = nil) {
+    if supportsLibraryState {
+      guard item.kind == .series || item.isPlayable else { return }
+      let request = beginPlaybackIntent()
+      playbackPlanningTask = Task { [weak self] in
+        guard let self else { return }
+        do {
+          let plan = try await self.playbackPlan(mediaId: item.id)
+          let previous = await self.previousPlaybackItems(for: plan)
+          guard !Task.isCancelled, self.playbackPlanningGeneration == request else { return }
+          guard let presentation = plan.makePresentation(intent: intent, previousItems: previous)
+          else { return }
+          self.playback = presentation
+        } catch {
+          if !Task.isCancelled, self.playbackPlanningGeneration == request,
+            !(error is CancellationError)
+          {
+            self.errorMessage = self.failureMessage(error)
+          }
+        }
+      }
+      return
+    }
+    guard profile != nil,
+      let presentation = CatalogPlaybackLogic.presentation(for: item, intent: intent ?? .play)
+    else {
+      return
+    }
+    beginPlaybackIntent()
+    playback = presentation
+  }
+
+  @discardableResult
+  private func beginPlaybackIntent() -> UUID {
+    playbackPlanningTask?.cancel()
+    playbackPlanningTask = nil
+    playbackPlanningGeneration = UUID()
+    return playbackPlanningGeneration
+  }
+
+  // The player awaits its final progress write before calling this method.
+  func closePlayback() async {
+    beginPlaybackIntent()
+    playback = nil
+    // The offline mode asks the server nothing.
+    guard offlineMode == nil else { return }
+    await refreshHome()
+  }
+
+  // MARK: Offline downloads
+
+  /// A download whose quality the person chooses now (Settings › Playback › Download Quality).
+  @Published var downloadChoice: PendingDownloadChoice?
+
+  /// Downloads a movie or episode to this Mac to watch without the server: the original, or a
+  /// smaller copy the server converts when it offers one and the setting asks for it.
+  func download(_ item: CatalogItemSummary) {
+    guard let profile, item.kind == .movie || item.kind == .episode, item.isPlayable else { return }
+    let generation = connectionGeneration
+    let sessionId = profile.sessionId
+    let preference =
+      UserDefaults.standard.string(forKey: DownloadQualityPreference.key)
+      ?? DownloadQualityPreference.ask
+    guard libraryCapabilities.contains(ServerFeatureNames.convertedDownloads),
+      preference != DownloadQualityPreference.original
+    else {
+      startDownload(item, using: profile)
+      return
+    }
+    Task {
+      let options = try? await APIClient(profile: profile).downloadOptions(mediaId: item.id)
+      guard isCurrent(generation), self.profile?.sessionId == sessionId else { return }
+      switch DownloadQualityPreference.resolve(preference, options: options) {
+      case .original: startDownload(item, using: profile)
+      case .ask:
+        if let options { downloadChoice = PendingDownloadChoice(item: item, options: options) }
+      case .converted(let quality):
+        startDownload(
+          item, using: profile, quality: quality, audio: options?.audioTrack,
+          expectedBytes: options?.qualities.first { $0.id == quality }?.estimatedBytes)
+      }
+    }
+  }
+
+  /// Downloads episodes one after another, such as a whole season: the quality is chosen once for
+  /// all, and each further episode gets the nearest quality the server offers for it.
+  func download(episodes: [CatalogItemSummary]) {
+    let downloads = OfflineDownloads.shared
+    let wanted = episodes.filter {
+      ($0.kind == .movie || $0.kind == .episode) && $0.isPlayable && !downloads.isDownloaded($0.id)
+        && downloads.active[$0.id] == nil
+    }
+    guard let profile, let first = wanted.first else { return }
+    let generation = connectionGeneration
+    let sessionId = profile.sessionId
+    let others = Array(wanted.dropFirst())
+    let preference =
+      UserDefaults.standard.string(forKey: DownloadQualityPreference.key)
+      ?? DownloadQualityPreference.ask
+    guard libraryCapabilities.contains(ServerFeatureNames.convertedDownloads),
+      preference != DownloadQualityPreference.original
+    else {
+      for item in wanted { startDownload(item, using: profile) }
+      return
+    }
+    Task {
+      let options = try? await APIClient(profile: profile).downloadOptions(mediaId: first.id)
+      guard isCurrent(generation), self.profile?.sessionId == sessionId else { return }
+      switch DownloadQualityPreference.resolve(preference, options: options) {
+      case .original:
+        for item in wanted { startDownload(item, using: profile) }
+      case .ask:
+        if let options {
+          downloadChoice = PendingDownloadChoice(item: first, options: options, others: others)
+        }
+      case .converted(let quality):
+        startDownload(
+          first, using: profile, quality: quality, audio: options?.audioTrack,
+          expectedBytes: options?.qualities.first { $0.id == quality }?.estimatedBytes)
+        await startDownloads(others, quality: quality, using: profile, generation: generation)
+      }
+    }
+  }
+
+  /// Starts further episodes in `quality`, or the nearest one the server offers for each; nil
+  /// keeps their original files.
+  func startDownloads(
+    _ items: [CatalogItemSummary], quality: String?,
+    using capturedProfile: StoredServerProfile? = nil,
+    generation capturedGeneration: UUID? = nil
+  ) async {
+    guard let profile = capturedProfile ?? self.profile else { return }
+    let generation = capturedGeneration ?? connectionGeneration
+    let sessionId = profile.sessionId
+    for item in items {
+      guard isCurrent(generation), self.profile?.sessionId == sessionId else { return }
+      guard let quality else {
+        startDownload(item, using: profile)
+        continue
+      }
+      let options = try? await APIClient(profile: profile).downloadOptions(mediaId: item.id)
+      guard isCurrent(generation), self.profile?.sessionId == sessionId else { return }
+      if case .converted(let own) = DownloadQualityPreference.resolve(quality, options: options) {
+        startDownload(
+          item, using: profile, quality: own, audio: options?.audioTrack,
+          expectedBytes: options?.qualities.first { $0.id == own }?.estimatedBytes)
+      } else {
+        startDownload(item, using: profile)
+      }
+    }
+  }
+
+  /// Starts a download in the chosen quality; nil keeps the original file.
+  func startDownload(
+    _ item: CatalogItemSummary, using capturedProfile: StoredServerProfile? = nil,
+    quality: String? = nil, audio: Int? = nil, expectedBytes: Int64? = nil
+  ) {
+    guard let profile = capturedProfile ?? self.profile else { return }
+    let subtitle =
+      item.kind == .episode
+      ? [
+        item.parentTitle,
+        item.seasonNumber.map { season in "S\(season) E\(item.episodeNumber ?? 0)" },
+      ].compactMap { $0 }.joined(separator: " · ") : item.year.map(String.init)
+    let series = item.parentId.flatMap { parent in catalogItems.first { $0.id == parent } }
+    OfflineDownloads.shared.download(
+      item, subtitle: subtitle, profile: profile, series: series, quality: quality, audio: audio,
+      expectedBytes: expectedBytes)
+  }
+
+  static func offlinePresentation(for title: OfflineTitle) -> PlaybackPresentation {
+    var presentation = PlaybackPresentation(
+      mediaId: title.id, title: title.title, subtitle: title.subtitle, startIntent: .resume,
+      trackScope: title.parentId)
+    presentation.offlineID = title.id
+    return presentation
+  }
+
+  /// Plays a download from this Mac; it works while the server is asleep or out of reach.
+  func playOffline(_ title: OfflineTitle) {
+    // Only a download of the open profile plays, so no one bypasses another profile's PIN or
+    // age restrictions while the server is unreachable.
+    guard profile != nil,
+      (offlineTitles + offlineModeTitles).contains(where: { $0.id == title.id })
+    else { return }
+    beginPlaybackIntent()
+    playback = Self.offlinePresentation(for: title)
+  }
+
+  /// Downloads for the open profile only. While no profile is open nothing is offered: the
+  /// profile picker's PIN and the profile's age restrictions cannot be checked without the server.
+  var offlineTitles: [OfflineTitle] {
+    Self.visibleOfflineTitles(
+      OfflineDownloads.shared.titles, server: (deviceConnection ?? profile)?.serverId,
+      user: profile?.user?.id,
+      profileOpen: profile?.isViewingSession == true || !usesProfileSelection)
+  }
+
+  nonisolated static func visibleOfflineTitles(
+    _ titles: [OfflineTitle], server: UUID?, user: UUID?, profileOpen: Bool
+  ) -> [OfflineTitle] {
+    guard let server, let user, profileOpen else { return [] }
+    return titles.filter { $0.serverId == server && $0.userId == user }
+      .sorted { $0.downloadedAt > $1.downloadedAt }
+  }
+
+  // MARK: Offline mode
+
+  /// The server this Mac is paired with, whose downloads the offline mode shows.
+  private var offlineServerId: UUID? { (deviceConnection ?? profile)?.serverId }
+
+  /// Whether to offer the offline mode: a remote server and downloads of it on this Mac.
+  var canOfferOfflineMode: Bool {
+    guard operatingMode != .host, offlineMode == nil, let server = offlineServerId else {
+      return false
+    }
+    return OfflineDownloads.shared.titles.contains { $0.serverId == server }
+  }
+
+  /// Loads the profiles that have downloads on this Mac once on demand so SwiftUI bodies do not
+  /// query Keychain on every render.
+  func refreshOfflineProfileChoices() {
+    guard let server = offlineServerId else {
+      offlineProfileChoices = []
+      return
+    }
+    let cards = offlineProfileStore.cards(serverId: server)
+    let owners = Set(OfflineDownloads.shared.titles.filter { $0.serverId == server }.map(\.userId))
+    var choices = cards.filter { owners.contains($0.userId) }.map {
+      OfflineProfileChoice(userId: $0.userId, card: $0)
+    }
+    for owner in owners where !cards.contains(where: { $0.userId == owner }) {
+      choices.append(OfflineProfileChoice(userId: owner, card: nil))
+    }
+    offlineProfileChoices = choices
+  }
+
+  func offlinePINLockedUntil(for card: OfflineProfileCard, now: Date = Date()) -> Date? {
+    let current =
+      offlineProfileChoices.first(where: { $0.userId == card.userId })?.card ?? card
+    return current.lockedUntil(now: now)
+  }
+
+  /// The downloads the open offline profile sees.
+  var offlineModeTitles: [OfflineTitle] {
+    guard case .open(let session) = offlineMode else { return [] }
+    return OfflineDownloads.shared.titles(serverId: session.serverId, userId: session.userId)
+  }
+
+  /// Stops looking for the server and shows the downloads on this Mac. A profile that is open
+  /// already keeps going; otherwise its offline card and PIN open it.
+  func openOfflineMode() {
+    guard canOfferOfflineMode, let server = offlineServerId else { return }
+    stopLookingForServer()
+    isSettingsPresented = false
+    refreshOfflineProfileChoices()
+    if let open = profile, let user = open.user,
+      open.isViewingSession || !usesProfileSelection,
+      OfflineDownloads.shared.titles.contains(where: {
+        $0.serverId == server && $0.userId == user.id
+      })
+    {
+      offlineMode = .open(
+        OfflineSession(
+          serverId: server, userId: user.id, name: user.shownName, pictureKey: user.pictureKey,
+          pictureRevision: user.pictureRevision))
+      return
+    }
+    let choices = offlineProfileChoices
+    if choices.count == 1, let card = choices[0].card, !card.pinProtected {
+      offlineMode = .open(OfflineSession(card: card))
+    } else {
+      offlineMode = .choosingProfile
+    }
+  }
+
+  /// Opens a profile's downloads offline. Runs PBKDF2 off the MainActor and persists per-card
+  /// lockout state in Keychain so restarting the app does not reset wrong-PIN throttling.
+  @discardableResult
+  func openOfflineProfile(_ card: OfflineProfileCard, pin: String, now: Date = Date()) async -> Bool
+  {
+    guard offlineMode != nil, card.serverId == offlineServerId else { return false }
+    var currentCard =
+      offlineProfileChoices.first(where: { $0.userId == card.userId })?.card ?? card
+    if currentCard.lockedUntil(now: now) != nil { return false }
+    let cardSnapshot = currentCard
+    let accepted = await Task.detached(priority: .userInitiated) {
+      cardSnapshot.accepts(pin)
+    }.value
+    guard offlineMode != nil, currentCard.serverId == offlineServerId else { return false }
+    currentCard.recordPINAttempt(succeeded: accepted, now: now)
+    offlineProfileStore.remember(currentCard)
+    refreshOfflineProfileChoices()
+    guard accepted else { return false }
+    offlineMode = .open(OfflineSession(card: currentCard))
+    return true
+  }
+
+  /// Back to the profiles of the offline mode.
+  func chooseOtherOfflineProfile() {
+    guard offlineMode != nil else { return }
+    if playback?.offlineID != nil { dismissPlayback() }
+    refreshOfflineProfileChoices()
+    offlineMode = .choosingProfile
+  }
+
+  /// Leaves the offline mode and looks for the server again.
+  func leaveOfflineMode() async {
+    guard offlineMode != nil else { return }
+    if playback?.offlineID != nil { dismissPlayback() }
+    offlineMode = nil
+    offlineProfileChoices = []
+    // Opening Tarven may still be on its first attempt; it shows its own progress.
+    guard !isStarting else { return }
+    await retryConnection()
+  }
+
+  /// No wake packets, reconnects or retries while the offline mode shows.
+  private func stopLookingForServer() {
+    serverWakeTask?.cancel()
+    reconnectTask?.cancel()
+    reconnectTask = nil
+    reconnectCoordinator.cancel()
+  }
+
+  /// Remembers a profile that opened while the server answered, for the offline mode.
+  private func rememberForOffline(_ choice: WatchingProfile, pin: String, serverId: UUID) {
+    let store = offlineProfileStore
+    // Deriving the PIN check takes a moment; keep it off the main actor.
+    Task.detached(priority: .utility) {
+      guard let card = OfflineProfileCard.make(serverId: serverId, profile: choice, pin: pin)
+      else { return }
+      store.remember(card)
+    }
+  }
+
+  private func syncOfflineProgress() {
+    guard let profile, profile.user != nil, !requiresProfileSelection else { return }
+    let catalog = catalogItems
+    Task {
+      await OfflineDownloads.shared.syncProgress(profile: profile)
+      await OfflineDownloads.shared.completeDetails(profile: profile, catalog: catalog)
+    }
+  }
+
+  // MARK: Artwork ahead of scrolling
+
+  private var artworkPrefetch: [Task<Void, Never>] = []
+
+  /// Loads the posters of Home and the library in the background, a few at a time, so cards
+  /// that scroll into view draw them in their first frame instead of fading them in.
+  private func prefetchArtwork() {
+    guard let profile, ProcessInfo.processInfo.environment["TARVEN_UI_TEST_MODE"] == nil else {
+      return
+    }
+    let variants = libraryCapabilities.contains("artwork-variants-v1")
+    var seen = Set<UUID>()
+    var posters: [ArtworkSummary] = []
+    let rails = (home.map { $0.continueWatching + $0.recentlyAdded + $0.favorites } ?? [])
+    for item in rails + catalogItems {
+      guard let poster = item.poster, seen.insert(poster.id).inserted else { continue }
+      posters.append(poster)
+      if posters.count >= 150 { break }
+    }
+    let loader = artworkLoader
+    // Cards ask for 320 or 640 pixels; a 640 picture serves both.
+    let width = variants ? 640 : nil
+    for task in artworkPrefetch { task.cancel() }
+    // Four quiet workers, each loading every fourth poster.
+    artworkPrefetch = (0..<4).map { lane in
+      Task(priority: .utility) { @MainActor in
+        for poster in stride(from: lane, to: posters.count, by: 4).map({ posters[$0] }) {
+          if Task.isCancelled { return }
+          if loader.cachedImage(for: poster, profile: profile, width: width) != nil { continue }
+          _ = try? await loader.image(for: poster, profile: profile, width: width)
+        }
+      }
+    }
+  }
+
+  /// A client for the open profile, for Wrapped and server moves; nil without one.
+  func profileClient() -> APIClient? {
+    guard let profile, !requiresProfileSelection else { return nil }
+    return APIClient(profile: profile)
+  }
+
+  func dismissPlayback() {
+    beginPlaybackIntent()
+    playback = nil
+  }
+
+  func loadWatchingProfiles() async throws {
+    #if DEBUG
+      if Self.uiTestMode == "profiles" {
+        watchingProfiles = Self.watchingProfileFixture
+        return
+      }
+    #endif
+    guard let device = deviceConnection ?? profile, !device.isViewingSession else { return }
+    let generation = connectionGeneration
+    let selection = profileSelectionGeneration
+    let client = APIClient(profile: device)
+    let info = try await client.serverInfo()
+    guard info.serverId == device.serverId else { throw APIClientError.serverIdentityMismatch }
+    WakeOnLan.remember(info)
+    let response: ProfilePickerResponse
+    do { response = try await client.watchingProfiles() } catch let error as APIClientError
+      where error.httpStatus == 404
+    {
+      throw APIClientError.serverRejected(
+        code: "server_update_required",
+        message:
+          "Update Tarven Server to 1.5.0 or later to use viewing profiles. Your device connection has been retained."
+      )
+    }
+    try ProfilePickerProtocol.validate(formatVersion: response.formatVersion)
+    WakeOnLan.remember(
+      serverId: device.serverId,
+      wakeOnLanAddresses: response.wakeOnLanAddresses,
+      hosting: response.hosting)
+    guard isCurrent(generation), profileSelectionGeneration == selection,
+      profile?.isViewingSession != true, !Task.isCancelled
+    else { throw CancellationError() }
+    noteServerPowerSaving(response.powerSavingEnabled ?? info.powerSavingEnabled ?? false)
+    watchingProfiles = response.profiles
+    managementSetupRequired = response.managementSetupRequired
+    profileSelectionError = nil
+    serverUnreachable = false
+  }
+
+  func reloadWatchingProfiles() async {
+    guard !isResting else { return }
+    let selection = profileSelectionGeneration
+    do { try await loadWatchingProfiles() } catch is CancellationError {} catch {
+      guard selection == profileSelectionGeneration, profile?.isViewingSession != true else {
+        return
+      }
+      serverUnreachable = ServerReconnectPolicy.isConnectivityFailure(error)
+      profileSelectionError = error.localizedDescription
+      if !handleSessionFailure(error) { beginReconnectIfNeeded(after: error) }
+    }
+  }
+
+  func clearProfileSelectionError() {
+    profileSelectionError = nil
+  }
+
+  func didDeleteWatchingProfile(id: UUID) {
+    watchingProfiles.removeAll { $0.id == id }
+  }
+
+  /// Invalidates an unlock even when the underlying request does not cooperate with cancellation.
+  func cancelWatchingProfileSelection() {
+    guard requiresProfileSelection, !isSwitchingProfile else { return }
+    profileSelectionGeneration = UUID()
+    isSelectingProfile = false
+    profileSelectionError = nil
+  }
+
+  func initializeWatchingProfiles(password: String, pin: String) async -> Bool {
+    guard let device = deviceConnection ?? profile, !device.isViewingSession,
+      ProfilePIN.isValid(pin), !isSelectingProfile
+    else { return false }
+    let expected = profileSelectionGeneration
+    isSelectingProfile = true
+    defer { if profileSelectionGeneration == expected { isSelectingProfile = false } }
+    do {
+      try await APIClient(profile: device).initializeProfiles(password: password, pin: pin)
+      guard expected == profileSelectionGeneration else { return false }
+      try await loadWatchingProfiles()
+      return true
+    } catch {
+      if expected == profileSelectionGeneration {
+        profileSelectionError = error.localizedDescription
+      }
+      return false
+    }
+  }
+
+  func selectWatchingProfile(_ choice: WatchingProfile, pin: String) async -> Bool {
+    guard let device = deviceConnection ?? profile, !device.isViewingSession,
+      !choice.needsPinSetup, !choice.pinProtectionEnabled || ProfilePIN.isValid(pin),
+      !isSelectingProfile
+    else { return false }
+    let expected = UUID()
+    profileSelectionGeneration = expected
+    profileSelectionError = nil
+    isSelectingProfile = true
+    defer { if profileSelectionGeneration == expected { isSelectingProfile = false } }
+    #if DEBUG
+      if Self.uiTestMode == "profiles" {
+        if ProcessInfo.processInfo.environment["TARVEN_PROFILE_UNLOCK_DELAY_UI_TESTS"] == "1" {
+          do { try await Task.sleep(for: .seconds(8)) } catch { return false }
+          guard expected == profileSelectionGeneration, !Task.isCancelled else { return false }
+        }
+        guard !choice.pinProtectionEnabled || pin == "1234" || pin == "12345678" else {
+          profileSelectionError = ProfilePIN.incorrect
+          return false
+        }
+        clearPersonalViewState()
+        let response = ProfileSessionResponse(
+          user: UserSummary(
+            id: choice.id, username: choice.name, role: choice.role,
+            createdAt: "2026-01-01T00:00:00Z", pinProtectionEnabled: choice.pinProtectionEnabled,
+            needsPinSetup: choice.needsPinSetup), sessionId: UUID(),
+          token: "synthetic-only-profile",
+          expiresAt: "2099-01-01T00:00:00Z")
+        profile = viewingProfile(response, device: device)
+        profileSelectionError = nil
+        home = Self.previewHome
+        return true
+      }
+    #endif
+    // The server may have gone to sleep while the profiles were showing.
+    let awake = await ensureServerAwake(device)
+    guard expected == profileSelectionGeneration, profile == device, !Task.isCancelled else {
+      return false
+    }
+    guard awake else {
+      serverUnreachable = true
+      profileSelectionError =
+        "\(device.name) isn’t answering. Check that it is switched on, then try again."
+      return false
+    }
+    var acceptedProfile: StoredServerProfile?
+    do {
+      let response: ProfileSessionResponse
+      if let profileUnlocker {
+        response = try await profileUnlocker(device, choice.id, pin)
+      } else {
+        response = try await APIClient(profile: device).unlockProfile(id: choice.id, pin: pin)
+      }
+      guard response.user.id == choice.id else { throw APIClientError.invalidResponse }
+      guard expected == profileSelectionGeneration, profile == device, !Task.isCancelled else {
+        let abandoned = viewingProfile(response, device: device)
+        let sessionEnder = profileSessionEnder
+        // A new task keeps cleanup usable after the caller's URLSession work was cancelled.
+        await Task { @MainActor in
+          if let sessionEnder {
+            try? await sessionEnder(abandoned)
+          } else {
+            try? await APIClient(profile: abandoned).endProfileSession()
+          }
+        }.value
+        return false
+      }
+      clearPersonalViewState()
+      wishPosterCache.clear()
+      let active = viewingProfile(response, device: device)
+      acceptedProfile = active
+      rememberForOffline(choice, pin: pin, serverId: device.serverId)
+      if deviceConnection == nil { deviceConnection = device }
+      profile = active
+      profileSelectionError = nil
+      errorMessage = nil
+      let expires = Self.sessionDate(response.expiresAt) ?? Date().addingTimeInterval(43200)
+      profileExpiryTask?.cancel()
+      profileExpiryTask = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(max(0, expires.timeIntervalSinceNow)))
+        guard !Task.isCancelled, self?.profile?.sessionId == active.sessionId else { return }
+        await self?.switchWatchingProfile()
+      }
+      try await refresh(requireCompleteSnapshot: true)
+      guard expected == profileSelectionGeneration,
+        ProfilePickerProtocol.isSameSession(profile, as: active), !Task.isCancelled
+      else {
+        return false
+      }
+      // Progress watched offline goes to the server as soon as its profile is open again.
+      syncOfflineProgress()
+      startSync()
+      return true
+    } catch is CancellationError {
+      return false
+    } catch {
+      guard expected == profileSelectionGeneration, !Task.isCancelled else { return false }
+      if let acceptedProfile {
+        guard ProfilePickerProtocol.isSameSession(profile, as: acceptedProfile) else {
+          return false
+        }
+        errorMessage = failureMessage(error)
+        beginReconnectIfNeeded(after: error)
+      } else if profile == device {
+        profileSelectionError =
+          (error as? APIClientError)?.problemCode == "invalid_profile_pin"
+          ? ProfilePIN.incorrect : error.localizedDescription
+      }
+      return false
+    }
+  }
+
+  func switchWatchingProfile() async {
+    guard let device = deviceConnection, !isSelectingProfile else { return }
+    let expected = UUID()
+    isSelectingProfile = true
+    isSwitchingProfile = true
+    profileSelectionGeneration = expected
+    defer {
+      if profileSelectionGeneration == expected {
+        isSelectingProfile = false
+        isSwitchingProfile = false
+      }
+    }
+    let current = profile
+    invalidateLibraryWork()
+    managementExpiresAt = nil
+    clearPersonalViewState()
+    wishPosterCache.clear()
+    // The old controller keeps its old credential until its progress is saved.
+    playback = nil
+    await PlaybackShutdownCoordinator.shared.shutdown()
+    guard expected == profileSelectionGeneration, deviceConnection == device, !Task.isCancelled
+    else { return }
+    if let current, current.isViewingSession {
+      try? await APIClient(profile: current).endProfileSession()
+    }
+    guard expected == profileSelectionGeneration, deviceConnection == device, !Task.isCancelled
+    else { return }
+    profileExpiryTask?.cancel()
+    managementExpiryTask?.cancel()
+    managementExpiresAt = nil
+    clearPersonalViewState()
+    wishPosterCache.clear()
+    profile = device
+    isSelectingProfile = false
+    isSwitchingProfile = false
+    await reloadWatchingProfiles()
+  }
+
+  func unlockManagement(password: String) async -> Bool {
+    guard let profile, profile.isViewingSession, profile.user?.role.canManageLibraries == true
+    else { return false }
+    let generation = connectionGeneration
+    let attempt = UUID()
+    managementAttempt = attempt
+    do {
+      let expiry: String
+      #if DEBUG
+        if Self.uiTestMode == "profiles" {
+          expiry = Date().addingTimeInterval(600).ISO8601Format()
+        } else if let managementUnlocker {
+          expiry = try await managementUnlocker(profile, password)
+        } else {
+          expiry = try await APIClient(profile: profile).unlockManagement(password: password)
+        }
+      #else
+        expiry = try await APIClient(profile: profile).unlockManagement(password: password)
+      #endif
+      guard isCurrent(generation), managementAttempt == attempt, let date = Self.sessionDate(expiry)
+      else { return false }
+      managementExpiresAt = date
+      managementExpiryTask?.cancel()
+      managementExpiryTask = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(max(0, date.timeIntervalSinceNow)))
+        guard !Task.isCancelled, self?.isCurrent(generation) == true else { return }
+        self?.managementExpiresAt = nil
+        self?.clearAdministrationState()
+      }
+      administrationErrorMessage = nil
+      await reloadAdministration()
+      return true
+    } catch {
+      if isCurrent(generation), managementAttempt == attempt { reportAdministrationFailure(error) }
+      return false
+    }
+  }
+
+  /// This profile's Touch ID key on this Mac, if it has one.
+  var storedPasskey: StoredPasskey? {
+    guard SecureEnclavePasskeySigner.isAvailable, let profile, let user = profile.user else {
+      return nil
+    }
+    return PasskeyStore.load(server: profile.serverId, profile: user.id)
+  }
+
+  /// Unlocks management with Touch ID when this Mac has a key for the profile, otherwise asks
+  /// for the Server Password. Returns whether management is unlocked.
+  func unlockManagementInteractively(serverName: String? = nil) async -> Bool {
+    if storedPasskey != nil, await unlockManagementWithPasskey() { return true }
+    guard
+      let password = try? AdministrationPasswordPrompt.confirm(
+        serverName: serverName ?? profile?.name ?? "Tarven")
+    else { return false }
+    return await unlockManagement(password: password)
+  }
+
+  /// Unlocks with Touch ID instead of the Server Password.
+  func unlockManagementWithPasskey() async -> Bool {
+    guard let profile, profile.isViewingSession, profile.user?.role.canManageLibraries == true,
+      let passkey = storedPasskey
+    else { return false }
+    let generation = connectionGeneration
+    let attempt = UUID()
+    managementAttempt = attempt
+    do {
+      let expiry = try await APIClient(profile: profile).unlockManagement(
+        passkeyId: passkey.passkeyId, signer: passkey.signer)
+      guard isCurrent(generation), managementAttempt == attempt, let date = Self.sessionDate(expiry)
+      else { return false }
+      managementExpiresAt = date
+      managementExpiryTask?.cancel()
+      managementExpiryTask = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(max(0, date.timeIntervalSinceNow)))
+        guard !Task.isCancelled, self?.isCurrent(generation) == true else { return }
+        self?.managementExpiresAt = nil
+        self?.clearAdministrationState()
+      }
+      administrationErrorMessage = nil
+      await reloadAdministration()
+      return true
+    } catch {
+      if let failure = error as? APIClientError, failure.problemCode == "passkey_invalid",
+        let user = profile.user
+      {
+        // The server no longer knows this key: forget it here too and fall back to the password.
+        PasskeyStore.remove(server: profile.serverId, profile: user.id)
+      }
+      return false
+    }
+  }
+
+  func lockManagement() async {
+    managementAttempt = UUID()
+    managementExpiryTask?.cancel()
+    managementExpiresAt = nil
+    clearAdministrationState()
+    if let profile, profile.isViewingSession {
+      if let managementLocker {
+        try? await managementLocker(profile)
+      } else {
+        #if DEBUG
+          if Self.uiTestMode == "profiles" { return }
+        #endif
+        try? await APIClient(profile: profile).lockManagement()
+      }
+    }
+  }
+  func recoverOwnerPIN(password: String, pin: String) async -> Bool {
+    guard operatingMode == .host, deviceConnection?.locallyManaged == true, ProfilePIN.isValid(pin),
+      !isSelectingProfile
+    else { return false }
+    isSelectingProfile = true
+    defer { isSelectingProfile = false }
+    do {
+      try await serverHost.recoverOwnerPIN(password: password, pin: pin)
+      try await loadWatchingProfiles()
+      return true
+    } catch {
+      profileSelectionError =
+        "Owner PIN recovery failed. Check the server password and that the local host is running."
+      return false
+    }
+  }
+
+  private func viewingProfile(_ response: ProfileSessionResponse, device: StoredServerProfile)
+    -> StoredServerProfile
+  {
+    StoredServerProfile(
+      serverId: device.serverId, name: device.name, baseURL: device.baseURL,
+      publicKeyFingerprint: device.publicKeyFingerprint, token: response.token,
+      sessionId: response.sessionId,
+      expiresAt: response.expiresAt, user: response.user, locallyManaged: device.locallyManaged,
+      viewingSession: true, powerSavingEnabled: device.powerSavingEnabled)
+  }
+
+  private func clearPersonalViewState() {
+    personDetails.removeAll()
+    personProfiles.removeAll()
+    browseWarmup?.cancel()
+    browseWarmup = nil
+    browseResults.removeAll()
+    for preparation in detailPreparations.values { preparation.cancel() }
+    detailPreparations.removeAll()
+    preparedDetails.removeAll()
+    movies = []
+    series = []
+    catalogItems = []
+    home = nil
+    libraryLoaded = false
+    collections = []
+    watchlistItems = []
+    watchlistIds = []
+    wishSummary = nil
+    wishPosterCache.clear()
+    clearAdministrationState()
+    artworkLoader.removeAll()
+    wrappedLaunch = nil
+    requestedMediaDetail = nil
+    requestedPersonDetail = nil
+    requestedDestination = nil
+    downloadChoice = nil
+    showingCollectionEditor = false
+    preselectedCollectionItem = nil
+    clearRemotePlaybackState()
+    isMediaManagerPresented = false
+    importPreviewLibrary = nil
+    sceneNotesVersion &+= 1
+    catalogVisibilityRevision &+= 1
+    errorMessage = nil
+  }
+
+  private func clearAdministrationState() {
+    invalidateAdministrationWork()
+    administrationErrorMessage = nil
+    libraries = []
+    activeScans = []
+    recentScans = []
+    libraryDiscoveries = []
+    libraryImportReviews = []
+    sessions = []
+    pairingCode = nil
+    metadataProvider = nil
+    metadataJob = nil
+    scanStatusUnavailable = []
+    scanPollTask?.cancel()
+    scanPollTask = nil
+    isMediaManagerPresented = false
+  }
+
+  private static func sessionDate(_ value: String) -> Date? {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+  }
+  #if DEBUG
+    private static var watchingProfileFixture: [WatchingProfile] {
+      let profiles = [
+        WatchingProfile(
+          id: UUID(uuidString: "70000000-0000-0000-0000-000000000001")!, name: "Owner",
+          role: .owner, needsPinSetup: false),
+        WatchingProfile(
+          id: UUID(uuidString: "70000000-0000-0000-0000-000000000002")!, name: "Viewer",
+          role: .user, needsPinSetup: false),
+        WatchingProfile(
+          id: UUID(uuidString: "70000000-0000-0000-0000-000000000003")!, name: "Needs PIN",
+          role: .user, needsPinSetup: true),
+        WatchingProfile(
+          id: UUID(uuidString: "70000000-0000-0000-0000-000000000004")!, name: "Guest",
+          role: .user, needsPinSetup: false, pinProtectionEnabled: false),
+      ]
+      switch ProcessInfo.processInfo.environment["TARVEN_PROFILE_LAYOUT_UI_TESTS"] {
+      case "single": return Array(profiles.prefix(1))
+      case "pair": return Array(profiles.prefix(2))
+      case "many":
+        return profiles + [
+          WatchingProfile(
+            id: UUID(uuidString: "70000000-0000-0000-0000-000000000005")!,
+            name: "A Longer Synthetic Profile Name", role: .user, needsPinSetup: false),
+          WatchingProfile(
+            id: UUID(uuidString: "70000000-0000-0000-0000-000000000006")!, name: "Weekend Viewer",
+            role: .user, needsPinSetup: false),
+          WatchingProfile(
+            id: UUID(uuidString: "70000000-0000-0000-0000-000000000007")!, name: "Another Viewer",
+            role: .user, needsPinSetup: false),
+        ]
+      default: return profiles
+      }
+    }
+  #endif
+
+  func disconnect() async {
+    do {
+      try store.delete()
+    } catch {
+      errorMessage = "The connection could not be removed securely. \(error.localizedDescription)"
+      return
+    }
+    let current = profile
+    let paired = deviceConnection
+    if let server = paired?.serverId ?? current?.serverId {
+      offlineProfileStore.forget(serverId: server)
+      PasskeyStore.removeAll(server: server)
+    }
+    ArtworkDiskCache.standard?.removeAll()
+    wishPosterCache.clearDisk()
+    offlineMode = nil
+    offlineProfileChoices = []
+    clearRemotePlaybackState()
+    wrappedLaunch = nil
+    requestedMediaDetail = nil
+    requestedPersonDetail = nil
+    requestedDestination = nil
+    downloadChoice = nil
+    showingCollectionEditor = false
+    preselectedCollectionItem = nil
+    let retiredGeneration = connectionGeneration
+    inspectionGeneration = UUID()
+    profile = nil
+    deviceConnection = nil
+    serverPowerSavingEnabled = false
+    isSwitchingProfile = false
+    isSelectingProfile = false
+    watchingProfiles = []
+    managementExpiresAt = nil
+    profileSelectionGeneration = UUID()
+    profileExpiryTask?.cancel()
+    managementExpiryTask?.cancel()
+    homeRefresher.invalidate()
+    movies = []
+    series = []
+    catalogItems = []
+    home = nil
+    libraryLoaded = false
+    collections = []
+    watchlistItems = []
+    watchlistIds = []
+    wishSummary = nil
+    wishPosterCache.clear()
+    libraries = []
+    activeScans = []
+    scanStatusUnavailable = []
+    recentScans = []
+    libraryDiscoveries = []
+    libraryImportReviews = []
+    sessions = []
+    pairingCode = nil
+    metadataProvider = nil
+    metadataJob = nil
+    importPreviewLibrary = nil
+    needsInitialLibrarySetup = false
+    homeRefreshTask?.cancel()
+    homeRefreshTask = nil
+    artworkLoader.removeAll()
+    inspectedServer = nil
+    playback = nil
+    errorMessage = nil
+    await syncController.stop(runID: retiredGeneration)
+    if !Self.isTestProcess {
+      if let current {
+        try? await APIClient(profile: current).logout()
+      }
+      if let paired { try? await APIClient(profile: paired).disconnectPairedDevice() }
+    }
+  }
+
+  @discardableResult
+  private func startNativeHost(skipKickstart: Bool = false) async -> Bool {
+    guard !isRecoveringLocalHost else { return false }
+    isRecoveringLocalHost = true
+    defer { isRecoveringLocalHost = false }
+    await syncController.stop()
+    errorMessage = nil
+    hostSnapshot = NativeHostSnapshot(
+      state: .starting,
+      message: nil,
+      bootstrapToken: nil,
+      serverInfo: nil)
+    do {
+      hostSnapshot = try await serverHost.start(
+        serverName: "Tarven on \(TarvenDeviceName.current)",
+        skipKickstart: skipKickstart)
+      beginTerminationProtection()
+      // A live helper may still be starting Kestrel or running a database migration after an
+      // update. Give normal startups 30 s and active database updates up to 10 minutes.
+      var idlePolls = 0
+      var totalPolls = 0
+      while OperatingModePolicy.isAwaitingReadiness(hostSnapshot.state) && totalPolls < 2_400 {
+        let isUpdatingDatabase =
+          hostSnapshot.message?.localizedCaseInsensitiveContains("Updating the database") == true
+        if !isUpdatingDatabase {
+          idlePolls += 1
+          if idlePolls >= 120 { break }
+        }
+        totalPolls += 1
+        try await Task.sleep(for: .milliseconds(250))
+        hostSnapshot = try await serverHost.status()
+      }
+      if OperatingModePolicy.isAwaitingReadiness(hostSnapshot.state) {
+        throw NativeServerHostError.rendezvousTimedOut
+      }
+      guard hostSnapshot.state == .running || hostSnapshot.state == .setupRequired else {
+        throw NativeHostStartupError.failed(
+          hostSnapshot.message ?? "The local server stopped during startup.")
+      }
+      if let profile {
+        try OperatingModePolicy.validateLocalHost(hostSnapshot, profile: profile)
+        if profile.isViewingSession, let deviceConnection, !hasPendingNetworkConfirmation {
+          do { _ = try await APIClient(profile: profile).currentUser() } catch let error
+            as APIClientError where error.httpStatus == 401
+          {
+            await PlaybackShutdownCoordinator.shared.shutdown()
+            playback = nil
+            managementExpiresAt = nil
+            clearPersonalViewState()
+            self.profile = deviceConnection
+          }
+        }
+        // Readiness includes loading the catalog, not merely a live helper.
+        // A superseded/partial snapshot must never be reported as successful.
+        try await refresh(requireCompleteSnapshot: true)
+        guard let current = self.profile, current.serverId == profile.serverId
+        else { return false }
+        let managed = current.retainingLocalHosting()
+        let savedDevice = (deviceConnection ?? current).retainingLocalHosting()
+        try store.save(savedDevice)
+        deviceConnection = savedDevice
+        self.profile = managed
+        startSync()
+      }
+      startHostPolling()
+      writeIsolatedHostResult(ready: true)
+      Self.hostLogger.info("Local host ready; saved connection retained.")
+      return true
+    } catch is CancellationError {
+      // Sleep/shutdown can cancel a recovery while the helper is still alive;
+      // cancellation is not evidence that the server or saved account failed.
+      return false
+    } catch {
+      guard !Task.isCancelled else { return false }
+      hostSnapshot = NativeHostSnapshot(
+        state: .failed,
+        message: error.localizedDescription,
+        bootstrapToken: nil,
+        serverInfo: nil)
+      errorMessage =
+        "Local server could not start: \(error.localizedDescription) Your saved account and library have not been reset."
+      Self.hostLogger.error("Local host startup failed; connection retained.")
+      writeIsolatedHostResult(ready: false)
+      return false
+    }
+  }
+
+  private func scheduleHomeRefresh() {
+    homeRefreshTask?.cancel()
+    homeRefreshTask = nil
+    guard !isResting else { return }
+    guard let value = home?.recommendationChangesAt,
+      let delay = HomeRefreshPolicy.delay(until: value)
+    else { return }
+    homeRefreshTask = Task { [weak self] in
+      try? await Task.sleep(for: .seconds(delay))
+      guard !Task.isCancelled, let self else { return }
+      await self.refreshHome()
+    }
+  }
+
+  private func startHostPolling() {
+    hostPollTask?.cancel()
+    hostPollTask = Task { [weak self] in
+      while !Task.isCancelled {
+        do { try await Task.sleep(for: .seconds(2)) } catch { return }
+        guard let self, !Task.isCancelled else { return }
+        do {
+          let snapshot = try await self.serverHost.status()
+          guard !Task.isCancelled else { return }
+          if snapshot.state == .idle {
+            // Stopped by its power settings, not broken: it starts again when Tarven is opened.
+            self.hostSnapshot = snapshot
+            self.hostPollTask = nil
+            return
+          }
+          if snapshot.state == .failed || snapshot.state == .stopped {
+            // A replying helper owns its recovery budget and planned stops. Do not
+            // bypass that decision by launching another host from the UI process.
+            self.hostSnapshot = snapshot
+            self.errorMessage =
+              snapshot.message ?? "The local server stopped. Choose Try Again to restart it."
+            self.hostPollTask = nil
+            return
+          }
+          self.hostSnapshot = snapshot
+          self.hostHealth.healthy(at: ProcessInfo.processInfo.systemUptime)
+        } catch {
+          guard !Task.isCancelled else { return }
+          let action = self.hostHealth.failed(
+            at: ProcessInfo.processInfo.systemUptime, confirmedExit: false)
+          switch action {
+          case .wait(let delay):
+            // A transient control-channel timeout must not restart a live host.
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+          case .recover:
+            guard self.operatingMode == .host,
+              self.profile == nil || self.profile?.locallyManaged == true
+            else {
+              self.errorMessage =
+                "The local host could not be reached. Choose Try Again to reconnect."
+              self.hostPollTask = nil
+              return
+            }
+            Self.hostLogger.notice("Local host unavailable; attempting bounded recovery.")
+            do { try await Task.sleep(for: .seconds(self.hostHealth.recoveryDelay)) } catch {
+              return
+            }
+            if await self.startNativeHost() { return }
+          case .stop:
+            self.hostSnapshot = NativeHostSnapshot(
+              state: .failed, message: error.localizedDescription,
+              bootstrapToken: nil, serverInfo: nil)
+            self.errorMessage =
+              "Local server stopped: \(error.localizedDescription) Choose Try Again to restart it. Your saved account is unchanged."
+            self.writeIsolatedHostResult(ready: false)
+            self.hostPollTask = nil
+            return
+          }
+        }
+      }
+    }
+  }
+
+  private func persistOperatingMode(explicit: Bool) {
+    guard !Self.isTestProcess else { return }
+    guard let operatingMode else { return }
+    UserDefaults.standard.set(operatingMode.rawValue, forKey: Self.operatingModeKey)
+    if explicit {
+      UserDefaults.standard.set(
+        OperatingModePolicy.selectionVersion,
+        forKey: Self.operatingModeSelectionVersionKey)
+    }
+  }
+
+  private func beginTerminationProtection() {
+    guard !isTerminationProtectionActive else { return }
+    ProcessInfo.processInfo.disableAutomaticTermination("Tarven is hosting its server")
+    ProcessInfo.processInfo.disableSuddenTermination()
+    isTerminationProtectionActive = true
+  }
+
+  private func endTerminationProtection() {
+    guard isTerminationProtectionActive else { return }
+    ProcessInfo.processInfo.enableAutomaticTermination("Tarven stopped hosting its server")
+    ProcessInfo.processInfo.enableSuddenTermination()
+    isTerminationProtectionActive = false
+  }
+
+  private func finishLocalAuthentication(
+    _ authentication: AuthenticationResponse,
+    lanPort: Int,
+    restart: Bool = true,
+    expectedGeneration: UUID? = nil
+  ) async throws {
+    let generation = expectedGeneration ?? connectionGeneration
+    if restart { try await serverHost.restart() }
+    var inspected: InspectedServer?
+    for _ in 0..<100 {
+      inspected = try? await APIClient.inspect(
+        baseURL: URL(string: "https://127.0.0.1:\(lanPort)")!)
+      if inspected != nil { break }
+      try await Task.sleep(for: .milliseconds(200))
+    }
+    guard let inspected else { throw NativeServerHostError.rendezvousTimedOut }
+    guard connectionGeneration == generation, !Task.isCancelled else { throw CancellationError() }
+    let connected = APIClient.profile(authentication: authentication, inspected: inspected)
+    var snapshot = try await serverHost.status()
+    for _ in 0..<120 {
+      guard OperatingModePolicy.isAwaitingReadiness(snapshot.state) else { break }
+      try await Task.sleep(for: .milliseconds(250))
+      snapshot = try await serverHost.status()
+    }
+    try OperatingModePolicy.validateLocalHost(snapshot, profile: connected)
+    guard connectionGeneration == generation, !Task.isCancelled else { throw CancellationError() }
+    let localProfile = connected.retainingLocalHosting()
+    try store.save(localProfile)
+    deviceConnection = localProfile
+    profile = localProfile
+    let authenticatedGeneration = connectionGeneration
+    try await refresh()
+    guard isCurrent(authenticatedGeneration) else { throw CancellationError() }
+    await reloadAdministration()
+    startSync()
+  }
+
+  private func startScanPolling() {
+    guard canManageStorage, !activeScans.isEmpty, let profile else { return }
+    scanPollTask?.cancel()
+    let run = UUID()
+    scanPollingRun = run
+    let generation = connectionGeneration
+    let administration = administrationGeneration
+    scanPollTask = Task { [weak self] in
+      while let model = self,
+        model.isCurrent(generation) && model.isCurrentAdministration(administration)
+          && !model.activeScans.isEmpty
+      {
+        do { try await Task.sleep(for: .seconds(1)) } catch { return }
+        guard let polledScans = self?.activeScans else { return }
+        let batch: ScanPollingBatch
+        do {
+          batch = try await ScanPollingBatch.load(scans: polledScans) { [weak self] id in
+            guard let model = self else { throw CancellationError() }
+            return try await model.currentAdministration {
+              try await APIClient(profile: profile).scan(id: id)
+            }
+          }
+        } catch { return }
+        guard let model = self,
+          model.isCurrent(generation), model.isCurrentAdministration(administration),
+          model.scanPollingRun == run
+        else { return }
+        let reconciled = batch.reconciled(
+          polledIDs: Set(polledScans.map(\.id)), current: model.activeScans)
+        model.activeScans = Self.uniqueScans(reconciled.active)
+        model.scanStatusUnavailable = reconciled.unavailable
+        if let failure = batch.definitiveFailure {
+          model.reportAdministrationFailure(failure)
+          model.scanPollTask = nil
+          return
+        }
+        if !reconciled.completed.isEmpty {
+          model.recentScans = Self.uniqueScans(reconciled.completed + model.recentScans)
+            .sorted { $0.createdAt > $1.createdAt }
+          do {
+            try await model.refresh()
+          } catch {
+            if let current = self,
+              current.isCurrent(generation), current.isCurrentAdministration(administration)
+            {
+              current.reportAdministrationFailure(error)
+            }
+          }
+          await self?.reloadAdministrationAfterScan()
+        }
+        if !reconciled.unavailable.isEmpty {
+          do { try await Task.sleep(for: .seconds(4)) } catch { return }
+        }
+      }
+      if let model = self, model.isCurrent(generation), model.scanPollingRun == run {
+        model.scanPollTask = nil
+      }
+    }
+  }
+
+  /// What a failed request shows. A server that does not answer is usually asleep or switched
+  /// off, so the banner says that plainly and Try Again wakes it, instead of the system's
+  /// "Could not connect to the server."
+  func failureMessage(_ error: Error) -> String {
+    if ServerReconnectPolicy.isMoved(error), operatingMode != .host {
+      let name = (deviceConnection ?? profile)?.name ?? "The server"
+      return "\(name) moved to another computer. Tarven is connecting to it there."
+    }
+    guard ServerReconnectPolicy.isConnectivityFailure(error), operatingMode != .host else {
+      return error.localizedDescription
+    }
+    serverUnreachable = true
+    let name = (deviceConnection ?? profile)?.name ?? "The server"
+    return canWakeCurrentServer
+      ? "\(name) isn’t answering. It may be asleep. Try Again wakes it."
+      : "\(name) isn’t answering. Check that it is switched on, then try again."
+  }
+
+  private func beginReconnectIfNeeded(after error: Error) {
+    guard operatingMode != .host, !hasPendingNetworkConfirmation, !isResting,
+      offlineMode == nil,
+      ServerReconnectPolicy.isConnectivityFailure(error) || ServerReconnectPolicy.isMoved(error),
+      reconnectTask == nil, let current = profile
+    else { return }
+    let generation = connectionGeneration
+    let coordinator = reconnectCoordinator
+    reconnectTask = Task { [weak self] in
+      do {
+        // A server that went to sleep while Tarven was open is woken first, with the progress
+        // shown, instead of only looking for it at its address.
+        if let wakeTarget = self.flatMap({
+          $0.canWakeCurrentServer ? ($0.deviceConnection ?? current) : nil
+        }) {
+          _ = await self?.ensureServerAwake(wakeTarget)
+          guard let model = self, model.isCurrent(generation), !Task.isCancelled else { return }
+        }
+        // Only looks for it from here: a server that stayed asleep is woken by Wake Server, not
+        // by someone who merely moves the mouse or closes the window.
+        let inspected = try await coordinator.reconnect(current, wakes: false)
+        guard let model = self, model.isCurrent(generation) else { return }
+        let device = model.deviceConnection ?? current
+        guard !device.isViewingSession else { throw APIClientError.invalidResponse }
+        let powerSaving = inspected.info.powerSavingEnabled ?? model.serverPowerSavingEnabled
+        let paired = device.changingAddress(inspected.baseURL, name: inspected.info.name)
+          .changingPowerSaving(powerSaving)
+        try model.store.save(paired)
+        model.deviceConnection = paired
+        model.profile = current.changingAddress(inspected.baseURL, name: inspected.info.name)
+          .changingPowerSaving(powerSaving)
+        model.serverPowerSavingEnabled = powerSaving
+        // Retire all captured old-address requests before publishing a fresh snapshot.
+        model.reconnectTask = nil
+        model.invalidateLibraryWork()
+        let resumedGeneration = model.connectionGeneration
+        do {
+          try await model.refresh(requireCompleteSnapshot: true)
+          guard let currentModel = self, currentModel.isCurrent(resumedGeneration) else { return }
+          currentModel.errorMessage = nil
+          currentModel.profileSelectionError = nil
+          currentModel.serverUnreachable = false
+          currentModel.synchronizationErrorMessage = nil
+          currentModel.startSync()
+        } catch let failure as APIClientError where failure.httpStatus == 401 {
+          guard let currentModel = self, currentModel.isCurrent(resumedGeneration) else { return }
+          if currentModel.profile?.isViewingSession == true {
+            await currentModel.switchWatchingProfile()
+          } else {
+            currentModel.requireDevicePairing()
+          }
+        } catch {
+          guard let currentModel = self, currentModel.isCurrent(resumedGeneration) else { return }
+          currentModel.errorMessage = currentModel.failureMessage(error)
+          currentModel.beginReconnectIfNeeded(after: error)
+        }
+      } catch is CancellationError {
+      } catch {
+        guard let model = self, model.isCurrent(generation) else { return }
+        model.reconnectTask = nil
+        model.errorMessage = model.failureMessage(error)
+      }
+    }
+  }
+
+  private func handleSessionFailure(_ error: Error) -> Bool {
+    guard usesProfileSelection, let failure = error as? APIClientError else { return false }
+    // Credential-entry errors (wrong Server Password, PIN, or Touch ID verification) return 401
+    // with an explicit problem code; keep the active viewing/device session and show the error locally.
+    if failure.problemCode == "invalid_credentials" || failure.problemCode == "invalid_profile_pin"
+      || failure.problemCode == "passkey_invalid"
+    {
+      return false
+    }
+    if failure.problemCode == "device_session_revoked"
+      || (failure.httpStatus == 401 && profile?.isViewingSession != true)
+    {
+      requireDevicePairing()
+      return true
+    }
+    if profile?.isViewingSession == true, !hasPendingNetworkConfirmation,
+      failure.httpStatus == 401 || failure.problemCode == "profile_session_expired"
+        || failure.problemCode == "profile_session_revoked"
+    {
+      Task { await switchWatchingProfile() }
+      return true
+    }
+    return false
+  }
+
+  private func requireDevicePairing() {
+    // Keep the saved credential until an explicit disconnect/replacement. A network
+    // failure never erases it; a confirmed device rejection shows connection UI.
+    guard usesProfileSelection else { return }
+    profileExpiryTask?.cancel()
+    managementExpiryTask?.cancel()
+    managementExpiresAt = nil
+    clearPersonalViewState()
+    wishPosterCache.clear()
+    profile = nil
+    deviceConnection = nil
+    serverPowerSavingEnabled = false
+    watchingProfiles = []
+    inspectedServer = nil
+    errorMessage = "This device is no longer authorized. Pair it with your server again."
+  }
+
+  private func startSync() {
+    guard !requiresProfileSelection, !isResting else { return }
+    guard let profile else { return }
+    startRemoteDeviceService()
+    let generation = connectionGeneration
+    syncStartTask?.cancel()
+    syncStartTask = Task { [weak self, profile] in
+      guard let self, self.isCurrent(generation) else { return }
+      await self.syncController.start(
+        profile: profile, runID: generation,
+        onFailure: { [weak self] error in
+          guard let self, self.isCurrent(generation) else { return }
+          self.synchronizationErrorMessage = self.failureMessage(error)
+          _ = self.handleSessionFailure(error)
+        },
+        onSuccess: { [weak self] in
+          guard let self, self.isCurrent(generation) else { return }
+          self.synchronizationErrorMessage = nil
+        },
+        onTransportFailure: { [weak self] in
+          guard let self, self.isCurrent(generation) else { return }
+          self.beginReconnectIfNeeded(after: URLError(.networkConnectionLost))
+        }
+      ) { [weak self] changes in
+        guard let self, self.isCurrent(generation) else { throw CancellationError() }
+        try await self.handleSyncChanges(changes)
+      }
+    }
+  }
+
+  private func handleSyncChanges(_ changes: SyncChangesResponse) async throws {
+    let generation = connectionGeneration
+    guard let profile, isCurrent(generation) else { throw CancellationError() }
+    let plan = SyncRefreshPlan(changes)
+    do {
+      if plan.fullCatalog {
+        try await refresh(requireCompleteSnapshot: true)
+        if let playing = playback {
+          do {
+            _ = try await APIClient(profile: profile).catalogSummary(id: playing.mediaId)
+          } catch let denied as APIClientError
+            where denied.httpStatus == 404 || denied.httpStatus == 403
+          {
+            playback = nil
+            await PlaybackShutdownCoordinator.shared.shutdown()
+          }
+        }
+        artworkLoader.removeAll()
+        catalogVisibilityRevision &+= 1
+      } else if plan.home {
+        let client = APIClient(profile: profile)
+        let request = homeRefresher.beginRequest()
+        // Stage all responses before publishing or acknowledging. A missing
+        // title can indicate a concurrent removal/grant change: retry with an
+        // authorized full snapshot, never retain hidden cached content.
+        let refreshedHome = try await homeRefresher.load(request: request, profile: profile)
+        var replacements: [UUID: CatalogItemSummary] = [:]
+        for id in plan.mediaIDs {
+          do { replacements[id] = try await client.catalogSummary(id: id) } catch let error
+            as APIClientError where error.httpStatus == 404
+          {
+            try await refresh(requireCompleteSnapshot: true)
+            guard isCurrent(generation) else { throw CancellationError() }
+            return
+          }
+        }
+        let refreshedCollections = plan.collections ? try await client.collections() : nil
+        guard isCurrent(generation) else { throw CancellationError() }
+        guard let refreshedHome, homeRefresher.isCurrent(request) else {
+          if Task.isCancelled { throw CancellationError() }
+          throw APIClientError.supersededSnapshot
+        }
+        catalogItems = catalogItems.map { replacements[$0.id] ?? $0 }
+        movies = movies.map { movie in
+          guard let item = replacements[movie.id] else { return movie }
+          return MovieSummary(
+            id: movie.id, title: item.title, year: item.year, availability: item.availability)
+        }
+        series = series.map { show in
+          guard let item = replacements[show.id] else { return show }
+          return SeriesSummary(
+            id: show.id, title: item.title, availability: item.availability,
+            seasonCount: show.seasonCount, episodeCount: show.episodeCount)
+        }
+        collections = (refreshedCollections ?? collections).map { collection in
+          CollectionSummary(
+            id: collection.id, name: collection.name, poster: collection.poster,
+            items: collection.items.map { replacements[$0.id] ?? $0 })
+        }
+        home = refreshedHome
+        scheduleHomeRefresh()
+      }
+      guard isCurrent(generation) else { throw CancellationError() }
+      if changes.changedAreas.contains(.userState) {
+        if supportsWatchlist,
+          let loadedWatchlist = try? await APIClient(profile: profile).watchlist(),
+          isCurrent(generation)
+        {
+          watchlistItems = loadedWatchlist.items
+          watchlistIds = Set(loadedWatchlist.mediaIds)
+        }
+        await refreshWishSummary(notify: true)
+        sceneNotesVersion &+= 1
+        catalogVisibilityRevision &+= 1
+      } else if changes.changedAreas.contains(.catalog) {
+        await refreshWishSummary(notify: true)
+      }
+      if !Self.isTestProcess, !NativePreflightIsolation.isRequested {
+        PlaybackProgressOutbox.shared.activate(profile: profile)
+      }
+      if changes.resetRequired || changes.changedAreas.contains(.libraries), canManageStorage {
+        // A management refresh is not part of acknowledging a personal catalog
+        // snapshot. Its expiry or failure must not stop profile synchronization.
+        do { try await refreshLibraryAdministration() } catch { reportAdministrationFailure(error) }
+        guard isCurrent(generation) else { throw CancellationError() }
+      }
+    } catch {
+      if isCurrent(generation), !(error is CancellationError),
+        error as? APIClientError != .supersededSnapshot
+      {
+        synchronizationErrorMessage = failureMessage(error)
+      }
+      throw error
+    }
+  }
+
+  private func reloadAdministrationAfterScan() async {
+    try? await refreshLibraryAdministration()
+  }
+
+  private func refreshLibraryAdministration() async throws {
+    guard let profile, canManageStorage else { return }
+    let generation = connectionGeneration
+    let result = try await currentAdministration { [self] in
+      let client = APIClient(profile: profile)
+      let refreshedLibraries = try await client.libraries()
+      async let discoveries = loadDiscoveries(client: client, libraries: refreshedLibraries)
+      async let reviews = loadImportReviews(client: client, libraries: refreshedLibraries)
+      let snapshot = try await (discoveries, reviews)
+      return AdministrationSnapshot(
+        libraries: refreshedLibraries, discoveries: snapshot.0, reviews: snapshot.1)
+    }
+    guard isCurrent(generation) else { throw CancellationError() }
+    libraries = result.libraries
+    libraryDiscoveries = result.discoveries
+    libraryImportReviews = result.reviews
+  }
+
+  private static func uniqueScans(_ scans: [LibraryScanSummary]) -> [LibraryScanSummary] {
+    var seen = Set<UUID>()
+    return scans.filter { seen.insert($0.id).inserted }
+  }
+
+  private func loadDiscoveries(
+    client: APIClient,
+    libraries: [LibrarySummary]
+  ) async throws -> [LibraryDiscoverySummary] {
+    var discoveries: [LibraryDiscoverySummary] = []
+    for library in libraries where library.kind == .automatic {
+      discoveries.append(contentsOf: try await client.libraryDiscoveries(id: library.id))
+    }
+    return discoveries.sorted {
+      $0.detectedTitle.localizedCaseInsensitiveCompare($1.detectedTitle) == .orderedAscending
+    }
+  }
+
+  private func loadImportReviews(
+    client: APIClient,
+    libraries: [LibrarySummary]
+  ) async throws -> [LibraryImportReviewSummary] {
+    var reviews: [LibraryImportReviewSummary] = []
+    for library in libraries {
+      reviews.append(contentsOf: try await client.libraryImportReviews(id: library.id))
+    }
+    return reviews.sorted {
+      $0.detectedTitle.localizedCaseInsensitiveCompare($1.detectedTitle) == .orderedAscending
+    }
+  }
+
+  #if DEBUG
+    static func serverSettingsRenderPreview() -> AppModel {
+      let model = AppModel(store: InMemoryServerProfileStore())
+      model.hasStarted = true
+      model.operatingMode = .client
+      let original = previewOwnerProfile
+      model.profile = StoredServerProfile(
+        serverId: original.serverId, name: original.name,
+        baseURL: URL(string: "https://server-settings-preview.invalid")!,
+        publicKeyFingerprint: original.publicKeyFingerprint, token: original.token,
+        sessionId: original.sessionId, expiresAt: original.expiresAt, user: original.user)
+      model.isStarting = false
+      return model
+    }
+
+    private static let previewMovieID = UUID(
+      uuidString: "10000000-0000-0000-0000-000000000001")!
+    private static let previewSeriesID = UUID(
+      uuidString: "20000000-0000-0000-0000-000000000001")!
+    private static let previewEpisodeID = UUID(
+      uuidString: "20000000-0000-0000-0000-000000000010")!
+    private static let previewMissingID = UUID(
+      uuidString: "10000000-0000-0000-0000-000000000099")!
+
+    private static let previewCatalog: [CatalogItemSummary] = [
+      CatalogItemSummary(
+        id: previewMovieID,
+        kind: .movie,
+        title: "El Camino: A Breaking Bad Movie",
+        originalTitle: nil,
+        year: 2019,
+        overview: "Jesse Pinkman must come to terms with his past in order to forge a future.",
+        genres: ["Crime", "Drama"],
+        poster: nil,
+        backdrop: nil,
+        availability: .available,
+        isFavorite: true,
+        progress: PlaybackProgressResponse(
+          mediaId: previewMovieID,
+          positionMilliseconds: 2_100_000,
+          durationMilliseconds: 7_320_000,
+          isCompleted: false,
+          lastPlayedAt: "2026-09-10T08:00:00Z",
+          updatedAt: "2026-09-10T08:00:00Z"),
+        addedAt: "2026-09-09T08:00:00Z"),
+      CatalogItemSummary(
+        id: previewSeriesID,
+        kind: .series,
+        title: "Breaking Bad",
+        originalTitle: nil,
+        year: 2008,
+        overview:
+          "A chemistry teacher transforms himself into a ruthless player in the local drug trade.",
+        genres: ["Drama", "Crime"],
+        poster: nil,
+        backdrop: nil,
+        availability: .available,
+        isFavorite: false,
+        progress: nil,
+        addedAt: "2026-09-08T08:00:00Z"),
+      CatalogItemSummary(
+        id: previewMissingID,
+        kind: .movie,
+        title: "Missing Feature",
+        originalTitle: nil,
+        year: 2024,
+        overview: "This title remains in the library while its source is offline.",
+        genres: ["Drama"],
+        poster: nil,
+        backdrop: nil,
+        availability: .missing,
+        isFavorite: false,
+        progress: nil,
+        addedAt: "2026-09-07T08:00:00Z"),
+    ]
+
+    private static let previewSearchEpisode = CatalogItemSummary(
+      id: previewEpisodeID,
+      kind: .episode,
+      title: "Pilot",
+      originalTitle: nil,
+      year: 2008,
+      overview: "Walter White makes a desperate choice after receiving life-changing news.",
+      genres: ["Drama", "Crime"],
+      poster: nil,
+      backdrop: nil,
+      availability: .available,
+      isFavorite: false,
+      progress: nil,
+      addedAt: "2026-09-08T08:00:00Z",
+      parentTitle: "Breaking Bad",
+      seasonNumber: 1,
+      episodeNumber: 1)
+
+    private static let previewHome = HomeResponse(
+      recommendation: previewCatalog[1],
+      continueWatching: [previewCatalog[0]],
+      recentlyAdded: previewCatalog,
+      favorites: [previewCatalog[0]],
+      collections: [
+        CollectionSummary(
+          id: UUID(uuidString: "30000000-0000-0000-0000-000000000001")!,
+          name: "Breaking Bad Universe",
+          poster: nil,
+          items: previewCatalog)
+      ],
+      recommendationChangesAt: "2099-01-01T00:00:00Z")
+
+    private static func previewDetail(for item: CatalogItemSummary)
+      -> CatalogDetailPresentation
+    {
+      if CinemaUITestFixture.enabled { return CinemaUITestFixture.detail(item) }
+      let metadata = MediaMetadataSummary(
+        mediaId: item.id,
+        title: item.title,
+        originalTitle: item.originalTitle,
+        overview: item.overview,
+        releaseDate: item.year.map { "\($0)-01-01" },
+        year: item.year,
+        runtimeMinutes: item.kind == .movie ? 122 : nil,
+        rating: 8.9,
+        contentRating: "TV-MA",
+        genres: item.genres,
+        studios: ["Sony Pictures Television"],
+        countries: ["United States"],
+        credits: [
+          CreditSummary(
+            name: "Bryan Cranston",
+            department: "Acting",
+            job: nil,
+            character: "Walter White",
+            order: 0,
+            profile: nil),
+          CreditSummary(
+            name: "Aaron Paul",
+            department: "Acting",
+            job: nil,
+            character: "Jesse Pinkman",
+            order: 1,
+            profile: nil),
+        ],
+        poster: item.poster,
+        backdrop: item.backdrop,
+        still: nil,
+        provider: "TMDB",
+        providerMediaId: "preview",
+        reviewState: .matched)
+      let episodeItem = previewSearchEpisode
+      let supplementID = UUID(
+        uuidString: item.kind == .movie
+          ? "10000000-0000-0000-0000-000000000010"
+          : "20000000-0000-0000-0000-000000000020")!
+      let supplementItem = CatalogItemSummary(
+        id: supplementID,
+        kind: item.kind == .movie ? .trailer : .extra,
+        title: item.kind == .movie ? "Official Trailer" : "Inside Breaking Bad",
+        originalTitle: nil,
+        year: item.year,
+        overview: nil,
+        genres: [],
+        poster: nil,
+        backdrop: nil,
+        availability: .available,
+        isFavorite: false,
+        progress: nil,
+        addedAt: "2026-09-08T08:00:00Z")
+      return CatalogDetailPresentation(
+        item: item,
+        metadata: metadata,
+        seasons: item.kind == .series
+          ? [
+            SeasonPresentation(
+              number: 1,
+              episodes: [
+                EpisodePresentation(item: episodeItem, seasonNumber: 1, episodeNumber: 1)
+              ],
+              supplements: [])
+          ] : [],
+        supplements: [
+          SupplementPresentation(
+            item: supplementItem,
+            category: item.kind == .movie ? "Trailer" : "Extras",
+            seasonNumber: nil)
+        ])
+    }
+
+    private static let previewProfile = StoredServerProfile(
+      serverId: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
+      name: "Tarven",
+      baseURL: URL(string: "https://tarven.local:43111")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64),
+      token: "ui-test-token",
+      sessionId: UUID(uuidString: "00000000-0000-0000-0000-000000000005")!,
+      expiresAt: "2099-01-01T00:00:00Z")
+
+    private static let previewOwnerProfile = StoredServerProfile(
+      serverId: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
+      name: "Tarven on Test Mac",
+      baseURL: URL(string: "https://127.0.0.1:43111")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64),
+      token: "ui-test-owner-token",
+      sessionId: UUID(uuidString: "00000000-0000-0000-0000-000000000005")!,
+      expiresAt: "2099-01-01T00:00:00Z",
+      user: UserSummary(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000006")!,
+        username: "owner",
+        role: .owner,
+        createdAt: "2099-01-01T00:00:00Z"))
+
+    private static let previewHostSnapshot = NativeHostSnapshot(
+      state: .running,
+      message: nil,
+      bootstrapToken: nil,
+      serverInfo: ServerInfoResponse(
+        serverId: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
+        name: "Tarven on Test Mac",
+        version: "1.0.9",
+        isSetup: true,
+        lanAccessEnabled: true,
+        lanHttpsPort: 43_111,
+        publicKeyFingerprint: String(repeating: "A", count: 64),
+        displayFingerprint: "AAAA-AAAA-AAAA-AAAA-AAAA-AAAA"))
+  #endif
+
+  private static var uiTestMode: String? {
+    #if DEBUG
+      ProcessInfo.processInfo.environment["TARVEN_UI_TEST_MODE"]
+    #else
+      nil
+    #endif
+  }
+
+  private static var defaultStore: any ServerProfileStore {
+    if NativePreflightIsolation.isActive,
+      ProcessInfo.processInfo.environment["TARVEN_PREFLIGHT_CONNECTION_TEST"] == "1"
+    {
+      return InMemoryServerProfileStore(profile: isolatedHostProfile)
+    }
+    if isTestProcess || NativePreflightIsolation.isRequested { return InMemoryServerProfileStore() }
+    return KeychainServerStore()
+  }
+
+  private static var isolatedHostProfile: StoredServerProfile? {
+    guard NativePreflightIsolation.isActive,
+      let value = ProcessInfo.processInfo.environment["TARVEN_PREFLIGHT_PROFILE"],
+      value.utf8.count <= 16_384
+    else { return nil }
+    return try? JSONDecoder().decode(StoredServerProfile.self, from: Data(value.utf8))
+  }
+
+  private func writeIsolatedHostResult(ready: Bool) {
+    guard NativePreflightIsolation.isActive,
+      ProcessInfo.processInfo.environment["TARVEN_PREFLIGHT_CONNECTION_TEST"] == "1"
+    else { return }
+    struct Result: Encodable {
+      let ready: Bool
+      let owned: Bool
+      let catalogCount: Int
+      let profilesCount: Int
+      let viewingLocked: Bool
+      let unchangedConnection: Bool
+      let failureMessage: String?
+    }
+    let unchanged =
+      profile?.retainingLocalHosting() == Self.isolatedHostProfile?.retainingLocalHosting()
+    if var data = try? JSONEncoder().encode(
+      Result(
+        ready: ready, owned: profile?.locallyManaged == true,
+        catalogCount: catalogItems.count, profilesCount: watchingProfiles.count,
+        viewingLocked: profile?.isViewingSession != true, unchangedConnection: unchanged,
+        failureMessage: ready
+          ? nil
+          : hostSnapshot.message.map {
+            String($0.prefix(512)).replacingOccurrences(
+              of: profile?.token ?? "no-session-token", with: "[redacted]")
+          }))
+    {
+      data.append(0x0A)
+      // Launch Services provides this test-only output handle. No sandbox escape
+      // or direct access to the user's profile storage is required.
+      try? FileHandle.standardOutput.write(contentsOf: data)
+      if let result = String(data: data, encoding: .utf8) {
+        Self.hostLogger.notice("IsolatedHostResult \(result, privacy: .public)")
+      }
+    }
+  }
+
+  static var isTestProcess: Bool {
+    if NativePreflightIsolation.isRequested { return true }
+    #if DEBUG
+      return uiTestMode != nil
+        || ProcessInfo.processInfo.environment["TARVEN_RUNNING_TESTS"] == "1"
+        || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        || NSClassFromString("XCTestCase") != nil
+    #else
+      return false
+    #endif
+  }
+
+  // MARK: Remote Playback Controls
+
+  func activeRemotePlayers() async -> [RemotePlayerDevice] {
+    guard let profile else { return [] }
+    return (try? await APIClient(profile: profile).activePlayers(currentDeviceId: macDeviceId))
+      ?? []
+  }
+
+  func startRemotePlayback(
+    on device: RemotePlayerDevice, item: CatalogItemSummary, startPosition: Double = 0
+  ) {
+    guard let profile else { return }
+    let generation = connectionGeneration
+    let sessionId = profile.sessionId
+    activeRemotePlayer = device
+    remotePlaybackTitle = item.title
+    remotePlaybackPosition = startPosition
+    remotePlaybackDuration = Double(item.progress?.durationMilliseconds ?? 0) / 1000.0
+    isRemotePlaying = true
+
+    Task { [weak self] in
+      guard let self else { return }
+      do {
+        _ = try await APIClient(profile: profile).sendPlayerCommand(
+          deviceId: device.deviceId,
+          action: "play",
+          mediaId: item.id,
+          positionSeconds: startPosition
+        )
+      } catch {
+        await MainActor.run {
+          guard self.isCurrent(generation), self.profile?.sessionId == sessionId else { return }
+          self.clearRemotePlaybackState()
+          self.errorMessage = self.failureMessage(error)
+        }
+      }
+    }
+
+    startRemoteStatusPolling(device: device)
+  }
+
+  func sendRemotePlaybackCommand(
+    action: String, positionSeconds: Double? = nil, skipSeconds: Double? = nil
+  ) {
+    guard let profile, let device = activeRemotePlayer else { return }
+    let generation = connectionGeneration
+    let sessionId = profile.sessionId
+    let previousPlaying = isRemotePlaying
+    let previousPosition = remotePlaybackPosition
+    if action == "pause" { isRemotePlaying = false }
+    if action == "resume" { isRemotePlaying = true }
+    if let pos = positionSeconds { remotePlaybackPosition = pos }
+    if let skip = skipSeconds { remotePlaybackPosition = max(0, remotePlaybackPosition + skip) }
+    if positionSeconds != nil || skipSeconds != nil { remoteSeekSentAt = Date() }
+
+    Task { [weak self] in
+      guard let self else { return }
+      do {
+        _ = try await APIClient(profile: profile).sendPlayerCommand(
+          deviceId: device.deviceId,
+          action: action,
+          positionSeconds: positionSeconds,
+          skipSeconds: skipSeconds
+        )
+      } catch {
+        await MainActor.run {
+          guard self.isCurrent(generation), self.profile?.sessionId == sessionId else { return }
+          if action == "pause" || action == "resume" { self.isRemotePlaying = previousPlaying }
+          if positionSeconds != nil || skipSeconds != nil {
+            self.remotePlaybackPosition = previousPosition
+            self.remoteSeekSentAt = nil
+          }
+          self.errorMessage = self.failureMessage(error)
+        }
+      }
+    }
+  }
+
+  func stopRemotePlayback() {
+    let device = activeRemotePlayer
+    let capturedProfile = profile
+    clearRemotePlaybackState()
+    if let device, let capturedProfile {
+      Task {
+        _ = try? await APIClient(profile: capturedProfile).sendPlayerCommand(
+          deviceId: device.deviceId, action: "stop")
+      }
+    }
+  }
+
+  private func startRemoteStatusPolling(device: RemotePlayerDevice) {
+    remoteDeviceStatusTask?.cancel()
+    remoteDeviceStatusTask = nil
+    guard !isResting, profile != nil else { return }
+    remoteDeviceStatusTask = Task { [weak self] in
+      while !Task.isCancelled {
+        do { try await Task.sleep(nanoseconds: 2_500_000_000) } catch { return }
+        guard let self, !self.isResting, let profile = self.profile else { return }
+        do {
+          let status = try await APIClient(profile: profile).playerStatus(deviceId: device.deviceId)
+          await MainActor.run {
+            self.isRemotePlaying = status.isPlaying && !status.isPaused
+            let seekSettled =
+              self.remoteSeekSentAt.map { Date().timeIntervalSince($0) > 3 } ?? true
+            if seekSettled, let pos = status.positionSeconds { self.remotePlaybackPosition = pos }
+            if let dur = status.durationSeconds, dur > 0 { self.remotePlaybackDuration = dur }
+          }
+        } catch let err as APIClientError where err.httpStatus == 404 || err.httpStatus == 409 {
+          await MainActor.run {
+            self.stopRemotePlayback()
+            self.errorMessage = err.localizedDescription
+          }
+          break
+        } catch {}
+      }
+    }
+  }
+
+  func startRemoteDeviceService() {
+    remoteDeviceHeartbeatTask?.cancel()
+    remoteDeviceHeartbeatTask = nil
+    remoteDeviceCommandTask?.cancel()
+    remoteDeviceCommandTask = nil
+    guard profile != nil, !isResting, !requiresProfileSelection else { return }
+    let deviceId = macDeviceId
+    let deviceName = TarvenDeviceName.current
+
+    remoteDeviceHeartbeatTask = Task { [weak self] in
+      while !Task.isCancelled {
+        guard let self, !self.isResting, let profile = self.profile else { return }
+        let activeController = PlaybackShutdownCoordinator.shared.activeController
+        let isPlaying = self.playback != nil
+        let mediaId = activeController?.presentation.mediaId ?? self.playback?.mediaId
+        let title = activeController?.presentation.title ?? self.playback?.title
+        let positionSeconds = activeController.map { Double($0.currentTimeMilliseconds) / 1_000.0 }
+        let durationSeconds = activeController.flatMap {
+          $0.durationMilliseconds > 0 ? Double($0.durationMilliseconds) / 1_000.0 : nil
+        }
+        let isPaused = activeController.map { !$0.isPlaying } ?? false
+        let req = PlayerHeartbeatRequest(
+          deviceId: deviceId,
+          deviceName: deviceName,
+          clientType: "macos",
+          isPlaying: isPlaying,
+          mediaId: mediaId,
+          title: title,
+          positionSeconds: positionSeconds,
+          durationSeconds: durationSeconds,
+          isPaused: isPaused
+        )
+        _ = try? await APIClient(profile: profile).sendPlayerHeartbeat(req)
+        do { try await Task.sleep(nanoseconds: 15_000_000_000) } catch { return }
+      }
+    }
+
+    remoteDeviceCommandTask = Task { [weak self] in
+      var retryDelaySeconds: UInt64 = 2
+      while !Task.isCancelled {
+        guard let self, !self.isResting, let profile = self.profile else { return }
+        do {
+          let commands = try await APIClient(profile: profile).pollPlayerCommands(
+            deviceId: deviceId, waitMs: 10000)
+          retryDelaySeconds = 2
+          for cmd in commands {
+            self.handleIncomingRemoteCommand(cmd)
+          }
+        } catch is CancellationError {
+          return
+        } catch {
+          guard !self.isResting, !Task.isCancelled else { return }
+          do { try await Task.sleep(nanoseconds: retryDelaySeconds * 1_000_000_000) } catch {
+            return
+          }
+          retryDelaySeconds = min(retryDelaySeconds * 2, 30)
+        }
+      }
+    }
+  }
+
+  func handleIncomingRemoteCommand(_ command: RemotePlaybackCommand) {
+    let controller = PlaybackShutdownCoordinator.shared.activeController
+    switch command.action.lowercased() {
+    case "play":
+      if let mediaId = command.mediaId {
+        let intent: PlaybackStartIntent
+        if let pos = command.positionSeconds, pos > 0 {
+          intent = .position(Int64((pos * 1_000).rounded()))
+        } else {
+          intent = .play
+        }
+        Task { @MainActor [weak self] in
+          guard let self else { return }
+          self.startPlayback(mediaId: mediaId, title: "", startIntent: intent)
+        }
+      } else {
+        _ = controller?.play()
+      }
+    case "resume":
+      _ = controller?.play()
+    case "pause":
+      _ = controller?.pause()
+    case "skip":
+      if let seconds = command.skipSeconds {
+        controller?.skip(seconds: Int64(seconds.rounded()))
+      }
+    case "seek":
+      if let pos = command.positionSeconds {
+        controller?.seek(to: Int64(max(0, pos * 1_000).rounded()))
+      }
+    case "stop":
+      Task { @MainActor [weak self] in
+        self?.dismissPlayback()
+      }
+    default:
+      break
+    }
+  }
+}
+
+#if DEBUG
+  /// What one offscreen audit render shows (scripts/audit-render-screens.sh).
+  enum AuditRenderScenario {
+    case library
+    case emptyLibrary
+    case unreachable
+    case starting(ServerConnectionStatus?)
+    case operatingMode
+    case connect
+    case hostSetup
+    case hostStarting
+    case hostFailed
+    case firstLibrary
+    case setupFinish
+    case profiles
+    case profilesUnreachable
+    case player
+  }
+
+  extension AppModel {
+    /// A model filled from AuditRenderFixture; it never loads anything itself.
+    static func auditRenderModel(_ scenario: AuditRenderScenario) -> AppModel {
+      var selectsProfiles = false
+      if case .profiles = scenario { selectsProfiles = true }
+      if case .profilesUnreachable = scenario { selectsProfiles = true }
+      let model = AppModel(
+        store: InMemoryServerProfileStore(), profileSelectionEnabled: selectsProfiles)
+      model.hasStarted = true
+      model.isStarting = false
+      model.libraryLoaded = true
+      model.operatingMode = .client
+      model.profile = AuditRenderFixture.profile()
+      model.deviceConnection = AuditRenderFixture.profile(viewing: false)
+      model.catalogItems = AuditRenderFixture.catalog
+      model.movies = model.catalogItems.filter { $0.kind == .movie }.map {
+        MovieSummary(id: $0.id, title: $0.title, year: $0.year, availability: $0.availability)
+      }
+      model.series = model.catalogItems.filter { $0.kind == .series }.map {
+        SeriesSummary(
+          id: $0.id, title: $0.title, availability: $0.availability, seasonCount: 3,
+          episodeCount: 14)
+      }
+      model.home = AuditRenderFixture.home
+      model.collections = AuditRenderFixture.collections
+      model.wishSummary = WishSummaryResponse(
+        openCount: AuditRenderFixture.emptyData ? 0 : 2,
+        newlyFulfilledCount: AuditRenderFixture.emptyData ? 0 : 1)
+      model.libraries =
+        AuditRenderFixture.emptyData
+        ? []
+        : [
+          LibrarySummary(
+            id: UUID(uuidString: "A0000009-0000-0000-0000-000000000001")!,
+            name: "Filme – Ünïcødé Archiv (Wohnzimmer-NAS)",
+            path: "/Volumes/Mediathek Ølmühle/Filme/Skandinavien/Klassiker und Neuerscheinungen",
+            kind: .movies, availability: .available, createdAt: "2026-01-01T00:00:00Z",
+            lastScanStartedAt: "2026-11-20T03:00:00Z",
+            lastScanCompletedAt: "2026-11-20T03:04:00Z", lastError: nil, monitoringEnabled: true,
+            lastObservedAt: "2026-11-21T08:00:00Z", health: .healthy),
+          LibrarySummary(
+            id: UUID(uuidString: "A0000009-0000-0000-0000-000000000002")!, name: "Serien",
+            path: "/Volumes/Archive Drive/Serien", kind: .tvShows, availability: .unavailable,
+            createdAt: "2026-01-01T00:00:00Z", lastScanStartedAt: "2026-11-19T03:00:00Z",
+            lastScanCompletedAt: nil, lastError: "The library directory is unavailable.",
+            monitoringEnabled: true, lastObservedAt: "2026-11-19T03:00:00Z",
+            health: .waitingForStorage),
+        ]
+      switch scenario {
+      case .library, .emptyLibrary:
+        break
+      case .unreachable:
+        model.serverUnreachable = true
+        model.errorMessage =
+          "Ünïcødé Heimkino-Server in der Dachgeschosswohnung can't be reached. Check that it is turned on and on the same network."
+      case .starting(let status):
+        model.isStarting = true
+        model.connectionStatus = status
+      case .operatingMode:
+        model.operatingMode = nil
+        model.profile = nil
+        model.deviceConnection = nil
+      case .connect:
+        model.profile = nil
+        model.deviceConnection = nil
+      case .hostSetup:
+        model.operatingMode = .host
+        model.profile = nil
+        model.deviceConnection = nil
+        model.hostSnapshot = NativeHostSnapshot(
+          state: .setupRequired, message: nil, bootstrapToken: "audit-bootstrap-token",
+          serverInfo: nil)
+      case .hostStarting, .hostFailed:
+        var failed = false
+        if case .hostFailed = scenario { failed = true }
+        model.operatingMode = .host
+        model.profile = nil
+        model.deviceConnection = nil
+        model.hostSnapshot = NativeHostSnapshot(
+          state: failed ? .failed : .starting,
+          message: failed
+            ? "The server could not start: port 43111 is already used by another program." : nil,
+          bootstrapToken: nil, serverInfo: nil)
+      case .firstLibrary:
+        model.operatingMode = .host
+        model.profile = AuditRenderFixture.profile(viewing: false)
+        model.hostSnapshot = Self.previewHostSnapshot
+        model.needsInitialLibrarySetup = true
+        model.libraries = []
+      case .setupFinish:
+        model.setupGuide.start()
+      case .profiles:
+        model.profile = AuditRenderFixture.profile(viewing: false)
+        model.watchingProfiles = AuditRenderFixture.watchingProfiles
+      case .profilesUnreachable:
+        model.profile = AuditRenderFixture.profile(viewing: false)
+        model.watchingProfiles = []
+        model.serverUnreachable = true
+      case .player:
+        let item = AuditRenderFixture.movies[1]
+        model.playback = PlaybackPresentation(
+          mediaId: item.id, title: item.title, subtitle: "2021 · Adventure",
+          startIntent: .resume, artwork: item.backdrop)
+      }
+      // After the profile: a new connection clears the server's features.
+      model.libraryCapabilities = AuditRenderFixture.capabilities
+      return model
+    }
+  }
+#endif

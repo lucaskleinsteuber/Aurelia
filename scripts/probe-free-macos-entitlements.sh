@@ -1,12 +1,12 @@
 #!/bin/zsh
-# Tests a small synthetic probe, not a re-signed copy of Aurelia or its data.
+# Tests a small synthetic probe, not a re-signed copy of Tarven or its data.
 set -euo pipefail
 repository_root=${0:A:h:h}
 source "$repository_root/scripts/workspace-paths.sh"
-mkdir -p "$other_root/Logs" "$HOME/Library/Caches/Aurelia/TestRuns"
-probe_root=$(mktemp -d "$HOME/Library/Caches/Aurelia/TestRuns/Distribution-Probe.XXXXXX")
+mkdir -p "$other_root/Logs" "$HOME/Library/Caches/Tarven/TestRuns"
+probe_root=$(mktemp -d "$HOME/Library/Caches/Tarven/TestRuns/Distribution-Probe.XXXXXX")
 log="$other_root/Logs/Distribution-Entitlements-${probe_root:t}.log"
-trap '[[ "$probe_root" == "$HOME/Library/Caches/Aurelia/TestRuns/Distribution-Probe."* ]] && find "$probe_root" -depth -delete' EXIT
+trap '[[ "$probe_root" == "$HOME/Library/Caches/Tarven/TestRuns/Distribution-Probe."* ]] && find "$probe_root" -depth -delete' EXIT
 DEVELOPER_DIR="$developer_dir" xcrun swiftc -warnings-as-errors \
   "$repository_root/tools/macos/DistributionEntitlementProbe.swift" \
   -o "$probe_root/DistributionProbe"

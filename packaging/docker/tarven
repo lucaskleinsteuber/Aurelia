@@ -1,0 +1,70 @@
+#!/bin/bash
+# Tarven Server commands inside the container, for example:
+#   docker compose run --rm tarven setup      (once, before the server first starts)
+#   docker compose exec tarven tarven pair
+set -euo pipefail
+server=/opt/tarven/server/Tarven.Server
+# Compose files from before the rename to Tarven (Aurelia) still set these under the old names.
+: "${TARVEN_SERVER_NAME:=${AURELIA_SERVER_NAME:-}}"
+: "${TARVEN_OWNER:=${AURELIA_OWNER:-}}"
+: "${TARVEN_DEVICE_NAME:=${AURELIA_DEVICE_NAME:-}}"
+# Started as root only to hand the data folder to the tarven user (a new volume or a folder
+# from the host belongs to root); everything then runs as tarven.
+if [ "$(id -u)" -eq 0 ]; then
+  [ "$(stat -c %U /data)" = tarven ] || chown -R tarven:tarven /data
+  chmod 0700 /data
+  exec setpriv --reuid=tarven --regid=tarven --init-groups --inh-caps=-all "$0" "$@"
+fi
+command=${1:-run}
+[ $# -gt 0 ] && shift
+case "$command" in
+  run) exec "$server" run --data-dir /data "$@" ;;
+  setup)
+    if [ "${1:-}" = --browser ]; then
+      arguments=(setup-browser --data-dir /data)
+      [ -n "${TARVEN_SERVER_NAME:-}" ] && arguments+=(--server-name "$TARVEN_SERVER_NAME")
+      "$server" "${arguments[@]}"
+      echo
+      echo "Start the server with: docker compose up -d"
+      echo "Then show the one-time setup code with: docker compose exec tarven tarven setup-code"
+      echo "and open https://<this computer>:43111 in a browser to finish setting up."
+      exit 0
+    fi
+    owner=${TARVEN_OWNER:-}
+    if [ -z "$owner" ]; then
+      read -r -p "Owner name (used to sign in): " owner
+    fi
+    [ -n "$owner" ] || { echo "An owner name is required." >&2; exit 2; }
+    arguments=(setup-owner --headless --data-dir /data --username "$owner" --device-name "${TARVEN_DEVICE_NAME:-Docker}")
+    [ -n "${TARVEN_SERVER_NAME:-}" ] && arguments+=(--server-name "$TARVEN_SERVER_NAME")
+    "$server" "${arguments[@]}"
+    echo
+    echo "Start the server with: docker compose up -d"
+    echo "Then connect your devices; the first one also asks for the owner's new viewing PIN:"
+    echo "  Run: docker compose exec tarven tarven pair, then type the code in Tarven on the new device"
+    echo "  (Mac, Linux PC, Apple TV, iPhone, iPad, or this server's address in a browser)."
+    ;;
+  approve)
+    if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then code=$1; shift; exec "$server" pairing approve --code "$code" "$@"; fi
+    exec "$server" pairing approve "$@" ;;
+  pair) exec "$server" pairing create "$@" ;;
+  library|pairing|metadata|server|database) exec "$server" "$command" "$@" ;;
+  status) exec "$server" server identity ;;
+  setup-code)
+    if [ -r /data/browser-setup-code ]; then echo "Setup code: $(cat /data/browser-setup-code)"
+    else echo "No setup code: the server has an owner already, or it isn't running." >&2; exit 1; fi ;;
+  version) cat /opt/tarven/VERSION ;;
+  *)
+    cat <<'USAGE'
+Tarven Server in a container
+
+  setup                    Create the owner (run once with: docker compose run --rm tarven setup)
+  setup --browser          Set up in a web browser instead; setup-code shows the one-time code
+  pair                     Show a code to type on a new device (any Tarven app or a browser)
+  approve [CODE]           Allow an older app that shows a code itself
+  library add --path /media/Movies [--kind automatic|movies|tv]
+  library list | scan --all
+  status | version
+USAGE
+    ;;
+esac

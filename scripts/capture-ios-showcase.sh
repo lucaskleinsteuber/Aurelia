@@ -9,7 +9,7 @@ source "$repository_root/scripts/workspace-paths.sh"
 /bin/sh "$repository_root/scripts/prune-workspace.sh" || true
 showcase="$other_root/Showcase"
 screenshots="$repository_root/docs/assets/screenshots"
-run_root="$HOME/Library/Caches/Aurelia/TestRuns/ios-showcase-$(uuidgen | tr '[:upper:]' '[:lower:]')"
+run_root="$HOME/Library/Caches/Tarven/TestRuns/ios-showcase-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 mkdir -p "$run_root" "$screenshots"
 
 swift "$repository_root/scripts/make-showcase.swift" "$showcase"
@@ -20,12 +20,12 @@ python3 -m http.server "$port" --bind 127.0.0.1 --directory "$showcase" >/dev/nu
 server=$!
 trap 'kill $server 2>/dev/null || true; rm -rf "$run_root"' EXIT
 
-DEVELOPER_DIR="$developer_dir" xcodebuild -project "$repository_root/clients/ios/AureliaIOS.xcodeproj" \
-  -scheme AureliaIOS -configuration Debug -sdk iphonesimulator \
+DEVELOPER_DIR="$developer_dir" xcodebuild -project "$repository_root/clients/ios/TarvenIOS.xcodeproj" \
+  -scheme TarvenIOS -configuration Debug -sdk iphonesimulator \
   -destination 'generic/platform=iOS Simulator' -derivedDataPath "$run_root/DerivedData" \
   MOBILEVLCKIT_ROOT="$repository_root/clients/ios/Dependencies" CODE_SIGNING_ALLOWED=NO \
   build >"$run_root/build.log" 2>&1 || { grep -E "error:" "$run_root/build.log" | sort -u; exit 1; }
-app="$run_root/DerivedData/Build/Products/Debug-iphonesimulator/Aurelia.app"
+app="$run_root/DerivedData/Build/Products/Debug-iphonesimulator/Tarven.app"
 
 # The newest available simulator of each kind, the same model whose screen the README shows.
 device_for() {
@@ -46,17 +46,17 @@ capture() {
   xcrun simctl install "$device" "$app"
   local page
   for page in "$@"; do
-    xcrun simctl terminate "$device" com.lucas.aurelia.ios 2>/dev/null || true
-    SIMCTL_CHILD_AURELIA_IOS_UI_SCENARIO=showcase SIMCTL_CHILD_AURELIA_SHOWCASE_DIR="http://127.0.0.1:$port/" \
-      SIMCTL_CHILD_AURELIA_IOS_SHOWCASE_PAGE="$page" \
-      xcrun simctl launch "$device" com.lucas.aurelia.ios --aurelia-ui-testing >/dev/null
+    xcrun simctl terminate "$device" org.tarven.ios 2>/dev/null || true
+    SIMCTL_CHILD_TARVEN_IOS_UI_SCENARIO=showcase SIMCTL_CHILD_TARVEN_SHOWCASE_DIR="http://127.0.0.1:$port/" \
+      SIMCTL_CHILD_TARVEN_IOS_SHOWCASE_PAGE="$page" \
+      xcrun simctl launch "$device" org.tarven.ios --tarven-ui-testing >/dev/null
     # Artwork loads from local files; this leaves time for the pictures to fade in.
     sleep 6
     xcrun simctl io "$device" screenshot "$run_root/$prefix-$page.png" >/dev/null 2>&1
     sips -s format jpeg -s formatOptions 82 -Z 1600 "$run_root/$prefix-$page.png" \
       --out "$screenshots/$prefix-$page.jpg" >/dev/null
   done
-  xcrun simctl terminate "$device" com.lucas.aurelia.ios 2>/dev/null || true
+  xcrun simctl terminate "$device" org.tarven.ios 2>/dev/null || true
   xcrun simctl status_bar "$device" clear
   xcrun simctl shutdown "$device"
 }

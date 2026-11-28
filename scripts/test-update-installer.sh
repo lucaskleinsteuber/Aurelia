@@ -4,11 +4,11 @@ set -eu
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$repository_root/scripts/workspace-paths.sh"
 /bin/sh "$repository_root/scripts/prune-workspace.sh"
-mkdir -p "$HOME/Library/Caches/Aurelia/TestRuns"
-run_root=$(mktemp -d "$HOME/Library/Caches/Aurelia/TestRuns/installer.XXXXXX")
+mkdir -p "$HOME/Library/Caches/Tarven/TestRuns"
+run_root=$(mktemp -d "$HOME/Library/Caches/Tarven/TestRuns/installer.XXXXXX")
 trap 'rm -rf "$run_root"' EXIT HUP INT TERM
 xcrun swiftc -warnings-as-errors -swift-version 6 \
-  "$repository_root/clients/macos/AureliaServerHost/UpdateInstallation.swift" \
+  "$repository_root/clients/macos/TarvenServerHost/UpdateInstallation.swift" \
   "$repository_root/scripts/tests/UpdateInstallationTests.swift" \
   -o "$run_root/installer-tests"
 "$run_root/installer-tests" "$run_root"
@@ -16,8 +16,8 @@ xcrun swiftc -warnings-as-errors -swift-version 6 \
 # PID zero is rejected before mounting or touching any installed application. The real
 # --no-relaunch path must return failure after consuming its own synthetic download.
 xcrun swiftc -warnings-as-errors -swift-version 6 \
-  "$repository_root/clients/macos/AureliaServerHost/UpdateInstallation.swift" \
-  "$repository_root/clients/macos/AureliaServerHost/UpdateInstaller.swift" \
+  "$repository_root/clients/macos/TarvenServerHost/UpdateInstallation.swift" \
+  "$repository_root/clients/macos/TarvenServerHost/UpdateInstaller.swift" \
   "$repository_root/clients/macos/UpdateHandoff/MacUpdateInstallRequest.swift" \
   "$repository_root/clients/macos/UpdateHandoff/AppEdition.swift" \
   "$repository_root/scripts/tests/UpdateInstallerDiagnostic.swift" \

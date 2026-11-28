@@ -3,7 +3,7 @@ import Foundation
 @preconcurrency import VLCKit
 import XCTest
 
-@testable import Aurelia
+@testable import Tarven
 
 /// Overlay only into an owned source snapshot. The server has exactly one
 /// offline-provisioned source, never scans its directory, and never connects to
@@ -59,25 +59,25 @@ final class PlaybackAuthorizedSourceTests: XCTestCase {
     }
     do {
       let environment = ProcessInfo.processInfo.environment
-      guard environment["AURELIA_SOURCE_EVIDENCE_OWNED_STATE"] == "YES",
-        environment["AURELIA_SOURCE_EVIDENCE_AUTHORIZATION"] == "BREAKING_BAD_S01E01_10_MINUTES",
+      guard environment["TARVEN_SOURCE_EVIDENCE_OWNED_STATE"] == "YES",
+        environment["TARVEN_SOURCE_EVIDENCE_AUTHORIZATION"] == "BREAKING_BAD_S01E01_10_MINUTES",
         NativePreflightIsolation.isRequested, !NativePreflightIsolation.isActive,
-        let address = environment["AURELIA_SOURCE_EVIDENCE_SERVER_URL"],
+        let address = environment["TARVEN_SOURCE_EVIDENCE_SERVER_URL"],
         let url = URL(string: address), url.scheme == "https", url.host == "127.0.0.1",
         let port = url.port, port >= 1_024,
-        let pin = environment["AURELIA_SOURCE_EVIDENCE_FINGERPRINT"], pin.count == 64,
+        let pin = environment["TARVEN_SOURCE_EVIDENCE_FINGERPRINT"], pin.count == 64,
         pin.allSatisfy(\.isHexDigit),
-        let authentication = environment["AURELIA_SOURCE_EVIDENCE_AUTH"]?.data(using: .utf8),
-        let expectedVersion = environment["AURELIA_SOURCE_EVIDENCE_SERVER_VERSION"],
-        let expectedBytesString = environment["AURELIA_SOURCE_EVIDENCE_SOURCE_BYTES"],
+        let authentication = environment["TARVEN_SOURCE_EVIDENCE_AUTH"]?.data(using: .utf8),
+        let expectedVersion = environment["TARVEN_SOURCE_EVIDENCE_SERVER_VERSION"],
+        let expectedBytesString = environment["TARVEN_SOURCE_EVIDENCE_SOURCE_BYTES"],
         let expectedBytes = Int64(expectedBytesString), expectedBytes > 0,
-        let mediaID = UUID(uuidString: environment["AURELIA_SOURCE_EVIDENCE_MEDIA_ID"] ?? "")
+        let mediaID = UUID(uuidString: environment["TARVEN_SOURCE_EVIDENCE_MEDIA_ID"] ?? "")
       else { throw Failure.code("missing_bounded_authorized_configuration") }
       phase = "owned_server_pin"
       let inspected = try await APIClient.inspect(baseURL: url)
       try require(
         inspected.publicKeyFingerprint.caseInsensitiveCompare(pin) == .orderedSame
-          && inspected.info.name == "Aurelia Authorized Playback Evidence"
+          && inspected.info.name == "Tarven Authorized Playback Evidence"
           && inspected.info.version == expectedVersion, "wrong_owned_server_or_pin")
       version =
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
@@ -134,7 +134,7 @@ final class PlaybackAuthorizedSourceTests: XCTestCase {
       let outputWindow = NSWindow(
         contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
       outputWindow.isReleasedWhenClosed = false
-      outputWindow.title = "Aurelia bounded authorized playback evidence"
+      outputWindow.title = "Tarven bounded authorized playback evidence"
       outputWindow.contentView = view
       outputWindow.makeKeyAndOrderFront(nil)
       window = outputWindow

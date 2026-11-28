@@ -1,0 +1,759 @@
+using System.IO.Compression;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
+using Microsoft.Extensions.Configuration;
+using Tarven.Contracts;
+using Tarven.Server.Authentication;
+using Tarven.Server.Data;
+using Tarven.Server.Endpoints;
+using Tarven.Server.Services;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.EntityFrameworkCore;
+
+var commandLine = ServerCommandLine.Parse(args);
+if (commandLine.Command == "help")
+{
+    Console.WriteLine(ServerCommandLine.UsageText);
+    Environment.ExitCode = 0;
+    return;
+}
+
+if (commandLine.Command == "version")
+{
+    Console.WriteLine($"Tarven Server {ServerProductVersion.Current}");
+    Environment.ExitCode = 0;
+    return;
+}
+
+if (commandLine.Error is not null)
+{
+    Console.Error.WriteLine(commandLine.Error);
+    Environment.ExitCode = 2;
+    return;
+}
+
+if (commandLine.Command == "library")
+{
+    Environment.ExitCode = await LibraryCommandClient.RunAsync(commandLine, CancellationToken.None);
+    return;
+}
+
+if (commandLine.Command == "metadata")
+{
+    Environment.ExitCode = await MetadataCommandClient.RunAsync(commandLine, CancellationToken.None);
+    return;
+}
+
+if (commandLine.Command == "pairing")
+{
+    Environment.ExitCode = await PairingCommandClient.RunAsync(commandLine, CancellationToken.None);
+    return;
+}
+
+if (commandLine.Command == "server")
+{
+    Environment.ExitCode = await ServerIdentityCommandClient.RunAsync(
+        commandLine,
+        CancellationToken.None);
+    return;
+}
+
+if (commandLine.Command == "move")
+{
+    Environment.ExitCode = await ServerMoveCommandClient.RunAsync(commandLine, CancellationToken.None);
+    return;
+}
+
+if (commandLine.Command == "database")
+{
+    var configuration = new ConfigurationBuilder().Build();
+    var databaseRuntime = ServerRuntimeOptions.Resolve(configuration, args);
+    Environment.ExitCode = await DatabaseCommandClient.RunAsync(
+        commandLine,
+        databaseRuntime,
+        CancellationToken.None);
+    return;
+}
+
+var builder = WebApplication.CreateBuilder(args);
+LegacyNames.MapConfiguration(builder.Configuration);
+if (commandLine.Command != "run")
+{
+    // Keep stdout clean for machine-readable command output (e.g. setup-owner JSON) by routing
+    // framework logs such as EF Core migration warnings to stderr.
+    builder.Services.Configure<Microsoft.Extensions.Logging.Console.ConsoleLoggerOptions>(options =>
+        options.LogToStandardErrorThreshold = LogLevel.Trace);
+}
+var runtime = ServerRuntimeOptions.Resolve(builder.Configuration, args);
+
+PrivateFilePermissions.CreatePrivateDirectory(runtime.DataDirectory);
+using var instanceLock = runtime.HostParentProcessId is not null
+    ? await ServerInstanceLock.AcquireForHostAsync(runtime.DataDirectory, CancellationToken.None)
+    : appInstanceLock();
+// A data folder from before the rename to Tarven keeps aurelia.db until this server holds its lock.
+LegacyNames.AdoptDatabase(runtime.DataDirectory);
+await FullServerBackupService.RecoverInterruptedRestoreAsync(runtime, CancellationToken.None);
+// A restore asked for in a browser on a Linux package server, applied before anything opens the database.
+if (await FullServerBackupService.ApplyRequestedOnStartAsync(runtime, CancellationToken.None) is { } restored)
+    Console.WriteLine(restored == "completed" ? "Restored the server from a backup. Every device signs in again."
+        : "Restoring the server from a backup failed; the previous state stays.");
+runtime = ServerRuntimeOptions.Resolve(builder.Configuration, args);
+await new DatabaseBackupService(runtime).RecoverPendingRestoreAsync(CancellationToken.None);
+// A server that just moved here makes a certificate for this computer with its moved key.
+ServerMoveArrival.PrepareStart(runtime);
+using var tlsIdentity = ServerTlsIdentity.LoadOrCreate(runtime);
+var dataProtectionDirectory = Path.Combine(runtime.DataDirectory, "DataProtectionKeys");
+PrivateFilePermissions.CreatePrivateDirectory(dataProtectionDirectory);
+builder.WebHost.UseUrls(runtime.ListenUrl);
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = ServerRequestGuard.MaximumJsonBytes;
+    options.Limits.MaxRequestHeadersTotalSize = 16_384;
+    options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(15);
+    // A new TLS connection costs about 50 ms on macOS because the key lives in a keychain;
+    // idle client connections therefore stay open longer so they can be reused.
+    options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(10);
+    // A household needs a few dozen connections; the cap stops one device from holding
+    // thousands of idle connections open. The server name is not advertised.
+    options.Limits.MaxConcurrentConnections = 512;
+    options.AddServerHeader = false;
+});
+if (tlsIdentity.Certificate is not null)
+{
+    builder.WebHost.ConfigureKestrel(options =>
+        options.ConfigureHttpsDefaults(https =>
+            // Asked for each connection, so a certificate renewed while running is shown at once.
+            https.ServerCertificateSelector = (_, _) => tlsIdentity.Certificate));
+}
+// Every request would otherwise leave lines in the journal, all night while an app waits for changes.
+builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
+// Every database command at the default level would fill a Linux journal with hundreds of
+// thousands of lines an hour; warnings and errors still appear.
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
+if (commandLine.Command is "setup-owner" or "setup-browser")
+{
+    builder.Logging.SetMinimumLevel(LogLevel.Warning);
+    // A model design note, not a problem with this server; setup over SSH stays readable.
+    builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Model.Validation", LogLevel.Error);
+}
+
+var connectionString = SqliteConnections.ConnectionString(runtime.DatabasePath);
+
+builder.Services.AddSingleton(runtime);
+builder.Services.AddSingleton(tlsIdentity);
+builder.Services.AddSingleton<BootstrapSetupAuthorizer>();
+builder.Services.AddSingleton<BrowserSetup>();
+builder.Services.AddDataProtection()
+    .SetApplicationName("Aurelia.Server")
+    .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionDirectory));
+builder.Services.AddSingleton<DatabaseChangeSignal>();
+builder.Services.AddSingleton<DatabaseSaveSignal>();
+builder.Services.AddSingleton<DatabaseCommitSignal>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton<SecuritySettingsStore>();
+builder.Services.AddSingleton<SecurityAlertSignal>();
+builder.Services.AddSingleton<PasskeyService>();
+builder.Services.AddSingleton<SecurityLog>();
+builder.Services.AddHostedService(services => services.GetRequiredService<SecurityLog>());
+// Smart Home: events to webhooks, players' state and keys for Home Assistant (docs/AUTOMATION.md).
+builder.Services.AddSingleton<Tarven.Server.Services.PowerNowService>();
+builder.Services.AddSingleton<ServerPerformanceStore>();
+builder.Services.AddHostedService(services => services.GetRequiredService<ServerPerformanceStore>());
+builder.Services.AddSingleton<SlowQueryInterceptor>();
+builder.Services.AddDbContext<TarvenDbContext>((services, options) =>
+    // Single queries are the default; naming it keeps Entity Framework from warning about it at
+    // every start (queries that need a split say so with AsSplitQuery).
+    options.UseSqlite(connectionString, sqlite => sqlite.UseQuerySplittingBehavior(QuerySplittingBehavior.SingleQuery))
+        .AddInterceptors(services.GetRequiredService<DatabaseSaveSignal>(), services.GetRequiredService<DatabaseCommitSignal>(),
+            SqliteWriteMode.Interceptor, services.GetRequiredService<SlowQueryInterceptor>()));
+builder.Services.AddSingleton<TokenService>();
+builder.Services.AddSingleton<SessionActivityRecorder>();
+builder.Services.AddSingleton<DatabaseBackupService>();
+builder.Services.AddSingleton<FullServerBackupService>();
+// Moving to a new server (docs/SERVER_MOVE.md).
+builder.Services.AddSingleton<ServerMoveService>();
+builder.Services.AddSingleton<ServerMoveTransport>();
+builder.Services.AddSingleton<ServerMoveOptions>();
+builder.Services.AddSingleton<ServerMoveApplier>();
+builder.Services.AddSingleton<ServerMoveImportService>();
+builder.Services.AddScoped<LibraryRelocationService>();
+builder.Services.AddHostedService<ServerMoveArrivalReporter>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton(PlaybackTicketPolicy.Resolve(
+    builder.Environment.IsEnvironment("Testing"),
+    Environment.GetEnvironmentVariable("TARVEN_TEST_TICKET_LIFETIME_SECONDS")));
+builder.Services.AddScoped<AccountService>();
+builder.Services.AddScoped<ProfileService>();
+builder.Services.AddSingleton<ProfileSessionStore>();
+builder.Services.AddSingleton<ProfilePinAttemptGuard>();
+builder.Services.AddSingleton<DeviceAuthorizationGuard>();
+builder.Services.AddScoped<DeviceAuthorizationService>();
+builder.Services.AddSingleton<LocalOwnerPinRecovery>();
+builder.Services.AddSingleton<WebAppAssets>();
+builder.Services.AddScoped<LibraryAccessService>();
+builder.Services.AddSingleton<CatalogMutationGate>();
+builder.Services.AddSingleton<EditorArtworkStore>();
+builder.Services.AddSingleton<CollectionArtworkService>();
+builder.Services.AddScoped<MediaEditorService>();
+builder.Services.AddScoped<LibraryMutationService>();
+builder.Services.AddHostedService<LibraryCleanupWorker>();
+builder.Services.AddHostedService<BrowserSetupStarter>();
+builder.Services.AddSingleton<ServerConfigurationStore>();
+builder.Services.AddSingleton<CredentialAttemptGuard>();
+builder.Services.AddSingleton<PairingCodeAttemptGuard>();
+builder.Services.AddSingleton<ActiveStreamRegistry>();
+builder.Services.AddSingleton<LiveConversionService>();
+builder.Services.AddSingleton<Tarven.Server.Services.Hls.HlsSessionManager>();
+builder.Services.AddHostedService<Tarven.Server.Services.Hls.HlsSessionSweeper>();
+builder.Services.AddSingleton<ScrubPreviewService>();
+if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<ScrubPreviewService>());
+// An unexpected failure in an optional background service must never take down the whole server (audit SRV-BG-004).
+builder.Services.Configure<HostOptions>(options =>
+    options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore);
+builder.Services.AddSingleton<SegmentAudioReader>();
+builder.Services.AddSingleton<Tarven.Server.Services.Speech.SpeechModelStore>();
+builder.Services.AddSingleton<Tarven.Server.Services.Speech.ISpeechRecognizer, Tarven.Server.Services.Speech.WhisperRecognizer>();
+builder.Services.AddSingleton<Tarven.Server.Services.Speech.SpeechJobService>();
+if (!builder.Environment.IsEnvironment("Testing"))
+    builder.Services.AddHostedService(services => services.GetRequiredService<Tarven.Server.Services.Speech.SpeechJobService>());
+builder.Services.AddSingleton<SegmentDetectionService>();
+// Compares episodes' sound for intros and credits in the background; tests drive it explicitly.
+if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<SegmentDetectionService>());
+builder.Services.AddSingleton<Tarven.Server.Services.FileChecks.FileCheckService>();
+builder.Services.AddSingleton<Tarven.Server.Services.FileChecks.DriveHealthService>();
+// Reads every file and asks the drives in the background; tests drive both explicitly.
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddHostedService(services => services.GetRequiredService<Tarven.Server.Services.FileChecks.FileCheckService>());
+    builder.Services.AddHostedService(services => services.GetRequiredService<Tarven.Server.Services.FileChecks.DriveHealthService>());
+}
+builder.Services.AddSingleton<ServerSleepSignal>();
+builder.Services.AddSingleton<ServerUseClock>();
+builder.Services.AddSingleton<ServerWorkSignal>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<ServerWorkSignal>());
+builder.Services.AddSingleton(services => new ServerPowerSettingsStore(services.GetRequiredService<ServerRuntimeOptions>()));
+builder.Services.AddSingleton(services => new ServerUpdateStore(services.GetRequiredService<ServerRuntimeOptions>(), services.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton<LinuxServiceRestart>();
+builder.Services.AddHostedService<ServerSleepWorker>();
+builder.Services.AddHostedService<AppHostedIdleStop>();
+builder.Services.AddSingleton<AdministrationApprovalStore>();
+builder.Services.AddSingleton<ServerRequestGuard>();
+builder.Services.AddSingleton<NativeHostOperations>();
+builder.Services.AddSingleton<ServerDiagnosticsStore>();
+builder.Services.AddHostedService(services => services.GetRequiredService<ServerDiagnosticsStore>());
+builder.Services.AddSingleton<ServerReadinessService>();
+builder.Services.AddHostedService(services => services.GetRequiredService<ServerReadinessService>());
+builder.Services.AddScoped<LibraryService>();
+builder.Services.AddScoped<ImportPlanningService>();
+builder.Services.AddScoped<CatalogService>();
+builder.Services.AddScoped<PlaybackService>();
+builder.Services.AddScoped<ScreenTimeService>();
+builder.Services.AddSingleton<ScreenTimeEnforcer>();
+if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<ScreenTimeEnforcer>());
+builder.Services.AddScoped<PlaybackProgressService>();
+builder.Services.AddScoped<SceneNoteService>();
+builder.Services.AddScoped<MediaSegmentService>();
+builder.Services.AddScoped<MetadataService>();
+builder.Services.AddScoped<MetadataJobStore>();
+builder.Services.AddScoped<PresentationService>();
+builder.Services.AddScoped<WatchlistService>();
+builder.Services.AddScoped<LibraryStateService>();
+builder.Services.AddScoped<LibraryReachabilityService>();
+builder.Services.AddHostedService<LibraryReachabilityWorker>();
+builder.Services.AddScoped<SyncChangeService>();
+builder.Services.AddScoped<MediaSearchIndexService>();
+builder.Services.AddScoped<ServerHealthService>();
+builder.Services.AddScoped<WatchHistoryService>();
+builder.Services.AddScoped<LibraryHealthService>();
+builder.Services.AddSingleton<RemotePlaybackService>();
+builder.Services.AddSingleton<MetadataProviderSettingsStore>();
+builder.Services.AddSingleton<ArtworkStore>();
+builder.Services.AddSingleton<ArtworkVariantStore>();
+builder.Services.AddSingleton<WishPosterCache>();
+builder.Services.AddScoped<WishService>();
+builder.Services.AddScoped<PeopleService>();
+// Prepares common artwork widths in the background; tests drive it explicitly.
+if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService<ArtworkVariantWarmer>();
+if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService<QueryWarmer>();
+builder.Services.AddSingleton<MetadataJobScheduler>();
+builder.Services.AddHttpClient<ITmdbClient, TmdbClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Tarven/1.0");
+});
+builder.Services.AddSingleton<IMediaLibraryScanner, MediaLibraryScanner>();
+builder.Services.AddSingleton<LibraryScanScheduler>();
+builder.Services.AddHostedService<LibraryScanWorker>();
+builder.Services.AddHostedService<MetadataJobWorker>();
+builder.Services.AddHttpClient<IOpenSubtitlesClient, OpenSubtitlesClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Tarven v" + ServerProductVersion.Current);
+});
+builder.Services.AddSingleton<SubtitleProviderSettingsStore>();
+builder.Services.AddSingleton<DownloadedSubtitleStore>();
+builder.Services.AddSingleton<SubtitleQuota>();
+builder.Services.AddScoped<SubtitleDownloadService>();
+if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService<SubtitleAutoDownloader>();
+builder.Services.AddSingleton<ContentRatingRefresh>();
+if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<ContentRatingRefresh>());
+builder.Services.AddSingleton<CreditRefresh>();
+if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<CreditRefresh>());
+builder.Services.AddSingleton<KeywordRefresh>();
+if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<KeywordRefresh>());
+builder.Services.AddScoped<SuggestionService>();
+builder.Services.AddHostedService<LibraryMonitoringService>();
+builder.Services.AddHostedService<MaintenanceService>();
+builder.Services.AddHostedService<BonjourAdvertisementService>();
+builder.Services.AddHostedService<ParentProcessMonitor>();
+builder.Services.AddScoped<IPasswordHasher<ServerUser>, PasswordHasher<ServerUser>>();
+builder.Services.Configure<PasswordHasherOptions>(options =>
+{
+    options.CompatibilityMode = PasswordHasherCompatibilityMode.IdentityV3;
+    options.IterationCount = 210_000;
+});
+
+builder.Services
+    .AddAuthentication(DeviceTokenAuthenticationHandler.SchemeName)
+    .AddScheme<AuthenticationSchemeOptions, DeviceTokenAuthenticationHandler>(
+        DeviceTokenAuthenticationHandler.SchemeName,
+        _ => { });
+builder.Services.AddAuthorizationBuilder()
+    .SetDefaultPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser().RequireClaim("tarven_credential_kind", "profile").Build())
+    .AddPolicy("TrustedDevice", policy => policy.RequireAuthenticatedUser().RequireClaim("tarven_credential_kind", "device"))
+    .AddPolicy("Owner", policy => policy.RequireClaim("tarven_credential_kind", "profile").RequireRole(UserRole.Owner.ToString()))
+    .AddPolicy("Administrator", policy => policy.RequireClaim("tarven_credential_kind", "profile").RequireRole(
+        UserRole.Owner.ToString(),
+        UserRole.Admin.ToString()));
+
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.Converters.Add(
+        new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false));
+});
+
+// Library lists compress well and travel over Wi-Fi to the TV. Only GET catalog
+// responses are compressed: they never contain credentials (no BREACH exposure),
+// and media streams keep their exact byte ranges.
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.MimeTypes = ["application/json"];
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options => options.Level = CompressionLevel.Fastest);
+builder.Services.Configure<GzipCompressionProviderOptions>(options => options.Level = CompressionLevel.Fastest);
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, token) =>
+    {
+        context.HttpContext.Response.Headers.RetryAfter = "60";
+        await context.HttpContext.Response.WriteAsJsonAsync(new ApiProblem("rate_limited", "Too many requests. Try again shortly."), token);
+    };
+    options.AddPolicy("authentication", context => RateLimitPartition.GetFixedWindowLimiter(
+        ServerRequestGuard.AuthenticationPartitionKey(context),
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true,
+        }));
+    // Between two servers during a move: a handful of calls per move; the code's own five tries count separately.
+    options.AddPolicy("move", context => RateLimitPartition.GetFixedWindowLimiter(
+        ServerRequestGuard.AddressKey(context.Connection.RemoteIpAddress),
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 20,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true,
+        }));
+    options.AddPolicy("pairing", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.Identity?.Name ?? "anonymous",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 5,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true,
+        }));
+});
+
+var app = builder.Build();
+// Long polling and active streams must not hold the old database instance open
+// for the full HTTP shutdown timeout after the native helper disappears.
+app.Use((context, next) => ServerShutdownRequest.RunAsync(context, next, app.Lifetime.ApplicationStopping));
+app.Use((context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        SecurityHeaders.Apply(context.Response.Headers);
+        return Task.CompletedTask;
+    });
+    return next(context);
+});
+HostReadinessSignal.Register(
+    app.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>(),
+    Console.Out,
+    Environment.GetEnvironmentVariable(HostReadinessSignal.EnvironmentVariableName));
+app.Use(async (context, next) =>
+{
+    if (!context.RequestServices.GetRequiredService<ServerRequestGuard>().Admit(
+        context.Connection.RemoteIpAddress,
+        ServerRequestGuard.IsPreviewStream(context.Request),
+        ServerRequestGuard.IsUserStateWrite(context.Request)))
+    {
+        context.Response.StatusCode = 429;
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("request_rate_limited", "warning", status: 429);
+        context.Response.Headers.RetryAfter = "60";
+        await context.Response.WriteAsJsonAsync(new ApiProblem("rate_limited", "Too many requests. Try again shortly."));
+        return;
+    }
+    var networks = context.RequestServices.GetRequiredService<ServerConfigurationStore>().Current.AllowedNetworks;
+    if (!ServerRequestGuard.NetworkAllowed(context.Connection.RemoteIpAddress, networks))
+    {
+        context.Response.StatusCode = 403;
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("network_access_rejected", "warning", status: 403);
+        // Say why, so a device can tell a network setting from a missing permission or an outage.
+        await context.Response.WriteAsJsonAsync(new ApiProblem("network_not_allowed",
+            "This device's network address is not allowed by the server's network settings."));
+        return;
+    }
+    if (!ServerRequestGuard.HostAllowed(context.Request))
+    {
+        context.Response.StatusCode = 403;
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("host_rejected", "warning", status: 403);
+        await context.Response.WriteAsJsonAsync(new ApiProblem("host_not_allowed",
+            "Without HTTPS, Tarven Server only answers on the server computer's own address."));
+        return;
+    }
+    var backupUpload = HttpMethods.IsPut(context.Request.Method) && ((context.Request.Path.Value ?? "").StartsWith("/api/v1/server/backups/uploads/", StringComparison.OrdinalIgnoreCase)
+        || context.Request.Path.Equals("/api/v1/setup/move/file", StringComparison.OrdinalIgnoreCase));
+    var requestPath = context.Request.Path.Value ?? string.Empty;
+    var editorPath = requestPath.Contains("/editor", StringComparison.Ordinal);
+    var collectionArtworkUpload = HttpMethods.IsPost(context.Request.Method)
+        && requestPath.StartsWith("/api/v1/collections/", StringComparison.OrdinalIgnoreCase)
+        && requestPath.Contains("/artwork/", StringComparison.OrdinalIgnoreCase);
+    var imageUpload = (editorPath && HttpMethods.IsPost(context.Request.Method) && requestPath.EndsWith("/uploads", StringComparison.Ordinal))
+        || collectionArtworkUpload;
+    var photoUpload = HttpMethods.IsPut(context.Request.Method) && (context.Request.Path.Value ?? "").EndsWith("/picture/photo", StringComparison.OrdinalIgnoreCase);
+    var maximumBytes = backupUpload ? EncryptedBackupContainer.MaximumBytes : imageUpload ? EditorArtworkStore.MaximumUploadBytes
+        : photoUpload ? ProfilePictures.MaximumUploadBytes
+        : SpeechSubtitleEndpoints.IsUpload(context.Request) ? SpeechSubtitleEndpoints.MaximumSubtitleBytes
+        : editorPath ? 1024 * 1024 : ServerRequestGuard.MaximumJsonBytes;
+    if (context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } feature)
+        feature.MaxRequestBodySize = maximumBytes;
+    if (context.Request.ContentLength > maximumBytes)
+    {
+        context.Response.StatusCode = 413;
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("request_too_large", "warning", status: 413);
+        await context.Response.WriteAsJsonAsync(new ApiProblem("request_too_large", "The request is larger than the server accepts."));
+        return;
+    }
+    if (ServerPerformanceStore.Measures(context.Request))
+    {
+        var clock = context.RequestServices.GetRequiredService<TimeProvider>();
+        var startedAt = clock.GetTimestamp();
+        try { await next(context); }
+        finally
+        {
+            if (ServerPerformanceStore.EndpointKey(context) is { } endpoint)
+                context.RequestServices.GetRequiredService<ServerPerformanceStore>().RecordRequest(endpoint,
+                    clock.GetElapsedTime(startedAt).TotalMilliseconds, context.Response.StatusCode,
+                    context.Items[ServerPerformanceStore.QueryCountItem] is long queries ? queries : 0);
+        }
+    }
+    else
+    {
+        await next(context);
+    }
+    if (context.Response.StatusCode >= 400 && context.Items["Tarven.FailureRecorded"] is not true)
+    {
+        var status = context.Response.StatusCode;
+        var code = status switch { 401 => "authentication_rejected", 403 => "access_rejected", 429 => "request_rate_limited", >= 500 => "request_failed", _ => "request_rejected" };
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record(code, status >= 500 ? "error" : "warning",
+            context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, status);
+    }
+});
+// A server that moved to another computer answers only what devices need to find it there.
+app.Use(ServerMoveGuard.InvokeAsync);
+app.UseAuthentication();
+app.UseRateLimiter();
+app.UseAuthorization();
+app.UseWhen(CatalogCompression.Applies, branch => branch.UseResponseCompression());
+app.Use(async (context, next) =>
+{
+    if (ServerUseClock.CountsAsUse(context)) context.RequestServices.GetRequiredService<ServerUseClock>().Record();
+    context.RequestServices.GetRequiredService<LibraryAccessService>().Bind(context);
+    try
+    {
+        ServerRequestGuard.RequireManagement(context, context.RequestServices.GetRequiredService<ProfileSessionStore>());
+        await ServerRequestGuard.RequireApprovalAsync(context, context.RequestServices.GetRequiredService<AdministrationApprovalStore>());
+        var securityChange = SecurityChangeClassifier.Classify(context.Request.Method, context.Request.Path.Value);
+        var securityTarget = securityChange is null ? null : await SecurityTargets.NameAsync(context, securityChange);
+        if (context.User.Identity?.IsAuthenticated == true && context.Request.Path.StartsWithSegments("/api/v1/streams"))
+        {
+            var limits = context.RequestServices.GetRequiredService<ServerConfigurationStore>().Current;
+            using var lease = context.RequestServices.GetRequiredService<ActiveStreamRegistry>().Enter(
+                context.User.RequireUserId(), context.User.RequireProfileSessionId(), limits.GlobalStreamLimit, limits.UserStreamLimit, context.RequestAborted,
+                preview: ServerRequestGuard.IsPreviewStream(context.Request));
+            context.RequestAborted = lease.Token;
+            context.Items["Tarven.StreamLease"] = lease;
+            await next(context);
+        }
+        else await next(context);
+        if (context.Response.StatusCode == StatusCodes.Status400BadRequest
+            && !context.Response.HasStarted
+            && string.IsNullOrEmpty(context.Response.ContentType)
+            && context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Items["Tarven.FailureRecorded"] = true;
+            await context.Response.WriteAsJsonAsync(new ApiProblem(
+                "invalid_request",
+                "The request is missing required parameters or contains invalid values."));
+        }
+        if (context.Items["Tarven.AdministrationApproved"] is true && context.Response.StatusCode < 400)
+            context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("owner_change_completed", "information", context.User.RequireUserId(), context.Response.StatusCode);
+        if (securityChange is not null && context.Response.StatusCode < 400 && context.User.Identity?.IsAuthenticated == true)
+            context.RequestServices.GetRequiredService<SecurityLog>().Record(context, securityChange.Kind, securityChange.Outcome,
+                securityTarget ?? (securityChange.Kind == "management_unlocked" ? "Server Password" : null),
+                securityChange.Kind == "profile_opened" ? securityChange.TargetId : null);
+    }
+    catch (ApiException exception) when (!context.Response.HasStarted)
+    {
+        // Expected proof handshakes and a closed administrative window are state
+        // transitions, not authentication attacks. Record the precise code once.
+        var severity = exception.Code is "approval_required" or "management_locked" or "management_unlock_superseded"
+            ? "information" : exception.StatusCode >= 500 ? "error" : "warning";
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record(exception.Code, severity, context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, exception.StatusCode);
+        context.Items["Tarven.FailureRecorded"] = true;
+        if (SecurityChangeClassifier.FailureKind(exception.Code) is { } failure)
+            context.RequestServices.GetRequiredService<SecurityLog>().Record(context, failure, SecurityLog.Failed,
+                SecurityTargets.Path(context.Request.Path.Value));
+        context.Response.StatusCode = exception.StatusCode;
+        if (exception.StatusCode == 429) context.Response.Headers.RetryAfter = exception.Code == "device_pairing_slow_down" ? "5" : "60";
+        else if (exception is PlaybackException && exception.StatusCode == StatusCodes.Status503ServiceUnavailable) context.Response.Headers.RetryAfter = "2";
+        await context.Response.WriteAsJsonAsync(new ApiProblem(exception.Code, exception.Message));
+    }
+    catch (InvalidDataException) when (!context.Response.HasStarted)
+    {
+        context.Response.StatusCode = 400;
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("invalid_server_data", "warning",
+            context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, 400);
+        context.Items["Tarven.FailureRecorded"] = true;
+        await context.Response.WriteAsJsonAsync(new ApiProblem("invalid_server_data", "The operation data could not be validated. Active server data was not replaced."));
+    }
+    // A request body that ends early or exceeds the limit is the device's request, not the
+    // server's storage: it is also an IOException, so it is answered before the storage case.
+    catch (BadHttpRequestException exception) when (!context.Response.HasStarted)
+    {
+        context.Response.StatusCode = exception.StatusCode;
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("request_body_rejected", "warning",
+            context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, exception.StatusCode);
+        context.Items["Tarven.FailureRecorded"] = true;
+        var problem = exception.StatusCode == StatusCodes.Status413PayloadTooLarge
+            ? new ApiProblem("request_too_large", "The request is larger than the server accepts.")
+            : exception.InnerException is JsonException
+                || exception.Message.Contains("parameter", StringComparison.OrdinalIgnoreCase)
+                || exception.Message.Contains("JSON", StringComparison.OrdinalIgnoreCase)
+                ? new ApiProblem("invalid_request", "The request is missing required parameters or contains invalid values.")
+                : new ApiProblem("request_incomplete", "The request did not arrive completely. Try again.");
+        await context.Response.WriteAsJsonAsync(problem);
+    }
+    catch (IOException) when (context.RequestAborted.IsCancellationRequested)
+    {
+        // The device went away mid-request; nothing failed on the server.
+    }
+    catch (Exception exception) when (!context.Response.HasStarted && ServerStorageErrors.IsStorageFull(exception,
+        context.RequestServices.GetRequiredService<ServerRuntimeOptions>().DataDirectory))
+    {
+        context.Response.StatusCode = StatusCodes.Status507InsufficientStorage;
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("storage_full", "error",
+            context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, StatusCodes.Status507InsufficientStorage);
+        context.Items["Tarven.FailureRecorded"] = true;
+        await context.Response.WriteAsJsonAsync(new ApiProblem("storage_full", "The server's storage drive is full. Free disk space and try again."));
+    }
+    catch (IOException) when (!context.Response.HasStarted && (context.Request.Path.StartsWithSegments("/api/v1/server")
+        || context.Request.Path.StartsWithSegments("/api/v1/media") || context.Request.Path.StartsWithSegments("/api/v1/libraries")))
+    {
+        context.Response.StatusCode = 507;
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("server_storage_operation_failed", "error",
+            context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, 507);
+        context.Items["Tarven.FailureRecorded"] = true;
+        await context.Response.WriteAsJsonAsync(new ApiProblem("server_storage_unavailable", "The storage operation failed. Check available disk space and permissions."));
+    }
+});
+app.MapTarvenApi();
+app.MapServerManagement();
+app.MapServerMove();
+app.MapServerReadiness();
+app.MapMediaEditing();
+app.MapImportPlanning();
+app.MapSceneNotes();
+app.MapProfiles();
+app.MapDeviceAuthorization();
+app.MapWebApp();
+app.MapLiveConversion();
+app.MapHls();
+app.MapScrubPreviews();
+app.MapMediaSegments();
+app.MapFileChecks();
+app.MapRemotePlayback();
+app.MapSubtitleDownloads();
+app.MapSpeechSubtitles();
+app.MapServerSpeech();
+app.MapWishes();
+app.MapSecurityEndpoints();
+
+try
+{
+    var hostReadinessNonce = Environment.GetEnvironmentVariable(HostReadinessSignal.EnvironmentVariableName);
+    if (commandLine.Command == "run")
+    {
+        HostReadinessSignal.SignalMigrating(Console.Out, hostReadinessNonce);
+    }
+    await DatabaseInitializer.InitializeAsync(app.Services, CancellationToken.None);
+
+    if (runtime.LanAccessEnabled && commandLine.Command == "run")
+    {
+        // Without an owner the network only reaches what anyone may see, and the browser setup,
+        // which needs the one-time code from this computer (BrowserSetup).
+        await using var readinessScope = app.Services.CreateAsyncScope();
+        var database = readinessScope.ServiceProvider.GetRequiredService<TarvenDbContext>();
+        if (!await database.Users.AnyAsync())
+            Console.WriteLine("This server has no owner yet. Set it up in a browser with the setup code: sudo tarven setup --browser");
+    }
+
+    if (commandLine.Command == "setup-browser")
+    {
+        // Turns on network access before there is an owner, so a browser on another computer can
+        // set the server up with the code only this computer shows.
+        await using var scope = app.Services.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<TarvenDbContext>();
+        if (await database.Users.AnyAsync())
+        {
+            Console.Error.WriteLine("This server already has an owner. Connect devices with: tarven pair");
+            Environment.ExitCode = 1;
+            return;
+        }
+        var settings = scope.ServiceProvider.GetRequiredService<ServerConfigurationStore>();
+        var name = commandLine.Option("--server-name")?.Trim();
+        settings.Update(settings.Current with
+        {
+            LanAccessEnabled = true,
+            ServerName = string.IsNullOrEmpty(name) ? settings.Current.ServerName : name,
+        }, allowNetworkChange: true);
+        Console.WriteLine("Network access starts with the server, ready to be set up in a browser.");
+        return;
+    }
+
+    if (commandLine.Command == "setup-owner")
+    {
+        if (string.IsNullOrWhiteSpace(commandLine.Username))
+        {
+            Console.Error.WriteLine("setup-owner requires --username.");
+            Environment.ExitCode = 2;
+            return;
+        }
+
+        await using var scope = app.Services.CreateAsyncScope();
+        var accounts = scope.ServiceProvider.GetRequiredService<AccountService>();
+        try
+        {
+            // --headless sets up a server without a screen over SSH: the password is typed twice,
+            // network access is turned on for the next start and no session token is printed.
+            var headless = commandLine.HasFlag("--headless");
+            var password = commandLine.ReadPassword();
+            if (headless && !commandLine.PasswordFromStandardInput && !Console.IsInputRedirected
+                && commandLine.ReadSecret("Repeat the Server Password: ") != password)
+            {
+                Console.Error.WriteLine("The passwords do not match. Nothing was changed.");
+                Environment.ExitCode = 1;
+                return;
+            }
+
+            var response = await accounts.SetupOwnerAsync(
+                new SetupOwnerRequest(
+                    commandLine.Username,
+                    password,
+                    commandLine.DeviceName),
+                CancellationToken.None);
+            if (headless)
+            {
+                // Nobody keeps the setup session's token, so it is revoked at once.
+                await accounts.RevokeOwnDeviceAsync(response.SessionId, CancellationToken.None);
+                var settings = scope.ServiceProvider.GetRequiredService<ServerConfigurationStore>();
+                var name = commandLine.Option("--server-name")?.Trim();
+                settings.Update(settings.Current with
+                {
+                    LanAccessEnabled = true,
+                    ServerName = string.IsNullOrEmpty(name) ? settings.Current.ServerName : name,
+                }, allowNetworkChange: true);
+                Console.WriteLine($"{response.User.Username} owns this server. Network access starts with the server.");
+                return;
+            }
+
+            Console.WriteLine(JsonSerializer.Serialize(response, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                Converters =
+                {
+                    new JsonStringEnumConverter(
+                        JsonNamingPolicy.CamelCase,
+                        allowIntegerValues: false),
+                },
+            }));
+        }
+        catch (AccountException exception)
+        {
+            Console.Error.WriteLine($"{exception.Code}: {exception.Message}");
+            Environment.ExitCode = 1;
+        }
+
+        return;
+    }
+
+    if (runtime.LanAccessEnabled)
+    {
+        Console.WriteLine($"Tarven HTTPS is available on LAN port {runtime.LanHttpsPort}.");
+        Console.WriteLine($"Verification fingerprint: {tlsIdentity.DisplayFingerprint}");
+    }
+
+    try
+    {
+        await app.RunAsync();
+    }
+    catch (Exception exception) when (HostReadinessSignal.IsAddressInUse(exception))
+    {
+        HostReadinessSignal.SignalPortInUse(
+            Console.Out,
+            hostReadinessNonce,
+            runtime.LanAccessEnabled ? runtime.LanHttpsPort : null);
+        Console.Error.WriteLine($"Tarven Server could not bind its port because another program is already using it: {exception.Message}");
+        Environment.ExitCode = HostReadinessSignal.PortInUseExitCode;
+        return;
+    }
+}
+finally
+{
+    instanceLock?.Dispose();
+}
+
+ServerInstanceLock? appInstanceLock() => builder.Environment.IsEnvironment("Testing")
+    ? null
+    : ServerInstanceLock.Acquire(runtime.DataDirectory);
+
+public partial class Program
+{
+}

@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 
 # Historical synthetic evidence, never a release/install/rollback workflow.
-# Usage: zsh scripts/test-playback-historical.sh /path/to/signed/current/Aurelia.app [120]
+# Usage: zsh scripts/test-playback-historical.sh /path/to/signed/current/Tarven.app [120]
 # Each exact archived client runs sequentially against its matching archived
 # server and an independent owned database, using the same generated fixtures.
 repository_root=${0:A:h:h}
@@ -31,9 +31,9 @@ if [[ "${1:-}" == --run-version ]]; then
       || ( "$expected_version" == 1.4.1 && "$reference" == "$reference_141" )) \
     && -f "$EVIDENCE_RUN_ROOT/fixtures.private.json" \
     && -f "$EVIDENCE_RUN_ROOT/fixtures-before.private.json" \
-    && -n "${AURELIA_SIGNING_IDENTITY:-}" \
-    && "${AURELIA_SIGNING_IDENTITY:-}" != *[^A-F0-9]* \
-    && ${#AURELIA_SIGNING_IDENTITY} == 40 ]] \
+    && -n "${TARVEN_SIGNING_IDENTITY:-}" \
+    && "${TARVEN_SIGNING_IDENTITY:-}" != *[^A-F0-9]* \
+    && ${#TARVEN_SIGNING_IDENTITY} == 40 ]] \
     || { evidence_fail invalid_owned_version_configuration; exit 2; }
   run_id=${EVIDENCE_RUN_ROOT:t}
   version_root="$EVIDENCE_RUN_ROOT/$expected_version"
@@ -44,7 +44,7 @@ if [[ "${1:-}" == --run-version ]]; then
   client_state="$version_root/ClientState"
   derived_data="$version_root/DerivedData"
   result="$version_root/Playback-Historical-$expected_version.xcresult"
-  result_prefix="Aurelia-Playback-Historical-$expected_version-$run_id"
+  result_prefix="Tarven-Playback-Historical-$expected_version-$run_id"
   final_result="$other_root/Test Results/$result_prefix.xcresult"
   final_summary="$other_root/Test Results/$result_prefix.json"
   server_pid=''
@@ -131,30 +131,30 @@ if [[ "${1:-}" == --run-version ]]; then
   [[ "$archived_version" == "$expected_version" ]] \
     || { evidence_fail archival_server_version_mismatch; exit 1; }
   /usr/bin/ditto "$repository_root/tools/macos/PlaybackHistoricalBaselineTests.swift" \
-    "$source_root/clients/macos/AureliaTests/PlaybackHistoricalBaselineTests.swift"
+    "$source_root/clients/macos/TarvenTests/PlaybackHistoricalBaselineTests.swift"
 
   last_phase='matching archival server publish'
   version_status='build_failed'
   # Explicit MSBuild properties work on both historical props versions; using
   # only the environment variable would leak 1.4.0 outputs into a shared path.
-  (cd "$source_root" && "$DOTNET_BIN" publish src/Aurelia.Server/Aurelia.Server.csproj \
+  (cd "$source_root" && "$DOTNET_BIN" publish src/Tarven.Server/Tarven.Server.csproj \
     --configuration Release --runtime "$runtime" --self-contained true \
-    -p:AureliaBuildRoot="$version_root/DotnetServerBuild" \
+    -p:TarvenBuildRoot="$version_root/DotnetServerBuild" \
     -p:TreatWarningsAsErrors=true --output "$server_publish") \
     >"$version_root/server-build.private.log" 2>&1
-  server="$server_publish/Aurelia.Server"
+  server="$server_publish/Tarven.Server"
   [[ -x "$server" ]] || { evidence_fail missing_archival_server; exit 1; }
   last_phase='archival server native signature'
   while IFS= read -r -d '' binary; do
     if [[ "$(file -b "$binary")" == *Mach-O* && "$binary" != "$server" ]]; then
-      /usr/bin/codesign --force --sign "$AURELIA_SIGNING_IDENTITY" \
+      /usr/bin/codesign --force --sign "$TARVEN_SIGNING_IDENTITY" \
         --options runtime --timestamp=none "$binary" \
         >>"$version_root/server-signing.private.log" 2>&1
       /usr/bin/codesign --verify --strict "$binary" \
         >>"$version_root/server-signing.private.log" 2>&1
     fi
   done < <(find "$server_publish" -type f -print0)
-  /usr/bin/codesign --force --sign "$AURELIA_SIGNING_IDENTITY" \
+  /usr/bin/codesign --force --sign "$TARVEN_SIGNING_IDENTITY" \
     --options runtime --timestamp=none \
     --entitlements "$source_root/clients/macos/Configuration/ServerRuntime.entitlements" "$server" \
     >>"$version_root/server-signing.private.log" 2>&1
@@ -165,16 +165,16 @@ if [[ "${1:-}" == --run-version ]]; then
   (cd "$source_root" && "$DOTNET_BIN" publish \
     "$repository_root/tools/macos/PlaybackEvidenceProvisioner/PlaybackEvidenceProvisioner.csproj" \
     --configuration Release --runtime "$runtime" --self-contained false \
-    -p:AureliaRepositoryRoot="$source_root" \
-    -p:AureliaBuildRoot="$version_root/DotnetProvisionerBuild" \
+    -p:TarvenRepositoryRoot="$source_root" \
+    -p:TarvenBuildRoot="$version_root/DotnetProvisionerBuild" \
     -p:TreatWarningsAsErrors=true --output "$provisioner_publish") \
     >"$version_root/provisioner-build.private.log" 2>&1
 
   last_phase='isolated owner setup'
   version_status='setup_failed'
-  export AURELIA_EVIDENCE_OWNER_PASSWORD="historical-$(uuidgen)-synthetic-only!"
-  print -r -- "$AURELIA_EVIDENCE_OWNER_PASSWORD" \
-    | AURELIA_LAN_ENABLED=false ASPNETCORE_ENVIRONMENT=Production \
+  export TARVEN_EVIDENCE_OWNER_PASSWORD="historical-$(uuidgen)-synthetic-only!"
+  print -r -- "$TARVEN_EVIDENCE_OWNER_PASSWORD" \
+    | TARVEN_LAN_ENABLED=false ASPNETCORE_ENVIRONMENT=Production \
       "$server" setup-owner --data-dir "$server_data" --username historical-owner \
         --device-name 'Historical Synthetic Playback Evidence' --password-stdin \
         >"$version_root/owner-output.private" 2>"$version_root/setup-errors.private"
@@ -183,19 +183,19 @@ if [[ "${1:-}" == --run-version ]]; then
     "$version_root/authentication.private.json" >/dev/null
   last_phase='offline synthetic catalog provisioning'
   "$DOTNET_BIN" "$provisioner_publish/PlaybackEvidenceProvisioner.dll" synthetic \
-    "$server_data/aurelia.db" "$EVIDENCE_RUN_ROOT/fixtures.private.json" \
+    "$server_data/tarven.db" "$EVIDENCE_RUN_ROOT/fixtures.private.json" \
     >"$version_root/provisioner-output.private" 2>&1
   http_port=$(ruby -rsocket -e 's = TCPServer.new("127.0.0.1", 0); puts s.addr[1]; s.close')
   https_port=$(ruby -rsocket -e 's = TCPServer.new("127.0.0.1", 0); puts s.addr[1]; s.close')
   [[ "$http_port" != "$https_port" ]] \
     || { evidence_fail isolated_test_ports_collided; exit 1; }
   jq -n --argjson port "$https_port" \
-    '{version:2,serverName:"Aurelia Historical Baseline",lanAccessEnabled:true,lanHttpsPort:$port,
+    '{version:2,serverName:"Tarven Historical Baseline",lanAccessEnabled:true,lanHttpsPort:$port,
       revision:1,bonjourEnabled:false,monitoringEnabled:false,automaticBackupsEnabled:false}' \
     >"$server_data/server-settings.json"
   last_phase='owned archival HTTPS server readiness'
-  AURELIA_HOST_PARENT_PID=$$ ASPNETCORE_ENVIRONMENT=Production \
-    AURELIA_SERVER_NAME='Aurelia Historical Baseline' Logging__LogLevel__Default=Warning \
+  TARVEN_HOST_PARENT_PID=$$ ASPNETCORE_ENVIRONMENT=Production \
+    TARVEN_SERVER_NAME='Tarven Historical Baseline' Logging__LogLevel__Default=Warning \
     "$server" --data-dir "$server_data" --urls "http://127.0.0.1:$http_port" \
       --lan --lan-port "$https_port" >"$version_root/server-output.private" 2>&1 &
   server_pid=$!
@@ -209,7 +209,7 @@ if [[ "${1:-}" == --run-version ]]; then
     sleep 0.2
   done
   jq -e --arg version "$expected_version" \
-    '.isSetup == true and .version == $version and .name == "Aurelia Historical Baseline"' \
+    '.isSetup == true and .version == $version and .name == "Tarven Historical Baseline"' \
     "$version_root/server-info.private.json" >/dev/null
   fingerprint=$(openssl x509 -in "$server_data/server-certificate.pem" -pubkey -noout \
     | openssl pkey -pubin -outform DER | shasum -a 256 | awk '{print toupper($1)}')
@@ -223,17 +223,17 @@ if [[ "${1:-}" == --run-version ]]; then
   # override conflicts with that mode; verify the actual leaf before launch.
   test_build_settings=(ENABLE_TESTABILITY=YES SWIFT_TREAT_WARNINGS_AS_ERRORS=YES CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES)
   if [[ "$expected_version" == 1.4.1 ]]; then
-    test_build_settings+=('SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) AURELIA_BASELINE_REVISIONED_PROGRESS')
+    test_build_settings+=('SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) TARVEN_BASELINE_REVISIONED_PROGRESS')
   fi
   DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
-    -project "$source_root/clients/macos/Aurelia.xcodeproj" -scheme Aurelia \
+    -project "$source_root/clients/macos/Tarven.xcodeproj" -scheme Tarven \
     -configuration Debug -destination "platform=macOS,arch=$architecture" \
     -derivedDataPath "$derived_data" -enableCodeCoverage NO \
     "${test_build_settings[@]}" build-for-testing >"$version_root/xcodebuild.private.log" 2>&1 &
   EVIDENCE_TOOL_PID=$!
   wait "$EVIDENCE_TOOL_PID"
   EVIDENCE_TOOL_PID=''
-  test_host="$derived_data/Build/Products/Debug/Aurelia.app"
+  test_host="$derived_data/Build/Products/Debug/Tarven.app"
   evidence_copy_test_vlc "$test_host" "$derived_data/Build/Products/Debug/VLCKit.framework"
   [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$test_host/Contents/Info.plist")" == "$expected_version" ]] \
     || { evidence_fail archival_client_version_mismatch; exit 1; }
@@ -246,29 +246,29 @@ if [[ "${1:-}" == --run-version ]]; then
 
   last_phase='real historical playback XCTest baseline'
   version_status='test_failed'
-  export TEST_RUNNER_AURELIA_UI_TEST_MODE=playback-evidence
-  export TEST_RUNNER_AURELIA_BASELINE_OWNED_TEST_STATE=YES
+  export TEST_RUNNER_TARVEN_UI_TEST_MODE=playback-evidence
+  export TEST_RUNNER_TARVEN_BASELINE_OWNED_TEST_STATE=YES
   # The historical AppModel's existing fail-closed preflight guard rejects this
   # TestRuns location before reading saved profile/host settings. The baseline
   # constructs the real API/controller itself; this does not enable mock APIs.
-  export TEST_RUNNER_AURELIA_PREFLIGHT_TEST=1
-  export TEST_RUNNER_AURELIA_DATA_DIR="$server_data"
-  export TEST_RUNNER_AURELIA_BASELINE_SERVER_URL="https://127.0.0.1:$https_port"
-  export TEST_RUNNER_AURELIA_BASELINE_FINGERPRINT="$fingerprint"
-  export TEST_RUNNER_AURELIA_BASELINE_AUTH="$(<"$version_root/authentication.private.json")"
-  export TEST_RUNNER_AURELIA_BASELINE_FIXTURES="$(jq -c 'map({format,mediaId})' "$EVIDENCE_RUN_ROOT/fixtures.private.json")"
-  export TEST_RUNNER_AURELIA_BASELINE_RUN_ROOT="$client_state"
-  export TEST_RUNNER_AURELIA_BASELINE_EXPECTED_SERVER_VERSION="$expected_version"
-  export TEST_RUNNER_AURELIA_BASELINE_MINIMUM_SECONDS="$minimum_seconds"
+  export TEST_RUNNER_TARVEN_PREFLIGHT_TEST=1
+  export TEST_RUNNER_TARVEN_DATA_DIR="$server_data"
+  export TEST_RUNNER_TARVEN_BASELINE_SERVER_URL="https://127.0.0.1:$https_port"
+  export TEST_RUNNER_TARVEN_BASELINE_FINGERPRINT="$fingerprint"
+  export TEST_RUNNER_TARVEN_BASELINE_AUTH="$(<"$version_root/authentication.private.json")"
+  export TEST_RUNNER_TARVEN_BASELINE_FIXTURES="$(jq -c 'map({format,mediaId})' "$EVIDENCE_RUN_ROOT/fixtures.private.json")"
+  export TEST_RUNNER_TARVEN_BASELINE_RUN_ROOT="$client_state"
+  export TEST_RUNNER_TARVEN_BASELINE_EXPECTED_SERVER_VERSION="$expected_version"
+  export TEST_RUNNER_TARVEN_BASELINE_MINIMUM_SECONDS="$minimum_seconds"
   test_attempted=true
   set +e
   DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
-    -project "$source_root/clients/macos/Aurelia.xcodeproj" -scheme Aurelia \
+    -project "$source_root/clients/macos/Tarven.xcodeproj" -scheme Tarven \
     -configuration Debug -destination "platform=macOS,arch=$architecture" \
     -derivedDataPath "$derived_data" -resultBundlePath "$result" \
     -enableCodeCoverage NO -parallel-testing-enabled NO \
     -test-timeouts-enabled YES -maximum-test-execution-time-allowance "$((minimum_seconds * 3 + 360))" \
-    -only-testing:AureliaTests/PlaybackHistoricalBaselineTests \
+    -only-testing:TarvenTests/PlaybackHistoricalBaselineTests \
     "${test_build_settings[@]}" test-without-building >>"$version_root/xcodebuild.private.log" 2>&1 &
   EVIDENCE_TOOL_PID=$!
   wait "$EVIDENCE_TOOL_PID"
@@ -307,7 +307,7 @@ candidate=${candidate:A}
 [[ -x "$DOTNET_BIN" ]] || { evidence_fail pinned_dotnet_runtime_unavailable; exit 2; }
 git -C "$repository_root" cat-file -e "$reference_140^{commit}"
 git -C "$repository_root" cat-file -e "$reference_141^{commit}"
-runtime_parent="$HOME/Library/Caches/Aurelia/TestRuns"
+runtime_parent="$HOME/Library/Caches/Tarven/TestRuns"
 mkdir -p "$runtime_parent" "$other_root/Test Results" "$other_root/Logs"
 EVIDENCE_RUN_ROOT=$(mktemp -d "$runtime_parent/playback-evidence-historical-XXXXXXXX")
 export EVIDENCE_RUN_ROOT
@@ -316,7 +316,7 @@ last_phase='configuration'
 comparison_failed=false
 EVIDENCE_FORCED_SHUTDOWN=false
 EVIDENCE_WRAPPER_CHILD_PID=''
-final_comparison="$other_root/Test Results/Aurelia-Playback-Historical-Comparison-$run_id.json"
+final_comparison="$other_root/Test Results/Tarven-Playback-Historical-Comparison-$run_id.json"
 
 finish_comparison() {
   local exit_code=$? metadata_unchanged=false preservation_failed=false
@@ -340,7 +340,7 @@ finish_comparison() {
   [[ "$preservation_failed" == false ]] || exit_code=1
   version_summaries=()
   for version in 1.4.0 1.4.1; do
-    version_summary="$other_root/Test Results/Aurelia-Playback-Historical-$version-$run_id.json"
+    version_summary="$other_root/Test Results/Tarven-Playback-Historical-$version-$run_id.json"
     [[ ! -f "$version_summary" ]] || version_summaries+=("$version_summary")
   done
   if (( ${#version_summaries} > 0 )); then
@@ -369,15 +369,15 @@ trap finish_comparison EXIT
 trap 'exit 130' INT TERM
 
 last_phase='original signing identity resolution'
-AURELIA_SIGNING_IDENTITY=$(evidence_signing_identity "$candidate" "$EVIDENCE_RUN_ROOT")
-export AURELIA_SIGNING_IDENTITY
+TARVEN_SIGNING_IDENTITY=$(evidence_signing_identity "$candidate" "$EVIDENCE_RUN_ROOT")
+export TARVEN_SIGNING_IDENTITY
 last_phase='one shared synthetic fixture generation'
 mkdir -p "$EVIDENCE_RUN_ROOT/Fixtures"
 DEVELOPER_DIR="$developer_dir" xcrun --sdk macosx swiftc \
   -swift-version 6 -target "$architecture-apple-macos26.0" \
   -warnings-as-errors -parse-as-library \
   "$repository_root/tools/macos/FullChainFixtureGenerator.swift" \
-  "$repository_root/clients/macos/AureliaTests/FullChainSyntheticMedia.swift" \
+  "$repository_root/clients/macos/TarvenTests/FullChainSyntheticMedia.swift" \
   -o "$EVIDENCE_RUN_ROOT/FullChainFixtureGenerator" \
   >"$EVIDENCE_RUN_ROOT/generator-build.private.log" 2>&1
 "$EVIDENCE_RUN_ROOT/FullChainFixtureGenerator" "$EVIDENCE_RUN_ROOT/Fixtures" \

@@ -1,7 +1,7 @@
 # Moving to a new server
 
-Aurelia can move a whole server to another computer: a Linux server to a new Linux server, or
-between a Linux server and the server in Aurelia for Mac or Aurelia for Linux. Titles, metadata,
+Tarven can move a whole server to another computer: a Linux server to a new Linux server, or
+between a Linux server and the server in Tarven for Mac or Tarven for Linux. Titles, metadata,
 artwork, progress, favorites, collections, profiles, settings, the server's identity and every
 device's sign-in come along. Media files are never copied or changed; on the new computer each
 storage location is pointed at the folder where the same files are now.
@@ -14,26 +14,26 @@ storage location is pointed at the folder where the same files are now.
      one use).
    - **Moving file:** the old server writes an encrypted moving file protected by a passphrase,
      for a USB stick or a network share.
-2. Set up the new server (browser or `sudo aurelia setup` on Linux, **Set Up This Mac** on a Mac,
-   hosting in the Linux app) and choose **Move from another Aurelia server**. Pick the old server
+2. Set up the new server (browser or `sudo tarven setup` on Linux, **Set Up This Mac** on a Mac,
+   hosting in the Linux app) and choose **Move from another Tarven server**. Pick the old server
    from the list (or type its address) and enter the move code, or choose the moving file and type
    its passphrase.
-3. For each storage location Aurelia suggests the folder on the new computer that holds the same
+3. For each storage location Tarven suggests the folder on the new computer that holds the same
    files ("412 of 415 sample files found"). Confirm it, choose another folder, or choose **Later**:
    the location then stays offline with its titles until **Storage Location Moved…** points it at
    the new folder.
 4. The new server starts with the old one's identity. The old server stops offering itself on the
    network and tells devices where the server went; devices stay signed in and switch on their own.
-   **Undo Move** on the old server (or `sudo aurelia move undo`) brings it back; turn the new one
+   **Undo Move** on the old server (or `sudo tarven move undo`) brings it back; turn the new one
    off first, two copies of the same server must never run at once.
 
 Browsers reach the new server at its new address and sign in once there: their sign-in belongs to
 the address.
 
-On a Linux server without a screen the same works over SSH: `aurelia move code` or
-`aurelia move export FILE` on the old server (as its owner), `sudo aurelia setup --move` on the new
+On a Linux server without a screen the same works over SSH: `tarven move code` or
+`tarven move export FILE` on the old server (as its owner), `sudo tarven setup --move` on the new
 one (it asks for the address and code, or the file and its passphrase, and shows the suggested
-folders to confirm), `aurelia move status` and `sudo aurelia move undo` on the old one again.
+folders to confirm), `tarven move status` and `sudo tarven move undo` on the old one again.
 
 ## Protocol
 
@@ -41,7 +41,7 @@ All bodies are JSON unless stated. Error bodies use the usual `{ "code", "messag
 
 ### On the old server (Owner session, Server Password confirmation like other owner operations)
 
-`POST` and `DELETE /api/v1/server/move` and `POST …/mark-moved` need an `X-Aurelia-Approval` grant
+`POST` and `DELETE /api/v1/server/move` and `POST …/mark-moved` need an `X-Tarven-Approval` grant
 (`POST /api/v1/management/approval` or `/api/v1/server/approval`), like a restore.
 
 - `POST /api/v1/server/move` `{ "method": "network" }` →
@@ -100,12 +100,12 @@ other). `move.json` is never restored as state.
 ### On the new server while it has no owner
 
 Allowed only before setup finished (otherwise 409 `server_already_setup`), over HTTPS or on this
-computer, with the setup code the browser setup uses (header `X-Aurelia-Setup-Code`; a wrong one is
-403 `setup_code_invalid` and counts like a wrong code in the browser setup). App hosts (Aurelia for
+computer, with the setup code the browser setup uses (header `X-Tarven-Setup-Code`; a wrong one is
+403 `setup_code_invalid` and counts like a wrong code in the browser setup). App hosts (Tarven for
 Mac and for Linux hosting their own server) use the authority they already use for
-`POST /api/v1/setup/owner`: the header `X-Aurelia-Bootstrap-Token` with the token they pass to the
-server in `AURELIA_BOOTSTRAP_TOKEN` at start, from loopback only (otherwise 403
-`bootstrap_required`). Move calls never use the token up. `sudo aurelia setup --move` reads the
+`POST /api/v1/setup/owner`: the header `X-Tarven-Bootstrap-Token` with the token they pass to the
+server in `TARVEN_BOOTSTRAP_TOKEN` at start, from loopback only (otherwise 403
+`bootstrap_required`). Move calls never use the token up. `sudo tarven setup --move` reads the
 setup code from the server's data folder as root.
 
 - `POST /api/v1/setup/move/network` `{ "address", "code" }` asks the old server's hello first, then
@@ -137,7 +137,7 @@ setup code from the server's data folder as root.
 
 - `GET /api/v1/libraries/{id}/relocate/suggestions` → `{ "sampled", "suggestions": [{ "path", "matched" }] }`.
 - `POST /api/v1/libraries/{id}/relocate/preview` `{ "path" }` → `{ "sampled", "matched" }`.
-- `POST /api/v1/libraries/{id}/relocate` `{ "path", "force"?: bool }` (with an `X-Aurelia-Approval`
+- `POST /api/v1/libraries/{id}/relocate` `{ "path", "force"?: bool }` (with an `X-Tarven-Approval`
   grant) → rewrites the location's and its titles' paths (and manual file bindings), clears their
   file identities and starts a scan that finds them by path; answers
   `{ "sampled", "matched", "titles", "scanId" }`. Refuses `matched == 0` for a location with samples

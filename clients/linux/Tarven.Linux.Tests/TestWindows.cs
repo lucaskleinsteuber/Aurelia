@@ -1,0 +1,44 @@
+using Tarven.Linux.Core.Platform;
+using Tarven.Linux.Core.Settings;
+using Tarven.Linux.Views;
+using Avalonia.Controls;
+using Avalonia.Media.Imaging;
+using Avalonia.Threading;
+
+namespace Tarven.Linux.Tests;
+
+/// <summary>Opens the real main window with in-memory settings, so tests never touch the person's files.</summary>
+internal static class TestWindows
+{
+    static TestWindows()
+    {
+        // Screens are checked and drawn in their finished state.
+        Tarven.Linux.Controls.Motion.Enabled = false;
+    }
+
+    /// <summary>The window a control is shown in, such as the main window around Settings.</summary>
+    public static Window HostOf(Control control) => control as Window ?? (Window)TopLevel.GetTopLevel(control)!;
+
+    public static MainWindow Show(WindowButtonLayout? layout = null, ISettingsStore? settings = null) => Show(AppServices.ForTests(settings, layout));
+
+    public static MainWindow Show(AppServices services)
+    {
+        var window = new MainWindow(services)
+        {
+            Width = 1280,
+            Height = 800,
+        };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        return window;
+    }
+
+    /// <summary>Keeps rendered frames for a person to look at when TARVEN_LINUX_SNAPSHOTS names a folder.</summary>
+    public static void SaveSnapshot(Bitmap frame, string name)
+    {
+        var folder = Environment.GetEnvironmentVariable("TARVEN_LINUX_SNAPSHOTS");
+        if (string.IsNullOrEmpty(folder)) return;
+        Directory.CreateDirectory(folder);
+        frame.Save(Path.Combine(folder, name + ".png"), PngBitmapEncoderOptions.Default);
+    }
+}

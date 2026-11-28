@@ -1,9 +1,9 @@
-# Aurelia in a web browser
+# Tarven in a web browser
 
-Every Aurelia Server (in the Mac app or on Linux) also serves Aurelia for web browsers. It does
+Every Tarven Server (in the Mac app or on Linux) also serves Tarven for web browsers. It does
 everything the Mac app does, from setting up a new server to editing the library, on any
 computer, phone or tablet at home. The Mac app is development-signed and runs only on registered
-Macs, so on every other Mac the browser is the way to use Aurelia.
+Macs, so on every other Mac the browser is the way to use Tarven.
 
 ## Opening it
 
@@ -19,21 +19,21 @@ Web Browser*.
 - **Without home network access**, a server running in the Mac app is reachable only from
   a browser on that Mac. Its loopback address is shown then.
 - **When the server is off or asleep**, the browser cannot load the page at all, because
-  the server serves it. If the server stops while the page is open, Aurelia says so and
+  the server serves it. If the server stops while the page is open, Tarven says so and
   connects again by itself once the server is back. A browser cannot send Wake-on-LAN. On a
   Linux server with **Wake When a Device Connects** on (Settings › Power), opening the address
   or keeping the asleep page open wakes it, from a device that reached it shortly before;
-  otherwise open Aurelia on the Mac to wake it. A server that Aurelia hosts on a Mac or Linux PC
-  is never woken over the network: the page says "Start Aurelia on Your Mac" (or Linux PC) and
-  connects once Aurelia runs there again.
+  otherwise open Tarven on the Mac to wake it. A server that Tarven hosts on a Mac or Linux PC
+  is never woken over the network: the page says "Start Tarven on Your Mac" (or Linux PC) and
+  connects once Tarven runs there again.
 
 ## Setting up a new server
 
 A Linux server without an owner can be set up entirely in a browser:
 
-1. On the server computer, run `sudo aurelia setup` and choose the browser (or run
-   `sudo aurelia setup --browser`). In Docker: `docker compose run --rm aurelia setup --browser`,
-   start the server, then `docker compose exec aurelia aurelia setup-code`.
+1. On the server computer, run `sudo tarven setup` and choose the browser (or run
+   `sudo tarven setup --browser`). In Docker: `docker compose run --rm tarven setup --browser`,
+   start the server, then `docker compose exec tarven tarven setup-code`.
 2. It shows the server's addresses and a one-time **setup code** such as `ABCDE-FGHJK`.
 3. Open an address in a browser, type the code, the owner's name and the Server Password. This
    browser becomes the first device and asks for the owner's viewing PIN.
@@ -41,13 +41,13 @@ A Linux server without an owner can be set up entirely in a browser:
    TMDB token for posters and details, and power saving; then the first scan.
 
 The code exists only while the server has no owner. It lives in the server's private data folder
-(`/var/lib/aurelia/browser-setup-code`, readable by root and the server), never in its log, lasts a
+(`/var/lib/tarven/browser-setup-code`, readable by root and the server), never in its log, lasts a
 day, and ten wrong tries replace it, so someone else at home cannot claim the server first. Until
 the owner exists the network reaches only the browser app and the setup step.
 
-### Moving from another Aurelia server
+### Moving from another Tarven server
 
-The setup's first step asks **Set Up a New Server** or **Move from Another Aurelia Server**
+The setup's first step asks **Set Up a New Server** or **Move from Another Tarven Server**
 ([SERVER_MOVE.md](SERVER_MOVE.md)). Moving asks for the same setup code, then either the old
 server's address and its move code (a browser cannot search the network, so the address is typed
 as the old server's Move window shows it) or the moving file and its passphrase. The page follows
@@ -55,7 +55,7 @@ as the old server's Move window shows it) or the moving file and its passphrase.
 computer ("412 of 415 sample files found"), the other suggestions, a typed folder with **Preview**,
 and **Later**. **Finish Move** restarts the server with the old one's identity; the page waits for
 it and asks to sign in with a code, because a browser's sign-in belongs to the address. Every setup
-call sends the code in `X-Aurelia-Setup-Code`; it stays in the page's memory only.
+call sends the code in `X-Tarven-Setup-Code`; it stays in the page's memory only.
 
 On the old server, **Settings › Server › Move to a New Server** (owner) shows the move code with its
 countdown, or saves the moving file through the backup transfer download, and offers Cancel, Mark
@@ -70,7 +70,7 @@ with the Server Password when it asks. The rules live in
 ## Signing in
 
 1. On the main device, the owner creates an 8-digit code: *Settings › Profiles and Devices ›
-   Create Code* in Aurelia on a Mac or Linux computer, or `aurelia pair` on a Linux server. A
+   Create Code* in Tarven on a Mac or Linux computer, or `tarven pair` on a Linux server. A
    code works once and for five minutes.
 2. The browser asks for the code (`POST /api/v1/web/pair`); the server keeps the browser's
    credential in an HttpOnly cookie. It appears on the main device under its name, such as
@@ -92,7 +92,7 @@ The browser never holds a token that scripts can read:
 - Browsers keep cookies per address, not per port. Another web service on the same computer
   and address (for example `https://192.168.1.50:8443`) therefore receives these cookies with
   its own requests. Scripts there still cannot read them, but that service's server can. Run
-  only services you trust next to Aurelia on the same address, or give the server its own
+  only services you trust next to Tarven on the same address, or give the server its own
   host name.
 - See [the client protocol](CLIENT_PROTOCOL.md#web-browser-sign-in) for the details.
 
@@ -271,8 +271,8 @@ categories, a search field and Done (Esc); viewers see only their own.
   out, Library Health (duplicates, missing titles and titles without details), the TMDB token,
   Review Matches, OpenSubtitles, codes for new devices (*Create Code*, *Enter Code from Device*),
   profiles with their access, devices and passwords, Power (on a Linux package server: keep
-  running, stop Aurelia, sleep or shut down after unused minutes or a sleep timer, awake hours and
-  waking when a device connects; on a server inside Aurelia on a Mac or Linux PC: keep running or
+  running, stop Tarven, sleep or shut down after unused minutes or a sleep timer, awake hours and
+  waking when a device connects; on a server inside Tarven on a Mac or Linux PC: keep running or
   stop after unused minutes), Video Conversion, backups
   (checking them, encrypted backups to download, and restoring on a server hosted by the Mac app
   or installed from the Linux package, which restores at its restart), an Import Preview for a
@@ -300,20 +300,20 @@ with TMDB, chooses another video file for a film or episode, downloads subtitles
 and removes a title. Every field can go back to the automatic value. Manual changes survive later
 scans. A conflict with a change made elsewhere keeps your draft until you reload.
 
-## Add Aurelia to the home screen
+## Add Tarven to the home screen
 
 Open the server's HTTPS address on the phone or tablet and accept its certificate when prompted.
 In Safari, choose **Share › Add to Home Screen**; in Chrome on Android, choose **Add to Home
-Screen** or **Install App** from the browser menu. Open the resulting Aurelia icon to use the
+Screen** or **Install App** from the browser menu. Open the resulting Tarven icon to use the
 app in its own window without the browser toolbar. Pair that window with the server if it
 asks to sign in; a home-screen app can keep a separate browser session.
 
 The manifest and 192/512-pixel icons support standalone installation; Safari uses its
-180-pixel touch icon, title and status-bar settings. The icons are derived from Aurelia's
+180-pixel touch icon, title and status-bar settings. The icons are derived from Tarven's
 existing vector icon with `swift scripts/make-web-icons.swift
-src/Aurelia.Server/WebApp/icon.svg src/Aurelia.Server/WebApp/icons`. They contain no library
+src/Tarven.Server/WebApp/icon.svg src/Tarven.Server/WebApp/icons`. They contain no library
 artwork. The public manifest, icons and app shell reveal no account, library or management
-data. Those still require authentication through the same API. Aurelia uses no service worker
+data. Those still require authentication through the same API. Tarven uses no service worker
 and no offline cache: the server must be reachable.
 
 ## Speed and motion
@@ -331,7 +331,7 @@ and no offline cache: the server must be reachable.
 
 ## How it is built
 
-- The files are in `src/Aurelia.Server/WebApp`: plain HTML, CSS and JavaScript modules, with
+- The files are in `src/Tarven.Server/WebApp`: plain HTML, CSS and JavaScript modules, with
   no framework, no build step and nothing loaded from the internet. They are built into the
   server, so every server version carries its matching browser app.
 - The page has its own strict content security policy: only its own scripts, styles,
@@ -348,11 +348,11 @@ node --test "tests/WebApp/*.test.mjs"
 ```
 
 - The server side (cookies, the sign-in steps, the page's policy) is tested in
-  `tests/Aurelia.Server.Tests/WebAppTests.cs`.
+  `tests/Tarven.Server.Tests/WebAppTests.cs`.
 
 ### Server updates in the browser
 
-Owners of a Linux server installed from the Aurelia package can check and install releases
+Owners of a Linux server installed from the Tarven package can check and install releases
 under Settings › Server › Updates. The section shows the installed/newest versions and the
 server updater's checking, installing, failed or completed state. Progress is indeterminate:
 the existing server contract does not provide a download percentage. Installation asks for
@@ -372,16 +372,16 @@ outages, failures, cancellation and duplicate clicks without a real server.
 ## Reproducing the browser screenshots
 
 Run `zsh scripts/capture-showcase.sh --web-only` on a Mac with Swift, Node and an existing Playwright
-installation. Set `AURELIA_PLAYWRIGHT_NODE_MODULES` (or `NODE_PATH`) to its `node_modules`
-folder if it is not on Node's module path. `AURELIA_CHROMIUM_EXECUTABLE` can select an existing
-Chromium/Chrome executable; `AURELIA_NODE` can select Node. Nothing is downloaded or added to
+installation. Set `TARVEN_PLAYWRIGHT_NODE_MODULES` (or `NODE_PATH`) to its `node_modules`
+folder if it is not on Node's module path. `TARVEN_CHROMIUM_EXECUTABLE` can select an existing
+Chromium/Chrome executable; `TARVEN_NODE` can select Node. Nothing is downloaded or added to
 the browser app's dependencies. `--help` prints usage, and
 `node scripts/capture-web-showcase.mjs --check` only checks capture dependencies.
 
 The script regenerates the same 13-title library and artwork with `scripts/make-showcase.swift`
 in a unique cache folder, serves it with the unchanged production browser modules on an
 unused loopback port, and uses a fresh headless browser context. The fixture API is a separate
-developer script, never compiled into Aurelia; it does not connect to a real server or read
+developer script, never compiled into Tarven; it does not connect to a real server or read
 credentials. Only its own origin is allowed, and every real media request is rejected.
 
 Home, the title page, paused player controls and Playback settings are written as `web-*.jpg`
@@ -401,7 +401,7 @@ They use synthetic files and simulated media objects, with no browser launch or 
 
 ## Play on another device
 
-A title's page has **Play on…**, which lists the profile's other open Aurelia players (Mac,
+A title's page has **Play on…**, which lists the profile's other open Tarven players (Mac,
 Apple TV, iPhone or another browser) and starts the title there. While the browser plays, it
 reports itself as a player too, so the others can start, pause, seek or stop it. Safari shows an AirPlay button where the video can be
 sent to an Apple TV or AirPlay receiver; other browsers do not offer it.
@@ -417,7 +417,7 @@ the slides wait for a tap. `js/wrapped.js`, tested in `tests/WebApp/wrapped.test
 ## Cinema mode
 
 Settings › Playback › **Cinema Mode** works as on the Mac: before a film that starts from the
-beginning comes one of Aurelia's made-up ads (ice cream, popcorn or phones; nothing is for sale),
+beginning comes one of Tarven's made-up ads (ice cream, popcorn or phones; nothing is for sale),
 up to three trailers of films in the library nobody has watched, and the curtain, which opens once
 the film's picture moves (at most after ten seconds). **Skip** moves on, **Start Film** (Return)
 goes straight to the film, Esc ends everything. The rules live in `js/cinema.js`.

@@ -2,10 +2,10 @@ import Foundation
 import Security
 
 // Uses only an isolated synthetic group and an ephemeral credential. The
-// Keychain query intentionally matches Aurelia's existing ordinary Mac query,
+// Keychain query intentionally matches Tarven's existing ordinary Mac query,
 // without claiming a restricted access group or forcing the DP Keychain.
-let group = "B5N7JVK37J.com.aurelia.distribution-probe"
-let service = "Aurelia.ProfilelessSigningProbe.\(UUID().uuidString)"
+let group = "B5N7JVK37J.com.tarven.distribution-probe"
+let service = "Tarven.ProfilelessSigningProbe.\(UUID().uuidString)"
 let expected = Data("synthetic probe, not an application token".utf8)
 let query: [String: Any] = [
   kSecClass as String: kSecClassGenericPassword,

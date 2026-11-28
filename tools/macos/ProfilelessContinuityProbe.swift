@@ -8,7 +8,7 @@ guard CommandLine.arguments.count >= 3,
   let identifier = UUID(uuidString: CommandLine.arguments[2])
 else { exit(2) }
 let action = CommandLine.arguments[1]
-let service = "Aurelia.ProfilelessContinuityProbe.\(identifier.uuidString)"
+let service = "Tarven.ProfilelessContinuityProbe.\(identifier.uuidString)"
 let initial = Data("synthetic baseline credential".utf8)
 let updated = Data("synthetic updated credential".utf8)
 let authenticationContext = LAContext()
@@ -57,9 +57,9 @@ case "read-update-delete":
   guard updatedCorrectly && removed else { exit(1) }
   guard
     let group = FileManager.default.containerURL(
-      forSecurityApplicationGroupIdentifier: "B5N7JVK37J.com.aurelia.distribution-probe")
+      forSecurityApplicationGroupIdentifier: "B5N7JVK37J.com.tarven.distribution-probe")
   else { exit(1) }
-  // The synthetic group is unrelated to Aurelia's production host group.
+  // The synthetic group is unrelated to Tarven's production host group.
   let directory = group.appendingPathComponent(
     "Library/Caches/SigningProbe/\(identifier.uuidString)")
   do {
@@ -75,7 +75,7 @@ case "read-update-delete":
 case "group-read":
   guard
     let group = FileManager.default.containerURL(
-      forSecurityApplicationGroupIdentifier: "B5N7JVK37J.com.aurelia.distribution-probe")
+      forSecurityApplicationGroupIdentifier: "B5N7JVK37J.com.tarven.distribution-probe")
   else { exit(1) }
   let path = group.appendingPathComponent(
     "Library/Caches/SigningProbe/\(identifier.uuidString)/synthetic-handoff")
@@ -92,7 +92,7 @@ case "group-read":
 case "group-delete":
   guard
     let group = FileManager.default.containerURL(
-      forSecurityApplicationGroupIdentifier: "B5N7JVK37J.com.aurelia.distribution-probe")
+      forSecurityApplicationGroupIdentifier: "B5N7JVK37J.com.tarven.distribution-probe")
   else { exit(1) }
   let directory = group.appendingPathComponent(
     "Library/Caches/SigningProbe/\(identifier.uuidString)")

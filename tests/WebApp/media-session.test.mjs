@@ -2,7 +2,7 @@
 // navigator.mediaSession. No browser, network or files.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { attachMediaSession, mediaMetadataFor, positionStateFor, supportsMediaSession } from "../../src/Aurelia.Server/WebApp/js/media-session.js";
+import { attachMediaSession, mediaMetadataFor, positionStateFor, supportsMediaSession } from "../../src/Tarven.Server/WebApp/js/media-session.js";
 
 class FakeMetadata { constructor(values) { Object.assign(this, values); } }
 
@@ -30,7 +30,7 @@ test("an episode shows its show and number, a movie its year, with the poster", 
   const url = (image, width) => image ? `${image.path}?width=${width}` : "";
   const shown = mediaMetadataFor(episode, url);
   assert.deepEqual({ title: shown.title, artist: shown.artist, album: shown.album },
-    { title: "Low Tide", artist: "Harbor Lights · S2 E1", album: "Aurelia" });
+    { title: "Low Tide", artist: "Harbor Lights · S2 E1", album: "Tarven" });
   assert.deepEqual(shown.artwork.map((entry) => entry.sizes), ["320x480", "640x960"]);
   assert.equal(mediaMetadataFor({ kind: "movie", title: "Amber Fields", year: 2019 }, url).artist, "2019");
   assert.deepEqual(mediaMetadataFor({ kind: "movie", title: "No Poster" }, url).artwork, []);

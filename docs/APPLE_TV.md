@@ -1,9 +1,9 @@
-# Aurelia for Apple TV
+# Tarven for Apple TV
 
 The Apple TV app is made for the big screen and the Siri Remote: Home with Continue Watching,
 Movies, TV Shows, Search, title pages with seasons, cast, trailers and extras, and fullscreen
 playback of the original files with every audio and subtitle track. It needs tvOS 26 and an
-Aurelia server at home.
+Tarven server at home.
 
 The app is not in the App Store. You build it once on a Mac with Xcode and install it on your
 Apple TV; this guide shows how. Developers find the project details in
@@ -14,7 +14,7 @@ Apple TV; this guide shows how. Developers find the project details in
 - An Apple TV with tvOS 26 on the same network as the Mac.
 - A Mac with Xcode 26 and an Apple ID signed in under Xcode › Settings › Accounts. A free Apple ID
   works; its apps must be signed again every seven days (see [Keeping it running](#keeping-it-running)).
-- This repository: `git clone https://github.com/lucaskleinsteuber/Aurelia.git`.
+- This repository: `git clone https://github.com/lucaskleinsteuber/Tarven.git`.
 
 ## 1. Pair the Apple TV with Xcode (once)
 
@@ -31,7 +31,7 @@ From the repository folder:
 zsh scripts/prepare-tvvlckit.sh
 zsh scripts/build-tvos.sh --allow-provisioning-updates --device <identifier>
 xcrun devicectl device install app --device <identifier> \
-  "Local/Build/tvOS/<version>-<build>/DerivedData/Build/Products/Release-appletvos/Aurelia.app"
+  "Local/Build/tvOS/<version>-<build>/DerivedData/Build/Products/Release-appletvos/Tarven.app"
 ```
 
 The first command downloads the VideoLAN player framework and checks it against a pinned SHA-256.
@@ -40,11 +40,11 @@ third installs it. Reinstalling later replaces only the app; its server connecti
 
 ## 3. Connect to your server
 
-1. Open **Aurelia** on the Apple TV. It lists the servers it finds at home; choose yours, or type
+1. Open **Tarven** on the Apple TV. It lists the servers it finds at home; choose yours, or type
    its address.
 2. Check that the **fingerprint** matches the one on the server computer.
 3. On the server's Mac or Linux app choose **Settings › Profiles and Devices › Create Code**
-   (on a Linux server: `aurelia pair`) and type the 8-digit code on the Apple TV.
+   (on a Linux server: `tarven pair`) and type the 8-digit code on the Apple TV.
 4. Choose your profile and enter its PIN.
 
 Settings › Playback › **Streaming Quality** (shown when the server offers adaptive streaming)
@@ -74,7 +74,7 @@ clear it all) and **Statistics and Wrapped**: watch time, streaks, the last week
 titles and genres, a year in review and Wrapped as full-screen slides (right and left move,
 Play/Pause holds, Back leaves).
 
-**Cinema Mode** (Settings › Playback) plays one of Aurelia's made-up ads, trailers of films
+**Cinema Mode** (Settings › Playback) plays one of Tarven's made-up ads, trailers of films
 nobody has watched yet and the curtain before a film that starts from its beginning, as on the
 Mac. Skip and Start Film take the focus; Back leaves the player.
 
@@ -93,7 +93,7 @@ Restart, Performance, Background Work, Power with the Wake-on-LAN check and Slee
 Stop Now, Server Updates, Screen Time with Today's extras, Review Matches and New Devices, and
 Subtitles… on a title's page. A protected change first asks to unlock management for ten minutes:
 **Confirm on Another Device** shows a four-digit code that an iPhone, iPad or Mac with Face ID or
-Touch ID confirms, or the Server Password is typed with the TV keyboard. While Aurelia is open on
+Touch ID confirms, or the Server Password is typed with the TV keyboard. While Tarven is open on
 Home, the owner hears about a new device with That Was Me or Block. Adding new devices still
 happens on a Mac, an iPhone or the Linux app.
 
@@ -101,7 +101,7 @@ happens on a Mac, an iPhone or the Linux app.
 
 The Apple TV shows *The Server Is Off* and sends a Wake-on-LAN packet to the server's last
 address. tvOS does not allow the broadcast that wakes every sleeping computer, so if the server
-stays asleep, open Aurelia on a Mac, Linux PC or iPhone, which wakes it. As soon as the server
+stays asleep, open Tarven on a Mac, Linux PC or iPhone, which wakes it. As soon as the server
 answers, the Apple TV connects by itself.
 
 ## Keeping it running
@@ -112,4 +112,4 @@ install it again. With a paid Apple Developer account the signature lasts a year
 ## Play On
 
 From 2.8.0 the Apple TV follows play, pause, continue, seek, skip and stop sent with **Play on…**
-from a Mac, the Linux app or a browser, while Aurelia is open on it.
+from a Mac, the Linux app or a browser, while Tarven is open on it.

@@ -6,7 +6,7 @@ import {
   profilePayload, scrubPreviewBucketSeconds, scrubPreviewFrameUrl, scrubPreviewUsageText, transcodingSummary, waitForLibraryOperation,
   POWER_MODES, powerPayload, wakeOnAccessOffered, rememberWakeOnAccess, remembersWakeOnAccess, wakeRetryDelay,
   powerModesFor, appHostName, rememberHosting, rememberedHosting, wakeCheck, timeoutSignal, keepsPolling
-} from "../../src/Aurelia.Server/WebApp/js/logic.js";
+} from "../../src/Tarven.Server/WebApp/js/logic.js";
 
 test("management permissions keep owner settings and selected-title storage restrictions", () => {
   assert.deepEqual(managementPermissions({ role: "owner", accessMode: "selectedTitles" }), { owner: true, administrator: true, storage: true });
@@ -285,7 +285,7 @@ test("playback and general preferences normalization preserves valid settings an
 });
 
 test("general settings decide which titles, sidebar sections and start page show", async () => {
-  const { visibleTitles, startPath, sidebarShows } = await import("../../src/Aurelia.Server/WebApp/js/preferences.js");
+  const { visibleTitles, startPath, sidebarShows } = await import("../../src/Tarven.Server/WebApp/js/preferences.js");
   const titles = [
     { id: "a", kind: "movie", availability: "available", watchState: "completed" },
     { id: "b", kind: "movie", availability: "missing", watchState: "unplayed" },
@@ -305,7 +305,7 @@ test("general settings decide which titles, sidebar sections and start page show
 });
 
 test("playback settings choose the start position, Up Next lead and default languages", async () => {
-  const logic = await import("../../src/Aurelia.Server/WebApp/js/logic.js");
+  const logic = await import("../../src/Tarven.Server/WebApp/js/logic.js");
   const progress = { positionMilliseconds: 45_000, durationMilliseconds: 2_400_000, isCompleted: false };
   assert.equal(logic.playbackStartSeconds("resume", progress, true, 0), 45);
   assert.equal(logic.playbackStartSeconds("resume", progress, true, 60), 0);
@@ -357,7 +357,7 @@ test("video conversion reads the encoder, the hint and the running conversions f
 });
 
 test("Dialogue Boost and Volume Leveling follow the other apps' presets and keep old Night Mode", async () => {
-  const { audioProfile, normalizePreferences } = await import("../../src/Aurelia.Server/WebApp/js/logic.js");
+  const { audioProfile, normalizePreferences } = await import("../../src/Tarven.Server/WebApp/js/logic.js");
   assert.equal(normalizePreferences({ nightMode: true }).volumeLeveling, "standard");
   assert.equal(normalizePreferences({ nightMode: true, volumeLeveling: "off" }).volumeLeveling, "off");
   assert.equal(normalizePreferences({ dialogueBoost: "loud" }).dialogueBoost, "off");
@@ -386,7 +386,7 @@ test("Settings › Power sends what the server can act on and only asks a card t
   assert.throws(() => powerPayload({ mode: "sleep", idleMinutes: 15, awakeHours: true, awakeFrom: "17:00", awakeUntil: "17:00" }), /different start/);
   assert.equal(wakeOnAccessOffered(card, "sleep"), true);
   assert.equal(wakeOnAccessOffered(card, "shutdown"), true);
-  assert.equal(wakeOnAccessOffered(card, "stop"), false, "a stopped Aurelia already starts on any connection");
+  assert.equal(wakeOnAccessOffered(card, "stop"), false, "a stopped Tarven already starts on any connection");
   assert.equal(wakeOnAccessOffered({ wakeSupport: "g" }, "sleep"), false);
 });
 
@@ -426,10 +426,10 @@ test("the asleep page knocks often for two minutes, then calmly, and knows wheth
   assert.equal(remembersWakeOnAccess({ getItem: () => { throw new Error("blocked"); } }), false);
 });
 
-test("a server inside the Aurelia app only keeps running or stops, is never woken and says where to start it", () => {
+test("a server inside the Tarven app only keeps running or stops, is never woken and says where to start it", () => {
   const laptop = { available: true, hosting: "macApp", mode: "stop", idleMinutes: 30, wakeSupport: "pumbg" };
   assert.deepEqual(powerModesFor(laptop).map((mode) => mode.id), ["off", "stop"]);
-  assert.match(powerModesFor(laptop)[1].explanation, /Start Aurelia on your Mac/);
+  assert.match(powerModesFor(laptop)[1].explanation, /Start Tarven on your Mac/);
   assert.equal(powerModesFor({ hosting: "linuxServer" }), POWER_MODES);
   assert.equal(wakeOnAccessOffered({ ...laptop, mode: "sleep" }), false);
   assert.throws(() => powerPayload({ mode: "sleep", idleMinutes: 15 }, laptop), /Choose what/);
@@ -446,7 +446,7 @@ test("a server inside the Aurelia app only keeps running or stops, is never woke
 });
 
 test("performance reads like the Mac: short durations, routes without constraints, slowest first", async () => {
-  const { performanceDuration, performanceRoute, performanceSummary } = await import("../../src/Aurelia.Server/WebApp/js/logic.js");
+  const { performanceDuration, performanceRoute, performanceSummary } = await import("../../src/Tarven.Server/WebApp/js/logic.js");
   assert.equal(performanceDuration(12.6), "13 ms");
   assert.equal(performanceDuration(1460), "1.5 s");
   assert.equal(performanceDuration(undefined), "0 ms");
@@ -480,7 +480,7 @@ test("an older server without measurements still shows the rest of the server pa
 test("the Wake-on-LAN check says what the server found and what only a test shows", () => {
   const server = { available: true, hosting: "linuxServer", wakeSupport: "pumbg", network: "wired", wakeOn: "g", sleepKind: "deep" };
   assert.equal(wakeCheck(server, "off"), null);
-  assert.equal(wakeCheck(server, "stop"), null, "a stopped Aurelia needs no Wake-on-LAN");
+  assert.equal(wakeCheck(server, "stop"), null, "a stopped Tarven needs no Wake-on-LAN");
   assert.equal(wakeCheck({ ...server, hosting: "macApp" }, "sleep"), null);
   assert.equal(wakeCheck({ ...server, available: false }, "sleep"), null);
 
@@ -502,7 +502,7 @@ test("the Wake-on-LAN check says what the server found and what only a test show
 });
 
 test("welcome screen step count matches whether power control is available", async (t) => {
-  const { createSettings } = await import("../../src/Aurelia.Server/WebApp/js/settings.js");
+  const { createSettings } = await import("../../src/Tarven.Server/WebApp/js/settings.js");
   const { installDOM } = await import("./dom-fixture.mjs");
   installDOM(t);
   for (const [available, expected] of [[false, /Two steps/], [true, /Three steps/]]) {
@@ -523,7 +523,7 @@ test("welcome screen step count matches whether power control is available", asy
 });
 
 test("Settings updates isCurrent ignores stale update checks after a profile change", async (t) => {
-  const { createSettings } = await import("../../src/Aurelia.Server/WebApp/js/settings.js");
+  const { createSettings } = await import("../../src/Tarven.Server/WebApp/js/settings.js");
   const { installDOM, flush, deferred, button } = await import("./dom-fixture.mjs");
   installDOM(t);
   const checkDeferred = deferred();
@@ -564,7 +564,7 @@ test("Settings updates isCurrent ignores stale update checks after a profile cha
 });
 
 test("Name and Picture uses readable accessible names and Signed-In Devices encodes IDs with context", async (t) => {
-  const { createSettings } = await import("../../src/Aurelia.Server/WebApp/js/settings.js");
+  const { createSettings } = await import("../../src/Tarven.Server/WebApp/js/settings.js");
   const { installDOM, flush, all, button } = await import("./dom-fixture.mjs");
   installDOM(t);
   const calls = [];

@@ -1,0 +1,11 @@
+[Unit]
+Description=Start Tarven Server when a device connects
+# Listens only while Tarven Server is stopped to save power; starting Tarven closes it.
+Conflicts=tarven.service
+# Ordering makes systemd stop one completely before the other takes the port, in both directions.
+After=tarven.service
+
+[Socket]
+ListenStream=43111
+ListenStream=127.0.0.1:43110
+Service=tarven-start.service

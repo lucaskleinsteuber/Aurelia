@@ -29,19 +29,19 @@ swift "$repository_root/scripts/make-showcase.swift" "$showcase"
 python3 -m http.server "$port" --bind 127.0.0.1 --directory "$showcase" >/dev/null 2>&1 &
 server=$!
 trap 'kill $server 2>/dev/null || true' EXIT
-export TEST_RUNNER_AURELIA_SHOWCASE_DIR="http://127.0.0.1:$port/"
+export TEST_RUNNER_TARVEN_SHOWCASE_DIR="http://127.0.0.1:$port/"
 
 started=$(date +%s)
-AURELIA_UNIT_TEST_FILTER=AureliaTests/ProfilePickerLayoutTests \
-  AURELIA_UI_TEST_FILTER=AureliaUITests/ShowcaseScreenshotUITests \
+TARVEN_UNIT_TEST_FILTER=TarvenTests/ProfilePickerLayoutTests \
+  TARVEN_UI_TEST_FILTER=TarvenUITests/ShowcaseScreenshotUITests \
   zsh "$repository_root/scripts/test-macos.sh"
-AURELIA_TV_UI_TEST_FILTER=TVShowcaseScreenshotUITests \
+TARVEN_TV_UI_TEST_FILTER=TVShowcaseScreenshotUITests \
   zsh "$repository_root/scripts/test-tvos-ui.sh"
 
 # Export the named screenshots of both runs as PNG files.
 export_root=$(mktemp -d)
-for result in "$other_root/Test Results"/Aurelia-macOS-UI-*.xcresult(N) \
-  "$other_root/Test Results"/AureliaTV-UI-*.xcresult(N); do
+for result in "$other_root/Test Results"/Tarven-macOS-UI-*.xcresult(N) \
+  "$other_root/Test Results"/TarvenTV-UI-*.xcresult(N); do
   (( $(stat -f %m "$result") >= started )) || continue
   target="$export_root/${result:t:r}"
   xcrun xcresulttool export attachments --path "$result" --output-path "$target" >/dev/null

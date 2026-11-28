@@ -8,7 +8,7 @@ evidence_fail() {
 }
 
 evidence_assert_owned_run() {
-  local owned_root=${1:-} owned_parent="$HOME/Library/Caches/Aurelia/TestRuns"
+  local owned_root=${1:-} owned_parent="$HOME/Library/Caches/Tarven/TestRuns"
   [[ -n "$owned_root" \
     && ( "$owned_root" == "$owned_parent/playback-evidence-"* \
       || "$owned_root" == "$owned_parent/full-chain-"* ) \
@@ -44,7 +44,7 @@ evidence_signing_identity() {
   identity=$(openssl x509 -inform DER -in "$certificate_root/leaf-0" \
     -noout -fingerprint -sha1 | awk -F= '{ gsub(":", "", $2); print toupper($2) }') \
     || { evidence_fail original_leaf_fingerprint; return 1; }
-  selected=${AURELIA_SIGNING_IDENTITY:-$identity}
+  selected=${TARVEN_SIGNING_IDENTITY:-$identity}
   [[ "$identity" != *[^A-F0-9]* && ${#identity} == 40 && "$selected" == "$identity" ]] \
     || { evidence_fail mismatched_original_signing_identity; return 1; }
   /usr/bin/security find-identity -v -p codesigning \
@@ -348,7 +348,7 @@ evidence_stop_pid() {
 evidence_stop_test_hosts() {
   local test_pid command_line failed=0
   evidence_assert_owned_run "${EVIDENCE_RUN_ROOT:-}" || return 1
-  for test_pid in $(pgrep -x Aurelia 2>/dev/null || true); do
+  for test_pid in $(pgrep -x Tarven 2>/dev/null || true); do
     command_line=$(ps -p "$test_pid" -o command= 2>/dev/null || true)
     if [[ "$command_line" == "$EVIDENCE_RUN_ROOT/"* ]]; then
       evidence_stop_pid "$test_pid" || failed=1
@@ -360,16 +360,16 @@ evidence_stop_test_hosts() {
 evidence_stop_owned_servers() {
   local server_pid command_line server_data version failed=0
   evidence_assert_owned_run "${EVIDENCE_RUN_ROOT:-}" || return 1
-  for server_pid in $(pgrep -x Aurelia.Server 2>/dev/null || true); do
+  for server_pid in $(pgrep -x Tarven.Server 2>/dev/null || true); do
     command_line=$(ps -p "$server_pid" -o command= 2>/dev/null || true)
     if [[ "$command_line" == "$EVIDENCE_RUN_ROOT/"* ]]; then
       # Historical executables and their data directories have no spaces in
       # this canonical run tree. Stop only the expected published-server path.
       for version in 1.4.0 1.4.1; do
         server_data="$EVIDENCE_RUN_ROOT/$version/ServerData"
-        if [[ "$command_line" == "$EVIDENCE_RUN_ROOT/$version/PublishedServer/Aurelia.Server "* ]]; then
+        if [[ "$command_line" == "$EVIDENCE_RUN_ROOT/$version/PublishedServer/Tarven.Server "* ]]; then
           evidence_stop_packaged_server "$server_pid" \
-            "$EVIDENCE_RUN_ROOT/$version/PublishedServer/Aurelia.Server" \
+            "$EVIDENCE_RUN_ROOT/$version/PublishedServer/Tarven.Server" \
             "$server_data" "$EVIDENCE_RUN_ROOT" || failed=1
         fi
       done
@@ -425,14 +425,14 @@ evidence_export_log() {
   [[ -f "$input" && "$output" == /* && ! -L "$output" ]] \
     || { evidence_fail invalid_evidence_log; return 1; }
   ruby -rjson -e '
-    values = [ENV["AURELIA_EVIDENCE_OWNER_PASSWORD"]].compact
+    values = [ENV["TARVEN_EVIDENCE_OWNER_PASSWORD"]].compact
     if !ARGV[2].empty? && File.file?(ARGV[2])
       auth = JSON.parse(File.read(ARGV[2]))
       values += [auth["token"], auth["sessionId"]].compact
     end
     data = File.read(ARGV[0])
     values.each { |value| data = data.gsub(value, "[redacted-owned-test-credential]") unless value.empty? }
-    source = ENV["AURELIA_EVIDENCE_AUTHORIZED_SOURCE_FILE"]
+    source = ENV["TARVEN_EVIDENCE_AUTHORIZED_SOURCE_FILE"]
     data = data.gsub(source, "[redacted-authorized-source]") if source && !source.empty?
     File.write(ARGV[1], data)
   ' "$input" "$output" "$authentication" \

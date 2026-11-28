@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Read the published dependency graph, not a hand-maintained list of binaries.
 repository_root=${0:A:h:h}
-deps=${1:?Provide the published Aurelia.Server.deps.json.}
+deps=${1:?Provide the published Tarven.Server.deps.json.}
 assets=${2:?Provide the matching project.assets.json.}
 destination=${3:?Provide an external notices directory.}
 # An optional own overview; the Mac app's is the default.

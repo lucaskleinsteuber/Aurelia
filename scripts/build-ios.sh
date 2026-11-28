@@ -21,12 +21,12 @@ bash "$repository_root/scripts/check-swift-format.sh"
 
 version=$(awk '/^MARKETING_VERSION = / {print $3}' "$repository_root/clients/ios/Configuration/BuildNumber.xcconfig")
 build_number=$(awk '/^CURRENT_PROJECT_VERSION = / {print $3}' "$repository_root/clients/ios/Configuration/BuildNumber.xcconfig")
-# AURELIA_TEST_EDITION=1 builds "Aurelia Test": its own app identity and data beside the real
+# TARVEN_TEST_EDITION=1 builds "Tarven Test": its own app identity and data beside the real
 # app, with Reset App Data in its settings. The real app's identity and data stay untouched.
-test_edition=${AURELIA_TEST_EDITION:-0}
+test_edition=${TARVEN_TEST_EDITION:-0}
 edition_folder=$version-$build_number
 (( test_edition )) && edition_folder=Test-$version-$build_number
-build_root=${AURELIA_IOS_BUILD_ROOT:-"$other_root/Build/iOS/$edition_folder"}
+build_root=${TARVEN_IOS_BUILD_ROOT:-"$other_root/Build/iOS/$edition_folder"}
 mkdir -p "$build_root" "$other_root/Logs"
 build_root=${build_root:A}
 
@@ -38,17 +38,17 @@ fi
 dependency_root=${MOBILEVLCKIT_ROOT:-"$repository_root/clients/ios/Dependencies"}
 MOBILEVLCKIT_ROOT="$dependency_root" "$repository_root/scripts/prepare-ios-vlckit.sh"
 
-log="$other_root/Logs/Aurelia-iOS-Build-$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen).log"
+log="$other_root/Logs/Tarven-iOS-Build-$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen).log"
 arguments=(
-  -project "$repository_root/clients/ios/AureliaIOS.xcodeproj"
-  -scheme AureliaIOS -configuration Release -destination-timeout 30
+  -project "$repository_root/clients/ios/TarvenIOS.xcodeproj"
+  -scheme TarvenIOS -configuration Release -destination-timeout 30
   -derivedDataPath "$build_root/DerivedData"
   "MOBILEVLCKIT_ROOT=$dependency_root"
   SWIFT_TREAT_WARNINGS_AS_ERRORS=YES GCC_TREAT_WARNINGS_AS_ERRORS=YES
 )
 if (( test_edition )); then
-  arguments+=(PRODUCT_BUNDLE_IDENTIFIER=com.lucas.aurelia.ios.test "AURELIA_DISPLAY_NAME=Aurelia Test"
-    "SWIFT_ACTIVE_COMPILATION_CONDITIONS=AURELIA_TEST_EDITION")
+  arguments+=(PRODUCT_BUNDLE_IDENTIFIER=org.tarven.ios.test "TARVEN_DISPLAY_NAME=Tarven Test"
+    "SWIFT_ACTIVE_COMPILATION_CONDITIONS=TARVEN_TEST_EDITION")
 fi
 if [[ -n "$device" ]]; then
   # A free development profile for this device, requested from Apple through Xcode's account.
@@ -62,10 +62,10 @@ else
 fi
 
 DEVELOPER_DIR="$developer_dir" xcodebuild "${arguments[@]}" build 2>&1 | tee "$log"
-app="$build_root/DerivedData/Build/Products/$products/Aurelia.app"
+app="$build_root/DerivedData/Build/Products/$products/Tarven.app"
 framework="$app/Frameworks/MobileVLCKit.framework/MobileVLCKit"
 
-if [[ ! -f "$app/Aurelia" || ! -f "$app/LICENSE" || ! -f "$framework" || ! -f "$app/MobileVLCKit-COPYING.txt" ]]; then
+if [[ ! -f "$app/Tarven" || ! -f "$app/LICENSE" || ! -f "$framework" || ! -f "$app/MobileVLCKit-COPYING.txt" ]]; then
   print -u2 "The built iOS application, player dependency or license is incomplete."
   exit 1
 fi

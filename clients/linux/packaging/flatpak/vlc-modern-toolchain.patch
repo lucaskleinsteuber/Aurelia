@@ -1,4 +1,4 @@
-From: Aurelia contributors
+From: Tarven contributors
 Subject: Preserve hardening, assertions and warning-free compilation on the current SDK
 
 Respect SDK _FORTIFY_SOURCE in released configure probes and config.h. Modernize the
@@ -6,7 +6,7 @@ legacy Autoconf K&R probe for Clang22. Use proper GNU make pattern-rule prerequi
 read the bundled revision for release tarballs without attempting a nonexistent Git repo.
 Mark the unused SDP parameter in the disabled stream-output stub. Preserve unconditional
 upstream development TODO reminders as comments; input-clock and native-window behavior
-remain those of the pinned release. Aurelia uses its own Avalonia frame-callback window.
+remain those of the pinned release. Tarven uses its own Avalonia frame-callback window.
 
 --- a/configure
 +++ b/configure
@@ -142,7 +142,7 @@ remain those of the pinned release. Aurelia uses its own Avalonia frame-callback
  static inline void vout_SendEventClose(vout_thread_t *vout)
  {
 -#warning FIXME: implement video close event
-+/* Upstream TODO: implement the video-window close event. Aurelia owns its window
++/* Upstream TODO: implement the video-window close event. Tarven owns its window
 + * and closes playback through libvlc_media_player_stop, not this native-window hook. */
      /* FIXME: this code is disabled as it breaks the non-playlist cases */
      //playlist_Stop(pl_Get(vout));

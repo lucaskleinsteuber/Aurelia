@@ -4,20 +4,20 @@
 
 Use the .NET SDK pinned in `global.json` and Xcode with the macOS 26 SDK.
 Generated output goes to the git-ignored `Local/` folder of the checkout, or to
-`AURELIA_OTHER_ROOT` when it is set (`scripts/workspace-paths.sh`,
+`TARVEN_OTHER_ROOT` when it is set (`scripts/workspace-paths.sh`,
 `Directory.Build.props`).
 Run server verification from the repository root:
 
 ```sh
 dotnet tool restore
-dotnet restore Aurelia.slnx
-dotnet format Aurelia.slnx --verify-no-changes --no-restore
-dotnet build Aurelia.slnx --configuration Release --no-restore
-dotnet test Aurelia.slnx --configuration Release --no-build
+dotnet restore Tarven.slnx
+dotnet format Tarven.slnx --verify-no-changes --no-restore
+dotnet build Tarven.slnx --configuration Release --no-restore
+dotnet test Tarven.slnx --configuration Release --no-build
 ```
 
-For the Mac client, use the `Aurelia` scheme in
-`clients/macos/Aurelia.xcodeproj` and run:
+For the Mac client, use the `Tarven` scheme in
+`clients/macos/Tarven.xcodeproj` and run:
 
 ```sh
 scripts/prepare-vlckit.sh
@@ -90,14 +90,14 @@ Before building the signed staged candidate, capture its client code and
 compiler-configuration fingerprint from the repository root:
 
 ```sh
-export AURELIA_CANDIDATE_CLIENT_SOURCE_FINGERPRINT="$(ruby tools/macos/playback-client-source-fingerprint.rb "$(pwd -P)")"
+export TARVEN_CANDIDATE_CLIENT_SOURCE_FINGERPRINT="$(ruby tools/macos/playback-client-source-fingerprint.rb "$(pwd -P)")"
 ```
 
 Build that candidate without changing the captured client source/configuration,
 then run the playback gate with the same exported fingerprint:
 
 ```sh
-zsh scripts/test-playback-full-chain.sh /path/to/staged/Aurelia.app 1800
+zsh scripts/test-playback-full-chain.sh /path/to/staged/Tarven.app 1800
 ```
 
 The optional all-format diagnostic uses this fingerprint and checks it before the
@@ -139,7 +139,7 @@ the full gate. Phase messages and minute-by-minute numeric output counters are
 printed without source paths, credentials or media IDs.
 
 To investigate only real episode completion and handoff, select
-`AURELIA_FULL_CHAIN_TEST_FILTER=AureliaTests/PlaybackFullChainTests/testAutomaticEpisodeHandoffDiagnostic`
+`TARVEN_FULL_CHAIN_TEST_FILTER=TarvenTests/PlaybackFullChainTests/testAutomaticEpisodeHandoffDiagnostic`
 with a short run. This retains the production callback timing and real decoding,
 but deliberately does not certify the all-format or 30-minute gate.
 
@@ -169,10 +169,10 @@ renames only a generated test folder. Hardware media-key and AirPods behavior,
 installed-host startup, and any explicitly approved personal-source check are
 recorded separately; none is implied by a full-chain pass.
 
-The optional `AureliaIntegrationTests` pairing/catalog test requires an isolated
-synthetic server, `AURELIA_TEST_SERVER_URL`, `AURELIA_TEST_PAIRING_CODE`,
-`AURELIA_TEST_SERVER_FINGERPRINT` and `AURELIA_TEST_PROFILE_PIN`. An optional
-`AURELIA_TEST_PROFILE_ID` selects another initialized test profile; otherwise the
+The optional `TarvenIntegrationTests` pairing/catalog test requires an isolated
+synthetic server, `TARVEN_TEST_SERVER_URL`, `TARVEN_TEST_PAIRING_CODE`,
+`TARVEN_TEST_SERVER_FINGERPRINT` and `TARVEN_TEST_PROFILE_PIN`. An optional
+`TARVEN_TEST_PROFILE_ID` selects another initialized test profile; otherwise the
 paired owner's profile is used. It verifies that the device cannot read the
 catalog before PIN unlock and revokes its newly paired test device on completion
 or failure. Never point it at personal library state.

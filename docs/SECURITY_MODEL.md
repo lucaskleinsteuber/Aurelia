@@ -1,6 +1,6 @@
 # Security model
 
-Aurelia runs on a computer at home and is reachable only from the home network. This page
+Tarven runs on a computer at home and is reachable only from the home network. This page
 describes who may do what and which protections stay in place, so that a change to an
 endpoint or a client can be checked against it.
 
@@ -15,16 +15,16 @@ endpoint or a client can be checked against it.
   never put a reverse proxy, a tunnel or a port forwarding in front of it.
 - **Paired devices.** A Mac, Linux PC, Apple TV, iPhone, iPad or browser gets access only with
   a one-time 8-digit code that the owner creates on the main device (*Create Code*, or
-  `aurelia pair` on a Linux server); a code works once and for five minutes. Each device has its
+  `tarven pair` on a Linux server); a code works once and for five minutes. Each device has its
   own token, which the owner can revoke under *Settings › Profiles and Devices*.
 - **Profiles.** On a paired device, each person chooses their profile. Owner and administrator
   profiles always need their PIN; other profiles can have one.
 - **Browsers** keep their credentials in `HttpOnly`, `SameSite=Strict` cookies (using the
   `__Host-` prefix over HTTPS so another service on the same host cannot overwrite them) that
-  scripts cannot read, and every change must carry the `X-Aurelia-Web` header, which another web
+  scripts cannot read, and every change must carry the `X-Tarven-Web` header, which another web
   page cannot add. The page's content policy loads nothing from the internet. Because browser
   cookies are not port-scoped (RFC 6265), avoid running untrusted HTTPS services on the same IP
-  address or hostname as Aurelia Server.
+  address or hostname as Tarven Server.
 - **Rate limits** slow down guessing of passwords, PINs and pairing codes and cap requests
   per address. Waiting pairing codes also end after 100 wrong guesses in total, from any
   address.
@@ -100,7 +100,7 @@ asking would break them. Until they do, an administrator can remove these withou
 The client asks for the password in a sheet that says what will happen, then gets a one-time
 approval with `POST /api/v1/management/approval` (or the older `/api/v1/server/approval`)
 bound to the profile, the exact method and address, and the request body's hash. The approval
-lasts two minutes and is used up by that one request, sent with the `X-Aurelia-Approval`
+lasts two minutes and is used up by that one request, sent with the `X-Tarven-Approval`
 header.
 
 Older clients that send an approval with other requests still work; the server ignores it
@@ -125,8 +125,8 @@ Each entry has the time, the profile, the device's name, platform and IP address
 detail such as a profile's name or a storage location's folder name. It never holds a password,
 PIN, token, full path or title. The log is kept for 90 days (30 to 365, set by the owner).
 
-Every app sends `X-Aurelia-Installation` (a random identifier it creates once) and
-`X-Aurelia-Client` (`ios/2.11.0`, `macos/…`, `linux/…`, `tvos/…`); the browser keeps its
+Every app sends `X-Tarven-Installation` (a random identifier it creates once) and
+`X-Tarven-Client` (`ios/2.11.0`, `macos/…`, `linux/…`, `tvos/…`); the browser keeps its
 identifier in an HttpOnly cookie. A device that signs in for the first time is **new** until the
 owner answers "That Was Me". The owner's apps show it at once while they are open (the Mac also
 as a notification); there are no push notifications, so a closed app sees it the next time.
@@ -160,7 +160,7 @@ Requests last two minutes and are used once.
 
 - Only the owner can ask the server to sleep, turn off or stop now (Settings › Power › Right
   Now); every request lands in the security log.
-- Turning the server off from Linux goes through a file the root `aurelia-autosleep --now` reads:
+- Turning the server off from Linux goes through a file the root `tarven-autosleep --now` reads:
   it accepts only `sleep`, `shutdown` or `stop`, refuses links, and waits for a running update.
 
 ## Checking a change

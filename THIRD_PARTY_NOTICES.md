@@ -1,6 +1,6 @@
 # Third-party notices
 
-Aurelia's own source is licensed under the [MIT License](LICENSE). The apps and the server include
+Tarven's own source is licensed under the [MIT License](LICENSE). The apps and the server include
 or use the open-source components below, each under its own license. Every app shows these license
 texts in *Settings › About*, and the packages carry them in full.
 
@@ -11,7 +11,7 @@ texts in *Settings › About*, and the packages carry them in full.
   Public License version 2.1 or later. The complete license text from the pinned official binary
   package is included in each app (`VLCKit-COPYING.txt`, `MobileVLCKit-COPYING.txt`,
   `TVVLCKit-COPYING.txt`). Source and license information: <https://code.videolan.org/videolan/VLCKit>
-- **Aurelia for Linux** uses **LibVLCSharp** (LGPL 2.1 or later) with the distribution's own
+- **Tarven for Linux** uses **LibVLCSharp** (LGPL 2.1 or later) with the distribution's own
   **libVLC**; the Flatpak brings libVLC and its decoder libraries, each under its own license,
   listed in the Flatpak's notices.
 
@@ -24,7 +24,7 @@ unmodified official source (<https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz>, S
 `scripts/build-ffmpeg-macos.sh`, without GPL or non-free parts, and are licensed under the GNU
 Lesser General Public License version 2.1 or later; the license text is beside them as
 `COPYING.LGPLv2.1`. The Linux server and the Docker image use the distribution's own ffmpeg, which
-Aurelia does not distribute. Source and license information: <https://ffmpeg.org/legal.html>
+Tarven does not distribute. Source and license information: <https://ffmpeg.org/legal.html>
 
 ## Speech recognition
 
@@ -35,7 +35,7 @@ The Mac app's server includes `whisper-cli` from **whisper.cpp 1.8.3** (with `gg
 `870ba21409cdf66697dc4db15ebdb13bc67037d76c7cc63756c81471d8f1731a`) by
 `scripts/build-whisper-macos.sh`, is licensed under the MIT License, and carries its complete
 license text beside the binary at `Contents/Resources/Server/whisper/LICENSE`. The Linux server
-and the Docker image use the distribution's own `whisper.cpp` package, which Aurelia does not
+and the Docker image use the distribution's own `whisper.cpp` package, which Tarven does not
 distribute. Source and license information: <https://github.com/ggml-org/whisper.cpp>
 
 ## Server and Linux app
@@ -45,14 +45,14 @@ SkiaSharp, SQLitePCLRaw with SQLite, and Haukcode.Mdns. The Linux app additional
 Avalonia (MIT), Tmds.DBus (MIT), BouncyCastle (MIT) and the Inter font (SIL Open Font License 1.1). Release builds
 include the resolved package metadata and the available upstream license and notice files: in the
 Mac app under `Contents/Resources/ThirdPartyNotices`, in the Linux packages under
-`/usr/share/doc/aurelia-desktop/notices`, including the .NET runtime packs' complete notices and
+`/usr/share/doc/tarven-desktop/notices`, including the .NET runtime packs' complete notices and
 Skia's third-party notices.
 
 The checked-in Haukcode.Mdns license comes from upstream commit
 `db212fc8e272e29212fe2147810757ca5b437ca4` (the 1.0.18 package revision, verified unchanged for
 the bundled 1.0.22 package). SQLitePCLRaw's license and notice come from the 2.1.12 tag, commit
 `ca835d21508bff43121c65081035840ac5006c4c` (verified unchanged for the bundled 2.1.13 packages).
-Its upstream notice covers optional providers too; inclusion does not imply Aurelia uses SQLCipher
+Its upstream notice covers optional providers too; inclusion does not imply Tarven uses SQLCipher
 or those providers.
 
 ## Services
@@ -60,4 +60,4 @@ or those providers.
 Movie and series details and pictures can come from [TMDB](https://www.themoviedb.org) when the
 server's owner turns it on with their own key; subtitles can come from
 [OpenSubtitles](https://www.opensubtitles.com). This product uses the TMDB API but is not
-endorsed or certified by TMDB, and Aurelia is not endorsed by OpenSubtitles.
+endorsed or certified by TMDB, and Tarven is not endorsed by OpenSubtitles.

@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <AureliaRepositoryRoot Condition="'$(AureliaRepositoryRoot)' == ''">$(MSBuildThisFileDirectory)../../..</AureliaRepositoryRoot>
+    <TarvenRepositoryRoot Condition="'$(TarvenRepositoryRoot)' == ''">$(MSBuildThisFileDirectory)../../..</TarvenRepositoryRoot>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="$(AureliaRepositoryRoot)/src/Aurelia.Server/Aurelia.Server.csproj" />
+    <ProjectReference Include="$(TarvenRepositoryRoot)/src/Tarven.Server/Tarven.Server.csproj" />
   </ItemGroup>
 </Project>

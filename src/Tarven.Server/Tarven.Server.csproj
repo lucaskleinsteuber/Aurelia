@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <AssemblyName>Tarven.Server</AssemblyName>
+    <RootNamespace>Tarven.Server</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- A home server serves a handful of clients: workstation GC keeps memory and threads small. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+  </PropertyGroup>
+  <!--
+    Release payloads (restored and published for a runtime identifier) start precompiled and leave out
+    unused framework code. Partial trimming only removes code from framework libraries that
+    declare themselves trimmable; Tarven, EF Core, SQLite and Bonjour stay complete, so their
+    reflection keeps working. Minimal API handlers and JSON keep their reflection-based paths.
+  -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != '' or '$(RuntimeIdentifiers)' != ''">
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <EnableRequestDelegateGenerator>false</EnableRequestDelegateGenerator>
+  </PropertyGroup>
+  <!-- The browser app's files are built into the server (Services/WebAppAssets.cs). -->
+  <ItemGroup>
+    <Content Remove="WebApp/**" />
+    <None Remove="WebApp/**" />
+    <EmbeddedResource Include="WebApp/**" LogicalName="WebApp/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tarven.Server.Tests" />
+    <ProjectReference Include="../Tarven.Contracts/Tarven.Contracts.csproj" />
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" />
+    <PackageReference Include="Haukcode.Mdns" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+</Project>

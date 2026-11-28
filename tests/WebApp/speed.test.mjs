@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createReadCache, createPrefetcher } from "../../src/Aurelia.Server/WebApp/js/logic.js";
-import { createApi } from "../../src/Aurelia.Server/WebApp/js/api.js";
+import { createReadCache, createPrefetcher } from "../../src/Tarven.Server/WebApp/js/logic.js";
+import { createApi } from "../../src/Tarven.Server/WebApp/js/api.js";
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 

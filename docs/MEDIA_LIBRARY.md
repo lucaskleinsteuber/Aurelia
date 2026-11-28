@@ -1,8 +1,8 @@
 # Organizing your media
 
-Aurelia reads your folders as they are and never renames, moves or changes a file. It recognizes
+Tarven reads your folders as they are and never renames, moves or changes a file. It recognizes
 most common layouts, and the import preview shows every decision before anything is added, so
-nothing has to be perfect. The names below are the ones Aurelia understands best.
+nothing has to be perfect. The names below are the ones Tarven understands best.
 
 ## Supported files
 
@@ -49,7 +49,7 @@ TV Shows/
         └── Behind the Scenes.mkv
 ```
 
-Aurelia understands these episode names: `S01E02`, `S1 E2`, `1x02`, `Season 1 Episode 2`,
+Tarven understands these episode names: `S01E02`, `S1 E2`, `1x02`, `Season 1 Episode 2`,
 `Staffel 1 Folge 2`, and inside a season folder also `E02`, `Episode 2`, `Folge 2` or just `02`.
 Season folders may be called `Season 1`, `Staffel 1` or `S1`. Specials go in `Specials` or
 `Season 0` (episodes `S00E01` and so on) and appear as the series' Specials.
@@ -121,7 +121,7 @@ Subtitles found with OpenSubtitles are kept in the server's data folder, never n
 ## Details, artwork and cast from TMDB
 
 With a free TMDB key (see [Getting started](GETTING_STARTED.md#3-get-posters-details-and-subtitles-optional-free)),
-Aurelia fetches posters, backdrops, descriptions, ratings, age ratings and the complete cast and
+Tarven fetches posters, backdrops, descriptions, ratings, age ratings and the complete cast and
 crew. It compares the title, the year and, for series, the seasons and episodes you have, so most
 titles match without asking. Unsure matches wait in **Review Matches**, where you choose the right
 one. You can also edit any detail by hand; your edits are kept when the library is scanned again.
@@ -139,7 +139,7 @@ Selecting a person shows every movie and series in your library they are part of
   or shared with everyone.
 - A collection works like a box set on a shelf: it can hold movies, whole series, single seasons
   (such as a show's Specials) and single episodes, in your own order or by release or title. Give
-  it a description, a cover and a background picture, or let Aurelia make a cover from its titles.
+  it a description, a cover and a background picture, or let Tarven make a cover from its titles.
   It shows how much of it you have watched, and **Play** continues where you left off.
 - An automatic film series or universe can be saved as your own collection to change it. On
   Apple TV, collections can be browsed and played but not edited.

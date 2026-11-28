@@ -39,7 +39,7 @@ if [ ! -f "$package_root/COPYING.txt" ]; then
 fi
 
 # The official archive is pre-signed. Xcode must strip and then re-sign the
-# embedded copy for Aurelia, so remove only the cached binary signature.
+# embedded copy for Tarven, so remove only the cached binary signature.
 framework_binary="$package_root/VLCKit.xcframework/macos-arm64_x86_64/VLCKit.framework/Versions/A/VLCKit"
 if [ ! -f "$framework_binary" ]; then
     echo "VLCKit macOS framework binary is missing from the official package." >&2

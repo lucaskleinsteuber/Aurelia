@@ -14,7 +14,7 @@ cleanup() {
 }
 trap cleanup EXIT
 mkdir -p "$mount"
-/usr/bin/hdiutil create -size 128m -fs HFS+ -volname AureliaRecoveryProbe "$image" >/dev/null
+/usr/bin/hdiutil create -size 128m -fs HFS+ -volname TarvenRecoveryProbe "$image" >/dev/null
 /usr/bin/hdiutil attach -nobrowse -mountpoint "$mount" "$image" >/dev/null
 env NUGET_PACKAGES="$other_root/Package Cache/NuGet" "$dotnet_bin" run \
-  --project "$repository_root/tools/Aurelia.Server.RecoveryProbe" -- "$mount"
+  --project "$repository_root/tools/Tarven.Server.RecoveryProbe" -- "$mount"

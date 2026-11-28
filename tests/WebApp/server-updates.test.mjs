@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createServerUpdates, updateSummary } from "../../src/Aurelia.Server/WebApp/js/server-updates.js";
-import { createSettings } from "../../src/Aurelia.Server/WebApp/js/settings.js";
-import { h } from "../../src/Aurelia.Server/WebApp/js/dom.js";
-import { createApi, ApiError } from "../../src/Aurelia.Server/WebApp/js/api.js";
+import { createServerUpdates, updateSummary } from "../../src/Tarven.Server/WebApp/js/server-updates.js";
+import { createSettings } from "../../src/Tarven.Server/WebApp/js/settings.js";
+import { h } from "../../src/Tarven.Server/WebApp/js/dom.js";
+import { createApi, ApiError } from "../../src/Tarven.Server/WebApp/js/api.js";
 import { installDOM, flush, deferred, button, all } from "./dom-fixture.mjs";
 
 const initial = { available: true, installed: "1.14.0 (101)", newest: "1.15.0 (102)", updateAvailable: true, state: "idle", checkedAt: "2026-10-27T00:00:00Z", message: null };
@@ -35,7 +35,7 @@ test("status summaries use the server contract without inventing a percentage", 
   assert.match(updateSummary(status("checking")), /Looking for/);
   assert.match(updateSummary(status("installing")), /1\.15\.0 \(102\)/);
   assert.equal(updateSummary(status("installing", { progressPercent: 54, phase: "downloading" })), "Downloading 1.15.0 (102)… (54%)");
-  assert.equal(updateSummary(status("installing", { progressPercent: 92, phase: "restarting" }), { reconnecting: true }), "Restarting Aurelia Server… (95%)");
+  assert.equal(updateSummary(status("installing", { progressPercent: 92, phase: "restarting" }), { reconnecting: true }), "Restarting Tarven Server… (95%)");
   assert.equal(updateSummary(status("failed", { message: "Synthetic checksum failure" })), "Synthetic checksum failure");
   assert.match(updateSummary(status("idle", { updateAvailable: false })), /up to date/);
   assert.match(updateSummary(status("idle", { available: false })), /Linux/);
@@ -101,7 +101,7 @@ test("restart outages retain progress and success reports the installed version 
   } } });
   await f.tick(); assert.match(f.component.element.textContent, /Waiting to reconnect/); assert.equal(f.timers.size, 1);
   await f.tick(); assert.match(f.component.element.textContent, /now running 1\.15\.0 \(102\)/);
-  button(f.component.element, "Reload Aurelia").click();
+  button(f.component.element, "Reload Tarven").click();
   assert.equal(f.reloads, 1);
   assert.equal(f.timers.size, 0); assert.equal(f.calls.length, 0);
 });
@@ -110,7 +110,7 @@ test("idle without a changed installed version is not reported as an installed u
   const f = fixture(t, { initialStatus: status("installing") });
   await f.tick(); assert.match(f.component.element.textContent, /The update was not installed/);
   assert.doesNotMatch(f.component.element.textContent, /now running/); assert.equal(f.timers.size, 0);
-  assert.equal(all(f.component.element).some((node) => node.textContent === "Reload Aurelia"), false);
+  assert.equal(all(f.component.element).some((node) => node.textContent === "Reload Tarven"), false);
 });
 
 test("an updater failure stays visible and does not retry the install", async (t) => {
@@ -194,7 +194,7 @@ test("update checks use the existing POST route with the caller's cancellation s
   await api.checkForUpdates({ signal: controller.signal });
   assert.equal(calls[0].path, "/api/v1/server/updates/check"); assert.equal(calls[0].method, "POST");
   assert.equal(calls[0].signal, controller.signal); assert.equal(calls[0].credentials, "same-origin");
-  assert.equal(calls[0].headers["X-Aurelia-Web"], "profile");
+  assert.equal(calls[0].headers["X-Tarven-Web"], "profile");
 });
 
 

@@ -1,8 +1,8 @@
 #!/bin/bash
-# Downloads a stable Aurelia Server release for this image, checks it against the release's
-# SHA256SUMS and its minisign signature and unpacks it into /opt/aurelia.
+# Downloads a stable Tarven Server release for this image, checks it against the release's
+# SHA256SUMS and its minisign signature and unpacks it into /opt/tarven.
 set -euo pipefail
-# The owner's minisign key, as in `aurelia update`. Every release must be signed with it, old
+# The owner's minisign key, as in `tarven update`. Every release must be signed with it, old
 # builds included: there is no unsigned way in.
 signing_public_key=RWT0nYptHNjXQSXnVurY9XXdPF2Ssq5sUlSP+WoBwjA5GPXWnugBc7lE
 
@@ -28,7 +28,7 @@ repository=$1
 case "$2" in
   amd64|x86_64) arch=x64 ;;
   arm64|aarch64) arch=arm64 ;;
-  *) echo "Aurelia Server runs on amd64 and arm64, not on $2." >&2; exit 1 ;;
+  *) echo "Tarven Server runs on amd64 and arm64, not on $2." >&2; exit 1 ;;
 esac
 wanted=${3:-}
 work=$(mktemp -d)
@@ -38,7 +38,7 @@ newest_in() {
     | first(.assets[] | select(.name == "SHA256SUMS") | .browser_download_url) as $sums
     | (first(.assets[] | select(.name == "SHA256SUMS.minisig") | .browser_download_url) // "") as $signature
     | .assets[]
-    | (.name | capture("^Aurelia-Server-(?<version>[0-9][0-9.]*)-(?<build>[0-9]+)-linux-" + $arch + "\\.tar\\.gz$")) as $found
+    | (.name | capture("^Tarven-Server-(?<version>[0-9][0-9.]*)-(?<build>[0-9]+)-linux-" + $arch + "\\.tar\\.gz$")) as $found
     | select($wanted == "" or $found.build == $wanted)
     | [($found.build | tonumber), $found.version, .name, .browser_download_url, $sums, $signature] ]
   | max_by(.[0]) // empty | .[0] |= tostring | join("\t")' "$1"
@@ -52,39 +52,39 @@ for page in 1 2 3 4 5; do
   newest=$(newest_in "$work/releases.json")
   [ -z "$newest" ] && [ "$(jq length "$work/releases.json")" -ge 100 ] || break
 done
-[ -n "$newest" ] || { echo "No stable Aurelia Server release for $arch${wanted:+ with build $wanted} was found." >&2; exit 1; }
+[ -n "$newest" ] || { echo "No stable Tarven Server release for $arch${wanted:+ with build $wanted} was found." >&2; exit 1; }
 IFS=$'\t' read -r build version name url sums_url signature_url <<<"$newest"
-echo "Aurelia Server $version ($build) for $arch"
+echo "Tarven Server $version ($build) for $arch"
 curl -fsSL --retry 3 "$url" -o "$work/$name"
 curl -fsSL --retry 3 "$sums_url" -o "$work/SHA256SUMS"
 if [ -z "$signature_url" ]; then
   if [ "$build" -lt 153 ]; then
     echo "Build $build predates signed releases (build 153 and newer); only signed releases can be installed." >&2
   else
-    echo "The release is not signed by the owner of Aurelia." >&2
+    echo "The release is not signed by the owner of Tarven." >&2
   fi
   exit 1
 fi
 curl -fsSL --retry 3 "$signature_url" -o "$work/SHA256SUMS.minisig" \
   && mkdir "$work/signature" && signature_valid "$work/SHA256SUMS" "$work/SHA256SUMS.minisig" "$work/signature" \
-  || { echo "The release is not signed by the owner of Aurelia." >&2; exit 1; }
+  || { echo "The release is not signed by the owner of Tarven." >&2; exit 1; }
 expected=$(awk -v file="$name" '{ sub(/^\*/, "", $2); sub(/^\.\//, "", $2) } $2 == file { print $1 }' "$work/SHA256SUMS")
 [ "${#expected}" -eq 64 ] && [ "$(sha256sum "$work/$name" | cut -d ' ' -f1)" = "$expected" ] \
   || { echo "The download does not match its published checksum." >&2; exit 1; }
-# Like `aurelia update`: only the package's own folder is unpacked, owned by root, and it must be
+# Like `tarven update`: only the package's own folder is unpacked, owned by root, and it must be
 # the version and architecture that was chosen.
-folder="Aurelia-Server-$version-linux-$arch"
+folder="Tarven-Server-$version-linux-$arch"
 tar -tzf "$work/$name" > "$work/contents"
 awk -v folder="$folder" 'index($0, folder "/") != 1 || /(^|\/)\.\.(\/|$)/ { bad = 1 } END { exit bad }' "$work/contents" \
-  || { echo "The download is not an Aurelia Server package." >&2; exit 1; }
+  || { echo "The download is not a Tarven Server package." >&2; exit 1; }
 mkdir "$work/package"
 tar -xzf "$work/$name" --no-same-owner -C "$work/package"
 package="$work/package/$folder"
 [ "$(cat "$package/VERSION" 2>/dev/null)" = "$version ($build)" ] && [ "$(cat "$package/ARCHITECTURE" 2>/dev/null)" = "$arch" ] \
-  || { echo "The download is not Aurelia Server $version ($build) for $arch." >&2; exit 1; }
-install -d /opt/aurelia
-cp -R "$package/server" "$package/notices" /opt/aurelia/
-install -m 0644 "$package/VERSION" /opt/aurelia/VERSION
-chmod -R u=rwX,go=rX /opt/aurelia
-chmod 0755 /opt/aurelia/server/Aurelia.Server
+  || { echo "The download is not Tarven Server $version ($build) for $arch." >&2; exit 1; }
+install -d /opt/tarven
+cp -R "$package/server" "$package/notices" /opt/tarven/
+install -m 0644 "$package/VERSION" /opt/tarven/VERSION
+chmod -R u=rwX,go=rX /opt/tarven
+chmod 0755 /opt/tarven/server/Tarven.Server
 rm -rf "$work"

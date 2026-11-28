@@ -20,8 +20,8 @@ NOT_COVERED = {
     "only appear on interaction; not captured by drawing a window's content view.",
     "Sheets in place": "Sheets are drawn on their own at their natural size (size label "
     "'sheet'), not attached to the window.",
-    "Native materials with reduced transparency": "Only Aurelia's own "
-    "aureliaReduceTransparency is switched (hosting view environment). SwiftUI/AppKit "
+    "Native materials with reduced transparency": "Only Tarven's own "
+    "tarvenReduceTransparency is switched (hosting view environment). SwiftUI/AppKit "
     "materials follow the system setting, which is never changed.",
     "Window chrome": "Traffic-light buttons and the title bar belong to the window frame and are "
     "not part of the drawn content view.",
@@ -51,15 +51,15 @@ def main() -> None:
     lines = [
         "# Mac app offscreen renders",
         "",
-        "Made by `scripts/audit-render-screens.sh` (DEBUG mode `AURELIA_UI_TEST_MODE=audit-render`)"
+        "Made by `scripts/audit-render-screens.sh` (DEBUG mode `TARVEN_UI_TEST_MODE=audit-render`)"
         " with an invented library (`AuditRenderFixture.swift`). File names are "
         "`<screen>__<size>__<appearance>.png`; sizes are window content sizes in points (the "
         "window minimum is 760x560), `1280x3000-tall` shows more of a scrolling page, `sheet` is a "
         "sheet at its own size. Appearances: `light`/`dark` set the window's system appearance "
         "(the app's root view asks for dark itself), `-contrast` adds the high-contrast "
-        "appearance and Aurelia's increased-contrast branch, `-reducedtransparency` Aurelia's "
+        "appearance and Tarven's increased-contrast branch, `-reducedtransparency` Tarven's "
         "reduced-transparency branch. Pictures are drawn at 1 pixel per point unless "
-        "AURELIA_AUDIT_RENDER_SCALE says otherwise.",
+        "TARVEN_AUDIT_RENDER_SCALE says otherwise.",
         "",
         f"{len(pictures)} pictures of {len(screens)} screens.",
         "",

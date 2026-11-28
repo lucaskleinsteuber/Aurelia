@@ -29,14 +29,14 @@ export CC
   --enable-libass --enable-freetype --enable-matroska
 find . -name Makefile -type f -exec sed -i \
   -e '/^CFLAGS = /s/$/ -Werror/' -e '/^CXXFLAGS = /s/$/ -Werror/' {} +
-# Aurelia supplies its own controls, discovery and window. Keep the no-op interface for libVLC
+# Tarven supplies its own controls, discovery and window. Keep the no-op interface for libVLC
 # integrations, and omit VLC's desktop/remote-control interfaces, discovery services and music
 # visualizers. File demuxers, decoders, subtitles, filters, memory output and VAAPI stay enabled.
 # Place these before the first aggregate target: make expands prerequisites while reading it.
 awk '
   /^all: / && !inserted {
-    print "aurelia_unused_modules := $(filter-out libdummy_plugin.la,$(control_LTLIBRARIES)) $(sd_LTLIBRARIES) $(visu_LTLIBRARIES)"
-    print "LTLIBRARIES := $(filter-out $(aurelia_unused_modules),$(LTLIBRARIES))"
+    print "tarven_unused_modules := $(filter-out libdummy_plugin.la,$(control_LTLIBRARIES)) $(sd_LTLIBRARIES) $(visu_LTLIBRARIES)"
+    print "LTLIBRARIES := $(filter-out $(tarven_unused_modules),$(LTLIBRARIES))"
     print "control_LTLIBRARIES = libdummy_plugin.la"
     print "sd_LTLIBRARIES ="
     print "visu_LTLIBRARIES ="
@@ -44,14 +44,14 @@ awk '
   }
   { print }
   END { if (!inserted) exit 1 }
-' modules/Makefile > modules/Makefile.aurelia
-mv modules/Makefile.aurelia modules/Makefile
+' modules/Makefile > modules/Makefile.tarven
+mv modules/Makefile.tarven modules/Makefile
 # Autoconf adds this complex-arithmetic compile option to CFLAGS, but Clang rejects it when
 # the standalone cache generator is linked. Its metadata-only tool needs no such optimization;
 # keep the option on the player libraries and keep -Werror on the generator itself.
-cat >> bin/Makefile <<'AURELIA_CACHEGEN'
+cat >> bin/Makefile <<'TARVEN_CACHEGEN'
 vlc-cache-gen: CFLAGS := $(filter-out -fcx-limited-range,$(CFLAGS))
-AURELIA_CACHEGEN
+TARVEN_CACHEGEN
 # Link dependent components to the installed core metadata, so their final runtime paths are
 # correct on the first link. Referencing the uninstalled build-tree .la would force libtool
 # to rewrite every dependent library during installation.

@@ -5,8 +5,8 @@ import assert from "node:assert/strict";
 import {
   deviceConfirmationDetails, deviceConfirmationMessage, newDeviceNote, remoteUnlockState, securityDeviceLine,
   securityEventText, securityEventsQuery, securityKind, supportsSecurity, unansweredDevices
-} from "../../src/Aurelia.Server/WebApp/js/security.js";
-import { createSecurityAlerts, remoteUnlockPanel, securitySection } from "../../src/Aurelia.Server/WebApp/js/security-view.js";
+} from "../../src/Tarven.Server/WebApp/js/security.js";
+import { createSecurityAlerts, remoteUnlockPanel, securitySection } from "../../src/Tarven.Server/WebApp/js/security-view.js";
 import { installDOM, all, button, flush } from "./dom-fixture.mjs";
 
 const text = (node) => node.textContent;

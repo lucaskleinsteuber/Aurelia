@@ -1,11 +1,11 @@
 // The browser's Import Preview with an invented storage location; no browser, network or files.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createManagementEditors } from "../../src/Aurelia.Server/WebApp/js/settings-editors.js";
-import { createImportPreview } from "../../src/Aurelia.Server/WebApp/js/import-preview.js";
+import { createManagementEditors } from "../../src/Tarven.Server/WebApp/js/settings-editors.js";
+import { createImportPreview } from "../../src/Tarven.Server/WebApp/js/import-preview.js";
 import {
   importAssignmentChanges, importChoicesFor, importEditorStart, importPreviewRows, libraryPayload, loadImportPreview,
-} from "../../src/Aurelia.Server/WebApp/js/logic.js";
+} from "../../src/Tarven.Server/WebApp/js/logic.js";
 import { installDOM, all, button, flush } from "./dom-fixture.mjs";
 
 const items = [

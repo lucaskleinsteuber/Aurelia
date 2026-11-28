@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCatalogView } from "../../src/Aurelia.Server/WebApp/js/catalog-view.js";
-import { createApi, ApiError } from "../../src/Aurelia.Server/WebApp/js/api.js";
-import { h } from "../../src/Aurelia.Server/WebApp/js/dom.js";
+import { createCatalogView } from "../../src/Tarven.Server/WebApp/js/catalog-view.js";
+import { createApi, ApiError } from "../../src/Tarven.Server/WebApp/js/api.js";
+import { h } from "../../src/Tarven.Server/WebApp/js/dom.js";
 import { installDOM, all, button, flush, deferred } from "./dom-fixture.mjs";
 
 function fixture(t, api = {}) {
@@ -72,7 +72,7 @@ test("favorite API keeps encoded identity, same-origin cookies and route cancell
   const api = createApi(async (path, options) => { calls.push({ path, ...options }); return { ok: true, status: 204 }; });
   await api.setFavorite("a/b", true, { signal: controller.signal });
   assert.equal(calls[0].path, "/api/v1/media/a%2Fb/favorite"); assert.equal(calls[0].signal, controller.signal);
-  assert.equal(calls[0].credentials, "same-origin"); assert.equal(calls[0].headers["X-Aurelia-Web"], "profile");
+  assert.equal(calls[0].credentials, "same-origin"); assert.equal(calls[0].headers["X-Tarven-Web"], "profile");
   assert.equal(calls[0].body, '{"isFavorite":true}');
 });
 

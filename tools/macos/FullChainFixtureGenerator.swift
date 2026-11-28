@@ -7,7 +7,7 @@ struct FullChainFixtureGenerator {
   static func main() async throws {
     guard CommandLine.arguments.count == 2 else { throw Failure.invalidOwnedRoot }
     let root = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
-    guard root.path.contains("/Library/Caches/Aurelia/TestRuns/playback-evidence-"),
+    guard root.path.contains("/Library/Caches/Tarven/TestRuns/playback-evidence-"),
       root.lastPathComponent == "Fixtures", root.resolvingSymlinksInPath().path == root.path
     else { throw Failure.invalidOwnedRoot }
     let fixtures = try await FullChainSyntheticMedia.generate(in: root)

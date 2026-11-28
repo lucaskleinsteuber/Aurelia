@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest an idea or improvement for Aurelia.
+description: Suggest an idea or improvement for Tarven.
 labels: ["enhancement"]
 body:
   - type: textarea
@@ -15,12 +15,12 @@ body:
       label: Which apps would it affect?
       multiple: true
       options:
-        - Aurelia for Mac
-        - Aurelia for Linux (desktop app)
+        - Tarven for Mac
+        - Tarven for Linux (desktop app)
         - The server (Linux, Docker or inside an app)
-        - Aurelia for Apple TV
-        - Aurelia for iPhone or iPad
-        - Aurelia in a web browser
+        - Tarven for Apple TV
+        - Tarven for iPhone or iPad
+        - Tarven in a web browser
         - Documentation
   - type: textarea
     id: idea

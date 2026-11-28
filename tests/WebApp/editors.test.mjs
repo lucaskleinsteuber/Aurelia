@@ -1,8 +1,8 @@
 // Exercise the real forms with a small in-memory DOM. No browser, windows or network run.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ApiError } from "../../src/Aurelia.Server/WebApp/js/api.js";
-import { createManagementEditors } from "../../src/Aurelia.Server/WebApp/js/settings-editors.js";
+import { ApiError } from "../../src/Tarven.Server/WebApp/js/api.js";
+import { createManagementEditors } from "../../src/Tarven.Server/WebApp/js/settings-editors.js";
 
 class TestNode extends EventTarget {
   constructor(tag = "", text = "") {

@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 import {
   formatMoveCode, initialChoice, isServerMoved, mappingPayload, matchText, moveAddress, moveCodeComplete, movedDestination,
   ownerMoveView, rankedSuggestions, relocateDecision, safeAddresses, setupMoveView, transferProgress,
-} from "../../src/Aurelia.Server/WebApp/js/server-move.js";
-import { createApi, ApiError } from "../../src/Aurelia.Server/WebApp/js/api.js";
-import { createSetupMove, movedNotice } from "../../src/Aurelia.Server/WebApp/js/server-move-view.js";
+} from "../../src/Tarven.Server/WebApp/js/server-move.js";
+import { createApi, ApiError } from "../../src/Tarven.Server/WebApp/js/api.js";
+import { createSetupMove, movedNotice } from "../../src/Tarven.Server/WebApp/js/server-move-view.js";
 import { installDOM, flush, button, input, all } from "./dom-fixture.mjs";
 
 const json = (status, value) => ({ status, ok: status >= 200 && status < 300, text: async () => (value === undefined ? "" : JSON.stringify(value)) });
@@ -23,7 +23,7 @@ test("move codes are twelve letters and digits in groups of four", () => {
   assert.equal(moveCodeComplete("abcdefghjkmn"), true);
 });
 
-test("the old server's address gets https and Aurelia's port, and nothing else is accepted", () => {
+test("the old server's address gets https and Tarven's port, and nothing else is accepted", () => {
   assert.equal(moveAddress("192.168.1.20"), "https://192.168.1.20:43111");
   assert.equal(moveAddress(" old-server.local:44000 "), "https://old-server.local:44000");
   assert.equal(moveAddress("https://192.168.1.20:443"), "https://192.168.1.20:443");
@@ -128,12 +128,12 @@ test("setup move calls carry the setup code header and no token, and a 409 serve
     return json(200, { state: "fetching" });
   }, { onMoved: (error) => moved.push(error) });
   await api.startNetworkMove("ABCDE-FGHJK", "https://192.168.1.20:43111", "ABCD-EFGH-JKMN");
-  assert.equal(calls[0].headers["X-Aurelia-Setup-Code"], "ABCDE-FGHJK");
-  assert.equal(calls[0].headers["X-Aurelia-Web"], "device");
+  assert.equal(calls[0].headers["X-Tarven-Setup-Code"], "ABCDE-FGHJK");
+  assert.equal(calls[0].headers["X-Tarven-Web"], "device");
   assert.deepEqual(JSON.parse(calls[0].body), { address: "https://192.168.1.20:43111", code: "ABCD-EFGH-JKMN" });
   assert.equal((await api.uploadMovingFile("ABCDE-FGHJK", { type: "" })).uploadId, "upload-1");
   assert.equal(calls[1].method, "PUT");
-  assert.equal(calls[1].headers["X-Aurelia-Setup-Code"], "ABCDE-FGHJK");
+  assert.equal(calls[1].headers["X-Tarven-Setup-Code"], "ABCDE-FGHJK");
   assert.equal(calls[1].headers["Content-Type"], "application/octet-stream");
   await api.finishMove("ABCDE-FGHJK", { mappings: [{ id: "a", path: null }] });
   assert.equal(calls[2].path, "/api/v1/setup/move/finish");
@@ -155,7 +155,7 @@ test("Storage Location Moved sends force only when asked", async () => {
   await api.relocateLibrary("lib-1", "/srv/empty", true);
   const sent = calls.filter((call) => call.path === "/api/v1/libraries/lib-1/relocate").map((call) => JSON.parse(call.body));
   assert.deepEqual(sent, [{ path: "/srv/new" }, { path: "/srv/empty", force: true }]);
-  assert.ok(calls.every((call) => call.path !== "/api/v1/libraries/lib-1/relocate" || call.headers["X-Aurelia-Approval"] === "synthetic-approval"));
+  assert.ok(calls.every((call) => call.path !== "/api/v1/libraries/lib-1/relocate" || call.headers["X-Tarven-Approval"] === "synthetic-approval"));
 });
 
 test("the location step previews a typed folder and finishes with the chosen mappings", async (t) => {
@@ -205,7 +205,7 @@ test("Undo Move is sent as it is and asks for an approval only when the server w
   const api = createApi(async (path, options) => {
     calls.push({ path, ...options });
     if (path === "/api/v1/management/approval") return json(200, { token: "synthetic-approval" });
-    if (path === "/api/v1/server/move" && !options.headers["X-Aurelia-Approval"] && asked) return json(403, { code: "approval_required", message: "Approve" });
+    if (path === "/api/v1/server/move" && !options.headers["X-Tarven-Approval"] && asked) return json(403, { code: "approval_required", message: "Approve" });
     return json(204);
   });
   // A moved server answers only its move: no approval is fetched.
@@ -217,7 +217,7 @@ test("Undo Move is sent as it is and asks for an approval only when the server w
   calls.length = 0;
   await api.endServerMove();
   assert.deepEqual(calls.map((call) => call.path), ["/api/v1/server/move", "/api/v1/management/approval", "/api/v1/server/move"]);
-  assert.equal(calls[2].headers["X-Aurelia-Approval"], "synthetic-approval");
+  assert.equal(calls[2].headers["X-Tarven-Approval"], "synthetic-approval");
 });
 
 test("a move that was just started may report idle for a moment before it fetches", async (t) => {

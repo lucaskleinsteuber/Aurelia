@@ -2,7 +2,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import * as live from "../../src/Aurelia.Server/WebApp/js/live-logic.js";
+import * as live from "../../src/Tarven.Server/WebApp/js/live-logic.js";
 
 test("codec support asks the browser for each family and leaves out refused ones", () => {
   const chrome = (type) => /avc1|vp09|av01|mp4a\.40|opus|flac|mp4a\.6B/.test(type);
@@ -120,7 +120,7 @@ test("subtitle selection preserves absolute cue times before and after a resumed
 
 test("dragging across unbuffered time starts one new stream where the playhead comes to rest", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const { LiveSource, SEEK_SETTLE_MS } = await import("../../src/Aurelia.Server/WebApp/js/live.js");
+  const { LiveSource, SEEK_SETTLE_MS } = await import("../../src/Tarven.Server/WebApp/js/live.js");
   const source = Object.create(LiveSource.prototype);
   const restarts = [];
   Object.assign(source, { destroyed: false, streaming: true, streamStart: 0, waiters: new Set(),

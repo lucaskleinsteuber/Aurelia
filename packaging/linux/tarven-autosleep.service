@@ -1,0 +1,6 @@
+[Unit]
+Description=Put Tarven Server to sleep when nobody uses it
+
+[Service]
+Type=oneshot
+ExecStart=/opt/tarven/tarven-autosleep

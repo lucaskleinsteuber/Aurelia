@@ -1,0 +1,344 @@
+#!/bin/bash
+# Saves power when nobody uses this Tarven server. Depending on MODE it either stops only Tarven
+# Server ("stop"; systemd starts it again as soon as a device connects, through
+# tarven-start.socket), puts the whole computer to sleep ("sleep", suspend to RAM) or turns it
+# off ("shutdown"). Wake-on-LAN, which Tarven's apps send, wakes or starts it again. Either happens:
+# - five minutes after a player's sleep timer ended, if nothing played since (Tarven Server
+#   leaves its sleep-ready file then), at any time of day, unless AFTER_SLEEP_TIMER is off;
+# - otherwise after IDLE_MINUTES without a connected device, outside AWAKE_FROM-AWAKE_UNTIL when
+#   those hours are set. With awake hours a sleeping or turned off computer also wakes itself at
+#   AWAKE_FROM.
+# - after waking (WAKE_ON_ACCESS can wake it on any direct packet, also a stray one), five minutes
+#   after that wake when nobody has used Tarven since.
+#   An app left open with nobody using it does not count as a connected device.
+# Settings: sleep-settings in the server's data folder, changed in the app's server settings or
+# with `sudo tarven sleep`. Run every five minutes by tarven-autosleep.timer; it does nothing
+# while MODE is off. `sudo tarven sleep status` shows the current decision.
+# With TARVEN_AUTOSLEEP_DRY_RUN=1 it only prints its decision.
+# With --now it carries out a request from an app, Home Assistant or Siri to sleep, turn off or
+# stop right away (Tarven Server leaves power-now in its data folder; tarven-power-request.path
+# starts this at once), whatever MODE says.
+set -euo pipefail
+data=${TARVEN_DATA_DIR:-/var/lib/tarven}
+. "${TARVEN_SLEEP_SETTINGS_LIBRARY:-/opt/tarven/tarven-sleep-settings}"
+read_sleep_settings "$data/sleep-settings"
+dry_run=${TARVEN_AUTOSLEEP_DRY_RUN:-0}
+state=${TARVEN_AUTOSLEEP_STATE:-/run/tarven-autosleep}
+ready=$data/sleep-ready
+
+mkdir -p "$state"
+# Serialize timer checks and --now requests so a race cannot skip power-now or double-trigger (audit LNX-PKG-007).
+if command -v flock >/dev/null 2>&1; then
+  exec 8>"$state/lock"
+  flock 8
+fi
+now=$(date +%s)
+if [ ! -f "$state/last-active" ]; then
+  echo "$now" > "$state/last-active"
+  # A computer that turns off starts with an empty /run: this start is its wake.
+  [ "$MODE" = shutdown ] && echo "$now" > "$state/woke"
+fi
+# An empty or damaged last-active (a full disk, a cut write) would stop every later calculation
+# under set -e, and the computer would never sleep again until a restart (audit S-X21).
+[[ "$(head -c 20 "$state/last-active" 2>/dev/null || true)" =~ ^[0-9]+$ ]] || echo "$now" > "$state/last-active"
+
+say() { if [ "$dry_run" = 1 ]; then echo "$1"; fi; }
+
+# True when either a systemd update unit or a manual `sudo tarven update` holds the update lock (audit LNX-PKG-009).
+update_running() {
+  if systemctl is-active --quiet tarven-update-request.service tarven-update-check.service; then
+    return 0
+  fi
+  local lock=${TARVEN_UPDATE_LOCK:-/run/tarven-update.lock}
+  if [ -f "$lock" ] && command -v flock >/dev/null 2>&1; then
+    if ! (exec 9<"$lock" && flock -n 9) 2>/dev/null; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+write_power_status() {
+  local state_name=$1 message=${2:-}
+  [ "$dry_run" = 1 ] && return 0
+  [ -d "$data" ] && id tarven >/dev/null 2>&1 || return 0
+  message=$(printf '%s' "$message" | tr -cd '[:print:]' | cut -c1-200)
+  printf 'STATE=%s\nAT=%s\nMESSAGE=%s\n' "$state_name" "$now" "$message" \
+    | runuser -u tarven -- /bin/sh -c 'umask 077; t=$(mktemp "$1.XXXXXX") && cat > "$t" && mv -f "$t" "$1"' sh "$data/power-status" \
+    || true
+}
+
+minutes() { echo $(( 10#${1%%:*} * 60 + 10#${1##*:} )); }
+
+# AWAKE_FROM on day $1 (today or tomorrow) in seconds. On the night the clocks go forward its
+# time may not exist (02:30 in Europe); it then counts in the day's earlier offset, which is the
+# same moment the clock shows an hour later. Prints nothing when even that fails.
+wake_time() {
+  date -d "$1 $AWAKE_FROM" +%s 2>/dev/null \
+    || date -d "$1 $AWAKE_FROM $(date -d "$1 00:00" +%z 2>/dev/null)" +%s 2>/dev/null \
+    || true
+}
+
+save_power() {
+  if [ "$MODE" = stop ]; then
+    if [ "$dry_run" = 1 ]; then echo "stop Tarven until a device connects: $1"; exit 0; fi
+    rm -f "$ready"
+    logger -t tarven-autosleep "$1: stopping Tarven Server until a device connects."
+    echo "$now" > "$state/last-active"
+    # The socket conflicts with the service: starting it stops Tarven and listens in its place.
+    # If it cannot listen, Tarven must not stay unreachable.
+    if ! systemctl start tarven-start.socket; then
+      logger -t tarven-autosleep "Could not wait for devices; Tarven Server keeps running."
+      write_power_status failed "Could not start the waiting socket; Tarven Server kept running."
+      systemctl start tarven
+    fi
+    exit 0
+  fi
+  local wake="" until="a Wake-on-LAN call" verb=sleep
+  [ "$MODE" = shutdown ] && verb="turn off"
+  if [ -n "$AWAKE_FROM" ]; then
+    wake=$(wake_time today)
+    if [ -z "$wake" ] || (( wake <= now )); then wake=$(wake_time tomorrow); fi
+    [ -z "$wake" ] || until="$(date -d "@$wake" '+%a %H:%M') or a Wake-on-LAN call"
+  fi
+  if [ "$dry_run" = 1 ]; then echo "$verb until $until: $1"; exit 0; fi
+  rm -f "$ready" "$state/woke"
+  # The settings may have changed in the app since the start: the card wakes as they say now.
+  # Never put the computer to sleep or turn it off unless Wake-on-LAN ("g") is actually active.
+  if ! "${TARVEN_WAKE_ON_LAN:-/opt/tarven/tarven-wake-on-lan}" >/dev/null 2>&1; then
+    logger -t tarven-autosleep "Wake-on-LAN could not be enabled; keeping this computer awake so Tarven stays reachable."
+    write_power_status failed "Wake-on-LAN could not be enabled; keeping this computer awake."
+    echo "$now" > "$state/last-active"
+    exit 0
+  fi
+  local wake_now=""
+  if [ -f "$data/wake-on-lan-status" ] && [ ! -L "$data/wake-on-lan-status" ]; then
+    wake_now=$(awk -F= '$1 == "WAKE_ON" { print $2; exit }' "$data/wake-on-lan-status" 2>/dev/null || true)
+  fi
+  if [[ "$wake_now" != *g* ]]; then
+    logger -t tarven-autosleep "Wake-on-LAN is not enabled on the network card (WAKE_ON=${wake_now:-unknown}); keeping this computer awake so Tarven stays reachable."
+    write_power_status failed "Wake-on-LAN is not active on the network card; keeping this computer awake."
+    echo "$now" > "$state/last-active"
+    exit 0
+  fi
+  if [ "$MODE" = shutdown ]; then
+    if [ -n "$wake" ]; then
+      rtcwake -m no -t "$wake" >/dev/null 2>&1 || logger -t tarven-autosleep "Could not schedule RTC wake for $until; turning off anyway."
+    else
+      rtcwake -m disable >/dev/null 2>&1 || true
+    fi
+    logger -t tarven-autosleep "$1: turning off until $until."
+    if ! systemctl poweroff; then
+      logger -t tarven-autosleep "Could not turn off: systemctl poweroff failed; staying awake."
+      write_power_status failed "Power off was refused or failed; staying awake."
+      echo "$now" > "$state/last-active"
+    fi
+    exit 0
+  fi
+  if ! grep -qw mem /sys/power/state 2>/dev/null; then
+    logger -t tarven-autosleep "Could not sleep: suspend to RAM is not supported on this computer; staying awake."
+    write_power_status failed "Suspend to RAM is not supported on this computer. Use Stop Tarven or Shut Down instead."
+    echo "$now" > "$state/last-active"
+    exit 0
+  fi
+  # After waking, devices get a fresh idle period to connect.
+  echo "$now" > "$state/last-active"
+  if [ -n "$wake" ]; then
+    rtcwake -m no -t "$wake" >/dev/null 2>&1 || logger -t tarven-autosleep "Could not schedule RTC wake for $until; sleeping until a Wake-on-LAN call."
+  else
+    # A wake time left from earlier awake hours must not wake it now.
+    rtcwake -m disable >/dev/null 2>&1 || true
+  fi
+  logger -t tarven-autosleep "$1: sleeping until $until."
+  if ! systemctl suspend; then
+    logger -t tarven-autosleep "Could not sleep: suspend was inhibited or failed; staying awake."
+    write_power_status failed "Suspend was inhibited or failed; staying awake."
+    echo "$now" > "$state/last-active"
+    exit 0
+  fi
+  write_power_status ok ""
+  date +%s > "$state/last-active"
+  date +%s > "$state/woke"
+  exit 0
+}
+
+# Asked to save power now. Handled before MODE=stop/MODE=off early exits so power-now is always
+# consumed and tarven-power-request.path can never loop to start-limit-hit (audit LNX-PKG-007).
+if [ "${1:-}" = --now ]; then
+  request=$data/power-now
+  # Anything else at that name (a folder, a link) is removed unread: left there, it would start this
+  # again and again until systemd stopped answering power requests (audit S-X1).
+  if [ -L "$request" ] || { [ -e "$request" ] && [ ! -f "$request" ]; }; then
+    [ "$dry_run" = 1 ] || rm -rf -- "$request"
+    logger -t tarven-autosleep "Removed a power request that was not a plain file."
+    exit 0
+  fi
+  [ -f "$request" ] || exit 0
+  action=$(head -c 16 "$request" | tr -d '[:space:]')
+  [ "$dry_run" = 1 ] || rm -f "$request"
+  case "$action" in
+    sleep|shutdown|stop) MODE=$action ;;
+    *) logger -t tarven-autosleep "Ignored an unknown request to save power."; exit 0 ;;
+  esac
+  # An update must finish first; the request is not kept.
+  if update_running; then
+    logger -t tarven-autosleep "Asked to $action now, but an update is running; staying on."
+    exit 0
+  fi
+  save_power "Asked from an app"
+fi
+
+# Tarven stopped earlier and is waiting for a device. If stopping is no longer wanted, it starts
+# again (starting it closes the waiting socket).
+if ! systemctl is-active --quiet tarven && systemctl is-active --quiet tarven-start.socket; then
+  if [ "$MODE" = stop ]; then say "stopped: Tarven starts when a device connects"; exit 0; fi
+  [ "$dry_run" = 1 ] || systemctl start tarven
+fi
+
+# While nothing is to be saved, no time counts as unused, so turning it on starts a fresh period.
+if [ "$MODE" = off ]; then
+  echo "$now" > "$state/last-active"
+  [ "$dry_run" = 1 ] || rm -f "$ready"
+  say "running: power saving is off"
+  exit 0
+fi
+
+# Prints "ssh" when someone is signed in over SSH (any configured sshd port, or a remote logind
+# session such as Tailscale SSH), "console" for an active local TTY session, or nothing otherwise.
+interactive_session_kind() {
+  local ports="" port filter=""
+  if command -v sshd >/dev/null 2>&1; then
+    ports=$(sshd -T 2>/dev/null | awk '$1 == "port" && $2 ~ /^[0-9]+$/ { print $2 }' || true)
+  fi
+  [ -n "$ports" ] || ports=22
+  for port in $ports; do
+    filter="${filter:+$filter or }sport = :$port"
+  done
+  if ss -Htn state established "( $filter )" 2>/dev/null | grep -q .; then
+    echo ssh
+    return 0
+  fi
+  if command -v loginctl >/dev/null 2>&1; then
+    local session_id state type class remote
+    while read -r session_id _rest; do
+      [ -n "$session_id" ] || continue
+      class=$(loginctl show-session "$session_id" -p Class --value 2>/dev/null || true)
+      state=$(loginctl show-session "$session_id" -p State --value 2>/dev/null || true)
+      [ "$class" = user ] && [ "$state" = active ] || continue
+      remote=$(loginctl show-session "$session_id" -p Remote --value 2>/dev/null || true)
+      if [ "$remote" = yes ]; then
+        echo ssh
+        return 0
+      fi
+      type=$(loginctl show-session "$session_id" -p Type --value 2>/dev/null || true)
+      if [ "$type" = tty ]; then
+        echo console
+        return 0
+      fi
+    done < <(loginctl list-sessions --no-legend 2>/dev/null || true)
+  fi
+  return 1
+}
+
+# Someone signed in over SSH or a local console is working on the computer: never put it to sleep under them.
+if [ "$MODE" != stop ]; then
+  session_kind=$(interactive_session_kind || true)
+  if [ "$session_kind" = ssh ]; then
+    echo "$now" > "$state/last-active"
+    say "awake: signed in over SSH"
+    exit 0
+  elif [ "$session_kind" = console ]; then
+    echo "$now" > "$state/last-active"
+    say "awake: signed in on console"
+    exit 0
+  fi
+fi
+
+# An update is being checked or installed: sleeping now could leave a half-replaced program.
+# This also holds after an ended sleep timer; the timer's signal stays for the next check.
+if update_running; then
+  echo "$now" > "$state/last-active"
+  say "awake: updating"
+  exit 0
+fi
+
+# The server says what it works on (Tarven Server 2.18 and newer): a scan, metadata job or
+# owner-started speech job keeps the computer on, including after an ended sleep timer so a scan
+# finishes first (audit LNX-PKG-012); intro, credits, file-check and preview analysis does not,
+# since it continues after the next wake where it left off (audit B-4).
+work=""
+if [ -f "$data/work" ] && [ ! -L "$data/work" ] && (( now - $(stat -c %Y "$data/work") < 120 )); then
+  work=$(head -c 16 "$data/work" | tr -d '[:space:]')
+fi
+if [ "$work" = keepawake ]; then
+  echo "$now" > "$state/last-active"
+  say "awake: in use"
+  exit 0
+fi
+
+# A sleep timer ended five minutes ago and nothing played since. A signal older than a quarter of
+# an hour is stale (power saving was off then) and is ignored.
+if [ -f "$ready" ]; then
+  if [ "$AFTER_SLEEP_TIMER" = on ] && (( now - $(stat -c %Y "$ready") < 900 )); then save_power "A sleep timer ended"; fi
+  [ "$dry_run" = 1 ] || rm -f "$ready"
+fi
+
+# In use: someone used Tarven on a device, or the computer is working.
+# Tarven Server notes in last-use when someone last browsed, played or saved progress (and keeps
+# it fresh while playback streams are open); an app that is merely open keeps its sync and Play On
+# connections without counting. A server without that file counts every connected device instead.
+busy=false
+used=""
+[ -f "$data/last-use" ] && [ ! -L "$data/last-use" ] && used=$(head -c 20 "$data/last-use" 2>/dev/null || true)
+if [[ "$used" =~ ^[0-9]+$ ]]; then
+  (( used > now )) && used=$now
+  (( used > $(cat "$state/last-active") )) && echo "$used" > "$state/last-active"
+elif ss -Htn state established '( sport = :43111 )' | grep -q .; then
+  busy=true
+fi
+# Background analysis (intro, credits, file checks, previews) should not keep the computer awake on
+# its own, but unrelated work by other users (backups, builds) still counts while analysis runs.
+if [ "$work" != analysis ]; then
+  if awk '{ exit !($1 > 0.5) }' /proc/loadavg; then busy=true; fi
+else
+  tarven_uid=$(id -u tarven 2>/dev/null || true)
+  if [ -n "$tarven_uid" ] \
+    && ps -eo uid=,pcpu= 2>/dev/null | awk -v a="$tarven_uid" '$1 != a { sum += $2 } END { exit !(sum > 50.0) }'; then
+    busy=true
+  fi
+fi
+if update_running; then busy=true; fi
+if $busy; then
+  echo "$now" > "$state/last-active"
+  say "awake: in use"
+  exit 0
+fi
+
+if [ -n "$AWAKE_FROM" ] && [ -n "$AWAKE_UNTIL" ]; then
+  current=$(minutes "$(date +%H:%M)")
+  from=$(minutes "$AWAKE_FROM")
+  until=$(minutes "$AWAKE_UNTIL")
+  in_window=false
+  if (( from < until )); then
+    (( current >= from && current < until )) && in_window=true
+  else
+    (( current >= from || current < until )) && in_window=true
+  fi
+  if $in_window; then say "awake: $AWAKE_FROM-$AWAKE_UNTIL"; exit 0; fi
+fi
+
+last=$(cat "$state/last-active")
+# Woken, but nobody used Tarven since: a stray packet or a device that left again.
+if [ -f "$state/woke" ]; then
+  woke=$(head -c 20 "$state/woke")
+  if [[ "$woke" =~ ^[0-9]+$ ]] && (( last <= woke )); then
+    (( now - woke >= 300 )) && save_power "Woken but unused for 5 minutes"
+  else
+    [ "$dry_run" = 1 ] || rm -f "$state/woke"
+  fi
+fi
+if (( now - last < IDLE_MINUTES * 60 )); then
+  say "awake: used $(( (now - last) / 60 )) minutes ago"
+  exit 0
+fi
+save_power "Unused for $IDLE_MINUTES minutes"

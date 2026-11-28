@@ -5,34 +5,34 @@ umask 077
 # Optional playback diagnostic, run only at the user's explicit request.
 # Uses only generated test media and a private
 # database/account; never launches/stops the installed app or reads its library.
-# Usage: zsh scripts/test-playback-full-chain.sh /path/to/staged/Aurelia.app [soak-seconds]
-# Capture AURELIA_CANDIDATE_CLIENT_SOURCE_FINGERPRINT before building the
+# Usage: zsh scripts/test-playback-full-chain.sh /path/to/staged/Tarven.app [soak-seconds]
+# Capture TARVEN_CANDIDATE_CLIENT_SOURCE_FINGERPRINT before building the
 # candidate; an all-format >=1800-second diagnostic requires that provenance.
-# Optional AURELIA_FULL_CHAIN_FORMAT_FILTER=AVI|MP4|MKV is diagnostic only;
+# Optional TARVEN_FULL_CHAIN_FORMAT_FILTER=AVI|MP4|MKV is diagnostic only;
 # the default all-format run checks the complete optional diagnostic criteria.
 repository_root=${0:A:h:h}
 source "$repository_root/scripts/workspace-paths.sh"
 source "$repository_root/scripts/playback-evidence-common.sh"
 candidate=${1:-}
 soak_seconds=${2:-180}
-[[ -d "$candidate/Contents" ]] || { print -u2 'Supply a verified staged Aurelia.app.'; exit 2; }
+[[ -d "$candidate/Contents" ]] || { print -u2 'Supply a verified staged Tarven.app.'; exit 2; }
 [[ "$soak_seconds" == <120-7200> ]] || { print -u2 'Soak duration must be 120–7200 seconds (1800 for 30 minutes). Each other format plays for at least 120 seconds.'; exit 2; }
 candidate=${candidate:A}
-configuration=${AURELIA_FULL_CHAIN_CONFIGURATION:-Release}
-format_filter=${AURELIA_FULL_CHAIN_FORMAT_FILTER:-}
+configuration=${TARVEN_FULL_CHAIN_CONFIGURATION:-Release}
+format_filter=${TARVEN_FULL_CHAIN_FORMAT_FILTER:-}
 [[ -z "$format_filter" || "$format_filter" == AVI || "$format_filter" == MP4 || "$format_filter" == MKV ]] \
   || { print -u2 'The optional diagnostic format filter must be AVI, MP4 or MKV.'; exit 2; }
-test_filter=${AURELIA_FULL_CHAIN_TEST_FILTER:-AureliaTests/PlaybackFullChainTests/testPackagedPinnedServerRelayAndRealVideoAudio}
+test_filter=${TARVEN_FULL_CHAIN_TEST_FILTER:-TarvenTests/PlaybackFullChainTests/testPackagedPinnedServerRelayAndRealVideoAudio}
 required_method_selected=false
 required_method_verified=false
 case "$test_filter" in
-  AureliaTests|AureliaTests/PlaybackFullChainTests|AureliaTests/PlaybackFullChainTests/testPackagedPinnedServerRelayAndRealVideoAudio)
+  TarvenTests|TarvenTests/PlaybackFullChainTests|TarvenTests/PlaybackFullChainTests/testPackagedPinnedServerRelayAndRealVideoAudio)
     required_method_selected=true ;;
 esac
-if [[ "$test_filter" == AureliaTests/PlaybackFullChainTests ]]; then
-  test_filter=AureliaTests/PlaybackFullChainTests/testPackagedPinnedServerRelayAndRealVideoAudio
+if [[ "$test_filter" == TarvenTests/PlaybackFullChainTests ]]; then
+  test_filter=TarvenTests/PlaybackFullChainTests/testPackagedPinnedServerRelayAndRealVideoAudio
 fi
-expected_client_source_fingerprint=${AURELIA_CANDIDATE_CLIENT_SOURCE_FINGERPRINT:-}
+expected_client_source_fingerprint=${TARVEN_CANDIDATE_CLIENT_SOURCE_FINGERPRINT:-}
 source_provenance_required=false
 source_provenance_supplied=false
 if (( soak_seconds >= 1800 )) && [[ -z "$format_filter" && "$required_method_selected" == true ]]; then
@@ -51,13 +51,13 @@ fi
   || { print -u2 'Full chain configuration must be Release or Debug.'; exit 2; }
 runtime='osx-arm64'
 [[ "$(uname -m)" == x86_64 ]] && runtime='osx-x64'
-server="$candidate/Contents/Resources/Server/$runtime/Aurelia.Server"
+server="$candidate/Contents/Resources/Server/$runtime/Tarven.Server"
 [[ -x "$server" ]] || { print -u2 'The staged app has no packaged server for this architecture.'; exit 2; }
-runtime_parent="$HOME/Library/Caches/Aurelia/TestRuns"
+runtime_parent="$HOME/Library/Caches/Tarven/TestRuns"
 mkdir -p "$runtime_parent" "$other_root/Test Results" "$other_root/Logs"
 runtime_root=$(mktemp -d "$runtime_parent/full-chain-XXXXXXXX")
 EVIDENCE_RUN_ROOT=$runtime_root
-EVIDENCE_PROJECT_PATH="$repository_root/clients/macos/Aurelia.xcodeproj"
+EVIDENCE_PROJECT_PATH="$repository_root/clients/macos/Tarven.xcodeproj"
 EVIDENCE_FORCED_SHUTDOWN=false
 export EVIDENCE_RUN_ROOT
 run_id=${runtime_root:t}
@@ -65,10 +65,10 @@ data_root="$runtime_root/ServerData"
 derived_data="$runtime_root/DerivedData"
 result="$runtime_root/Playback-Full-Chain.xcresult"
 ordinary_result="$runtime_root/Playback-Ordinary-Unit.xcresult"
-final_result="$other_root/Test Results/Aurelia-Playback-Full-Chain-$run_id.xcresult"
-final_ordinary_result="$other_root/Test Results/Aurelia-Playback-Ordinary-Unit-$run_id.xcresult"
-final_log="$other_root/Logs/Aurelia-Playback-Full-Chain-$run_id.log"
-final_summary="$other_root/Test Results/Aurelia-Playback-Full-Chain-$run_id.json"
+final_result="$other_root/Test Results/Tarven-Playback-Full-Chain-$run_id.xcresult"
+final_ordinary_result="$other_root/Test Results/Tarven-Playback-Ordinary-Unit-$run_id.xcresult"
+final_log="$other_root/Logs/Tarven-Playback-Full-Chain-$run_id.log"
+final_summary="$other_root/Test Results/Tarven-Playback-Full-Chain-$run_id.json"
 mkdir -p "$data_root"
 media_root="$runtime_root/Fixtures"
 mkdir -p "$media_root"
@@ -81,7 +81,7 @@ client_source_before_launch_verified=false
 client_source_after_run_verified=false
 last_phase='configuration'
 owner_password="full-chain-$(uuidgen)-synthetic-only!"
-export AURELIA_EVIDENCE_OWNER_PASSWORD="$owner_password"
+export TARVEN_EVIDENCE_OWNER_PASSWORD="$owner_password"
 server_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$candidate/Contents/Info.plist")
 build_number=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$candidate/Contents/Info.plist")
 http_port=$(ruby -rsocket -e 's = TCPServer.new("127.0.0.1", 0); puts s.addr[1]; s.close')
@@ -204,7 +204,7 @@ last_phase='signature verification'
 
 last_phase='isolated owner setup'
 print -r -- "$owner_password" | \
-  AURELIA_LAN_ENABLED=false ASPNETCORE_ENVIRONMENT=Testing \
+  TARVEN_LAN_ENABLED=false ASPNETCORE_ENVIRONMENT=Testing \
   "$server" setup-owner --data-dir "$data_root" --username full-chain-owner \
     --device-name 'Full Chain Release Test' --password-stdin \
     >"$runtime_root/owner-output.private" 2>"$runtime_root/setup-errors.private"
@@ -214,7 +214,7 @@ jq -e '.token and .sessionId and .user.role == "owner"' "$runtime_root/authentic
 # Explicitly disable discovery, monitoring and scheduled backups in owned test
 # state. The short-ticket seam is honored only when the server environment is Testing.
 jq -n --argjson port "$https_port" \
-  '{version:2,serverName:"Aurelia Full Chain Test",lanAccessEnabled:true,lanHttpsPort:$port,
+  '{version:2,serverName:"Tarven Full Chain Test",lanAccessEnabled:true,lanHttpsPort:$port,
     revision:1,bonjourEnabled:false,monitoringEnabled:false,automaticBackupsEnabled:false}' \
   >"$data_root/server-settings.json"
 last_phase='packaged HTTPS server startup'
@@ -253,19 +253,19 @@ if [[ "$configuration" == Release ]]; then
   test_build_settings+=("EXCLUDED_SOURCE_FILE_NAMES=ServerSettingsRenderTests.swift ImportPlanningTests.swift MetadataEditorTests.swift")
 fi
 DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
-  -project "$repository_root/clients/macos/Aurelia.xcodeproj" -scheme Aurelia \
+  -project "$repository_root/clients/macos/Tarven.xcodeproj" -scheme Tarven \
   -configuration "$configuration" -destination "platform=macOS,arch=$(uname -m)" \
   -derivedDataPath "$derived_data" -enableCodeCoverage NO \
   "${test_build_settings[@]}" \
   build-for-testing 2>&1 | tee "$runtime_root/xcodebuild.log"
-embedded_vlc="$derived_data/Build/Products/$configuration/Aurelia.app/Contents/Frameworks/VLCKit.framework"
+embedded_vlc="$derived_data/Build/Products/$configuration/Tarven.app/Contents/Frameworks/VLCKit.framework"
 test_vlc="$derived_data/Build/Products/$configuration/VLCKit.framework"
 [[ -d "$embedded_vlc" && -d "$test_vlc" && ! -L "$test_vlc" ]] \
   || { print -u2 'The isolated signed VLC test framework copies are unavailable.'; exit 1; }
 /usr/bin/codesign --verify --strict "$embedded_vlc"
 /usr/bin/ditto "$embedded_vlc" "$test_vlc"
 /usr/bin/codesign --verify --strict "$test_vlc"
-test_host="$derived_data/Build/Products/$configuration/Aurelia.app"
+test_host="$derived_data/Build/Products/$configuration/Tarven.app"
 /usr/bin/codesign --verify --strict "$test_host"
 
 last_phase='test-only shared fixture folder grant'
@@ -314,7 +314,7 @@ host_signing_identity=$(openssl x509 -inform DER \
   -in "$runtime_root/test-host-original-certificate-0" -noout -fingerprint -sha1 \
   | awk -F= '{ gsub(":", "", $2); print toupper($2) }') \
   || fail_fixture_grant calculate_original_certificate_fingerprint
-signing_identity=${AURELIA_SIGNING_IDENTITY:-$host_signing_identity}
+signing_identity=${TARVEN_SIGNING_IDENTITY:-$host_signing_identity}
 [[ ${#host_signing_identity} == 40 && "$signing_identity" == "$host_signing_identity" ]] \
   || { print -u2 'The test fixture grant must use the original host signing identity.'; exit 1; }
 /usr/bin/security find-identity -v -p codesigning \
@@ -353,41 +353,41 @@ last_phase='real playback XCTest gate'
 # must retain its normal XCTest-only in-memory behavior. A process-wide native
 # preflight flag would reject those explicit synthetic model calls. Run it in a
 # separate host, then enable the stronger fail-closed flag only for playback.
-if [[ "$test_filter" == AureliaTests ]]; then
+if [[ "$test_filter" == TarvenTests ]]; then
   [[ "$configuration" == Debug ]] \
     || { print -u2 'The complete ordinary unit suite requires Debug; use the mandatory full-chain filter for Release.'; exit 2; }
   last_phase='ordinary isolated Debug XCTest suite'
-  /usr/bin/env -u TEST_RUNNER_AURELIA_PREFLIGHT_TEST -u TEST_RUNNER_AURELIA_DATA_DIR \
-    -u AURELIA_PREFLIGHT_TEST -u AURELIA_DATA_DIR \
-    TEST_RUNNER_AURELIA_RUNNING_TESTS=1 DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
-    -project "$repository_root/clients/macos/Aurelia.xcodeproj" -scheme Aurelia \
+  /usr/bin/env -u TEST_RUNNER_TARVEN_PREFLIGHT_TEST -u TEST_RUNNER_TARVEN_DATA_DIR \
+    -u TARVEN_PREFLIGHT_TEST -u TARVEN_DATA_DIR \
+    TEST_RUNNER_TARVEN_RUNNING_TESTS=1 DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
+    -project "$repository_root/clients/macos/Tarven.xcodeproj" -scheme Tarven \
     -configuration Debug -destination "platform=macOS,arch=$(uname -m)" \
     -derivedDataPath "$derived_data" -resultBundlePath "$ordinary_result" \
     -enableCodeCoverage NO -parallel-testing-enabled NO \
-    -only-testing:AureliaTests -skip-testing:AureliaTests/PlaybackFullChainTests \
+    -only-testing:TarvenTests -skip-testing:TarvenTests/PlaybackFullChainTests \
     "${test_build_settings[@]}" test-without-building 2>&1 | tee -a "$runtime_root/xcodebuild.log"
   evidence_stop_test_hosts
-  test_filter=AureliaTests/PlaybackFullChainTests/testPackagedPinnedServerRelayAndRealVideoAudio
+  test_filter=TarvenTests/PlaybackFullChainTests/testPackagedPinnedServerRelayAndRealVideoAudio
   last_phase='real playback XCTest gate'
 fi
 # Request isolation before Release AppModel initialization. TestRuns is not a
 # native-helper preflight location, so AppModel.start must reject this launch
 # before saved profiles/settings are read. The XCTest owns its real API path.
-export TEST_RUNNER_AURELIA_PREFLIGHT_TEST=1
-export TEST_RUNNER_AURELIA_DATA_DIR="$data_root"
-export TEST_RUNNER_AURELIA_FULL_CHAIN_SERVER_URL="https://127.0.0.1:$https_port"
-export TEST_RUNNER_AURELIA_FULL_CHAIN_FINGERPRINT="$fingerprint"
-export TEST_RUNNER_AURELIA_FULL_CHAIN_OWNER_AUTH="$(<"$runtime_root/authentication.private.json")"
-export TEST_RUNNER_AURELIA_FULL_CHAIN_PASSWORD="$owner_password"
-export TEST_RUNNER_AURELIA_FULL_CHAIN_SERVER_VERSION="$server_version"
-export TEST_RUNNER_AURELIA_FULL_CHAIN_SOAK_SECONDS="$soak_seconds"
-export TEST_RUNNER_AURELIA_FULL_CHAIN_PAUSE_SECONDS=35
-export TEST_RUNNER_AURELIA_FULL_CHAIN_CONTROL_URL="$control_url"
-export TEST_RUNNER_AURELIA_FULL_CHAIN_MEDIA_ROOT="$media_root"
+export TEST_RUNNER_TARVEN_PREFLIGHT_TEST=1
+export TEST_RUNNER_TARVEN_DATA_DIR="$data_root"
+export TEST_RUNNER_TARVEN_FULL_CHAIN_SERVER_URL="https://127.0.0.1:$https_port"
+export TEST_RUNNER_TARVEN_FULL_CHAIN_FINGERPRINT="$fingerprint"
+export TEST_RUNNER_TARVEN_FULL_CHAIN_OWNER_AUTH="$(<"$runtime_root/authentication.private.json")"
+export TEST_RUNNER_TARVEN_FULL_CHAIN_PASSWORD="$owner_password"
+export TEST_RUNNER_TARVEN_FULL_CHAIN_SERVER_VERSION="$server_version"
+export TEST_RUNNER_TARVEN_FULL_CHAIN_SOAK_SECONDS="$soak_seconds"
+export TEST_RUNNER_TARVEN_FULL_CHAIN_PAUSE_SECONDS=35
+export TEST_RUNNER_TARVEN_FULL_CHAIN_CONTROL_URL="$control_url"
+export TEST_RUNNER_TARVEN_FULL_CHAIN_MEDIA_ROOT="$media_root"
 if [[ -n "$format_filter" ]]; then
-  export TEST_RUNNER_AURELIA_FULL_CHAIN_FORMAT_FILTER="$format_filter"
+  export TEST_RUNNER_TARVEN_FULL_CHAIN_FORMAT_FILTER="$format_filter"
 else
-  unset TEST_RUNNER_AURELIA_FULL_CHAIN_FORMAT_FILTER
+  unset TEST_RUNNER_TARVEN_FULL_CHAIN_FORMAT_FILTER
 fi
 verify_client_source before_launch
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$test_host/Contents/Info.plist")" == "$server_version" \
@@ -395,7 +395,7 @@ verify_client_source before_launch
   || { evidence_fail actual_test_host_version_or_build_differs_from_candidate; exit 1; }
 test_host_version_build_verified=true
 DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
-  -project "$repository_root/clients/macos/Aurelia.xcodeproj" -scheme Aurelia \
+  -project "$repository_root/clients/macos/Tarven.xcodeproj" -scheme Tarven \
   -configuration "$configuration" -destination "platform=macOS,arch=$(uname -m)" \
   -derivedDataPath "$derived_data" -resultBundlePath "$result" \
   -enableCodeCoverage NO -parallel-testing-enabled NO \

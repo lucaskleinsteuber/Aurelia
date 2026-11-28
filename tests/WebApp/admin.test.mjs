@@ -1,9 +1,9 @@
 // The browser's server administration with an invented server; no browser, network or files.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createManagementEditors } from "../../src/Aurelia.Server/WebApp/js/settings-editors.js";
-import { createAdminTools } from "../../src/Aurelia.Server/WebApp/js/settings-admin.js";
-import { codeCountdown, folderCrumbs, subtitleLanguages } from "../../src/Aurelia.Server/WebApp/js/logic.js";
+import { createManagementEditors } from "../../src/Tarven.Server/WebApp/js/settings-editors.js";
+import { createAdminTools } from "../../src/Tarven.Server/WebApp/js/settings-admin.js";
+import { codeCountdown, folderCrumbs, subtitleLanguages } from "../../src/Tarven.Server/WebApp/js/logic.js";
 import { installDOM, all, button, flush } from "./dom-fixture.mjs";
 
 function fixture(t, api) {
@@ -143,7 +143,7 @@ test("administration helpers count down codes, split folders and clean language 
 });
 
 test("Edit Metadata shows a picture choice and its crop without decoding anything", async () => {
-  const { pictureAddress, cropStyle } = await import("../../src/Aurelia.Server/WebApp/js/metadata-extras.js");
+  const { pictureAddress, cropStyle } = await import("../../src/Tarven.Server/WebApp/js/metadata-extras.js");
   assert.equal(pictureAddress("m 1", { uploadId: "u/1" }), "/api/v1/media/m%201/editor/uploads/u%2F1");
   assert.equal(pictureAddress("m", { assetId: "a" }), "/api/v1/media/m/editor/artwork/a");
   assert.equal(pictureAddress("m", null), "");

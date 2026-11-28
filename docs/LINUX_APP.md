@@ -1,49 +1,49 @@
-# Aurelia for Linux
+# Tarven for Linux
 
-Aurelia for Linux (`clients/linux`) is the native desktop app for Linux: the library, the player,
+Tarven for Linux (`clients/linux`) is the native desktop app for Linux: the library, the player,
 app settings, server administration and hosting the server on the same computer. It follows the
 Mac app's capabilities; [the feature inventory](LINUX_APP_PARITY.md) records each implementation,
 its tests and the remaining platform differences.
 
 It is written in C# (.NET 10) with the Avalonia interface toolkit, the way the Mac app is written
-in Swift with SwiftUI. Its interface code is its own; it shares only `src/Aurelia.Contracts` with
+in Swift with SwiftUI. Its interface code is its own; it shares only `src/Tarven.Contracts` with
 the server, so requests and responses always use the same field names and formats. It runs on
 64-bit Intel/AMD (x64) and 64-bit ARM (arm64) Linux, under Wayland or X11. Platform specifics
 stay behind small adapters so the code stays portable.
 
 ## Installation
 
-Download a package from an **Aurelia for Linux** release on [GitHub](https://github.com/lucaskleinsteuber/Aurelia/releases).
+Download a package from an **Tarven for Linux** release on [GitHub](https://github.com/lucaskleinsteuber/Tarven/releases).
 These releases use `linux-app-<version>-<build>` tags. Choose the package for your distribution
 **and processor** (`uname -m` prints `x86_64` for x64 or `aarch64` for arm64):
 
 | Distribution | x64 (Intel, AMD) | arm64 (64-bit ARM) |
 | --- | --- | --- |
-| Ubuntu, Debian, Linux Mint, Pop!_OS | `Aurelia-Desktop-<v>-<b>-amd64.deb` | `Aurelia-Desktop-<v>-<b>-arm64.deb` |
-| Fedora, openSUSE | `Aurelia-Desktop-<v>-<b>-x86_64.rpm` | `Aurelia-Desktop-<v>-<b>-aarch64.rpm` |
-| Arch, CachyOS, Manjaro, EndeavourOS | `Aurelia-Desktop-<v>-<b>-x86_64.pkg.tar.zst` | `Aurelia-Desktop-<v>-<b>-aarch64.pkg.tar.zst` |
-| Any distribution with Flatpak | `Aurelia-Desktop-<v>-<b>-x86_64.flatpak` | not available; use the native package |
+| Ubuntu, Debian, Linux Mint, Pop!_OS | `Tarven-Desktop-<v>-<b>-amd64.deb` | `Tarven-Desktop-<v>-<b>-arm64.deb` |
+| Fedora, openSUSE | `Tarven-Desktop-<v>-<b>-x86_64.rpm` | `Tarven-Desktop-<v>-<b>-aarch64.rpm` |
+| Arch, CachyOS, Manjaro, EndeavourOS | `Tarven-Desktop-<v>-<b>-x86_64.pkg.tar.zst` | `Tarven-Desktop-<v>-<b>-aarch64.pkg.tar.zst` |
+| Any distribution with Flatpak | `Tarven-Desktop-<v>-<b>-x86_64.flatpak` | not available; use the native package |
 
 For example, version 2.0.0 (25) on x64:
 
 ```bash
 # Ubuntu / Debian
-sudo apt install ./Aurelia-Desktop-2.0.0-25-amd64.deb
+sudo apt install ./Tarven-Desktop-2.0.0-25-amd64.deb
 # Fedora
-sudo dnf install ./Aurelia-Desktop-2.0.0-25-x86_64.rpm
+sudo dnf install ./Tarven-Desktop-2.0.0-25-x86_64.rpm
 # Arch / CachyOS
-sudo pacman -U ./Aurelia-Desktop-2.0.0-25-x86_64.pkg.tar.zst
+sudo pacman -U ./Tarven-Desktop-2.0.0-25-x86_64.pkg.tar.zst
 # Flatpak, per-user installation
-flatpak install --user ./Aurelia-Desktop-2.0.0-25-x86_64.flatpak
-flatpak run io.github.lucasfd3.Aurelia
+flatpak install --user ./Tarven-Desktop-2.0.0-25-x86_64.flatpak
+flatpak run org.tarven.Tarven
 ```
 
 The arm64 packages are built from the same source as the x64 ones, but only the x64 packages are
 run in the automated install checks.
 
-Open **Aurelia** from the application launcher. Choose **Set Up This PC** to host a library here,
+Open **Tarven** from the application launcher. Choose **Set Up This PC** to host a library here,
 or **Connect to an Existing Server** and type the code from *Create Code* on the server's computer
-(or `aurelia pair` on a Linux server).
+(or `tarven pair` on a Linux server).
 Native packages use the distribution's VLC libraries; installing `ffmpeg` is recommended when
 hosting here, for browser conversion and server-generated scrub previews.
 
@@ -67,32 +67,32 @@ running both as hosts on the same port.
 
 | Project | Contents |
 | --- | --- |
-| `Aurelia.Linux.Core` | App logic without any interface toolkit: API client, connection and profiles, keyring, discovery, Wake-on-LAN, screen order, settings |
-| `Aurelia.Linux` | The app: design tokens and styles (`Design/`), window buttons and behavior (`Controls/`), screens (`Views/`) |
-| `Aurelia.Linux.Tests` | Logic tests and headless interface tests that draw the real views without a screen |
-| `Aurelia.Linux.IntegrationTests` | The connection logic against the real server, in process |
+| `Tarven.Linux.Core` | App logic without any interface toolkit: API client, connection and profiles, keyring, discovery, Wake-on-LAN, screen order, settings |
+| `Tarven.Linux` | The app: design tokens and styles (`Design/`), window buttons and behavior (`Controls/`), screens (`Views/`) |
+| `Tarven.Linux.Tests` | Logic tests and headless interface tests that draw the real views without a screen |
+| `Tarven.Linux.IntegrationTests` | The connection logic against the real server, in process |
 
 The version and build number live in `clients/linux/Directory.Build.props`
-(`Version`, `AureliaLinuxBuildNumber`), independent of the Mac/server and Apple TV versions.
+(`Version`, `TarvenLinuxBuildNumber`), independent of the Mac/server and Apple TV versions.
 
 ## Design
 
-The app follows the Mac app's dark Aurelia design, not GNOME or KDE styling. The tokens in
-`Design/AureliaTokens.axaml` are the values from the Mac app's `AureliaDesign.swift`: the
+The app follows the Mac app's dark Tarven design, not GNOME or KDE styling. The tokens in
+`Design/TarvenTokens.axaml` are the values from the Mac app's `TarvenDesign.swift`: the
 measured canvas color, spacing, radii, sidebar width and type sizes. The typeface is Inter,
-bundled with the app. The symbols in `Design/AureliaIcons.axaml` are drawn for Aurelia, so
+bundled with the app. The symbols in `Design/TarvenIcons.axaml` are drawn for Tarven, so
 nothing is loaded or licensed from elsewhere.
 
 Pages run full height beneath the sidebar. The sidebar (`Controls/SidebarBackground.cs`) blurs
 what passes beneath it and tints it with the canvas color at 66 %, like the Mac app;
 `ReduceTransparency` makes it the opaque canvas. Avalonia runs natively on Wayland and falls back to
-X11; `AURELIA_DISPLAY_BACKEND=x11` forces X11.
+X11; `TARVEN_DISPLAY_BACKEND=x11` forces X11.
 
 ## Window
 
 Like the Mac app, the window has no title bar: the content reaches the top edge. On Wayland the app
 extends into the window and Avalonia draws only the resize border; on X11 the window manager keeps a
-thin border and drops its title bar (`WindowDecorations.BorderOnly`). Aurelia draws its own window
+thin border and drops its title bar (`WindowDecorations.BorderOnly`). Tarven draws its own window
 buttons (`Controls/WindowChrome.cs`): plain round close, minimize and maximize buttons, never imitations
 of the Mac's colored ones, placed where the desktop puts them. KDE Plasma's `ButtonsOnLeft` and
 `ButtonsOnRight` in kwinrc are read first, then GNOME's `button-layout` (also used by Cinnamon, Budgie
@@ -100,7 +100,7 @@ and MATE), otherwise they sit on the right. Pressing on empty space in the top 5
 window and a double click maximizes it (`Controls/AppWindowBehavior.cs`); F11 switches full screen,
 F9 the sidebar, Ctrl+Q quits. Ctrl+F, Ctrl+/, Alt+Left and Esc work wherever the focus is in the
 library, also right after a profile opens. The window opens with its last size and maximized again
-if it was (never in full screen). Opening Aurelia from the application launcher again brings back
+if it was (never in full screen). Opening Tarven from the application launcher again brings back
 the existing window, including a host running in the background; it does not start a second host. The sidebar can be dragged between 210 and 300 pixels wide.
 
 ## Screens and settings
@@ -108,8 +108,8 @@ the existing window, including a host running in the background; it does not sta
 `Flow/AppFlow.cs` chooses the full-window screen in the Mac app's order: the start screen, the welcome
 choice ("Set Up This PC" or "Connect to an Existing Server"), host setup or the connection screen, the
 profile picker, the first storage locations and the library. The chosen mode is remembered.
-Preferences are kept in `$XDG_CONFIG_HOME/aurelia-desktop/settings.json`, readable only by the user
-and written through a temporary file; caches go to `$XDG_CACHE_HOME/aurelia-desktop`.
+Preferences are kept in `$XDG_CONFIG_HOME/tarven-desktop/settings.json`, readable only by the user
+and written through a temporary file; caches go to `$XDG_CACHE_HOME/tarven-desktop`.
 
 ## Connecting
 
@@ -130,7 +130,7 @@ another key is never used; the start screen says so ("Server Moved") and asks to
 silent new computer is waited for like a sleeping server. This PC's own hosted server is not
 followed when it moves away; its owner can still undo the move in Settings › Server.
 
-The connection screen lists servers announced on the network (`_aurelia._tcp` and the older
+The connection screen lists servers announced on the network (`_tarven._tcp` and the older
 `_aurelia-home._tcp`, TLS only) or takes a typed address (HTTPS, port 43111 by default). Starting
 offline leaves discovery empty and keeps manual entry available; network address changes retry
 unavailable discovery browsers. On first
@@ -175,7 +175,7 @@ with Wish or Me Too; `Core/Library/PeoplePresentation.cs` holds the words.
 ← → Space, Esc closes), and from the 2nd of a month last month's Wrapped, also on Home in that
 first week. `Core/Playback/WrappedStory.cs` holds the rules.
 
-**Download** keeps a movie or episode on this PC, in the app's data folder. With Aurelia Server
+**Download** keeps a movie or episode on this PC, in the app's data folder. With Tarven Server
 2.20 or newer it can be a smaller copy (1080p, 720p or 480p, with its size and how long the
 server needs): **Settings › Playback › Download Quality** asks every time or always uses one. The
 server converts the copy while it downloads and stores nothing; `Core/Playback/ConvertedDownloads.cs`
@@ -197,9 +197,9 @@ library (Done or Esc returns), with a search field (`Settings/SettingsView.cs`):
 - Updates: the installed version, daily automatic checks, release notes and a confirmed package update.
 - Advanced: the server connection (name, address, fingerprint, profile) and "Disconnect This PC".
 
-When nothing plays and nobody used Aurelia for the chosen minutes, Aurelia lets go of a server on
+When nothing plays and nobody used Tarven for the chosen minutes, Tarven lets go of a server on
 another computer that has power saving enabled so it can sleep: the sync stops, idle connections
-close and "Aurelia Is Resting" shows. Switching back to Aurelia, clicking or pressing any key wakes
+close and "Tarven Is Resting" shows. Switching back to Tarven, clicking or pressing any key wakes
 the server and continues with the open profile automatically. Ctrl+/ lists the keyboard shortcuts.
 
 ## App updates
@@ -220,26 +220,26 @@ list, and only then stops playback and this PC's server. Native packages use `pk
 `apt-get`, `dnf`/`zypper` or `pacman`; the desktop shows the administrator prompt. Flatpak uses the
 host's per-user Flatpak installation. A cancelled or failed install can be retried; a stopped
 host is started again on failure. The download shows its progress, and the release notes appear as
-text, not as Markdown marks. After success, Restart Aurelia (native packages) quits, even a background
+text, not as Markdown marks. After success, Restart Tarven (native packages) quits, even a background
 host, and opens the newly installed version; the new process waits until the old one has quit
-(`--after-quit <pid>`). A Flatpak update offers Quit Aurelia instead. Aurelia Test's Reset App Data
+(`--after-quit <pid>`). A Flatpak update offers Quit Tarven instead. Tarven Test's Reset App Data
 restarts the same way. The package manager replaces app files and leaves
 the user's data, settings and keyring entries in place.
 
 ## Server management
 
 Owners and administrators manage the server from Settings, as in the Mac app
-(`Aurelia.Linux.Core/Management`, `Aurelia.Linux/Management`). Library appears for owners and for
+(`Tarven.Linux.Core/Management`, `Tarven.Linux/Management`). Library appears for owners and for
 administrators with the whole library, Metadata for both, and Server and Power only for the owner, because
 the server accepts its requests only from the owner; the Mac app shows them to administrators too
 and they fail.
 
-- Power: when the server this PC hosts runs (with Aurelia open or also when it is closed, at sign-in,
-  keeping the PC awake) and what a server does when nobody uses Aurelia. A Linux package server
-  can stop only Aurelia, sleep or shut down its computer and wake when a device connects; a server
-  inside Aurelia on a Mac or Linux PC only keeps running or stops after the unused minutes (exit
-  status 76) and starts again when Aurelia's window is opened. Other devices then show "Start
-  Aurelia on Your Linux PC" instead of trying Wake-on-LAN.
+- Power: when the server this PC hosts runs (with Tarven open or also when it is closed, at sign-in,
+  keeping the PC awake) and what a server does when nobody uses Tarven. A Linux package server
+  can stop only Tarven, sleep or shut down its computer and wake when a device connects; a server
+  inside Tarven on a Mac or Linux PC only keeps running or stops after the unused minutes (exit
+  status 76) and starts again when Tarven's window is opened. Other devices then show "Start
+  Tarven on Your Linux PC" instead of trying Wake-on-LAN.
 - Security (owner): the security log, signed-in devices with That Was Me and Block, the block
   list and how long the log is kept, and a note at the top of the window when a new device signs
   in. When Face ID or Touch ID is required for administrators, unlocking shows Confirm on Another
@@ -248,7 +248,7 @@ and they fail.
 - Server: summary with state, facts and Restart Server; health; Performance (response times per endpoint and slow database queries, measured by the server); for a Linux package server its
   updates; new devices and automatic backups with Back Up Now; scrub previews; and
   under Advanced Settings the details, network (a reversible trial for desktop-hosted servers;
-  a standalone Linux server is set up with `sudo aurelia setup`), sign-in and streaming limits, library maintenance and job queue, backups
+  a standalone Linux server is set up with `sudo tarven setup`), sign-in and streaming limits, library maintenance and job queue, backups
   (retention, verify, encrypted export, restore with a passphrase) and diagnostics. Server settings
   are edited as JSON, so fields this app does not know are saved back unchanged.
 - Profiles and Devices (owner): every profile with role, PIN and access, the profile editor (role,
@@ -275,7 +275,7 @@ and they fail.
 
 Requests go out as they are. Only when the server answers `approval_required` does the client ask
 `POST /api/v1/management/approval` for a one-use approval of exactly that request (method, path with
-query, SHA-256 of the exact body) and send it again with `X-Aurelia-Approval`. When management is
+query, SHA-256 of the exact body) and send it again with `X-Tarven-Approval`. When management is
 locked, the Server Password prompt opens above whatever sheet is open, `POST /api/v1/management/unlock`
 unlocks it for ten minutes, and the request is retried. Sheets stack, so an editor stays open
 beneath the prompt. Network changes of a server hosted in the desktop app use the trial below.
@@ -283,13 +283,13 @@ beneath the prompt. Network changes of a server hosted in the desktop app use th
 ## Hosting on this PC
 
 “Set Up This PC” starts the self-contained server bundled in the app, as a child process
-(`Hosting/LocalServerHost.cs`). Its data stays in `$XDG_DATA_HOME/aurelia-desktop/server`; removing
+(`Hosting/LocalServerHost.cs`). Its data stays in `$XDG_DATA_HOME/tarven-desktop/server`; removing
 or updating the app package does not remove it. HTTP bootstrap traffic stays on 127.0.0.1:43110.
 After setup, the app talks to its own server over pinned HTTPS on the chosen port, even with home
 network access off. The server receives arguments directly, without a shell, and a lifeline pipe
 stops it when the app exits or crashes. The host watches for failures and retries at most three
 times in ten minutes before asking the person to try again. It never starts a second server over
-an existing Aurelia server on the same port; that screen offers to connect to the existing one.
+an existing Tarven server on the same port; that screen offers to connect to the existing one.
 
 Setup asks for a server name, owner name, Server Password and HTTPS port. The first owner PIN
 opens that owner profile immediately, followed by “Choose Storage Locations”. Adding a folder
@@ -299,8 +299,8 @@ on the local profile picker resets the owner PIN with the Server Password, then 
 picker. Passwords and device credentials are kept out of settings and logs.
 
 Settings → Server → “When the Server Runs” chooses whether closing the window stops the server
-or keeps Aurelia in the notification area. The tray offers reopening and quitting. Start at sign-in
-requires background hosting and launches `aurelia-desktop --background`; Keep This PC Awake requests
+or keeps Tarven in the notification area. The tray offers reopening and quitting. Start at sign-in
+requires background hosting and launches `tarven-desktop --background`; Keep This PC Awake requests
 a sleep inhibitor while the server runs. Flatpak uses the desktop portals for background permission
 and inhibition. Native packages use the desktop's autostart location and login-session inhibitor.
 These settings do not bypass sleep or shutdown, and they show a firewall hint for the selected port
@@ -308,12 +308,12 @@ without changing firewall rules.
 
 ### Moving another server to this PC
 
-“Set Up This PC” also offers “Move from Another Aurelia Server…” ([SERVER_MOVE.md](SERVER_MOVE.md),
+“Set Up This PC” also offers “Move from Another Tarven Server…” ([SERVER_MOVE.md](SERVER_MOVE.md),
 `Hosting/HostSetupModel.cs`, `Hosting/SetupMoveChannel.cs`). Over the network, the old server is
 picked from the servers announced nearby or typed, with the move code it shows; otherwise the
 moving file is chosen and opened with its passphrase. The app sends the setup-time move calls to
 its own server on 127.0.0.1 with the bootstrap token it already uses to create the owner
-(`X-Aurelia-Bootstrap-Token`), only while that server waits for setup. It follows the progress,
+(`X-Tarven-Bootstrap-Token`), only while that server waits for setup. It follows the progress,
 then shows each storage location with its best folder on this PC ("412 of 415 sample files
 found"), the other suggestions, another folder chosen with the folder picker and previewed, or
 Later (the location stays offline until Location Moved…). Finish Move applies the data; the
@@ -340,7 +340,7 @@ confirmation and watchdog rollback serialize their journal updates so a confirme
 be overwritten by an expiring trial.
 
 A standalone Linux server package has its own service and configuration; its network information
-remains read-only here, with a pointer to `sudo aurelia setup`.
+remains read-only here, with a pointer to `sudo tarven setup`.
 
 ## Player
 
@@ -353,7 +353,7 @@ Automatic Resume and start-over settings decide it). The remembered audio and su
 applies (the series' own first, then the last choice, then the default language), and the server's
 sidecar subtitle files are added. Progress is saved every 15 seconds and at every pause, seek, end
 and close, with the revision it builds on (`Playback/ProgressOutbox.cs`; saves that could not be
-sent wait in `$XDG_STATE_HOME/aurelia-desktop/pending-progress.json`). A conflict offers to keep
+sent wait in `$XDG_STATE_HOME/tarven-desktop/pending-progress.json`). A conflict offers to keep
 this computer's position. With **Settings › Playback › Streaming Quality** set to Automatic or a
 cap such as "Up to 720p" (shown when the server offers adaptive streaming), VLC plays the server's
 HLS stream through the same relay instead of the original file; the relay passes only the
@@ -369,7 +369,7 @@ server's playlists and segments. Server management shows the server's **Video Co
   loop, Mute, nudges by a tenth of a second, No Intro/No Credits), and the detection's progress,
   current episode, time left and each series.
 - **Cinema Mode** (Settings › Playback, with a server that lists trailers): before a film that
-  starts from its beginning comes one of Aurelia's made-up ads, trailers of films nobody has
+  starts from its beginning comes one of Tarven's made-up ads, trailers of films nobody has
   watched yet (each through its own ticket and relay, revoked afterwards) and the curtain, which
   opens once the film plays behind it. Skip (→) moves on, Start Film (Enter) goes straight to the
   film, Escape closes the player.
@@ -393,7 +393,7 @@ server's playlists and segments. Server management shows the server's **Video Co
 - keys: Space, ←/→, M, F, Esc, P, N and Ctrl+Shift+←/→.
 
 The controls hide after the chosen delay. `Platform/LinuxPlaybackSystem.cs` publishes the player
-through MPRIS (`org.mpris.MediaPlayer2.aurelia`, for media keys and the desktop's media controls)
+through MPRIS (`org.mpris.MediaPlayer2.tarven`, for media keys and the desktop's media controls)
 and keeps the screen awake with `org.freedesktop.ScreenSaver` while playing.
 
 Play On (`Playback/PlayOn.cs`): while a profile is open this computer announces itself every 15
@@ -428,16 +428,16 @@ scripts/test-linux-app.sh
 
 restores, checks formatting, builds Release with warnings as errors and runs all tests:
 
-- `Aurelia.Linux.Tests`: logic, and headless interface tests that draw the real views with Skia
+- `Tarven.Linux.Tests`: logic, and headless interface tests that draw the real views with Skia
   (frames are saved to `Local/Test Results/LinuxApp-<run>/snapshots`). They need no screen and do
   not take over one. Screens that talk to a server use a scripted fake server.
-- `Aurelia.Linux.IntegrationTests`: the app's connection and library logic against the real
-  Aurelia server in the same process, with a temporary data folder, synthetic accounts and a
+- `Tarven.Linux.IntegrationTests`: the app's connection and library logic against the real
+  Tarven server in the same process, with a temporary data folder, synthetic accounts and a
   library made of one-byte files named like videos. Hosting tests also launch the real server
   executable against temporary state, verify crash recovery and port conflicts, confirm a new
   HTTPS address and expire an isolated trial journal to exercise production rollback. It is a separate project
   because the server's SkiaSharp 4 and Avalonia's SkiaSharp 3 cannot load together.
-- The real desktop keyring is tested only on a Linux desktop with `AURELIA_TEST_KEYRING=1`, using
+- The real desktop keyring is tested only on a Linux desktop with `TARVEN_TEST_KEYRING=1`, using
   its own entry that the test removes again.
 
 ```bash
@@ -445,9 +445,9 @@ scripts/build-linux-app.sh
 ```
 
 runs the tests, publishes the app self-contained for `linux-x64` and `linux-arm64`
-(`AURELIA_LINUX_ARCHES` may choose one) and lays each out as installed:
-`/usr/lib/aurelia-desktop`, the `aurelia-desktop` command (the server package owns `aurelia`),
-the desktop entry and AppStream metadata `io.github.lucasfd3.Aurelia`, the icon and the
+(`TARVEN_LINUX_ARCHES` may choose one) and lays each out as installed:
+`/usr/lib/tarven-desktop`, the `tarven-desktop` command (the server package owns `tarven`),
+the desktop entry and AppStream metadata `org.tarven.Tarven`, the icon and the
 third-party notices. `scripts/package-linux-app.sh` then makes the packages on Linux, for arm64
 from the prebuilt arm64 tree on the same x64 computer (deb, rpm and Arch; no Flatpak):
 
@@ -458,18 +458,18 @@ from the prebuilt arm64 tree on the same x64 computer (deb, rpm and Arch; no Fla
 | `.pkg.tar.zst` | Arch Linux, CachyOS, Manjaro, EndeavourOS |
 | `.flatpak` | any distribution with Flatpak (Freedesktop runtime 26.08 from Flathub) |
 
-On the Mac, set `AURELIA_LINUX_PACKAGE_HOST` to an Arch-family ssh host with `dpkg-deb`, `rpmbuild`,
+On the Mac, set `TARVEN_LINUX_PACKAGE_HOST` to an Arch-family ssh host with `dpkg-deb`, `rpmbuild`,
 `makepkg`, `flatpak-builder`, the Freedesktop 26.08 Platform and SDK, and the LLVM 22 SDK extension.
 `makepkg` packs the prebuilt tree with `--nodeps`: the runtime dependencies are written into the
 package without having to be installed on the packaging computer. Set
-`AURELIA_LINUX_PACKAGE_SSH_CONFIG` to its ssh configuration. Everything lands in
+`TARVEN_LINUX_PACKAGE_SSH_CONFIG` to its ssh configuration. Everything lands in
 `Local/Build/LinuxApp/<version>-<build>/`.
 
-A Linux host that has only Docker works too: with `AURELIA_LINUX_PACKAGE_DOCKER=1`,
+A Linux host that has only Docker works too: with `TARVEN_LINUX_PACKAGE_DOCKER=1`,
 `scripts/package-linux-app-in-docker.sh` runs the same packaging there in a throwaway Arch Linux
 container at the lowest CPU and I/O priority, without ports or other containers. The Flatpak runtimes
-and module cache stay in the Docker volume `aurelia-package-cache` (the first build takes about an
-hour, later ones about 20 minutes); `docker volume rm aurelia-package-cache` removes them.
+and module cache stay in the Docker volume `tarven-package-cache` (the first build takes about an
+hour, later ones about 20 minutes); `docker volume rm tarven-package-cache` removes them.
 
 ```bash
 scripts/install-linux-app.sh <ssh host>

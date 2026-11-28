@@ -1,18 +1,18 @@
 # Troubleshooting
 
 Short answers to the questions that come up most. If none fits, open an
-[issue](https://github.com/lucaskleinsteuber/Aurelia/issues) with the app, its version
+[issue](https://github.com/lucaskleinsteuber/Tarven/issues) with the app, its version
 (*Settings › About*) and what you did; leave out passwords, codes and personal paths.
 
 ## Connecting
 
 **The app finds no server.**
-- The server computer must be on, Aurelia must run there, and both devices must be in the same
+- The server computer must be on, Tarven must run there, and both devices must be in the same
   home network (not a guest Wi-Fi, which keeps devices apart).
 - On the server, *Settings › Server › Allow HTTPS access from LAN / private VPN* must be on.
 - Bonjour may be blocked by the router; type the server's address instead, for example
   `192.168.1.50`. The Mac and Linux apps show it under *Settings › Profiles and Devices*; on a
-  Linux server, `aurelia status` prints it.
+  Linux server, `tarven status` prints it.
 - On a Linux server with a firewall other than `ufw`, allow TCP port **43111** and UDP port
   **5353** (Bonjour). The installer opens them only in an active `ufw`.
 
@@ -22,11 +22,11 @@ reinstalled the server yourself, remove the server in the app and connect again;
 continue and check which computer has that address.
 
 **The pairing code is not accepted.** A code works once and for five minutes. Create a new one on
-the server computer (*Create Code*, or `aurelia pair`) and type it on the device right away.
+the server computer (*Create Code*, or `tarven pair`) and type it on the device right away.
 
 **The browser warns about the certificate.** The server signs its own certificate, so browsers do
 not know it. Compare the fingerprint the browser shows with the one in the app, then continue.
-[Aurelia in a web browser](WEB_APP.md) explains it per browser.
+[Tarven in a web browser](WEB_APP.md) explains it per browser.
 
 ## The server
 
@@ -34,31 +34,31 @@ not know it. Compare the fingerprint the browser shows with the one in the app, 
 (BIOS/UEFI) and works only over a network cable on most computers. The Mac and Linux apps wake
 it when they open. On iPhone and iPad, *Wake Server* on the "server is off" screen sends the
 packet for two minutes, and Settings › Server › Wake-on-LAN says whether it can work; iOS and
-tvOS may block the broadcast part, so if nothing happens open Aurelia on a Mac or Linux PC first. Away from home, wake it
+tvOS may block the broadcast part, so if nothing happens open Tarven on a Mac or Linux PC first. Away from home, wake it
 through your router (for example the MyFRITZ!App) or keep it awake during set hours with
-`sudo aurelia sleep server --awake 17:00-23:30`. See
+`sudo tarven sleep server --awake 17:00-23:30`. See
 [power saving](LINUX_SERVER.md#saving-power).
 
 **The server computer freezes without a monitor.** If a Linux server with no screen attached
 stops answering completely (no ping, nothing in the log, power light still on), often while it
 converts video or finds intros but sometimes even when idle, its Intel graphics driver may be
 hanging. This was seen on an HP ProDesk 600 G4 Mini; the same video work runs fine once the
-driver is off. Aurelia does not need the driver unless it converts video with Intel Quick Sync
-or VA-API, and without it Aurelia uses the processor instead. Add `module_blacklist=i915` to
+driver is off. Tarven does not need the driver unless it converts video with Intel Quick Sync
+or VA-API, and without it Tarven uses the processor instead. Add `module_blacklist=i915` to
 `GRUB_CMDLINE_LINUX_DEFAULT` in `/etc/default/grub`, run `sudo update-grub` and restart; remove it
 again to undo. If such a computer does not start again after a freeze, unplug its power for
 30 seconds.
 
 **A drive is missing.** Titles on a disconnected drive stay with their details and progress and
 show as offline until it is back. On Linux, mount media drives permanently (for example through
-`/etc/fstab`) so they are there after a restart; [Aurelia Server on Linux](LINUX_SERVER.md)
+`/etc/fstab`) so they are there after a restart; [Tarven Server on Linux](LINUX_SERVER.md)
 shows how.
 
-**Aurelia on Mac says the server data folder is unavailable.** On a hosting Mac, the server stores
-its database and settings in `~/Library/Application Support/Aurelia Server` and its logs in
-`~/Library/Logs/Aurelia Server`. If you relocated that data folder with a symbolic link to an
-external drive, reconnect the drive and reopen Aurelia. If startup still fails, check available
-disk space on the drive and inspect `~/Library/Logs/Aurelia Server/server.log`.
+**Tarven on Mac says the server data folder is unavailable.** On a hosting Mac, the server stores
+its database and settings in `~/Library/Application Support/Tarven Server` and its logs in
+`~/Library/Logs/Tarven Server`. If you relocated that data folder with a symbolic link to an
+external drive, reconnect the drive and reopen Tarven. If startup still fails, check available
+disk space on the drive and inspect `~/Library/Logs/Tarven Server/server.log`.
 
 **Titles are not recognized or matched wrongly.** Check the names against
 [Organizing your media](MEDIA_LIBRARY.md), then scan again. Wrong matches can be fixed under
@@ -72,7 +72,7 @@ iPhone and iPad) shows how long each part of the server took over the last days 
 database queries were slow. Include it when you report a slow screen: the diagnostics report
 carries the same numbers without any titles or paths.
 
-**Updating the server.** On Linux run `sudo aurelia update`, or use *Settings › Updates › Server
+**Updating the server.** On Linux run `sudo tarven update`, or use *Settings › Updates › Server
 Updates* in the Mac or Linux app. Accounts, library and settings stay.
 
 ## Playback
@@ -82,7 +82,7 @@ full bit rate. Large 4K files need a fast connection: prefer a network cable for
 on Wi-Fi, a 5 GHz network. Away from home the upload speed of your internet line is the limit; see
 [Watching away from home](REMOTE_ACCESS.md#good-to-know).
 
-**No sound, or the wrong language.** Choose the track in the player's audio menu. Aurelia
+**No sound, or the wrong language.** Choose the track in the player's audio menu. Tarven
 remembers it for the series and the profile. Default languages are set under *Settings › Playback*.
 
 **Subtitles are missing.** Name subtitle files after the video (`Movie.en.srt`), see
@@ -101,7 +101,7 @@ Apple ID are signed for seven days. Build and install them again, see
 
 **The Mac app does not open on another Mac.** The published Mac download only runs on Macs
 registered to the developer's account. Build it yourself with a free Apple ID, see
-[Aurelia for Mac](MAC_APP.md#building-it-yourself).
+[Tarven for Mac](MAC_APP.md#building-it-yourself).
 
 ## Profiles
 

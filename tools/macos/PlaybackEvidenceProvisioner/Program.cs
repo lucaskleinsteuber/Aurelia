@@ -1,7 +1,7 @@
 using System.Text.Json;
-using Aurelia.Contracts;
-using Aurelia.Server.Data;
-using Aurelia.Server.Services;
+using Tarven.Contracts;
+using Tarven.Server.Data;
+using Tarven.Server.Services;
 using Microsoft.EntityFrameworkCore;
 
 // Offline fixture setup only. This never opens an installed/personal database,
@@ -13,9 +13,9 @@ try
     var mode = args[0];
     var databasePath = Path.GetFullPath(args[1]);
     var manifestPath = Path.GetFullPath(args[2]);
-    if (!databasePath.Contains("/Library/Caches/Aurelia/TestRuns/playback-evidence-", StringComparison.Ordinal)
-        || !databasePath.EndsWith("/aurelia.db", StringComparison.Ordinal)
-        || !manifestPath.Contains("/Library/Caches/Aurelia/TestRuns/playback-evidence-", StringComparison.Ordinal)
+    if (!databasePath.Contains("/Library/Caches/Tarven/TestRuns/playback-evidence-", StringComparison.Ordinal)
+        || !databasePath.EndsWith("/tarven.db", StringComparison.Ordinal)
+        || !manifestPath.Contains("/Library/Caches/Tarven/TestRuns/playback-evidence-", StringComparison.Ordinal)
         || !File.Exists(databasePath) || !File.Exists(manifestPath))
         throw new EvidenceSetupException("not_an_owned_evidence_database");
     var configuration = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
@@ -25,13 +25,13 @@ try
         || !fixtures.Select(value => value.Format).Order(StringComparer.Ordinal).SequenceEqual(EvidenceFixturePolicy.SyntheticFormats)))
         throw new EvidenceSetupException("not_the_three_generated_fixtures");
     if (mode == "authorized-personal" && (fixtures.Length != 1
-        || Environment.GetEnvironmentVariable("AURELIA_EVIDENCE_AUTHORIZED_SOURCE_FILE") is not { } authorized
+        || Environment.GetEnvironmentVariable("TARVEN_EVIDENCE_AUTHORIZED_SOURCE_FILE") is not { } authorized
         || Path.GetFullPath(fixtures[0].Path) != Path.GetFullPath(authorized)))
         throw new EvidenceSetupException("not_the_exact_authorized_source");
-    var options = new DbContextOptionsBuilder<AureliaDbContext>()
+    var options = new DbContextOptionsBuilder<TarvenDbContext>()
         .UseSqlite($"Data Source={databasePath};Mode=ReadWrite;Foreign Keys=True")
         .Options;
-    await using var database = new AureliaDbContext(options);
+    await using var database = new TarvenDbContext(options);
     if (await database.LibraryRoots.AnyAsync() || await database.MediaItems.AnyAsync()
         || (await database.Database.GetPendingMigrationsAsync()).Any())
         throw new EvidenceSetupException("owned_database_not_empty_or_not_migrated");
@@ -41,7 +41,7 @@ try
     {
         var source = Path.GetFullPath(fixture.Path);
         if (mode == "synthetic"
-            && !source.Contains("/Library/Caches/Aurelia/TestRuns/playback-evidence-", StringComparison.Ordinal))
+            && !source.Contains("/Library/Caches/Tarven/TestRuns/playback-evidence-", StringComparison.Ordinal))
             throw new EvidenceSetupException("synthetic_fixture_outside_owned_run");
         var file = new FileInfo(source);
         if (!file.Exists || file.LinkTarget is not null)

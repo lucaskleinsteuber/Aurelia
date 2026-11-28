@@ -1,11 +1,11 @@
 # Native client compatibility
 
-Aurelia currently ships a native macOS client. These additive API contracts also
+Tarven currently ships a native macOS client. These additive API contracts also
 prepare the server for another native client. They do not imply a released tvOS app.
 
 ## Discovery and identity
 
-Resolve the `_aurelia._tcp` Bonjour service to its actual target and port. Display
+Resolve the `_tarven._tcp` Bonjour service to its actual target and port. Display
 names and TXT records are discovery hints, not proof of identity. Before sending
 saved credentials to a relocated address, require the stored server ID and the
 stored public-key fingerprint to match. A changed identity needs explicit review.
@@ -27,7 +27,7 @@ accept up to 200. Catalog, Home and collection GET responses are compressed with
 Brotli or gzip when the request sends `Accept-Encoding`; other responses are not.
 
 Since 1.7.14, `preview-streams-v1` means stream reads sent with
-`X-Aurelia-Stream-Purpose: preview` count apart from playback: up to 8 at once per device
+`X-Tarven-Stream-Purpose: preview` count apart from playback: up to 8 at once per device
 session (32 per server) and their own per-address request budget, never against the stream
 limits. Clients prepare timeline previews on several decoders only when it is advertised;
 against older servers they keep to one, because previews would otherwise take playback slots.
@@ -51,7 +51,7 @@ and bounded recovery history require the Owner management endpoint
 
 Every current client pairs the same way: the owner creates an eight-digit code on the main
 device (`POST /api/v1/auth/pairings`, shown under *Settings › Profiles and Devices › Create
-Code* on a Mac or Linux computer, or `aurelia pair` on a Linux server), and the new device
+Code* on a Mac or Linux computer, or `tarven pair` on a Linux server), and the new device
 redeems it with `POST /api/v1/auth/pair` and `{ "code", "deviceName" }` after the user
 confirmed the server's fingerprint. A code works once and for five minutes. The browser app
 redeems it with `POST /api/v1/web/pair` (capability `web-pairing-code-v1`), which keeps the
@@ -60,7 +60,7 @@ credential in an HttpOnly cookie.
 ## Device authorization (older clients)
 
 Apple TV, iPhone, iPad and browser versions from before every client asked for a code still
-use this flow, so the server keeps supporting it (`aurelia approve CODE` on a Linux server); the
+use this flow, so the server keeps supporting it (`tarven approve CODE` on a Linux server); the
 2.0 apps no longer offer *Enter Code from Device…*, because every 2.0 app types the code that the
 main device creates.
 Start with `POST /api/v1/auth/device-pairings` and a `deviceName`. Display the

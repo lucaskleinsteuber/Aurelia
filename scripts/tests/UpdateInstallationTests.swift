@@ -29,15 +29,15 @@ struct UpdateInstallationTests {
     for scenario in scenarios {
       try exercise(scenario, root: parent.appendingPathComponent(scenario))
     }
-    let app = URL(fileURLWithPath: "/invented/Aurelia.app")
+    let app = URL(fileURLWithPath: "/invented/Tarven.app")
     let processes = UpdateInstallation.otherProcesses(
       in: app,
       listing: """
-        10 /invented/Aurelia.app/Contents/MacOS/Aurelia
-        11 /invented/Aurelia.app/Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/Aurelia Server Host
-        12 /invented/Aurelia.app/Contents/Resources/Server/aurelia-server
-        13 /invented/Aurelia.app.extra/Contents/MacOS/Aurelia
-        14 /other/Aurelia.app/Contents/MacOS/Aurelia
+        10 /invented/Tarven.app/Contents/MacOS/Tarven
+        11 /invented/Tarven.app/Contents/Helpers/Tarven Server Host.app/Contents/MacOS/Tarven Server Host
+        12 /invented/Tarven.app/Contents/Resources/Server/tarven-server
+        13 /invented/Tarven.app.extra/Contents/MacOS/Tarven
+        14 /other/Tarven.app/Contents/MacOS/Tarven
         """, excluding: 11)
     try check(processes == [10, 12], "Only this bundle's other processes block replacement")
     try downloadCleanup(parent: parent)
@@ -50,14 +50,14 @@ struct UpdateInstallationTests {
     let writableDir = parent.appendingPathComponent("WritableApps", isDirectory: true)
     try manager.createDirectory(at: writableDir, withIntermediateDirectories: true)
     try UpdateInstallation.verifyWritableDestination(
-      app: writableDir.appendingPathComponent("Aurelia.app"))
+      app: writableDir.appendingPathComponent("Tarven.app"))
     let readonlyDir = parent.appendingPathComponent("ReadOnlyApps", isDirectory: true)
     try manager.createDirectory(at: readonlyDir, withIntermediateDirectories: true)
     try manager.setAttributes([.posixPermissions: 0o555], ofItemAtPath: readonlyDir.path)
     defer { try? manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: readonlyDir.path) }
     do {
       try UpdateInstallation.verifyWritableDestination(
-        app: readonlyDir.appendingPathComponent("Aurelia.app"))
+        app: readonlyDir.appendingPathComponent("Tarven.app"))
       throw TestError.failed("Read-only Applications folder must be rejected before quit")
     } catch UpdateInstallation.Failure.notWritable {}
   }
@@ -145,8 +145,8 @@ struct UpdateInstallationTests {
   static func exercise(_ scenario: String, root: URL) throws {
     let manager = FileManager.default
     try manager.createDirectory(at: root, withIntermediateDirectories: true)
-    let app = root.appendingPathComponent("Aurelia.app")
-    let candidate = root.appendingPathComponent("image/Aurelia.app")
+    let app = root.appendingPathComponent("Tarven.app")
+    let candidate = root.appendingPathComponent("image/Tarven.app")
     let transaction = root.appendingPathComponent(".transaction")
     for bundle in [app, candidate] {
       try manager.createDirectory(at: bundle, withIntermediateDirectories: true)
@@ -160,7 +160,7 @@ struct UpdateInstallationTests {
       identity: { bundle in
         let original = bundle == app
         return .init(
-          identifier: !original && scenario == "wrong-app" ? "other.app" : "test.aurelia",
+          identifier: !original && scenario == "wrong-app" ? "other.app" : "test.tarven",
           build: original ? 100 : scenario == "wrong-build" ? 102 : 101,
           team: !original && scenario == "wrong-team"
             ? "OTHER" : scenario == "unsigned" ? nil : "TEST")

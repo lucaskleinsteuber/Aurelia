@@ -9,11 +9,11 @@ begin
   raise ArgumentError unless ARGV.length == 1 || (ARGV.length == 2 && ARGV[1] == '--owned-snapshot')
   repository = File.expand_path(ARGV[0])
   raise ArgumentError unless File.realpath(repository) == repository
-  roots = %w[clients/macos/Aurelia clients/macos/AureliaServerHost
-             clients/macos/Configuration clients/macos/Aurelia.xcodeproj]
+  roots = %w[clients/macos/Tarven clients/macos/TarvenServerHost
+             clients/macos/Configuration clients/macos/Tarven.xcodeproj]
   if ARGV[1] == '--owned-snapshot'
     run = ENV.fetch('EVIDENCE_RUN_ROOT')
-    owned_parent = File.join(Dir.home, 'Library/Caches/Aurelia/TestRuns')
+    owned_parent = File.join(Dir.home, 'Library/Caches/Tarven/TestRuns')
     raise ArgumentError unless File.dirname(run) == owned_parent &&
                               File.basename(run).start_with?('playback-evidence-') &&
                               File.realpath(run) == run && repository == File.join(run, 'Source')
@@ -25,7 +25,7 @@ begin
     raise ArgumentError unless status.success?
     new_code, status = Open3.capture2('git', '-C', repository, 'ls-files', '--others',
                                      '--exclude-standard', '-z', '--',
-                                     'clients/macos/Aurelia', 'clients/macos/AureliaServerHost')
+                                     'clients/macos/Tarven', 'clients/macos/TarvenServerHost')
     raise ArgumentError unless status.success?
     paths = tracked.split("\0") + new_code.split("\0").select { |path| path.end_with?('.swift') }
   end

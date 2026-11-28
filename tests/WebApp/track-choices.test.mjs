@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createTrackChoices, matchingTrack, trackIdentity } from "../../src/Aurelia.Server/WebApp/js/track-choices.js";
+import { createTrackChoices, matchingTrack, trackIdentity } from "../../src/Tarven.Server/WebApp/js/track-choices.js";
 const storage = () => { let value = null; return { getItem: () => value, setItem: (_key, next) => { value = next; } }; };
 const episode = (id, parentId = "show") => ({ id, parentId, kind: "episode" });
 const english = { index: 2, language: "eng", title: "Main", format: "aac", channels: 2 };

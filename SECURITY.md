@@ -1,6 +1,6 @@
 # Security policy
 
-Aurelia keeps people's libraries, profiles and viewing history, so security reports are taken
+Tarven keeps people's libraries, profiles and viewing history, so security reports are taken
 seriously. Thank you for reporting responsibly.
 
 ## Supported versions
@@ -13,7 +13,7 @@ seriously. Thank you for reporting responsibly.
 ## Reporting a vulnerability
 
 **Please do not open a public issue.** Report it privately through
-[GitHub's private vulnerability reporting](https://github.com/lucaskleinsteuber/Aurelia/security/advisories/new)
+[GitHub's private vulnerability reporting](https://github.com/lucaskleinsteuber/Tarven/security/advisories/new)
 (the *Report a vulnerability* button on the Security tab).
 
 Include:
@@ -34,7 +34,7 @@ soon as possible, and credit in the release notes if you like.
   internet, or to make the server write next to media or outside its data folder.
 - The update paths of the Mac app, the Linux app and the Linux server.
 
-How Aurelia is meant to protect these is described in the [security model](docs/SECURITY_MODEL.md).
+How Tarven is meant to protect these is described in the [security model](docs/SECURITY_MODEL.md).
 
 ## Out of scope
 

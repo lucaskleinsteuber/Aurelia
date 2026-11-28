@@ -1,0 +1,347 @@
+import AppKit
+import Foundation
+import OSLog
+
+/// "Check for Updates…": asks GitHub for the newest release of the repository this app was
+/// built from, downloads its disk image, checks it against the release's SHA256SUMS and hands
+/// it to the server host helper, which (outside the sandbox) replaces only the app bundle
+/// after this app quits and opens the new version. Library, settings and sign-ins stay.
+@MainActor
+final class AppUpdater: ObservableObject {
+  enum State: Equatable {
+    case idle
+    case checking
+    case upToDate
+    case available(AppRelease)
+    case downloading
+    case installing
+    case failed(String)
+  }
+
+  struct InstallHooks {
+    var updatesDirectory: @MainActor () throws -> URL = { try AppUpdater.updatesDirectory() }
+    var launchHelper: @MainActor (URL) async throws -> Void = { helper in
+      let configuration = NSWorkspace.OpenConfiguration()
+      configuration.activates = true
+      configuration.createsNewApplicationInstance = true
+      _ = try await NSWorkspace.shared.openApplication(at: helper, configuration: configuration)
+    }
+    var terminateApp: @MainActor () -> Void = { NSApp.terminate(nil) }
+    var showUpdatesPage: (@MainActor () -> Bool)? = nil
+    var presentAlert: (@MainActor (String, String) -> Void)? = nil
+    var acknowledgementTimeoutSeconds: TimeInterval = 30
+    var lateAcknowledgementTimeoutSeconds: TimeInterval = 15
+  }
+
+  static let shared = AppUpdater()
+  private static let logger = Logger(subsystem: "org.tarven.mac", category: "updates")
+
+  @Published private(set) var state: State = .idle
+  /// The release being downloaded or installed, and how far its download is.
+  @Published private(set) var installingRelease: AppRelease?
+  @Published private(set) var progress: AppUpdateProgress?
+  private var installTask: Task<Void, Never>?
+  /// "owner/name" baked in by build-macos-release.sh; builds from Xcode have none.
+  let repository: String?
+  let currentVersion: String
+  let currentBuild: Int
+  let bundlePath: String
+  private let client: AppUpdateClient
+  private let defaults: UserDefaults
+  private let installHooks: InstallHooks
+
+  init(
+    bundle: Bundle = .main,
+    client: AppUpdateClient = AppUpdateClient(),
+    defaults: UserDefaults = .standard,
+    bundlePath: String? = nil,
+    repositoryOverride: String? = nil,
+    currentVersion: String? = nil,
+    currentBuild: Int? = nil,
+    updatesStatusRoot: URL? = nil,
+    installHooks: InstallHooks = InstallHooks()
+  ) {
+    self.client = client
+    self.defaults = defaults
+    self.installHooks = installHooks
+    self.bundlePath = bundlePath ?? bundle.bundleURL.standardizedFileURL.path
+    let configured =
+      repositoryOverride
+      ?? (bundle.object(forInfoDictionaryKey: "TarvenUpdateRepository") as? String)
+    // Tarven Test never updates itself: an update would install the real app.
+    repository =
+      AppEdition.isTest ? nil : configured.flatMap { AppUpdateLogic.isRepository($0) ? $0 : nil }
+    AppUpdateSource.retirePublicTest(in: defaults)
+    self.currentVersion =
+      currentVersion
+      ?? (bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "?"
+    self.currentBuild =
+      currentBuild
+      ?? Int(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
+    if let root = updatesStatusRoot ?? MacUpdateInstallRequest.updatesDirectory() {
+      AppUpdateClient.pruneOrphanedDownloads(in: root)
+      if let outcome = MacUpdateInstallRequest.status(in: root), outcome.phase == "failed",
+        outcome.build > self.currentBuild
+      {
+        state = .failed(
+          outcome.message ?? "The previous update could not be completed. Try again.")
+      }
+    }
+  }
+
+  var canCheck: Bool { repository != nil }
+
+  var installLocationIssue: AppUpdateLogic.InstallLocationIssue? {
+    AppUpdateLogic.installLocationIssue(bundlePath: bundlePath)
+  }
+
+  var isBusy: Bool { state == .checking || state == .downloading || state == .installing }
+
+  /// Starts downloading and installing `release`; Settings › Updates shows how far it is.
+  func startInstall(_ release: AppRelease) {
+    guard !isBusy else {
+      showUpdatesPage()
+      return
+    }
+    installTask = Task { await install(release) }
+  }
+
+  /// Stops the download; nothing is installed and the offer stays in Settings.
+  func cancelInstall() {
+    guard state == .downloading else { return }
+    installTask?.cancel()
+  }
+
+  /// Opens Settings › Updates in the main window, where the check, the offer and the download
+  /// show. Returns false where Settings can't open (offline mode or no window yet), so the caller
+  /// falls back to a dialog.
+  @discardableResult
+  func showUpdatesPage() -> Bool {
+    if let override = installHooks.showUpdatesPage { return override() }
+    guard let model = AppModel.active, model.offlineMode == nil else { return false }
+    NSApp.activate()
+    NSApp.windows.first { $0.canBecomeMain && $0.isVisible }?.makeKeyAndOrderFront(nil)
+    model.openSettings(.updates)
+    return true
+  }
+
+  /// At launch, at most once a day; it speaks up only when there is news.
+  func checkInBackgroundIfDue() {
+    guard canCheck, AppUpdatePreferences.backgroundCheckIsDue(in: defaults, repository: repository)
+    else { return }
+    Task { await check(userInitiated: false) }
+  }
+
+  /// Looks for a newer release; a check the user asked for always answers.
+  func check(userInitiated: Bool) async {
+    // Asked for by a person, the answer shows in Settings › Updates instead of in dialogs; asking
+    // again while an update downloads shows how far it is.
+    let onPage = userInitiated && showUpdatesPage()
+    guard !isBusy else { return }
+    guard userInitiated || AppUpdatePreferences.checksAutomatically(in: defaults) else { return }
+    guard let repository else {
+      if userInitiated, !onPage {
+        let notice = AppUpdateLogic.unavailableCheckNotice(isTestEdition: AppEdition.isTest)
+        alert(notice.title, notice.message)
+      }
+      return
+    }
+    state = .checking
+    let beta = AppUpdatePreferences.betaUpdates(in: defaults)
+    do {
+      let result = try await client.catalog(
+        repository: repository,
+        cached: AppUpdateCatalogCache.load(repository: repository, beta: beta, defaults: defaults),
+        beta: beta)
+      let release = result.release
+      AppUpdateCatalogCache.save(
+        result.cache, repository: repository, beta: beta, defaults: defaults)
+      defaults.set(Date(), forKey: AppUpdatePreferences.checkKey(repository))
+      if AppUpdateLogic.isNewer(release, version: currentVersion, build: currentBuild) {
+        state = .available(release)
+        // Re-read choices after the request: Settings may have changed while it was in flight.
+        // The page already shows Install; only a background check asks in a dialog, and never
+        // repeatedly when this copy cannot self-update from its current folder.
+        if !onPage,
+          installLocationIssue == nil,
+          AppUpdatePreferences.shouldOffer(
+            version: release.version, userInitiated: userInitiated, defaults: defaults)
+        {
+          offer(release)
+        } else if userInitiated, !onPage, let issue = installLocationIssue {
+          alert("Tarven \(release.version) Is Available", issue.message)
+        }
+      } else {
+        state = .upToDate
+        if userInitiated, !onPage {
+          alert(
+            "Tarven Is Up to Date",
+            "You have the newest version, \(currentVersion) (\(currentBuild)).")
+        }
+      }
+    } catch {
+      // Without betas the newest stable release is the server's: there is no Mac version in it.
+      let noMacRelease: Bool
+      switch error as? AppUpdateError {
+      case .invalidTag, .invalidRelease, .noDiskImage: noMacRelease = !beta
+      default: noMacRelease = false
+      }
+      let message =
+        noMacRelease
+        ? AppUpdateBetaOnly.noStableVersion
+        : (error as? AppUpdateError)?.message
+          ?? "GitHub couldn't be reached. Check the internet connection, then try again."
+      state = .failed(message)
+      Self.logger.error("Update check failed: \(message, privacy: .public)")
+      if userInitiated, !onPage { alert("Couldn't Check for Updates", message) }
+    }
+  }
+
+  private func offer(_ release: AppRelease) {
+    let alert = NSAlert()
+    alert.messageText =
+      release.isBeta
+      ? "Tarven \(release.version) Beta Is Available"
+      : "Tarven \(release.version) Is Available"
+    alert.informativeText = AppUpdateLogic.installRestartNote(
+      downloadBytes: release.downloadBytes,
+      isHostingLocally: AppModel.active?.isLocalHost == true)
+    alert.addButton(withTitle: "Install and Restart")
+    alert.addButton(withTitle: "Later")
+    alert.addButton(withTitle: "Skip This Version")
+    switch alert.runModal() {
+    case .alertFirstButtonReturn:
+      startInstall(release)
+      showUpdatesPage()
+    case .alertThirdButtonReturn:
+      AppUpdatePreferences.skip(version: release.version, in: defaults)
+    default:
+      break
+    }
+  }
+
+  /// Downloads and checks the release, then lets the helper replace the app after it quits.
+  func install(_ release: AppRelease) async {
+    guard !isBusy else { return }
+    guard let repository else { return }
+    if let issue = installLocationIssue {
+      state = .failed(issue.message)
+      if !showUpdatesPage() { alert("Move Tarven to Applications", issue.message) }
+      return
+    }
+    installingRelease = release
+    progress = AppUpdateProgress(received: 0, expected: release.downloadBytes)
+    state = .downloading
+    AppUpdateDockProgress.show(nil)
+    var downloadedImage: URL?
+    var pendingRequest: MacUpdateInstallRequest?
+    var updatesFolder: URL?
+    do {
+      let folder = try installHooks.updatesDirectory()
+      updatesFolder = folder
+      let size = release.downloadBytes
+      let destination = try await client.download(
+        release, repository: repository, currentBuild: currentBuild, folder: folder,
+        progress: { [weak self] received, expected in
+          Task { @MainActor [weak self] in
+            self?.reportDownload(received: received, expected: expected ?? size)
+          }
+        })
+      downloadedImage = destination
+      try Task.checkCancellation()
+
+      state = .installing
+      AppUpdateDockProgress.show(nil)
+      let helper = URL(fileURLWithPath: bundlePath)
+        .appendingPathComponent("Contents/Helpers/Tarven Server Host.app")
+      let request = try MacUpdateInstallRequest.prepare(
+        image: destination, build: release.build, appPID: getpid(), root: folder)
+      try request.save(in: folder)
+      pendingRequest = request
+      try await installHooks.launchHelper(helper)
+      // NSWorkspace ignores arguments from a sandboxed caller. Do not quit until
+      // the same-team helper has acknowledged this exact validated request.
+      do {
+        try await request.waitForAcknowledgement(
+          in: folder, timeoutSeconds: installHooks.acknowledgementTimeoutSeconds)
+      } catch MacUpdateInstallRequest.Failure.acknowledgementTimedOut {
+        // Atomically withdraw the pending file before giving up. If withdrawal fails, the helper
+        // already claimed the request right at the deadline — keep waiting for its status rather
+        // than deleting the downloaded image out from under it.
+        if !request.withdraw(in: folder) {
+          try await request.waitForAcknowledgement(
+            in: folder, timeoutSeconds: installHooks.lateAcknowledgementTimeoutSeconds)
+        } else {
+          pendingRequest = nil
+          throw MacUpdateInstallRequest.Failure.acknowledgementTimedOut
+        }
+      }
+      Self.logger.notice("Installing Tarven \(release.version, privacy: .public); quitting.")
+      AppModel.active?.isPreparingApplicationUpdate = true
+      installHooks.terminateApp()
+    } catch {
+      var helperClaimedRequest = false
+      if let pendingRequest, let root = updatesFolder ?? MacUpdateInstallRequest.updatesDirectory()
+      {
+        helperClaimedRequest = !pendingRequest.withdraw(in: root)
+      }
+      if !helperClaimedRequest, let downloadedImage {
+        try? FileManager.default.removeItem(at: downloadedImage.deletingLastPathComponent())
+      }
+      AppUpdateDockProgress.clear()
+      progress = nil
+      installingRelease = nil
+      // Cancel was pressed: the download is gone and the update is still on offer.
+      if Task.isCancelled || error is CancellationError {
+        state = .available(release)
+        return
+      }
+      let message: String
+      if let updateError = error as? AppUpdateError {
+        message = updateError.message
+      } else if case .rejected(let detail) = error as? MacUpdateInstallRequest.Failure {
+        message = detail ?? "The update request could not be completed. Please try again."
+      } else {
+        message =
+          "The update installer did not acknowledge the request. Tarven has stayed open; try again."
+      }
+      state = .failed(message)
+      if !showUpdatesPage() { alert("Couldn't Install the Update", message) }
+    }
+  }
+
+  /// A later report never moves the bar backwards; reports after the download are ignored.
+  private func reportDownload(received: Int64, expected: Int64?) {
+    guard state == .downloading, received >= progress?.received ?? 0 else { return }
+    progress = AppUpdateProgress(received: received, expected: expected)
+    AppUpdateDockProgress.show(progress?.fraction)
+  }
+
+  /// A folder the helper can read too: the App Group shared with it.
+  static func updatesDirectory(fileManager: FileManager = .default) throws -> URL {
+    guard
+      let container = fileManager.containerURL(
+        forSecurityApplicationGroupIdentifier: HostBootstrapLocation.appGroupIdentifier)
+    else { throw AppUpdateError.noFolder }
+    let folder = container.appendingPathComponent(
+      "Library/Caches/Tarven/Updates", isDirectory: true)
+    do {
+      try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+      try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+    } catch { throw AppUpdateError.classify(error) }
+    AppUpdateClient.pruneOrphanedDownloads(in: folder, fileManager: fileManager)
+    return folder
+  }
+
+  private func alert(_ title: String, _ message: String) {
+    if let presentAlert = installHooks.presentAlert {
+      presentAlert(title, message)
+      return
+    }
+    let alert = NSAlert()
+    alert.messageText = title
+    alert.informativeText = message
+    alert.runModal()
+  }
+
+}

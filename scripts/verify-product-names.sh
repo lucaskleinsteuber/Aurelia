@@ -1,34 +1,107 @@
 #!/bin/sh
-# The current product is Aurelia; old identifiers are migration inputs only.
+# The current product is Tarven. It was called Aurelia until Server 3.0.0 and Mac 2.30.0 (and before
+# that by a two-word label). The old names stay only in the files below: migration and
+# compatibility code (LegacyNames, LegacyAppData, AureliaHandover, the legacy header, cookie, mDNS,
+# Keychain and configuration fallbacks), the Aurelia-Server bridge packages, frozen values,
+# historical changelog entries and the Aurelia Classic rules. A new file that names Aurelia fails here.
 set -eu
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repository_root"
-# git grep needs no extra tool; --untracked also checks new files that are not ignored yet.
-matches=$(git grep --untracked -I -o -E \
-  'Aurelia Home Server|Aurelia Home|AureliaHome|aurelia-home|aureliahome|AURELIA_HOME' \
-  -- . ':!scripts/verify-product-names.sh' || test "$?" -eq 1)
-printf '%s\n' "$matches" | sed '/./s|^|./|' | awk -F: '
-  BEGIN {
-    allow["./src/Aurelia.Server/Services/BonjourAdvertisementService.cs:aurelia-home"] = 1
-    allow["./src/Aurelia.Server/Services/ServerRuntimeOptions.cs:AureliaHome"] = 1
-    allow["./src/Aurelia.Server/Services/ServerRuntimeOptions.cs:AURELIA_HOME"] = 1
-    allow["./clients/macos/Aurelia/Security/KeychainServerStore.swift:aureliahome"] = 1
-    allow["./clients/macos/Configuration/Aurelia-Info.plist:aurelia-home"] = 1
-    allow["./clients/macos/Configuration/Aurelia.entitlements:aureliahome"] = 1
-    allow["./clients/macos/Aurelia/Hosting/ServerDataMigrator.swift:aurelia-home"] = 1
-    allow["./clients/macos/Aurelia/Hosting/ServerDataMigrator.swift:Aurelia Home Server"] = 1
-    allow["./clients/macos/Aurelia/Networking/BonjourBrowser.swift:aurelia-home"] = 1
-    allow["./clients/macos/AureliaTests/ServerDiscoveryTests.swift:aurelia-home"] = 1
-    allow["./clients/linux/Aurelia.Linux.Core/Connection/ServerDiscovery.cs:aurelia-home"] = 1
-    allow["./docs/LINUX_APP.md:aurelia-home"] = 1
-    allow["./clients/tvos/AureliaTV/Core/TVBonjourBrowser.swift:aurelia-home"] = 1
-    allow["./clients/tvos/Configuration/AureliaTV-Info.plist:aurelia-home"] = 1
-    allow["./clients/macos/AureliaTests/AureliaTests.swift:aurelia-home"] = 1
-    allow["./clients/macos/AureliaTests/AureliaTests.swift:Aurelia Home Server"] = 1
-    allow["./clients/macos/AureliaTests/TestEditionIsolationTests.swift:aurelia-home"] = 1
-    allow["./clients/macos/AureliaTests/TestEditionIsolationTests.swift:Aurelia Home Server"] = 1
-  }
-  NF && !allow[$0] { print "Unexpected retired product label: " $0; failed = 1 }
-  END { exit failed }
+allowed='
+  scripts/test-linux-server-takeover.sh
+  scripts/test-linux-server-install.sh
+  docs/README.md
+  docs/DOCKER.md
+  docs/RENAMED.md
+  README.md
+  AGENTS.md
+  CHANGELOG.md
+  clients/ios/Configuration/TarvenIOS-Info.plist
+  clients/ios/TarvenIOS/Core/IOSAPIClient.swift
+  clients/ios/TarvenIOS/Core/IOSBonjourBrowser.swift
+  clients/ios/TarvenIOS/Core/IOSSecurity.swift
+  clients/ios/TarvenIOS/Core/IOSStreamRelay.swift
+  clients/linux/Tarven.Linux.Core/Api/ServerTransport.cs
+  clients/linux/Tarven.Linux.Core/Api/TarvenApi.cs
+  clients/linux/Tarven.Linux.Core/Connection/ServerDiscovery.cs
+  clients/linux/Tarven.Linux.Core/Management/ManagementClient.cs
+  clients/linux/Tarven.Linux.Core/Platform/SecretServiceCredentialStore.cs
+  clients/linux/Tarven.Linux.Core/Playback/LoopbackStreamRelay.cs
+  clients/linux/Tarven.Linux.Core/Settings/LegacyAppData.cs
+  clients/linux/Tarven.Linux.Core/Updates/UpdateFeed.cs
+  clients/linux/Tarven.Linux.Tests/AppUpdateTests.cs
+  clients/linux/Tarven.Linux.Tests/LegacyAppDataTests.cs
+  clients/linux/Tarven.Linux/Program.cs
+  clients/macos/Configuration/Tarven-Info.plist
+  clients/macos/Configuration/Tarven.entitlements
+  clients/macos/Tarven/Hosting/ServerDataMigrator.swift
+  clients/macos/Tarven/Models/SecurityModels.swift
+  clients/macos/Tarven/Networking/APIClient.swift
+  clients/macos/Tarven/Networking/BonjourBrowser.swift
+  clients/macos/Tarven/Networking/LoopbackStreamRelay.swift
+  clients/macos/Tarven/Security/AureliaHandover.swift
+  clients/macos/Tarven/Security/KeychainServerStore.swift
+  clients/macos/Tarven/TarvenApp.swift
+  clients/macos/Tarven/Updates/AppUpdateLogic.swift
+  clients/macos/TarvenServerHost/ServerHostMain.swift
+  clients/macos/TarvenTests/AppUpdateLogicTests.swift
+  clients/macos/TarvenTests/AureliaHandoverTests.swift
+  clients/macos/TarvenTests/ServerDiscoveryTests.swift
+  clients/macos/TarvenTests/ServerSecurityTests.swift
+  clients/macos/TarvenTests/TarvenTests.swift
+  clients/macos/TarvenTests/TestEditionIsolationTests.swift
+  clients/macos/TarvenTests/UpdateSigningFixture.swift
+  clients/tvos/Configuration/TarvenTV-Info.plist
+  clients/tvos/TarvenTV/Core/TVAPIClient.swift
+  clients/tvos/TarvenTV/Core/TVBonjourBrowser.swift
+  clients/tvos/TarvenTV/Core/TVSecurity.swift
+  clients/tvos/TarvenTV/Core/TVStreamRelay.swift
+  docs/CLIENT_PROTOCOL.md
+  docs/LINUX_APP.md
+  docs/SECURITY_MODEL.md
+  docs/SERVER_MOVE.md
+  docs/UPDATE_TEST.md
+  packaging/docker/Dockerfile
+  packaging/docker/tarven
+  packaging/linux/get-aurelia.sh
+  packaging/linux/get-tarven.sh
+  packaging/linux/install.sh
+  scripts/build-linux-server.sh
+  scripts/build-macos-release.sh
+  scripts/package-linux-app.sh
+  scripts/publish-release.sh
+  scripts/verify-profileless-macos-entitlements.sh
+  src/Tarven.Server/Authentication/WebCookies.cs
+  src/Tarven.Server/Program.cs
+  src/Tarven.Server/Services/BonjourAdvertisementService.cs
+  src/Tarven.Server/Services/DeviceAuthorizationService.cs
+  src/Tarven.Server/Services/EncryptedBackupContainer.cs
+  src/Tarven.Server/Services/LegacyNames.cs
+  src/Tarven.Server/Services/PasskeyService.cs
+  src/Tarven.Server/Services/ServerCommandLine.cs
+  src/Tarven.Server/Services/ServerMoveCrypto.cs
+  src/Tarven.Server/Services/ServerRuntimeOptions.cs
+  src/Tarven.Server/WebApp/js/legacy-storage.js
+  src/Tarven.Server/WebApp/js/server-move-view.js
+  src/Tarven.Server/WebApp/js/settings-admin.js
+  tests/Tarven.Server.Tests/LegacyNamesTests.cs
+  tests/WebApp/legacy-storage.test.mjs
 '
+status=0
+# git grep needs no extra tool; --untracked also checks new files that are not ignored yet.
+for file in $(git grep --untracked -I -l -i aurelia -- . ':!Local' ':!scripts/verify-product-names.sh' || true); do
+  case "$allowed" in
+    *"
+  $file
+"*) ;;
+    *) echo "Unexpected old product name (Aurelia) in $file"; status=1 ;;
+  esac
+done
+for path in $(git ls-files --cached --others --exclude-standard | grep -i aurelia || true); do
+  case "$path" in
+    packaging/linux/get-aurelia.sh|clients/macos/Tarven/Security/AureliaHandover.swift|clients/macos/TarvenTests/AureliaHandoverTests.swift) ;;
+    *) echo "Unexpected old product name (Aurelia) in the path $path"; status=1 ;;
+  esac
+done
+[ "$status" -eq 0 ] || exit 1
 echo "Current product names and compatibility allowlist verified."

@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Draws Mac app screens offscreen to PNG files with an invented library, so they can be checked
-# for visual bugs without using anyone's screen (DEBUG mode AURELIA_UI_TEST_MODE=audit-render,
-# clients/macos/Aurelia/Views/AuditScreenRenderer.swift).
+# for visual bugs without using anyone's screen (DEBUG mode TARVEN_UI_TEST_MODE=audit-render,
+# clients/macos/Tarven/Views/AuditScreenRenderer.swift).
 #
 # The Debug build gets its own bundle identifier and an ad-hoc signature with only the App
 # Sandbox: no network, Keychain or App Group access, and its preferences live in its own
@@ -9,13 +9,13 @@
 # never shows a window; every picture comes from a window that is never ordered in. No system
 # setting is changed and nothing is played.
 #
-#   AURELIA_AUDIT_RENDER_OUTPUT    folder for <screen>__<size>__<appearance>.png and index.md
+#   TARVEN_AUDIT_RENDER_OUTPUT    folder for <screen>__<size>__<appearance>.png and index.md
 #                                  (default: $other_root/Audit/mac-render)
-#   AURELIA_AUDIT_RENDER_SIZES     e.g. 1280x800,760x560,1920x1080 (the default)
-#   AURELIA_AUDIT_RENDER_VARIANTS  light,dark,dark-contrast,dark-reducedtransparency (default);
+#   TARVEN_AUDIT_RENDER_SIZES     e.g. 1280x800,760x560,1920x1080 (the default)
+#   TARVEN_AUDIT_RENDER_VARIANTS  light,dark,dark-contrast,dark-reducedtransparency (default);
 #                                  also light-contrast, light-reducedtransparency
-#   AURELIA_AUDIT_RENDER_ONLY      comma-separated screen names
-#   AURELIA_AUDIT_RENDER_SCALE     pixels per point (default 1)
+#   TARVEN_AUDIT_RENDER_ONLY      comma-separated screen names
+#   TARVEN_AUDIT_RENDER_SCALE     pixels per point (default 1)
 #   --skip-build                   reuse the last build
 set -euo pipefail
 
@@ -25,12 +25,12 @@ source "$repository_root/scripts/workspace-paths.sh"
 
 skip_build=false
 [[ "${1:-}" == "--skip-build" ]] && skip_build=true
-output=${AURELIA_AUDIT_RENDER_OUTPUT:-"$other_root/Audit/mac-render"}
+output=${TARVEN_AUDIT_RENDER_OUTPUT:-"$other_root/Audit/mac-render"}
 derived_data="$other_root/Build/macOS-AuditRender-DerivedData"
-bundle_identifier=com.lucas.aurelia.media.auditrender
+bundle_identifier=org.tarven.mac.auditrender
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"
-runtime_root="/private/tmp/Aurelia/$run_id"
-candidate="$runtime_root/Aurelia.app"
+runtime_root="/private/tmp/Tarven/$run_id"
+candidate="$runtime_root/Tarven.app"
 frames="$runtime_root/frames.bin"
 log_root="$other_root/Logs"
 console_log="$log_root/Audit-Render-$run_id-console.log"
@@ -53,16 +53,16 @@ mkdir -m 700 -p "$runtime_root"
 if [[ "$skip_build" != true ]]; then
   "$repository_root/scripts/prepare-vlckit.sh"
   DEVELOPER_DIR="$developer_dir" nice -n 10 xcodebuild -quiet \
-    -project "$repository_root/clients/macos/Aurelia.xcodeproj" \
-    -scheme Aurelia -configuration Debug \
+    -project "$repository_root/clients/macos/Tarven.xcodeproj" \
+    -scheme Tarven -configuration Debug \
     -destination "platform=macOS,arch=$(uname -m)" \
     -derivedDataPath "$derived_data" \
     SWIFT_TREAT_WARNINGS_AS_ERRORS=YES CODE_SIGNING_ALLOWED=NO \
-    AURELIA_BUNDLE_ID_BASE=$bundle_identifier \
+    TARVEN_BUNDLE_ID_BASE=$bundle_identifier \
     build
 fi
 
-/usr/bin/ditto "$derived_data/Build/Products/Debug/Aurelia.app" "$candidate"
+/usr/bin/ditto "$derived_data/Build/Products/Debug/Tarven.app" "$candidate"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$candidate/Contents/Info.plist")" \
   == "$bundle_identifier" ]] || { print -u2 'The render build carries the real bundle identifier.'; exit 1; }
 cat > "$runtime_root/render.entitlements" <<'PLIST'
@@ -85,20 +85,20 @@ log_pid=$!
 sleep 1
 
 /usr/bin/open -n -g \
-  --env AURELIA_UI_TEST_MODE=audit-render \
-  --env "AURELIA_AUDIT_RENDER_SIZES=${AURELIA_AUDIT_RENDER_SIZES:-}" \
-  --env "AURELIA_AUDIT_RENDER_VARIANTS=${AURELIA_AUDIT_RENDER_VARIANTS:-}" \
-  --env "AURELIA_AUDIT_RENDER_ONLY=${AURELIA_AUDIT_RENDER_ONLY:-}" \
-  --env "AURELIA_AUDIT_RENDER_SCALE=${AURELIA_AUDIT_RENDER_SCALE:-}" \
+  --env TARVEN_UI_TEST_MODE=audit-render \
+  --env "TARVEN_AUDIT_RENDER_SIZES=${TARVEN_AUDIT_RENDER_SIZES:-}" \
+  --env "TARVEN_AUDIT_RENDER_VARIANTS=${TARVEN_AUDIT_RENDER_VARIANTS:-}" \
+  --env "TARVEN_AUDIT_RENDER_ONLY=${TARVEN_AUDIT_RENDER_ONLY:-}" \
+  --env "TARVEN_AUDIT_RENDER_SCALE=${TARVEN_AUDIT_RENDER_SCALE:-}" \
   --stdout "$frames" --stderr "$runtime_root/stderr.txt" "$candidate" \
   --args -ApplePersistenceIgnoreState YES
 
-deadline=$(( $(date +%s) + ${AURELIA_AUDIT_RENDER_TIMEOUT:-5400} ))
+deadline=$(( $(date +%s) + ${TARVEN_AUDIT_RENDER_TIMEOUT:-5400} ))
 finished=false
 while (( $(date +%s) < deadline )); do
   [[ -z "$application_pid" ]] \
-    && application_pid="$(pgrep -f "^$candidate/Contents/MacOS/Aurelia( |$)" | tail -1 || true)"
-  if [[ -f "$frames" ]] && grep -aq 'AURELIA-AUDIT-FRAME json manifest' "$frames"; then
+    && application_pid="$(pgrep -f "^$candidate/Contents/MacOS/Tarven( |$)" | tail -1 || true)"
+  if [[ -f "$frames" ]] && grep -aq 'TARVEN-AUDIT-FRAME json manifest' "$frames"; then
     finished=true
     break
   fi
@@ -116,7 +116,7 @@ import json, pathlib, re, sys
 frames, output, run_id, finished, console = sys.argv[1:6]
 output = pathlib.Path(output)
 data = pathlib.Path(frames).read_bytes() if pathlib.Path(frames).exists() else b""
-header = re.compile(rb"\nAURELIA-AUDIT-FRAME (\w+) (\S+) (\d+)\n")
+header = re.compile(rb"\nTARVEN-AUDIT-FRAME (\w+) (\S+) (\d+)\n")
 position, written, manifest, logs = 0, 0, [], []
 while True:
     match = header.search(data, position)

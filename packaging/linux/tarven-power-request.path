@@ -1,0 +1,10 @@
+[Unit]
+Description=Notice a request from an app to sleep, turn off or stop Tarven now
+
+[Path]
+# Tarven Server leaves this file in its data folder; tarven-autosleep --now removes it.
+PathExists=/var/lib/tarven/power-now
+Unit=tarven-power-request.service
+
+[Install]
+WantedBy=paths.target

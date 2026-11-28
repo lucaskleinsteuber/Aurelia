@@ -1,6 +1,6 @@
 # Code of conduct
 
-Everyone is welcome to contribute to Aurelia. Treat other people with respect,
+Everyone is welcome to contribute to Tarven. Treat other people with respect,
 discuss the work on its merits, and give feedback that someone can act on.
 
 Harassment, discrimination, threats, personal attacks, and sharing someone else's

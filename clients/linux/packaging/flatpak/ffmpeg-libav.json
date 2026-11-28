@@ -1,7 +1,7 @@
 {
   "name": "ffmpeg-libav",
   "post-install": [
-    "install -Dm644 COPYING.LGPLv2.1 /app/share/doc/aurelia-desktop/notices/libav/COPYING.LGPLv2.1"
+    "install -Dm644 COPYING.LGPLv2.1 /app/share/doc/tarven-desktop/notices/libav/COPYING.LGPLv2.1"
   ],
   "sources": [
     {

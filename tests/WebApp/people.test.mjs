@@ -2,8 +2,8 @@
 // requests the browser sends. Invented people only; no browser is opened.
 import test from "node:test";
 import assert from "node:assert/strict";
-import * as logic from "../../src/Aurelia.Server/WebApp/js/logic.js";
-import { createApi } from "../../src/Aurelia.Server/WebApp/js/api.js";
+import * as logic from "../../src/Tarven.Server/WebApp/js/logic.js";
+import { createApi } from "../../src/Tarven.Server/WebApp/js/api.js";
 
 test("People has its own address with the search in it", () => {
   assert.deepEqual(logic.parseRoute("/people", "?q=vale"), { name: "people", query: "vale" });

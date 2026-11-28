@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ScrollMemory, isTitleOffline, OFFLINE_FILE_NOTICE } from "../../src/Aurelia.Server/WebApp/js/logic.js";
+import { ScrollMemory, isTitleOffline, OFFLINE_FILE_NOTICE } from "../../src/Tarven.Server/WebApp/js/logic.js";
 
 test("scroll memory remembers and recalls scroll positions", () => {
   const memory = new ScrollMemory(4);

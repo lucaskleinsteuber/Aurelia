@@ -9,12 +9,12 @@ if [ "${1:-}" = --promote ]; then
   shift
   exec bash "$repository_root/scripts/promote-release.sh" "$@"
 fi
-export AURELIA_RELEASE_BETA=false
+export TARVEN_RELEASE_BETA=false
 if [ "${1:-}" = --beta ]; then
-  AURELIA_RELEASE_BETA=true
+  TARVEN_RELEASE_BETA=true
   shift
 fi
-beta=$AURELIA_RELEASE_BETA
+beta=$TARVEN_RELEASE_BETA
 if [ "${1:-}" = --linux-app ]; then
   shift
   exec bash "$repository_root/scripts/publish-linux-app-release.sh" "$@"
@@ -23,7 +23,7 @@ case "$#:${1:-}" in
   0:)
     product=Mac; latest=false
     # The Mac app is development-signed and runs only on registered Macs, so it ships as betas
-    # only (owner's decision, 11.11.2026); everyone else uses Aurelia in a browser.
+    # only (owner's decision, 11.11.2026); everyone else uses Tarven in a browser.
     [ "$beta" = true ] || { echo "The Mac app is published as a beta only: use publish-release.sh --beta." >&2; exit 1; } ;;
   1:--server) product=Server; latest=true ;;
   *) echo "Usage: publish-release.sh [--beta] [--server | --linux-app] | --promote <tag>" >&2; exit 1 ;;
@@ -75,42 +75,46 @@ verify_rising_build() {
 }
 
 if [ "$product" = Server ]; then
-  project="$repository_root/src/Aurelia.Server/Aurelia.Server.csproj"
+  project="$repository_root/src/Tarven.Server/Tarven.Server.csproj"
   version=$("$DOTNET_BIN" msbuild "$project" -getProperty:Version)
-  build=$("$DOTNET_BIN" msbuild "$project" -getProperty:AureliaBuildNumber)
+  build=$("$DOTNET_BIN" msbuild "$project" -getProperty:TarvenBuildNumber)
   build_tag="$version-$build"
   tag="server-$build_tag"
   verify_rising_build "server-" "$tag" "$build"
   output="$other_root/Build/Linux/$build_tag"
   verify_source_provenance "$output" "the Linux server packages"
-  files=("$output/Aurelia-Server-$build_tag-linux-x64.tar.gz"
+  # The Aurelia-Server packages are the same packages for servers from before the rename to
+  # Tarven, which update only under that name (scripts/build-linux-server.sh).
+  files=("$output/Tarven-Server-$build_tag-linux-x64.tar.gz"
+    "$output/Tarven-Server-$build_tag-linux-arm64.tar.gz"
+    "$output/Aurelia-Server-$build_tag-linux-x64.tar.gz"
     "$output/Aurelia-Server-$build_tag-linux-arm64.tar.gz" "$output/SHA256SUMS")
   for file in "${files[@]}"; do
     [ -s "$file" ] || { echo "Missing $file; run scripts/build-linux-server.sh first." >&2; exit 1; }
   done
   (cd "$output" && shasum -a 256 -c SHA256SUMS >/dev/null)
-  # `aurelia update`, the one-line installer and the Docker build install nothing whose SHA256SUMS
+  # `tarven update`, the one-line installer and the Docker build install nothing whose SHA256SUMS
   # lacks the owner's minisign signature (docs/LINUX_UPDATE_SIGNING.md). The secret key stays on
   # this Mac and never goes to GitHub.
   command -v minisign >/dev/null \
     || { echo "Install minisign (brew install minisign) to sign the release." >&2; exit 1; }
-  signing_key="${AURELIA_MINISIGN_SECRET_KEY:-$HOME/.minisign/aurelia-linux.key}"
+  signing_key="${TARVEN_MINISIGN_SECRET_KEY:-$HOME/.minisign/tarven-linux.key}"
   [ -s "$signing_key" ] \
     || { echo "Missing the minisign secret key $signing_key; see docs/LINUX_UPDATE_SIGNING.md." >&2; exit 1; }
-  public_key=$(sed -n 's/^signing_public_key=\([A-Za-z0-9+\/=]*\)$/\1/p' "$repository_root/packaging/linux/aurelia")
-  [ -n "$public_key" ] || { echo "packaging/linux/aurelia names no signing key." >&2; exit 1; }
+  public_key=$(sed -n 's/^signing_public_key=\([A-Za-z0-9+\/=]*\)$/\1/p' "$repository_root/packaging/linux/tarven")
+  [ -n "$public_key" ] || { echo "packaging/linux/tarven names no signing key." >&2; exit 1; }
   rm -f "$output/SHA256SUMS.minisig"
   minisign -S -s "$signing_key" -m "$output/SHA256SUMS" -x "$output/SHA256SUMS.minisig" \
-    -t "Aurelia Server $version ($build)"
+    -t "Tarven Server $version ($build)"
   # Check with the exact key the installed servers carry, before anything is uploaded.
   minisign -V -P "$public_key" -m "$output/SHA256SUMS" -x "$output/SHA256SUMS.minisig" >/dev/null \
     || { echo "The signature does not match the servers' public key; nothing was uploaded." >&2; exit 1; }
   files+=("$output/SHA256SUMS.minisig")
-  title="Aurelia Server $version ($build)"
+  title="Tarven Server $version ($build)"
   downloads=$(cat <<EOF
-- **Linux x64:** \`Aurelia-Server-$build_tag-linux-x64.tar.gz\`
-- **Linux arm64 (e.g. Raspberry Pi):** \`Aurelia-Server-$build_tag-linux-arm64.tar.gz\`
-- **Updating an existing installation:** Run \`sudo aurelia update\` or use **Settings › Updates › Server Updates** in Aurelia.
+- **Linux x64:** \`Tarven-Server-$build_tag-linux-x64.tar.gz\`
+- **Linux arm64 (e.g. Raspberry Pi):** \`Tarven-Server-$build_tag-linux-arm64.tar.gz\`
+- **Updating an existing installation:** Run \`sudo tarven update\` or use **Settings › Updates › Server Updates** in Tarven.
 EOF
 )
 else
@@ -129,20 +133,20 @@ else
     folder="$other_root/Build/Build $build"
     expected=arm64
     if [ "$arch" = x64 ]; then folder="$folder x64"; expected=x86_64; fi
-    app="$folder/Aurelia.app"
-    [ -d "$app" ] || { echo "Missing $app; run AURELIA_MAC_ARCH=$arch scripts/build-macos-release.sh first." >&2; exit 1; }
+    app="$folder/Tarven.app"
+    [ -d "$app" ] || { echo "Missing $app; run TARVEN_MAC_ARCH=$arch scripts/build-macos-release.sh first." >&2; exit 1; }
     verify_source_provenance "$folder" "$app"
     [ "$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")" = "$version" ] \
       && [ "$(plutil -extract CFBundleVersion raw "$app/Contents/Info.plist")" = "$build" ] \
-      || { echo "$app is not Aurelia $version ($build)." >&2; exit 1; }
-    [ "$(lipo -archs "$app/Contents/MacOS/Aurelia")" = "$expected" ] \
+      || { echo "$app is not Tarven $version ($build)." >&2; exit 1; }
+    [ "$(lipo -archs "$app/Contents/MacOS/Tarven")" = "$expected" ] \
       || { echo "$app is not built for $expected only." >&2; exit 1; }
     codesign --verify --deep --strict "$app"
-    dmg="$output/Aurelia-$tag-macOS-$arch.dmg"
+    dmg="$output/Tarven-$tag-macOS-$arch.dmg"
     rm -rf "$stage/image" && mkdir "$stage/image"
-    ditto "$app" "$stage/image/Aurelia.app"
+    ditto "$app" "$stage/image/Tarven.app"
     ln -s /Applications "$stage/image/Applications"
-    hdiutil create -quiet -ov -fs HFS+ -format UDZO -volname "Aurelia $version" -srcfolder "$stage/image" "$dmg"
+    hdiutil create -quiet -ov -fs HFS+ -format UDZO -volname "Tarven $version" -srcfolder "$stage/image" "$dmg"
     hdiutil verify -quiet "$dmg"
     files+=("$dmg")
   done
@@ -154,30 +158,30 @@ else
   # made in minisign's legacy format (-l), which the app checks with CryptoKit.
   command -v minisign >/dev/null \
     || { echo "Install minisign (brew install minisign) to sign the release." >&2; exit 1; }
-  signing_key="${AURELIA_MINISIGN_SECRET_KEY:-$HOME/.minisign/aurelia-linux.key}"
+  signing_key="${TARVEN_MINISIGN_SECRET_KEY:-$HOME/.minisign/tarven-linux.key}"
   [ -s "$signing_key" ] \
     || { echo "Missing the minisign secret key $signing_key; see docs/LINUX_UPDATE_SIGNING.md." >&2; exit 1; }
   public_key=$(sed -n 's/.*static let publicKey = "\([A-Za-z0-9+\/=]*\)".*/\1/p' \
-    "$repository_root/clients/macos/Aurelia/Updates/AppUpdateSignature.swift")
+    "$repository_root/clients/macos/Tarven/Updates/AppUpdateSignature.swift")
   [ -n "$public_key" ] || { echo "AppUpdateSignature names no public key." >&2; exit 1; }
   rm -f "$output/SHA256SUMS.minisig"
   minisign -S -l -s "$signing_key" -m "$output/SHA256SUMS" -x "$output/SHA256SUMS.minisig" \
-    -t "Aurelia for Mac $version ($build)"
+    -t "Tarven for Mac $version ($build)"
   minisign -V -P "$public_key" -m "$output/SHA256SUMS" -x "$output/SHA256SUMS.minisig" >/dev/null \
     || { echo "The signature does not match the Mac app's public key; nothing was uploaded." >&2; exit 1; }
   files+=("$output/SHA256SUMS.minisig")
-  title="Aurelia for Mac $version ($build)"
-  downloads="- **Mac with Apple silicon (M1 and newer):** Aurelia-$tag-macOS-arm64.dmg
-- **Mac with Intel processor:** Aurelia-$tag-macOS-x64.dmg
+  title="Tarven for Mac $version ($build)"
+  downloads="- **Mac with Apple silicon (M1 and newer):** Tarven-$tag-macOS-arm64.dmg
+- **Mac with Intel processor:** Tarven-$tag-macOS-x64.dmg
 
-Open the disk image and drag Aurelia to Applications."
+Open the disk image and drag Tarven to Applications."
 fi
 
 # Readable notes (what is new, what was fixed) come from a Markdown file, by default
-# "<workspace>/Release Notes/<version>-<build>.md"; AURELIA_RELEASE_NOTES selects another file.
+# "<workspace>/Release Notes/<version>-<build>.md"; TARVEN_RELEASE_NOTES selects another file.
 # The Mac updater shows this text in its update dialog. Without a file the download list is used.
-notes_file=${AURELIA_RELEASE_NOTES:-"$other_root/Release Notes/$tag.md"}
-if [ -n "${AURELIA_RELEASE_NOTES:-}" ] && [ ! -f "$notes_file" ]; then
+notes_file=${TARVEN_RELEASE_NOTES:-"$other_root/Release Notes/$tag.md"}
+if [ -n "${TARVEN_RELEASE_NOTES:-}" ] && [ ! -f "$notes_file" ]; then
   echo "Missing release notes $notes_file." >&2
   exit 1
 fi
@@ -189,7 +193,7 @@ if [ -f "$notes_file" ] && grep -q '[^[:space:]]' "$notes_file"; then
 $downloads"
 else
   echo "No release notes at $notes_file; using the download list only." >&2
-  notes="Aurelia $version ($build).
+  notes="Tarven $version ($build).
 
 $downloads"
 fi
@@ -246,7 +250,7 @@ gh release edit "$tag" --notes-file "$notes_output" --draft=false --latest="$lat
   --prerelease="$beta"
 echo "Published $title as $tag."
 
-if [ "${AURELIA_KEEP_LOCAL_BUILDS:-0}" != 1 ]; then
+if [ "${TARVEN_KEEP_LOCAL_BUILDS:-0}" != 1 ]; then
   if [ "$product" = Mac ]; then rm -rf -- "$other_root/Build/Build $build" "$other_root/Build/Build $build x64"; fi
   rm -rf -- "$output"
 fi

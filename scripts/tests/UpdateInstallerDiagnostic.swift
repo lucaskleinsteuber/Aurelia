@@ -25,12 +25,12 @@ struct UpdateInstallerDiagnostic {
     let fm = FileManager.default
     let updates = root.appendingPathComponent("EntryPoint/Updates", isDirectory: true)
     let apps = root.appendingPathComponent("EntryPoint/Apps", isDirectory: true)
-    let app = apps.appendingPathComponent("Aurelia.app", isDirectory: true)
+    let app = apps.appendingPathComponent("Tarven.app", isDirectory: true)
     let downloadDir = updates.appendingPathComponent(UUID().uuidString, isDirectory: true)
     try fm.createDirectory(at: app, withIntermediateDirectories: true)
     try fm.createDirectory(at: downloadDir, withIntermediateDirectories: true)
 
-    let image = downloadDir.appendingPathComponent("Aurelia-2.30.0-200-macOS-arm64.dmg")
+    let image = downloadDir.appendingPathComponent("Tarven-2.30.0-200-macOS-arm64.dmg")
     try Data("synthetic image".utf8).write(to: image)
 
     // Expired pending request is ignored by UpdateInstaller.hasPendingRequest.
@@ -57,12 +57,12 @@ struct UpdateInstallerDiagnostic {
       "--background launch must never enter update mode")
     try require(
       !UpdateInstaller.hasPendingRequest(
-        arguments: [], environment: ["AURELIA_HOST_MODE": "1"], appURL: app,
+        arguments: [], environment: ["TARVEN_HOST_MODE": "1"], appURL: app,
         requiredAppPath: app.path, updatesRoot: updates),
       "Host environment launch must never enter update mode")
     try require(
       !UpdateInstaller.hasPendingRequest(
-        arguments: [], environment: [:], appURL: app, requiredAppPath: "/Applications/Aurelia.app",
+        arguments: [], environment: [:], appURL: app, requiredAppPath: "/Applications/Tarven.app",
         updatesRoot: updates),
       "Non-Applications bundle must never consume an update request")
     try require(

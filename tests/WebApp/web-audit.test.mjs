@@ -2,10 +2,10 @@
 // itself and where the change feed starts. Synthetic data only; no browser is opened.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cssName, h, openPopupMenu, closePopupMenu, createSidebarResizeHandle } from "../../src/Aurelia.Server/WebApp/js/dom.js";
-import { createApi } from "../../src/Aurelia.Server/WebApp/js/api.js";
-import { confirmSheet, openSheet } from "../../src/Aurelia.Server/WebApp/js/sheet.js";
-import { openTrimEditor } from "../../src/Aurelia.Server/WebApp/js/segments-view.js";
+import { cssName, h, openPopupMenu, closePopupMenu, createSidebarResizeHandle } from "../../src/Tarven.Server/WebApp/js/dom.js";
+import { createApi } from "../../src/Tarven.Server/WebApp/js/api.js";
+import { confirmSheet, openSheet } from "../../src/Tarven.Server/WebApp/js/sheet.js";
+import { openTrimEditor } from "../../src/Tarven.Server/WebApp/js/segments-view.js";
 import { installDOM, flush, deferred, button, all } from "./dom-fixture.mjs";
 
 test("inline styles written as in scripts reach the element (audit L2)", (t) => {
@@ -64,15 +64,15 @@ test("reads the page makes by itself say so, and the feed starts at the newest c
   assert.doesNotMatch(requests.at(-1).path, /latest/);
 
   await api.home();
-  assert.equal(requests.at(-1).headers["X-Aurelia-Background"], undefined);
+  assert.equal(requests.at(-1).headers["X-Tarven-Background"], undefined);
   await api.background(() => api.serverFileChecks());
-  assert.equal(requests.at(-1).headers["X-Aurelia-Background"], "1");
+  assert.equal(requests.at(-1).headers["X-Tarven-Background"], "1");
   quiet = true;
   await api.home();
-  assert.equal(requests.at(-1).headers["X-Aurelia-Background"], "1");
+  assert.equal(requests.at(-1).headers["X-Tarven-Background"], "1");
   // A change the person makes always counts, even during a quiet refresh.
   await api.request("/api/v1/server/file-checks", { method: "PUT", body: { enabled: true } });
-  assert.equal(requests.at(-1).headers["X-Aurelia-Background"], undefined);
+  assert.equal(requests.at(-1).headers["X-Tarven-Background"], undefined);
 });
 
 test("closing the segment trim sheet before playback creation resolves revokes the ticket and skips video loading", async (t) => {
@@ -102,13 +102,13 @@ test("closing the segment trim sheet before playback creation resolves revokes t
   assert.equal(video.src, undefined);
 });
 
-test("closing a sheet removes its aurelia:page listener instead of leaking until navigation", (t) => {
+test("closing a sheet removes its tarven:page listener instead of leaking until navigation", (t) => {
   installDOM(t);
   const listeners = new Set();
   const priorAdd = globalThis.addEventListener;
   const priorRemove = globalThis.removeEventListener;
-  globalThis.addEventListener = (type, fn) => { if (type === "aurelia:page") listeners.add(fn); };
-  globalThis.removeEventListener = (type, fn) => { if (type === "aurelia:page") listeners.delete(fn); };
+  globalThis.addEventListener = (type, fn) => { if (type === "tarven:page") listeners.add(fn); };
+  globalThis.removeEventListener = (type, fn) => { if (type === "tarven:page") listeners.delete(fn); };
   t.after(() => { globalThis.addEventListener = priorAdd; globalThis.removeEventListener = priorRemove; });
 
   const sheet = openSheet({ title: "Inspect", primary: "Done" });

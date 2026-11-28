@@ -5,15 +5,15 @@ set -euo pipefail
 
 repository_root=${0:A:h:h}
 source "$repository_root/scripts/workspace-paths.sh"
-if [[ "${AURELIA_TV_DEVICE_CHECK:-}" != 1 ||
-      "${AURELIA_TV_DEVICE_TITLE:-}" != 'Breaking Bad' ||
-      "${AURELIA_TV_DEVICE_EPISODE_TITLE:-}" != Pilot ]]; then
+if [[ "${TARVEN_TV_DEVICE_CHECK:-}" != 1 ||
+      "${TARVEN_TV_DEVICE_TITLE:-}" != 'Breaking Bad' ||
+      "${TARVEN_TV_DEVICE_EPISODE_TITLE:-}" != Pilot ]]; then
   print -u2 'This check requires explicit opt-in for Breaking Bad S01 E01 Pilot.'
-  print -u2 'Set AURELIA_TV_DEVICE_CHECK=1, AURELIA_TV_DEVICE_TITLE="Breaking Bad", and AURELIA_TV_DEVICE_EPISODE_TITLE=Pilot.'
+  print -u2 'Set TARVEN_TV_DEVICE_CHECK=1, TARVEN_TV_DEVICE_TITLE="Breaking Bad", and TARVEN_TV_DEVICE_EPISODE_TITLE=Pilot.'
   exit 2
 fi
-if [[ "${AURELIA_TV_DEVICE_MEDIA_CHECKED:-}" != 1 || "${AURELIA_TV_DEVICE_READY:-}" != 1 ]]; then
-  print -u2 'Record the approved file size/mtime and confirm the TV is ready before setting AURELIA_TV_DEVICE_MEDIA_CHECKED=1 and AURELIA_TV_DEVICE_READY=1.'
+if [[ "${TARVEN_TV_DEVICE_MEDIA_CHECKED:-}" != 1 || "${TARVEN_TV_DEVICE_READY:-}" != 1 ]]; then
+  print -u2 'Record the approved file size/mtime and confirm the TV is ready before setting TARVEN_TV_DEVICE_MEDIA_CHECKED=1 and TARVEN_TV_DEVICE_READY=1.'
   exit 2
 fi
 device_id=''
@@ -32,18 +32,18 @@ while (( $# > 0 )); do
 done
 [[ -n "$device_id" ]] || { print -u2 'An explicit paired Apple TV identifier is required.'; exit 2; }
 run_id="tv-device-$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"
-run_root="$HOME/Library/Caches/Aurelia/TestRuns/$run_id"
-result="$other_root/Test Results/AureliaTV-Device-$run_id.xcresult"
-log="$other_root/Logs/AureliaTV-Device-$run_id.log"
+run_root="$HOME/Library/Caches/Tarven/TestRuns/$run_id"
+result="$other_root/Test Results/TarvenTV-Device-$run_id.xcresult"
+log="$other_root/Logs/TarvenTV-Device-$run_id.log"
 mkdir -p "$run_root" "$other_root/Test Results" "$other_root/Logs"
 did_run_tests=0
 finish() {
   local exit_code=$?
   set +e
   if (( did_run_tests )); then
-    # This is the test runner only. Never uninstall the user's Aurelia app.
+    # This is the test runner only. Never uninstall the user's Tarven app.
     xcrun devicectl device uninstall app --device "$device_id" \
-      com.lucas.aurelia.tvos.ui-tests.xctrunner --timeout 10 >> "$log" 2>&1
+      org.tarven.tv.ui-tests.xctrunner --timeout 10 >> "$log" 2>&1
   fi
   rm -rf "$run_root"
   exit "$exit_code"
@@ -53,8 +53,8 @@ trap finish EXIT
 dependency_root=${TVVLCKIT_ROOT:-"$repository_root/clients/tvos/Dependencies"}
 TVVLCKIT_ROOT="$dependency_root" "$repository_root/scripts/prepare-tvvlckit.sh"
 arguments=(
-  -project "$repository_root/clients/tvos/AureliaTV.xcodeproj"
-  -scheme AureliaTVDeviceCheck -configuration Release -sdk appletvos
+  -project "$repository_root/clients/tvos/TarvenTV.xcodeproj"
+  -scheme TarvenTVDeviceCheck -configuration Release -sdk appletvos
   -destination "platform=tvOS,id=$device_id" -destination-timeout 30
   -derivedDataPath "$run_root/DerivedData"
   "TVVLCKIT_ROOT=$dependency_root"
@@ -90,12 +90,12 @@ target['TestTimeoutsEnabled'] = True
 target['DefaultTestExecutionTimeAllowance'] = 240
 target['MaximumTestExecutionTimeAllowance'] = 240
 environment = target.setdefault('EnvironmentVariables', {})
-for key in ('AURELIA_TV_DEVICE_CHECK', 'AURELIA_TV_DEVICE_TITLE', 'AURELIA_TV_DEVICE_EPISODE_TITLE',
-            'AURELIA_TV_DEVICE_SERIES_ID', 'AURELIA_TV_DEVICE_EPISODE_ID', 'AURELIA_TV_DEVICE_MEDIA_CHECKED', 'AURELIA_TV_DEVICE_READY'):
+for key in ('TARVEN_TV_DEVICE_CHECK', 'TARVEN_TV_DEVICE_TITLE', 'TARVEN_TV_DEVICE_EPISODE_TITLE',
+            'TARVEN_TV_DEVICE_SERIES_ID', 'TARVEN_TV_DEVICE_EPISODE_ID', 'TARVEN_TV_DEVICE_MEDIA_CHECKED', 'TARVEN_TV_DEVICE_READY'):
     if key in os.environ:
         environment[key] = os.environ[key]
 for key in tuple(environment):
-    if key.startswith('AURELIA_TV_UI_'):
+    if key.startswith('TARVEN_TV_UI_'):
         del environment[key]
 target['UITargetAppEnvironmentVariables'] = {}
 target['UITargetAppCommandLineArguments'] = []
@@ -116,23 +116,23 @@ command = [
     '-collect-test-diagnostics', 'never', '-enableCodeCoverage', 'NO',
     '-parallel-testing-enabled', 'NO', '-test-timeouts-enabled', 'YES',
     '-default-test-execution-time-allowance', '240', '-maximum-test-execution-time-allowance', '240',
-    '-only-testing:AureliaTVUITests/TVDeviceCheckTests/testApprovedEpisodeOnPhysicalAppleTV',
+    '-only-testing:TarvenTVUITests/TVDeviceCheckTests/testApprovedEpisodeOnPhysicalAppleTV',
     'test-without-building',
 ]
 
-def terminate_only_aurelia():
+def terminate_only_tarven():
     """Bounded emergency stop; never target helpers or another installed app."""
     try:
         reply = subprocess.run(
             ['xcrun', 'devicectl', 'device', 'info', 'processes', '--device', device,
-             '--search', 'Aurelia', '--timeout', '5', '--json-output', '-'],
+             '--search', 'Tarven', '--timeout', '5', '--json-output', '-'],
             capture_output=True, text=True, timeout=7, check=False)
         data = json.loads(reply.stdout)
         candidates = []
         def walk(value):
             if isinstance(value, dict):
                 paths = [v for v in value.values() if isinstance(v, str)]
-                if any(p.endswith('/Aurelia.app/Aurelia') for p in paths):
+                if any(p.endswith('/Tarven.app/Tarven') for p in paths):
                     pid = value.get('processIdentifier', value.get('pid', value.get('processId')))
                     if isinstance(pid, int) and pid > 0:
                         candidates.append(pid)
@@ -162,11 +162,11 @@ with open(log_path, 'ab', buffering=0) as log:
         while selector.get_map():
             if time.monotonic() >= deadline:
                 timed_out = True
-                message = b'Device check exceeded its 270-second invocation limit; stopping Aurelia.\n'
+                message = b'Device check exceeded its 270-second invocation limit; stopping Tarven.\n'
                 log.write(message)
                 sys.stdout.buffer.write(message)
                 sys.stdout.flush()
-                terminate_only_aurelia()
+                terminate_only_tarven()
                 os.killpg(process.pid, signal.SIGTERM)
                 break
             for key, _ in selector.select(timeout=0.25):
@@ -185,7 +185,7 @@ with open(log_path, 'ab', buffering=0) as log:
     finally:
         selector.close()
         if process.poll() is None:
-            terminate_only_aurelia()
+            terminate_only_tarven()
             os.killpg(process.pid, signal.SIGKILL)
             process.wait()
     if timed_out:

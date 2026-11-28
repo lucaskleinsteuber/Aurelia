@@ -1,6 +1,6 @@
-# Building another Aurelia client
+# Building another Tarven client
 
-The shared JSON contracts are in `src/Aurelia.Contracts`. The macOS client is the
+The shared JSON contracts are in `src/Tarven.Contracts`. The macOS client is the
 current reference implementation, not a dependency of another client. This
 stabilization does not add Windows/Linux clients or certify either OS runtime.
 
@@ -38,7 +38,7 @@ Critical actions (library reset, backup restore, modifying/deleting owner or adm
 changing the Server Password) require explicit confirmation with the Server Password.
 When a critical action returns HTTP `403 approval_required` or when requesting approval,
 the client obtains a single-use proof through `/api/v1/management/approval` (with the Server
-Password) and retries with `X-Aurelia-Approval`. Proofs bind the action, exact request
+Password) and retries with `X-Tarven-Approval`. Proofs bind the action, exact request
 bytes, session and unlock generation, expiring within two minutes. Locking or switching
 profiles cancels pending administration work and discards old proofs.
 
@@ -59,15 +59,15 @@ storage is offline. They are database records, never embedded video edits.
 
 ## Where the server runs
 
-From 2.10.0, `GET /api/v1/server/info` reports `hosting`: `macApp` or `linuxApp` when Aurelia for
-Mac or Aurelia for Linux hosts the server on a desktop or laptop, `linuxServer` for the Linux
+From 2.10.0, `GET /api/v1/server/info` reports `hosting`: `macApp` or `linuxApp` when Tarven for
+Mac or Tarven for Linux hosts the server on a desktop or laptop, `linuxServer` for the Linux
 package and `server` otherwise. An app-hosted server reports no `wakeOnLanAddresses`; a client
 remembers `hosting` per server, forgets wake addresses it stored for it and, when the server does
-not answer, asks to start Aurelia on that Mac or Linux PC instead of sending Wake-on-LAN.
+not answer, asks to start Tarven on that Mac or Linux PC instead of sending Wake-on-LAN.
 `GET /api/v1/server/power` (owner) reports the same `hosting`; such a server offers only the modes
 `off` and `stop`, and with `stop` it ends itself after the unused minutes (or five minutes after a
 player's sleep timer, `afterSleepTimer`) with exit status 76, which its app treats as "stopped
-until Aurelia is opened here", not as a crash.
+until Tarven is opened here", not as a crash.
 From 2.16.0 a Linux package server's power settings also carry its Wake-on-LAN check, each empty
 when unknown: `network` (`wired`, `wifi` or `other`), `wakeOn` (the network card's current ethtool
 wake letters; `g` means a Wake-on-LAN packet wakes it) and `sleepKind` (`deep` for suspend to RAM,
@@ -81,8 +81,8 @@ A server without an owner can be set up from a browser instead (2.7.0): `GET /ap
 answers `{open}`; `POST /api/v1/web/setup` with `{code, ownerName, password, deviceName}` checks
 the one-time setup code from the server computer (`browser-setup-code` in the data folder, ten
 wrong codes replace it, a day at most), creates the owner and sets the device cookie like `/pair`.
-Both need the `X-Aurelia-Web` header and HTTPS; afterwards the request answers `409
-server_already_setup`. `setup-browser` (the server command behind `aurelia setup --browser`)
+Both need the `X-Tarven-Web` header and HTTPS; afterwards the request answers `409
+server_already_setup`. `setup-browser` (the server command behind `tarven setup --browser`)
 turns on network access before an owner exists; until then the network reaches only anonymous
 endpoints.
 
@@ -106,15 +106,15 @@ a credential:
   only the code, its expiry and the poll interval. The pairing's id and secret go into an
   HttpOnly cookie that is limited to `/api/v1/web/pairing`.
 - `POST /api/v1/web/pairing/status` reports the state. On approval the server acknowledges
-  the delivery itself and sets the `aurelia_device` cookie, which lasts as long as the
+  the delivery itself and sets the `tarven_device` cookie, which lasts as long as the
   device session.
 - `POST /api/v1/web/pairing/cancel` gives up a pending code.
 - `POST /api/v1/web/profiles/{id}/unlock` with `{pin}` opens a profile and sets the
-  `aurelia_profile` session cookie. `POST /api/v1/web/profile/end` ends it.
+  `tarven_profile` session cookie. `POST /api/v1/web/profile/end` ends it.
 - `POST /api/v1/web/sign-out` revokes the device session and deletes both cookies.
 
 All cookies are `HttpOnly`, `SameSite=Strict` and `Secure` on HTTPS. A cookie counts only
-when the request names it in the `X-Aurelia-Web` header, either `device` or `profile`.
+when the request names it in the `X-Tarven-Web` header, either `device` or `profile`.
 Another site cannot add that header without a CORS preflight, and the server never answers
 one. Every `/api/v1/web/` call requires the header. The one exception is a plain `GET` or
 `HEAD` of `/api/v1/streams/{ticket}` (including its `/live` stream) or `/api/v1/artwork/{id}`: it uses the profile cookie
@@ -145,7 +145,7 @@ at once, with only the areas changed in the last minute, instead of paging throu
 kept history (up to 10,000 changes, a reload per page). Older servers ignore `latest`.
 
 Reads an app makes by itself (a progress view refreshed every few seconds, a remote's status, a
-page reloaded because the feed reported a change) may carry `X-Aurelia-Background: 1`; such GET
+page reloaded because the feed reported a change) may carry `X-Tarven-Background: 1`; such GET
 requests don't count as someone using the server, so an open page never keeps a server with
 power saving awake. A title's details list at most 50 actors and 12 people with key crew jobs;
 the metadata editor still has everyone. Persist
@@ -215,7 +215,7 @@ Servers that report `live-conversion-v1` (in `/api/v1/server/info` and
 `/api/v1/capabilities`) convert a title while it plays, for players that cannot open the
 original file, such as a web browser with an MKV. The server reports the feature only when it
 found a working ffmpeg: its own in the Mac app, the system's on Linux, or the one named by the
-`Aurelia:Ffmpeg` setting (`off` turns it off). Converted video is never stored: ffmpeg reads
+`Tarven:Ffmpeg` setting (`off` turns it off). Converted video is never stored: ffmpeg reads
 the checked file and writes fragmented MP4 straight into the response. There is no cache, no
 segment and no temporary file.
 
@@ -279,8 +279,8 @@ render nodes `/dev/dri/renderD128` onwards. A chip counts only when ffmpeg lists
 a one-second encode of an invented test picture to ffmpeg's null output succeeds; it then also
 decodes when ffmpeg offers its decoder (`cuda` or `vaapi`) and falls back to the processor per
 title by itself. When a chip fails before the first byte of a conversion, that title is
-converted with `libx264` instead and the chip rests for ten minutes. `Aurelia:HardwareEncoding`
-is `auto` (default), `off`, `nvenc`, `qsv` or `vaapi`; `Aurelia:MaximumVideoConversions`
+converted with `libx264` instead and the chip rests for ten minutes. `Tarven:HardwareEncoding`
+is `auto` (default), `off`, `nvenc`, `qsv` or `vaapi`; `Tarven:MaximumVideoConversions`
 overrides the limit of one picture encode at a time on the processor and three on a chip. The
 Mac app's server uses Apple's VideoToolbox as before.
 
@@ -351,7 +351,7 @@ does no recognition itself.
   normal playback ticket.
 - `GET {streamPath}/speech-audio?audio={index}` streams that track (the default one without
   `audio`) as raw 16-bit little-endian PCM, 16 kHz, one channel
-  (`audio/L16;rate=16000;channels=1`, `X-Aurelia-Duration` in seconds). Surround tracks lean on
+  (`audio/L16;rate=16000;channels=1`, `X-Tarven-Duration` in seconds). Surround tracks lean on
   their center channel, where dialogue sits. ffmpeg decodes it live with low priority and writes
   only to the response; nothing is stored, and it counts as one of the server's conversions.
 - `POST /api/v1/media/{id}/subtitles/speech?language=de` (administrators, like subtitle
@@ -467,7 +467,7 @@ playback ticket; the player saves no progress for it.
 A person may download a movie or episode to their own Mac or Linux computer. The app streams
 the original file once through a normal playback ticket and the loopback relay (so the pinned
 certificate and sign-in apply) and keeps it, with the stream's subtitle files as WebVTT, in its
-own data folder: the sandboxed Application Support on the Mac, `$XDG_DATA_HOME/aurelia-desktop`
+own data folder: the sandboxed Application Support on the Mac, `$XDG_DATA_HOME/tarven-desktop`
 on Linux. Nothing is written on the server or next to the media. A download plays through the
 normal player without the server; progress watched offline is saved on the computer and sent
 with the expected revision once the server answers and the profile is open, unless the server
@@ -635,8 +635,8 @@ off until the owner turns it on.
 
 ## Security
 
-Every client sends `X-Aurelia-Installation: <uuid>` (created once and kept) and
-`X-Aurelia-Client: <platform>/<version>` (`ios`, `macos`, `linux`, `tvos`); the browser's
+Every client sends `X-Tarven-Installation: <uuid>` (created once and kept) and
+`X-Tarven-Client: <platform>/<version>` (`ios`, `macos`, `linux`, `tvos`); the browser's
 identifier is an HttpOnly cookie the server sets. Servers with capability `security-v1` add:
 
 - `GET /api/v1/server/security/events?outcome=&before=&limit=`, `GET …/devices`,
@@ -766,8 +766,8 @@ In addition to the flows detailed above, clients use these routes:
 
 - `GET/PUT /api/v1/server/settings` reads or updates host policy settings (device session lifetime,
   global and per-user stream limits).
-- `GET /api/v1/server/hosting` reports background and login hosting status when Aurelia for Mac or
-  Aurelia for Linux hosts the server.
+- `GET /api/v1/server/hosting` reports background and login hosting status when Tarven for Mac or
+  Tarven for Linux hosts the server.
 - `GET /api/v1/server/users` lists household profiles with their roles and storage grants.
 - `GET /api/v1/server/health/performance` (administrator) and
   `DELETE /api/v1/server/health/performance` (owner) read or reset server performance counters.

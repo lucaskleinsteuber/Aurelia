@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCatalogView } from "../../src/Aurelia.Server/WebApp/js/catalog-view.js";
-import { createApi, ApiError } from "../../src/Aurelia.Server/WebApp/js/api.js";
-import { parseRoute, routePath, browseQuery, personHref } from "../../src/Aurelia.Server/WebApp/js/logic.js";
-import { h } from "../../src/Aurelia.Server/WebApp/js/dom.js";
+import { createCatalogView } from "../../src/Tarven.Server/WebApp/js/catalog-view.js";
+import { createApi, ApiError } from "../../src/Tarven.Server/WebApp/js/api.js";
+import { parseRoute, routePath, browseQuery, personHref } from "../../src/Tarven.Server/WebApp/js/logic.js";
+import { h } from "../../src/Tarven.Server/WebApp/js/dom.js";
 import { installDOM, flush, deferred, all, button, input } from "./dom-fixture.mjs";
 const items = (start, count) => Array.from({ length: count }, (_v, i) => ({ id: `item-${start + i}`, title: `Invented ${start + i}`, kind: "movie", genres: ["Drama"], year: 2000 }));
 function fixture(t, overrides = {}) {
@@ -128,7 +128,7 @@ test("viewer APIs preserve same-origin cookies, encoded routes and cancellation"
   await api.setWatchState("a/b", { isWatched: true }, options); await api.setContinueWatching("a/b", { isHidden: true }, options);
   assert.match(calls[2].path, /collections\?offset=200&limit=100$/); assert.equal(calls[3].path, "/api/v1/media/a%2Fb/watch-state?scope=title");
   assert.equal(calls[5].path, "/api/v1/media/a%2Fb/continue-watching"); assert.equal(calls[5].method, "PUT");
-  for (const c of calls) { assert.equal(c.signal, controller.signal); assert.equal(c.credentials, "same-origin"); assert.equal(c.headers["X-Aurelia-Web"], "profile"); assert.equal(c.headers.Authorization, undefined); }
+  for (const c of calls) { assert.equal(c.signal, controller.signal); assert.equal(c.credentials, "same-origin"); assert.equal(c.headers["X-Tarven-Web"], "profile"); assert.equal(c.headers.Authorization, undefined); }
 });
 test("filtered search and collection routes round-trip", () => {
   const route = { name: "movies", filters: { query: "Quiet & Harbor", yearFrom: 1990, yearTo: 2000, favorites: true } }; const [path, query] = routePath(route).split("?");

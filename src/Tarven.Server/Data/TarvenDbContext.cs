@@ -1,0 +1,1082 @@
+using Tarven.Contracts;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+
+namespace Tarven.Server.Data;
+
+public sealed class TarvenDbContext(DbContextOptions<TarvenDbContext> options)
+    : DbContext(options)
+{
+    public Guid? AccessUserId { get; set; }
+    public bool AccessIsOwner { get; set; }
+    public ProfileAccessMode AccessMode { get; set; }
+
+    /// <summary>A children's profile's FSK limit; it narrows <see cref="ProfileAccessMode.EntireLibrary"/>.</summary>
+    public int? AccessAgeLimit { get; set; }
+
+    /// <summary>The stored ratings <see cref="AccessAgeLimit"/> allows (see <see cref="AgeRatings"/>).</summary>
+    public string[] AccessAllowedRatings => AgeRatings.AllowedFor(AccessAgeLimit);
+
+    /// <summary>Every title, without any per-title or age check.</summary>
+    public bool AccessWholeCatalog => AccessIsOwner || (AccessMode == ProfileAccessMode.EntireLibrary && AccessAgeLimit == null);
+
+    /// <summary>Every storage location; a children's profile sees all of them but only some of their titles.</summary>
+    public bool AccessAllLibraries => AccessIsOwner || AccessMode == ProfileAccessMode.EntireLibrary;
+
+    public bool AccessAgeLimited => !AccessIsOwner && AccessMode == ProfileAccessMode.EntireLibrary && AccessAgeLimit != null;
+    public DbSet<UserLibraryGrant> UserLibraryGrants => Set<UserLibraryGrant>();
+    public DbSet<UserTitleGrant> UserTitleGrants => Set<UserTitleGrant>();
+    public DbSet<UserTitleRule> UserTitleRules => Set<UserTitleRule>();
+    public DbSet<ProfilePhoto> ProfilePhotos => Set<ProfilePhoto>();
+    public DbSet<ScreenTimeRule> ScreenTimeRules => Set<ScreenTimeRule>();
+    public DbSet<ScreenTimeDay> ScreenTimeDays => Set<ScreenTimeDay>();
+    public DbSet<ServerAdministrationCredential> AdministrationCredentials => Set<ServerAdministrationCredential>();
+    public DbSet<ServerUser> Users => Set<ServerUser>();
+
+    public DbSet<DeviceSession> DeviceSessions => Set<DeviceSession>();
+    public DbSet<SecurityEvent> SecurityEvents => Set<SecurityEvent>();
+    public DbSet<BlockedDevice> BlockedDevices => Set<BlockedDevice>();
+    public DbSet<ManagementPasskey> ManagementPasskeys => Set<ManagementPasskey>();
+
+    public DbSet<PairingCode> PairingCodes => Set<PairingCode>();
+
+    public DbSet<DeviceAuthorizationRequest> DeviceAuthorizationRequests => Set<DeviceAuthorizationRequest>();
+
+    public DbSet<ServerIdentity> ServerIdentities => Set<ServerIdentity>();
+
+    public DbSet<LibraryRoot> LibraryRoots => Set<LibraryRoot>();
+
+    public DbSet<MediaItem> MediaItems => Set<MediaItem>();
+
+    public DbSet<LibraryScan> LibraryScans => Set<LibraryScan>();
+
+    public DbSet<LibraryScanIssue> LibraryScanIssues => Set<LibraryScanIssue>();
+
+    public DbSet<LibraryDiscovery> LibraryDiscoveries => Set<LibraryDiscovery>();
+
+    public DbSet<LibraryImportReview> LibraryImportReviews => Set<LibraryImportReview>();
+    public DbSet<LibraryImportAssignment> LibraryImportAssignments => Set<LibraryImportAssignment>();
+    public DbSet<LibraryImportPreview> LibraryImportPreviews => Set<LibraryImportPreview>();
+
+    public DbSet<PlaybackTicket> PlaybackTickets => Set<PlaybackTicket>();
+
+    public DbSet<PlaybackProgress> PlaybackProgress => Set<PlaybackProgress>();
+    public DbSet<ContinueWatchingState> ContinueWatchingStates => Set<ContinueWatchingState>();
+    public DbSet<LibraryStateMutation> LibraryStateMutations => Set<LibraryStateMutation>();
+    public DbSet<SceneNote> SceneNotes => Set<SceneNote>();
+    public DbSet<MediaSegment> MediaSegments => Set<MediaSegment>();
+    public DbSet<MediaFileCheck> MediaFileChecks => Set<MediaFileCheck>();
+    public DbSet<MediaKeywords> MediaKeywords => Set<MediaKeywords>();
+
+    public DbSet<MediaMetadata> MediaMetadata => Set<MediaMetadata>();
+    // Read only by the access filters below, which must see titles without filtering them.
+    private DbSet<MediaItemPlacement> MediaItemPlacements => Set<MediaItemPlacement>();
+    private DbSet<MediaItemRating> MediaItemRatings => Set<MediaItemRating>();
+    public DbSet<MediaCredit> MediaCredits => Set<MediaCredit>();
+    public DbSet<PersonProfile> PersonProfiles => Set<PersonProfile>();
+    public DbSet<ArtworkAsset> ArtworkAssets => Set<ArtworkAsset>();
+    public DbSet<MetadataReview> MetadataReviews => Set<MetadataReview>();
+    public DbSet<MetadataJob> MetadataJobs => Set<MetadataJob>();
+    public DbSet<MetadataJobItem> MetadataJobItems => Set<MetadataJobItem>();
+    public DbSet<MetadataProviderCooldown> MetadataProviderCooldowns => Set<MetadataProviderCooldown>();
+    public DbSet<UserFavorite> UserFavorites => Set<UserFavorite>();
+    public DbSet<MediaCollectionRecord> MediaCollections => Set<MediaCollectionRecord>();
+    public DbSet<MediaCollectionMember> MediaCollectionMembers => Set<MediaCollectionMember>();
+    public DbSet<CollectionArtworkAsset> CollectionArtworkAssets => Set<CollectionArtworkAsset>();
+    public DbSet<WatchEvent> WatchEvents => Set<WatchEvent>();
+    public DbSet<SyncChange> SyncChanges => Set<SyncChange>();
+    public DbSet<MediaExclusion> MediaExclusions => Set<MediaExclusion>();
+    public DbSet<LibraryMutation> LibraryMutations => Set<LibraryMutation>();
+    public DbSet<WishRecord> Wishes => Set<WishRecord>();
+    public DbSet<WishSupport> WishSupports => Set<WishSupport>();
+
+    public override async Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        await AppendSyncChangesAsync(cancellationToken);
+        return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private async Task AppendSyncChangesAsync(CancellationToken cancellationToken)
+    {
+        foreach (var entry in ChangeTracker.Entries<ServerUser>().Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+        {
+            if (entry.State == EntityState.Added || new[] { nameof(ServerUser.Role), nameof(ServerUser.IsEnabled),
+                    nameof(ServerUser.PinHash), nameof(ServerUser.PinProtectionEnabled), nameof(ServerUser.AccessMode),
+                    nameof(ServerUser.AccessRevision), nameof(ServerUser.DisplayName), nameof(ServerUser.PictureRevision),
+                    nameof(ServerUser.AgeLimit) }.Any(name => entry.Property(name).IsModified))
+                entry.Entity.ProfileRevision = entry.State == EntityState.Added ? 1 : checked(entry.Entity.ProfileRevision + 1);
+        }
+        foreach (var entry in ChangeTracker.Entries<MediaMetadata>().Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+            entry.Entity.EditorRevision++;
+        foreach (var entry in ChangeTracker.Entries<SceneNote>().Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+            entry.Entity.Revision = entry.State == EntityState.Added ? 1 : checked(entry.Entity.Revision + 1);
+        var changes = new HashSet<(SyncChangeArea Area, Guid? UserId, Guid? MediaId)>();
+        var affectedLibraries = new HashSet<Guid>();
+        var affectedCatalogLibraries = new HashSet<Guid>();
+        var changedCollections = new HashSet<Guid>();
+        var progressMediaIds = ChangeTracker.Entries<PlaybackProgress>()
+            .Where(entry => entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            .Select(entry => entry.Entity.MediaItemId).ToList();
+        var progressParents = progressMediaIds.Count == 0 ? new Dictionary<Guid, Guid?>()
+            : await MediaItems.Where(item => progressMediaIds.Contains(item.Id)).Select(item => new { item.Id, item.ParentId })
+                .ToDictionaryAsync(item => item.Id, item => item.ParentId, cancellationToken);
+        foreach (var entry in ChangeTracker.Entries<MediaItem>().Where(entry => progressMediaIds.Contains(entry.Entity.Id)))
+            progressParents[entry.Entity.Id] = entry.Entity.ParentId;
+        foreach (var entry in ChangeTracker.Entries().Where(entry =>
+                     (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+                     && entry.Entity is not SyncChange))
+        {
+            switch (entry.Entity)
+            {
+                case LibraryRoot root:
+                    affectedLibraries.Add(root.Id);
+                    changes.Add((SyncChangeArea.Libraries, null, null));
+                    if (entry.State != EntityState.Modified || LibraryRootAffectsCatalog(entry))
+                    {
+                        affectedCatalogLibraries.Add(root.Id);
+                        changes.Add((SyncChangeArea.Catalog, null, null));
+                    }
+                    break;
+                case LibraryScan or LibraryDiscovery or LibraryImportReview or LibraryImportAssignment:
+                    var rootId = entry.Property("LibraryRootId").CurrentValue as Guid?;
+                    if (rootId.HasValue) affectedLibraries.Add(rootId.Value);
+                    changes.Add((SyncChangeArea.Libraries, null, null));
+                    break;
+                case LibraryScanIssue issue:
+                    if (issue.LibraryScan is not null) affectedLibraries.Add(issue.LibraryScan.LibraryRootId);
+                    changes.Add((SyncChangeArea.Libraries, null, null));
+                    break;
+                case MediaItem item:
+                    if (entry.State == EntityState.Deleted)
+                    {
+                        affectedLibraries.Add(item.LibraryRootId);
+                        affectedCatalogLibraries.Add(item.LibraryRootId);
+                    }
+                    if (entry.State != EntityState.Modified || MediaItemAffectsCatalog(entry))
+                    {
+                        changes.Add((SyncChangeArea.Catalog, null, item.Id));
+                    }
+                    break;
+                case MediaMetadata metadata:
+                    changes.Add((SyncChangeArea.Metadata, null, metadata.MediaItemId));
+                    break;
+                case MediaCredit credit:
+                    changes.Add((SyncChangeArea.Metadata, null, credit.MediaItemId));
+                    break;
+                case ArtworkAsset artwork:
+                    changes.Add((SyncChangeArea.Metadata, null, artwork.MediaItemId));
+                    break;
+                case MediaCollectionRecord collection:
+                    changedCollections.Add(collection.Id);
+                    changes.Add((SyncChangeArea.Collections, null, null));
+                    break;
+                case MediaCollectionMember member:
+                    changes.Add((SyncChangeArea.Collections, null, member.MediaItemId));
+                    break;
+                case CollectionArtworkAsset collectionArtwork:
+                    changedCollections.Add(collectionArtwork.CollectionId);
+                    changes.Add((SyncChangeArea.Collections, null, null));
+                    break;
+                case UserFavorite favorite:
+                    changes.Add((SyncChangeArea.UserState, favorite.UserId, favorite.MediaItemId));
+                    break;
+                case PlaybackProgress progress:
+                    changes.Add((SyncChangeArea.UserState, progress.UserId, progress.MediaItemId));
+                    var parentId = progressParents.GetValueOrDefault(progress.MediaItemId);
+                    if (parentId.HasValue) changes.Add((SyncChangeArea.UserState, progress.UserId, parentId));
+                    break;
+                case ContinueWatchingState hidden:
+                    changes.Add((SyncChangeArea.UserState, hidden.UserId, hidden.MediaItemId));
+                    break;
+                case SceneNote note:
+                    changes.Add((SyncChangeArea.UserState, note.UserId, note.MediaItemId));
+                    break;
+            }
+        }
+
+        // Root-only and deleted-media changes cannot be checked through a surviving
+        // media row. Target resets to the users who had access before the commit;
+        // do not broadcast hidden libraries or collection names/counts globally.
+        // The recipients are every profile with access, not only those the saving
+        // profile's own access boundary shows, so these lookups ignore the query filters.
+        if (affectedLibraries.Count > 0)
+            foreach (var userId in await Users.IgnoreQueryFilters().Where(user => user.AccessMode == ProfileAccessMode.EntireLibrary
+                || user.LibraryGrants.Any(grant => affectedLibraries.Contains(grant.LibraryRootId))
+                || UserTitleGrants.Any(grant => grant.UserId == user.Id && affectedLibraries.Contains(grant.MediaItem.LibraryRootId)))
+                .Select(user => user.Id).ToListAsync(cancellationToken))
+                changes.Add((SyncChangeArea.Libraries, userId, null));
+        if (affectedCatalogLibraries.Count > 0)
+            foreach (var userId in await Users.IgnoreQueryFilters().Where(user => user.AccessMode == ProfileAccessMode.EntireLibrary
+                || user.LibraryGrants.Any(grant => affectedCatalogLibraries.Contains(grant.LibraryRootId))
+                || UserTitleGrants.Any(grant => grant.UserId == user.Id && affectedCatalogLibraries.Contains(grant.MediaItem.LibraryRootId)))
+                .Select(user => user.Id).ToListAsync(cancellationToken))
+                changes.Add((SyncChangeArea.Catalog, userId, null));
+        if (changedCollections.Count > 0)
+            foreach (var userId in await Users.IgnoreQueryFilters().Where(user => user.AccessMode == ProfileAccessMode.EntireLibrary
+                || user.LibraryGrants.Any(grant => MediaCollectionMembers.IgnoreQueryFilters().Any(member => changedCollections.Contains(member.CollectionId)
+                    && member.MediaItem.LibraryRootId == grant.LibraryRootId))
+                || UserTitleGrants.Any(grant => grant.UserId == user.Id && MediaCollectionMembers.IgnoreQueryFilters().Any(member =>
+                    changedCollections.Contains(member.CollectionId) && member.MediaItemId == grant.MediaItemId)))
+                .Select(user => user.Id).Distinct().ToListAsync(cancellationToken))
+                changes.Add((SyncChangeArea.Collections, userId, null));
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var change in changes)
+        {
+            SyncChanges.Add(new SyncChange
+            {
+                Area = change.Area,
+                UserId = change.UserId,
+                MediaItemId = change.MediaId,
+                CreatedAt = now,
+            });
+        }
+    }
+
+    private static bool MediaItemAffectsCatalog(EntityEntry entry)
+    {
+        foreach (var property in entry.Properties)
+        {
+            if (!property.IsModified)
+            {
+                continue;
+            }
+            if (property.Metadata.Name is nameof(MediaItem.LastSeenScanId) or nameof(MediaItem.UpdatedAt))
+            {
+                continue;
+            }
+            if (!Equals(property.OriginalValue, property.CurrentValue))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool LibraryRootAffectsCatalog(EntityEntry entry)
+    {
+        foreach (var property in entry.Properties)
+        {
+            if (!property.IsModified)
+            {
+                continue;
+            }
+            if (property.Metadata.Name is nameof(LibraryRoot.LastScanStartedAt)
+                or nameof(LibraryRoot.LastScanCompletedAt)
+                or nameof(LibraryRoot.LastObservedAt)
+                or nameof(LibraryRoot.LastError)
+                or nameof(LibraryRoot.MonitoringEnabled))
+            {
+                continue;
+            }
+            if (!Equals(property.OriginalValue, property.CurrentValue))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<ServerAdministrationCredential>(entity =>
+        {
+            entity.HasKey(value => value.Id);
+            entity.Property(value => value.PasswordHash).HasMaxLength(512).IsRequired();
+        });
+        modelBuilder.Entity<UserTitleGrant>(entity =>
+        {
+            entity.HasKey(grant => new { grant.UserId, grant.MediaItemId });
+            entity.HasOne(grant => grant.User).WithMany().HasForeignKey(grant => grant.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(grant => grant.MediaItem).WithMany().HasForeignKey(grant => grant.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<UserTitleGrant>().HasQueryFilter(grant => AccessUserId == null || AccessIsOwner || grant.UserId == AccessUserId);
+        modelBuilder.Entity<UserTitleRule>(entity =>
+        {
+            entity.HasKey(rule => new { rule.UserId, rule.MediaItemId });
+            entity.HasOne(rule => rule.User).WithMany().HasForeignKey(rule => rule.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(rule => rule.MediaItem).WithMany().HasForeignKey(rule => rule.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<UserTitleRule>().HasQueryFilter(rule => AccessUserId == null || AccessIsOwner || rule.UserId == AccessUserId);
+        modelBuilder.Entity<ProfilePhoto>(entity =>
+        {
+            entity.HasKey(photo => photo.UserId);
+            entity.HasOne(photo => photo.User).WithOne().HasForeignKey<ProfilePhoto>(photo => photo.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.Property(photo => photo.Jpeg).IsRequired();
+        });
+        modelBuilder.Entity<ScreenTimeRule>(entity =>
+        {
+            entity.HasKey(rule => rule.UserId);
+            entity.HasOne(rule => rule.User).WithOne().HasForeignKey<ScreenTimeRule>(rule => rule.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.Property(rule => rule.LockScope).HasConversion<string>().HasMaxLength(32);
+            entity.Property(rule => rule.Ending).HasConversion<string>().HasMaxLength(32);
+            entity.Property(rule => rule.SchoolBedtime).HasMaxLength(5);
+            entity.Property(rule => rule.SchoolWakeTime).HasMaxLength(5);
+            entity.Property(rule => rule.WeekendBedtime).HasMaxLength(5);
+            entity.Property(rule => rule.WeekendWakeTime).HasMaxLength(5);
+        });
+        modelBuilder.Entity<ScreenTimeDay>(entity =>
+        {
+            entity.HasKey(day => new { day.UserId, day.Day });
+            entity.HasOne(day => day.User).WithMany().HasForeignKey(day => day.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<LibraryImportAssignment>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
+            || LibraryRoots.Any(root => root.Id == item.LibraryRootId));
+        modelBuilder.Entity<LibraryImportPreview>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
+            || LibraryRoots.Any(root => root.Id == item.LibraryRootId));
+        modelBuilder.Entity<LibraryImportAssignment>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.LibraryRootId, item.NormalizedRelativePath, item.IsDirectory }).IsUnique();
+            entity.Property(item => item.RelativePath).HasMaxLength(4096);
+            entity.Property(item => item.NormalizedRelativePath).HasMaxLength(4096);
+            entity.Property(item => item.ParentRelativePath).HasMaxLength(4096);
+            entity.Property(item => item.Category).HasMaxLength(1024);
+            entity.Property(item => item.Title).HasMaxLength(500);
+            entity.HasOne(item => item.LibraryRoot).WithMany().HasForeignKey(item => item.LibraryRootId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<LibraryImportPreview>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => item.LibraryRootId);
+            entity.Property(item => item.Revision).HasMaxLength(64).IsConcurrencyToken();
+            entity.Property(item => item.Manifest).HasMaxLength(64);
+            entity.HasOne(item => item.LibraryRoot).WithMany().HasForeignKey(item => item.LibraryRootId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<UserLibraryGrant>(entity =>
+        {
+            entity.HasKey(grant => new { grant.UserId, grant.LibraryRootId });
+            entity.HasOne(grant => grant.User).WithMany(user => user.LibraryGrants)
+                .HasForeignKey(grant => grant.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(grant => grant.LibraryRoot).WithMany()
+                .HasForeignKey(grant => grant.LibraryRootId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<UserLibraryGrant>().HasQueryFilter(grant => AccessUserId == null || AccessIsOwner || grant.UserId == AccessUserId);
+        modelBuilder.Entity<MediaExclusion>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
+            || LibraryRoots.Any(root => root.Id == item.LibraryRootId));
+        modelBuilder.Entity<LibraryMutation>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner || item.UserId == AccessUserId);
+        modelBuilder.Entity<MediaExclusion>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.LibraryRootId, item.NormalizedSourcePath }).IsUnique();
+            entity.Property(item => item.RelativePath).HasMaxLength(4096);
+            entity.Property(item => item.NormalizedSourcePath).HasMaxLength(4096);
+            entity.HasOne(item => item.LibraryRoot).WithMany().HasForeignKey(item => item.LibraryRootId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<LibraryMutation>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.State).HasMaxLength(32);
+            entity.Property(item => item.Error).HasMaxLength(512);
+        });
+        // The filters read titles through MediaItemPlacements and MediaItemRatings, which have no
+        // filter of their own. IgnoreQueryFilters would do the same, but EF Core then drops every
+        // filter for the rest of the query, also where the query reads titles a second time.
+        modelBuilder.Entity<MediaItemPlacement>(entity =>
+        {
+            entity.HasNoKey();
+            entity.ToView("MediaItems");
+        });
+        modelBuilder.Entity<MediaItemRating>(entity =>
+        {
+            entity.HasNoKey();
+            entity.ToView("MediaMetadata");
+        });
+        modelBuilder.Entity<LibraryRoot>().HasQueryFilter(library => AccessUserId == null || AccessAllLibraries
+            || (AccessMode == ProfileAccessMode.LegacyLibraries && UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == library.Id))
+            || (AccessMode == ProfileAccessMode.SelectedTitles && UserTitleGrants.Any(grant => grant.UserId == AccessUserId
+                && MediaItemPlacements.Any(granted => granted.Id == grant.MediaItemId && granted.LibraryRootId == library.Id))));
+        modelBuilder.Entity<MediaItem>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
+            || (AccessMode == ProfileAccessMode.LegacyLibraries && UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == item.LibraryRootId))
+            || (AccessMode == ProfileAccessMode.SelectedTitles && UserTitleGrants.Any(grant => grant.UserId == AccessUserId
+                && (grant.MediaItemId == item.Id || grant.MediaItemId == item.ParentId
+                    || MediaItemPlacements.Any(parent => parent.Id == item.ParentId
+                        && (parent.ParentId == grant.MediaItemId || MediaItemPlacements.Any(grandparent => grandparent.Id == parent.ParentId && grandparent.ParentId == grant.MediaItemId))))))
+            // A children's profile: its film or series (episodes and seasons follow it) is allowed anyway, or not
+            // hidden and rated for the profile's age. Titles without a rating stay hidden.
+            || (AccessAgeLimited && MediaItemPlacements.Any(top => top.ParentId == null
+                && (top.Id == item.Id || top.Id == item.ParentId
+                    || MediaItemPlacements.Any(parent => parent.Id == item.ParentId && parent.ParentId == top.Id))
+                && (UserTitleRules.Any(rule => rule.UserId == AccessUserId && rule.MediaItemId == top.Id && rule.Allowed)
+                    || (!UserTitleRules.Any(rule => rule.UserId == AccessUserId && rule.MediaItemId == top.Id && !rule.Allowed)
+                        && MediaItemRatings.Any(metadata => metadata.MediaItemId == top.Id
+                            && AccessAllowedRatings.Contains(metadata.ManualContentRating ?? metadata.ProviderContentRating)))))));
+        modelBuilder.Entity<LibraryScan>().HasQueryFilter(scan => AccessUserId == null || AccessWholeCatalog
+            || LibraryRoots.Any(root => root.Id == scan.LibraryRootId));
+        modelBuilder.Entity<LibraryDiscovery>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
+            || LibraryRoots.Any(root => root.Id == item.LibraryRootId));
+        modelBuilder.Entity<LibraryImportReview>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
+            || LibraryRoots.Any(root => root.Id == item.LibraryRootId));
+        modelBuilder.Entity<LibraryScanIssue>().HasQueryFilter(issue => AccessUserId == null || AccessIsOwner
+            || LibraryScans.Any(scan => scan.Id == issue.LibraryScanId));
+        modelBuilder.Entity<MediaMetadata>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
+            || MediaItems.Any(media => media.Id == item.MediaItemId));
+        modelBuilder.Entity<MediaCredit>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
+            || MediaItems.Any(media => media.Id == item.MediaItemId));
+        modelBuilder.Entity<ArtworkAsset>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
+            || MediaItems.Any(media => media.Id == item.MediaItemId));
+        modelBuilder.Entity<MetadataReview>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
+            || MediaItems.Any(media => media.Id == item.MediaItemId));
+        modelBuilder.Entity<MetadataJob>().HasQueryFilter(job => AccessUserId == null || AccessIsOwner
+            || (AccessMode != ProfileAccessMode.SelectedTitles && job.LibraryRootId != null && LibraryRoots.Any(root => root.Id == job.LibraryRootId))
+            || (job.MediaItemId != null && MediaItems.Any(media => media.Id == job.MediaItemId)));
+        modelBuilder.Entity<MediaCollectionMember>().HasQueryFilter(member => AccessUserId == null || AccessIsOwner
+            || MediaItems.Any(media => media.Id == member.MediaItemId));
+        modelBuilder.Entity<PlaybackTicket>().HasQueryFilter(ticket => AccessUserId == null
+            || (ticket.UserId == AccessUserId && MediaItems.Any(media => media.Id == ticket.MediaItemId)));
+        modelBuilder.Entity<PlaybackProgress>().HasQueryFilter(progress => AccessUserId == null
+            || (progress.UserId == AccessUserId && MediaItems.Any(media => media.Id == progress.MediaItemId)));
+        modelBuilder.Entity<ContinueWatchingState>().HasQueryFilter(state => AccessUserId == null
+            || (state.UserId == AccessUserId && MediaItems.Any(media => media.Id == state.MediaItemId)));
+        modelBuilder.Entity<LibraryStateMutation>().HasQueryFilter(mutation => AccessUserId == null || mutation.UserId == AccessUserId);
+        modelBuilder.Entity<SceneNote>().HasQueryFilter(note => AccessUserId == null
+            || (note.UserId == AccessUserId && MediaItems.Any(media => media.Id == note.MediaItemId)));
+        modelBuilder.Entity<SceneNote>(entity =>
+        {
+            entity.HasKey(note => new { note.UserId, note.Id });
+            entity.Property(note => note.Text).HasMaxLength(2000).IsRequired();
+            entity.Property(note => note.Revision).IsConcurrencyToken();
+            entity.HasIndex(note => new { note.UserId, note.MediaItemId, note.StartMilliseconds });
+            entity.HasOne(note => note.User).WithMany().HasForeignKey(note => note.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(note => note.MediaItem).WithMany().HasForeignKey(note => note.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<MediaSegment>().HasQueryFilter(segment => AccessUserId == null || AccessWholeCatalog
+            || MediaItems.Any(media => media.Id == segment.MediaItemId));
+        modelBuilder.Entity<MediaSegment>(entity =>
+        {
+            entity.HasKey(segment => segment.MediaItemId);
+            entity.Property(segment => segment.IntroSource).HasConversion<string>().HasMaxLength(16);
+            entity.Property(segment => segment.CreditsSource).HasConversion<string>().HasMaxLength(16);
+            entity.HasOne(segment => segment.MediaItem).WithOne().HasForeignKey<MediaSegment>(segment => segment.MediaItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<MediaFileCheck>().HasQueryFilter(check => AccessUserId == null || AccessWholeCatalog
+            || MediaItems.Any(media => media.Id == check.MediaItemId));
+        modelBuilder.Entity<MediaFileCheck>(entity =>
+        {
+            entity.HasKey(check => check.MediaItemId);
+            entity.Property(check => check.Depth).HasConversion<string>().HasMaxLength(16);
+            entity.Property(check => check.State).HasConversion<string>().HasMaxLength(24);
+            entity.Property(check => check.Detail).HasMaxLength(1024);
+            entity.Property(check => check.Sha256).HasMaxLength(32);
+            entity.HasIndex(check => check.State);
+            entity.HasOne(check => check.MediaItem).WithOne().HasForeignKey<MediaFileCheck>(check => check.MediaItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        // History belongs to its profile and, like progress, only shows titles the profile may see,
+        // so a page's total matches the entries it can list.
+        modelBuilder.Entity<WatchEvent>().HasQueryFilter(watch => AccessUserId == null
+            || (watch.UserId == AccessUserId && MediaItems.Any(media => media.Id == watch.MediaItemId)));
+        modelBuilder.Entity<UserFavorite>().HasQueryFilter(favorite => AccessUserId == null
+            || (favorite.UserId == AccessUserId && MediaItems.Any(media => media.Id == favorite.MediaItemId)));
+        modelBuilder.Entity<SyncChange>().HasQueryFilter(change => AccessUserId == null || AccessWholeCatalog
+            || (change.UserId == AccessUserId && change.MediaItemId == null)
+            || (change.MediaItemId != null && MediaItems.Any(media => media.Id == change.MediaItemId)));
+        var dateTimeOffsetConverter = new ValueConverter<DateTimeOffset, long>(
+            value => value.ToUnixTimeMilliseconds(),
+            value => DateTimeOffset.FromUnixTimeMilliseconds(value));
+        var nullableDateTimeOffsetConverter = new ValueConverter<DateTimeOffset?, long?>(
+            value => value.HasValue ? value.Value.ToUnixTimeMilliseconds() : null,
+            value => value.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(value.Value) : null);
+        modelBuilder.Entity<MediaSegment>().Property(segment => segment.UpdatedAt).HasConversion(dateTimeOffsetConverter);
+        modelBuilder.Entity<MediaSegment>().Property(segment => segment.AnalyzedFileModifiedAt).HasConversion(nullableDateTimeOffsetConverter);
+        modelBuilder.Entity<MediaFileCheck>().Property(check => check.FileModifiedAt).HasConversion(dateTimeOffsetConverter);
+        modelBuilder.Entity<MediaFileCheck>().Property(check => check.CheckedAt).HasConversion(dateTimeOffsetConverter);
+        modelBuilder.Entity<MediaFileCheck>().Property(check => check.VerifiedAt).HasConversion(dateTimeOffsetConverter);
+        modelBuilder.Entity<ScreenTimeDay>().Property(day => day.LimitReachedAt).HasConversion(nullableDateTimeOffsetConverter);
+        modelBuilder.Entity<ScreenTimeDay>().Property(day => day.LastReportAt).HasConversion(nullableDateTimeOffsetConverter);
+        modelBuilder.Entity<ProfilePhoto>().Property(photo => photo.UpdatedAt).HasConversion(dateTimeOffsetConverter);
+        modelBuilder.Entity<LibraryMutation>().Property(mutation => mutation.CreatedAt).HasConversion(dateTimeOffsetConverter);
+        modelBuilder.Entity<LibraryMutation>().HasIndex(mutation => new { mutation.State, mutation.CreatedAt });
+        modelBuilder.Entity<WishRecord>(entity =>
+        {
+            entity.HasKey(wish => wish.Id);
+            entity.Property(wish => wish.Kind).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(wish => wish.Provider).HasMaxLength(32);
+            entity.Property(wish => wish.ProviderMediaId).HasMaxLength(64);
+            entity.Property(wish => wish.Title).HasMaxLength(512).IsRequired();
+            entity.Property(wish => wish.Overview).HasMaxLength(4096);
+            entity.Property(wish => wish.PosterPath).HasMaxLength(512);
+            entity.Property(wish => wish.AgeRating).HasMaxLength(64);
+            entity.Property(wish => wish.Note).HasMaxLength(1000);
+            entity.Property(wish => wish.State).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(wish => wish.ResolutionNote).HasMaxLength(1000);
+            entity.Property(wish => wish.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(wish => wish.ResolvedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(wish => wish.SeenByWisherAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.HasIndex(wish => new { wish.State, wish.CreatedAt });
+            entity.HasIndex(wish => new { wish.UserId, wish.State, wish.SeenByWisherAt });
+            entity.HasIndex(wish => wish.ResolvedByUserId);
+            entity.HasIndex(wish => wish.FulfilledMediaItemId);
+            entity.HasIndex(wish => new { wish.Provider, wish.ProviderMediaId, wish.Kind })
+                .IsUnique()
+                .HasFilter("\"State\" = 'Open' AND \"Provider\" IS NOT NULL AND \"ProviderMediaId\" IS NOT NULL");
+            entity.HasOne(wish => wish.User).WithMany().HasForeignKey(wish => wish.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(wish => wish.ResolvedByUser).WithMany().HasForeignKey(wish => wish.ResolvedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(wish => wish.FulfilledMediaItem).WithMany().HasForeignKey(wish => wish.FulfilledMediaItemId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+        modelBuilder.Entity<WishSupport>(entity =>
+        {
+            entity.HasKey(support => new { support.WishId, support.UserId });
+            entity.Property(support => support.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(support => support.UserId);
+            entity.HasOne(support => support.Wish).WithMany(wish => wish.Supports).HasForeignKey(support => support.WishId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(support => support.User).WithMany().HasForeignKey(support => support.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<MediaKeywords>(entity =>
+        {
+            entity.HasKey(keywords => keywords.MediaItemId);
+            entity.Property(keywords => keywords.KeywordsJson).HasMaxLength(8192);
+            entity.Property(keywords => keywords.UpdatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasOne(keywords => keywords.MediaItem).WithOne().HasForeignKey<MediaKeywords>(keywords => keywords.MediaItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ServerUser>(entity =>
+        {
+            entity.HasKey(user => user.Id);
+            entity.Property(user => user.Username).HasMaxLength(64).IsRequired();
+            entity.Property(user => user.NormalizedUsername).HasMaxLength(64).IsRequired();
+            entity.Property(user => user.PasswordHash).HasMaxLength(512).IsRequired();
+            entity.Property(user => user.PinHash).HasMaxLength(512);
+            entity.Property(user => user.PinProtectionEnabled);
+            entity.Property(user => user.ProfileRevision).IsConcurrencyToken();
+            entity.Property(user => user.AccessMode).HasConversion<string>().HasMaxLength(32);
+            entity.Property(user => user.AccessRevision).IsConcurrencyToken();
+            entity.Property(user => user.DisplayName).HasMaxLength(64);
+            entity.Property(user => user.PictureKey).HasMaxLength(64);
+            entity.Property(user => user.Role).HasConversion<string>().HasMaxLength(16);
+            entity.Property(user => user.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(user => user.NormalizedUsername).IsUnique();
+        });
+
+        modelBuilder.Entity<SecurityEvent>(entity =>
+        {
+            entity.HasKey(value => value.Id);
+            entity.Property(value => value.At).HasConversion(dateTimeOffsetConverter);
+            entity.Property(value => value.Kind).HasMaxLength(48).IsRequired();
+            entity.Property(value => value.Outcome).HasMaxLength(16).IsRequired();
+            entity.Property(value => value.UserName).HasMaxLength(128);
+            entity.Property(value => value.DeviceName).HasMaxLength(128);
+            entity.Property(value => value.Platform).HasMaxLength(64);
+            entity.Property(value => value.IpAddress).HasMaxLength(64);
+            entity.Property(value => value.Detail).HasMaxLength(256);
+            entity.HasIndex(value => value.At);
+            entity.HasIndex(value => new { value.Outcome, value.At });
+        });
+        modelBuilder.Entity<BlockedDevice>(entity =>
+        {
+            entity.HasKey(value => value.Id);
+            entity.Property(value => value.InstallationId).HasMaxLength(64).IsRequired();
+            entity.Property(value => value.DeviceName).HasMaxLength(128).IsRequired();
+            entity.Property(value => value.Platform).HasMaxLength(64);
+            entity.Property(value => value.IpAddress).HasMaxLength(64);
+            entity.Property(value => value.BlockedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(value => value.InstallationId).IsUnique();
+        });
+        modelBuilder.Entity<ManagementPasskey>(entity =>
+        {
+            entity.HasKey(value => value.Id);
+            entity.Property(value => value.Name).HasMaxLength(128).IsRequired();
+            entity.Property(value => value.PublicKey).HasMaxLength(65).IsRequired();
+            entity.Property(value => value.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(value => value.LastUsedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.HasIndex(value => value.UserId);
+            entity.HasIndex(value => value.DeviceSessionId);
+            entity.HasOne(value => value.User).WithMany().HasForeignKey(value => value.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(value => value.DeviceSession).WithMany().HasForeignKey(value => value.DeviceSessionId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<DeviceSession>(entity =>
+        {
+            entity.HasKey(session => session.Id);
+            entity.Property(session => session.DeviceName).HasMaxLength(128).IsRequired();
+            entity.Property(session => session.TokenHash).HasMaxLength(64).IsRequired();
+            entity.Property(session => session.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(session => session.LastSeenAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(session => session.ExpiresAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(session => session.RevokedAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(session => session.InstallationId).HasMaxLength(64);
+            entity.Property(session => session.Platform).HasMaxLength(64);
+            entity.Property(session => session.ClientVersion).HasMaxLength(32);
+            entity.Property(session => session.FirstIpAddress).HasMaxLength(64);
+            entity.Property(session => session.LastIpAddress).HasMaxLength(64);
+            entity.Property(session => session.AcknowledgedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.HasIndex(session => session.InstallationId);
+            entity.HasIndex(session => session.TokenHash).IsUnique();
+            entity.HasIndex(session => new { session.UserId, session.ExpiresAt });
+            entity.HasOne(session => session.User)
+                .WithMany(user => user.Sessions)
+                .HasForeignKey(session => session.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PairingCode>(entity =>
+        {
+            entity.HasKey(code => code.Id);
+            entity.Property(code => code.CodeHash).HasMaxLength(64).IsRequired();
+            entity.Property(code => code.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(code => code.ExpiresAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(code => code.ConsumedAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
+            entity.HasIndex(code => code.CodeHash).IsUnique();
+            entity.HasIndex(code => code.ExpiresAt);
+            entity.HasOne(code => code.User)
+                .WithMany(user => user.PairingCodes)
+                .HasForeignKey(code => code.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<DeviceAuthorizationRequest>(entity =>
+        {
+            entity.HasKey(request => request.Id);
+            entity.Property(request => request.DeviceName).HasMaxLength(128).IsRequired();
+            entity.Property(request => request.CodeHash).HasMaxLength(64).IsRequired();
+            entity.Property(request => request.SecretHash).HasMaxLength(64).IsRequired();
+            entity.Property(request => request.State).HasConversion<string>().HasMaxLength(16);
+            entity.Property(request => request.ProtectedAuthentication).HasMaxLength(4096);
+            entity.Property(request => request.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(request => request.ExpiresAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(request => request.LastPolledAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(request => request.AcknowledgedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.HasIndex(request => request.CodeHash).IsUnique();
+            entity.HasIndex(request => request.ExpiresAt);
+            entity.HasIndex(request => request.DeviceSessionId).IsUnique();
+            entity.HasOne(request => request.DeviceSession).WithMany().HasForeignKey(request => request.DeviceSessionId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ServerIdentity>(entity =>
+        {
+            entity.HasKey(identity => identity.Id);
+            entity.Property(identity => identity.Id).ValueGeneratedNever();
+            entity.Property(identity => identity.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.ToTable(table =>
+                table.HasCheckConstraint("CK_ServerIdentity_SingleRow", "Id = 1"));
+        });
+
+        modelBuilder.Entity<LibraryRoot>(entity =>
+        {
+            entity.HasKey(library => library.Id);
+            entity.Property(library => library.Name).HasMaxLength(128).IsRequired();
+            entity.Property(library => library.Path).HasMaxLength(4096).IsRequired();
+            entity.Property(library => library.NormalizedPath).HasMaxLength(4096).IsRequired();
+            entity.Property(library => library.Kind).HasConversion<string>().HasMaxLength(16);
+            entity.Property(library => library.Availability).HasConversion<string>().HasMaxLength(16);
+            entity.Property(library => library.LastObservedAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(library => library.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(library => library.LastScanStartedAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(library => library.LastScanCompletedAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(library => library.LastError).HasMaxLength(1024);
+            entity.HasIndex(library => library.NormalizedPath).IsUnique();
+        });
+
+        modelBuilder.Entity<MediaItem>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Kind).HasConversion<string>().HasMaxLength(16);
+            entity.Property(item => item.SourcePath).HasMaxLength(4096).IsRequired();
+            entity.Property(item => item.NormalizedSourcePath).HasMaxLength(4096).IsRequired();
+            entity.Property(item => item.DetectedTitle).HasMaxLength(512).IsRequired();
+            entity.Property(item => item.OverrideTitle).HasMaxLength(512);
+            entity.Property(item => item.Category).HasMaxLength(512).IsRequired();
+            entity.Property(item => item.Extension).HasMaxLength(16);
+            entity.Property(item => item.Availability).HasConversion<string>().HasMaxLength(16);
+            entity.Property(item => item.FileModifiedAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(item => item.FileSystemIdentity).HasMaxLength(128);
+            entity.Property(item => item.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(item => item.UpdatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(item => new { item.LibraryRootId, item.NormalizedSourcePath })
+                .IsUnique();
+            entity.HasIndex(item => new { item.LibraryRootId, item.FileSystemIdentity });
+            entity.HasIndex(item => new { item.Kind, item.Availability, item.CreatedAt });
+            entity.HasIndex(item => new { item.Kind, item.ParentId, item.SeasonNumber, item.EpisodeNumber, item.DetectedTitle, item.Id });
+            entity.HasIndex(item => new { item.LibraryRootId, item.Kind, item.Year });
+            entity.HasIndex(item => new
+            {
+                item.LibraryRootId,
+                item.Kind,
+                item.ParentId,
+                item.SeasonNumber,
+                item.EpisodeNumber,
+            });
+            entity.HasOne(item => item.LibraryRoot)
+                .WithMany(library => library.MediaItems)
+                .HasForeignKey(item => item.LibraryRootId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.Parent)
+                .WithMany(item => item.Children)
+                .HasForeignKey(item => item.ParentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<LibraryScan>(entity =>
+        {
+            entity.HasKey(scan => scan.Id);
+            entity.Property(scan => scan.State).HasConversion<string>().HasMaxLength(16);
+            entity.Property(scan => scan.Trigger).HasConversion<string>().HasMaxLength(32);
+            entity.Property(scan => scan.TargetRelativePath).HasMaxLength(4096);
+            entity.Property(scan => scan.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(scan => scan.StartedAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(scan => scan.CompletedAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(scan => scan.LeaseExpiresAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(scan => scan.HeartbeatAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(scan => scan.CancelRequestedAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(scan => scan.Error).HasMaxLength(1024);
+            entity.HasIndex(scan => new { scan.LibraryRootId, scan.CreatedAt });
+            entity.HasOne(scan => scan.LibraryRoot)
+                .WithMany(library => library.Scans)
+                .HasForeignKey(scan => scan.LibraryRootId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<LibraryScanIssue>(entity =>
+        {
+            entity.HasKey(issue => issue.Id);
+            entity.Property(issue => issue.Code).HasMaxLength(64).IsRequired();
+            entity.Property(issue => issue.Message).HasMaxLength(1024).IsRequired();
+            entity.Property(issue => issue.Path).HasMaxLength(4096);
+            entity.HasOne(issue => issue.LibraryScan)
+                .WithMany(scan => scan.Issues)
+                .HasForeignKey(issue => issue.LibraryScanId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<LibraryDiscovery>(entity =>
+        {
+            entity.HasKey(discovery => discovery.Id);
+            entity.Property(discovery => discovery.RelativePath).HasMaxLength(4096).IsRequired();
+            entity.Property(discovery => discovery.NormalizedRelativePath).HasMaxLength(4096).IsRequired();
+            entity.Property(discovery => discovery.DetectedTitle).HasMaxLength(512).IsRequired();
+            entity.Property(discovery => discovery.SuggestedKind)
+                .HasConversion<string>().HasMaxLength(16);
+            entity.Property(discovery => discovery.Reason).HasMaxLength(128).IsRequired();
+            entity.Property(discovery => discovery.Decision)
+                .HasConversion<string>().HasMaxLength(16);
+            entity.Property(discovery => discovery.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(discovery => discovery.UpdatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(discovery => new
+            {
+                discovery.LibraryRootId,
+                discovery.NormalizedRelativePath,
+            }).IsUnique();
+            entity.HasOne(discovery => discovery.LibraryRoot)
+                .WithMany(library => library.Discoveries)
+                .HasForeignKey(discovery => discovery.LibraryRootId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<LibraryImportReview>(entity =>
+        {
+            entity.HasKey(review => review.Id);
+            entity.Property(review => review.RelativePath).HasMaxLength(4096).IsRequired();
+            entity.Property(review => review.NormalizedRelativePath).HasMaxLength(4096).IsRequired();
+            entity.Property(review => review.DetectedTitle).HasMaxLength(512).IsRequired();
+            entity.Property(review => review.Reason).HasMaxLength(256).IsRequired();
+            entity.Property(review => review.State).HasConversion<string>().HasMaxLength(16);
+            entity.Property(review => review.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(review => review.UpdatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(review => new { review.LibraryRootId, review.NormalizedRelativePath })
+                .IsUnique();
+            entity.HasIndex(review => new { review.LibraryRootId, review.State, review.DetectedTitle });
+            entity.HasOne(review => review.LibraryRoot)
+                .WithMany(library => library.ImportReviews)
+                .HasForeignKey(review => review.LibraryRootId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(review => review.AssignedMovie)
+                .WithMany()
+                .HasForeignKey(review => review.AssignedMovieId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<PlaybackTicket>(entity =>
+        {
+            entity.HasKey(ticket => ticket.Id);
+            entity.Property(ticket => ticket.TokenHash).HasMaxLength(64).IsRequired();
+            entity.Property(ticket => ticket.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(ticket => ticket.ExpiresAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(ticket => ticket.RevokedAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(ticket => ticket.ScreenTimeExtraEndsAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.HasIndex(ticket => ticket.TokenHash).IsUnique();
+            entity.HasIndex(ticket => new { ticket.UserId, ticket.ExpiresAt });
+            entity.HasIndex(ticket => new { ticket.DeviceSessionId, ticket.ExpiresAt });
+            entity.HasOne(ticket => ticket.MediaItem)
+                .WithMany(item => item.PlaybackTickets)
+                .HasForeignKey(ticket => ticket.MediaItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(ticket => ticket.DeviceSession)
+                .WithMany(session => session.PlaybackTickets)
+                .HasForeignKey(ticket => ticket.DeviceSessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(ticket => ticket.User)
+                .WithMany(user => user.PlaybackTickets)
+                .HasForeignKey(ticket => ticket.UserId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        modelBuilder.Entity<PlaybackProgress>(entity =>
+        {
+            entity.HasKey(progress => progress.Id);
+            entity.Property(progress => progress.Revision).HasDefaultValue(1L);
+            entity.Property(progress => progress.LastMutationFingerprint).HasMaxLength(64);
+            entity.Property(progress => progress.LastPlayedAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(progress => progress.UpdatedAt)
+                .HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(progress => new { progress.UserId, progress.MediaItemId })
+                .IsUnique();
+            entity.HasOne(progress => progress.MediaItem)
+                .WithMany(item => item.PlaybackProgress)
+                .HasForeignKey(progress => progress.MediaItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(progress => progress.User)
+                .WithMany(user => user.PlaybackProgress)
+                .HasForeignKey(progress => progress.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ContinueWatchingState>(entity =>
+        {
+            entity.HasKey(state => new { state.UserId, state.MediaItemId });
+            entity.HasOne(state => state.User).WithMany().HasForeignKey(state => state.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(state => state.MediaItem).WithMany(item => item.ContinueWatchingStates).HasForeignKey(state => state.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<LibraryStateMutation>(entity =>
+        {
+            entity.HasKey(mutation => new { mutation.UserId, mutation.ClientMutationId });
+            entity.Property(mutation => mutation.Fingerprint).HasMaxLength(64);
+            entity.Property(mutation => mutation.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(mutation => mutation.CreatedAt);
+            entity.HasOne(mutation => mutation.User).WithMany().HasForeignKey(mutation => mutation.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MediaMetadata>(entity =>
+        {
+            entity.HasKey(metadata => metadata.MediaItemId);
+            entity.Property(metadata => metadata.EditorRevision).IsConcurrencyToken();
+            entity.Property(metadata => metadata.Provider).HasMaxLength(32);
+            entity.Property(metadata => metadata.ProviderMediaId).HasMaxLength(64);
+            entity.Property(metadata => metadata.ProviderMediaType).HasMaxLength(16);
+            entity.Property(metadata => metadata.ProviderTitle).HasMaxLength(512);
+            entity.Property(metadata => metadata.ProviderOriginalTitle).HasMaxLength(512);
+            entity.Property(metadata => metadata.ProviderOverview).HasMaxLength(8192);
+            entity.Property(metadata => metadata.ProviderReleaseDate).HasMaxLength(32);
+            entity.Property(metadata => metadata.ProviderContentRating).HasMaxLength(32);
+            entity.Property(metadata => metadata.ProviderGenresJson).HasMaxLength(4096);
+            entity.Property(metadata => metadata.ProviderStudiosJson).HasMaxLength(4096);
+            entity.Property(metadata => metadata.ProviderCountriesJson).HasMaxLength(4096);
+            entity.Property(metadata => metadata.ManualTitle).HasMaxLength(512);
+            entity.Property(metadata => metadata.ManualOriginalTitle).HasMaxLength(512);
+            entity.Property(metadata => metadata.ManualOverview).HasMaxLength(8192);
+            entity.Property(metadata => metadata.ManualReleaseDate).HasMaxLength(32);
+            entity.Property(metadata => metadata.ManualContentRating).HasMaxLength(32);
+            entity.Property(metadata => metadata.ManualGenresJson).HasMaxLength(4096);
+            entity.Property(metadata => metadata.ManualStudiosJson).HasMaxLength(4096);
+            entity.Property(metadata => metadata.ManualCountriesJson).HasMaxLength(4096);
+            entity.Property(metadata => metadata.ReviewState).HasConversion<string>().HasMaxLength(16);
+            entity.Property(metadata => metadata.ProviderUpdatedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(metadata => metadata.UpdatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(metadata => new { metadata.Provider, metadata.ProviderMediaId });
+            entity.HasOne(metadata => metadata.MediaItem).WithOne(item => item.Metadata)
+                .HasForeignKey<MediaMetadata>(metadata => metadata.MediaItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MediaCredit>(entity =>
+        {
+            entity.HasKey(credit => credit.Id);
+            entity.Property(credit => credit.ProviderPersonId).HasMaxLength(64);
+            entity.Property(credit => credit.Name).HasMaxLength(256).IsRequired();
+            entity.Property(credit => credit.Department).HasMaxLength(64).IsRequired();
+            entity.Property(credit => credit.Job).HasMaxLength(128);
+            entity.Property(credit => credit.Character).HasMaxLength(512);
+            entity.Property(credit => credit.ProfilePath).HasMaxLength(512);
+            entity.HasIndex(credit => new { credit.MediaItemId, credit.SortOrder });
+            // A person's page and the People list look credits up by person (people-v1).
+            entity.HasIndex(credit => credit.ProviderPersonId);
+            entity.HasOne(credit => credit.Metadata).WithMany(metadata => metadata.Credits)
+                .HasForeignKey(credit => credit.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PersonProfile>(entity =>
+        {
+            entity.HasKey(profile => new { profile.Provider, profile.ProviderPersonId });
+            entity.Property(profile => profile.Provider).HasMaxLength(16);
+            entity.Property(profile => profile.ProviderPersonId).HasMaxLength(64);
+            entity.Property(profile => profile.Language).HasMaxLength(16).IsRequired();
+            entity.Property(profile => profile.Name).HasMaxLength(256).IsRequired();
+            entity.Property(profile => profile.Biography).HasMaxLength(8192);
+            entity.Property(profile => profile.Birthday).HasMaxLength(10);
+            entity.Property(profile => profile.Deathday).HasMaxLength(10);
+            entity.Property(profile => profile.PlaceOfBirth).HasMaxLength(256);
+            entity.Property(profile => profile.KnownForDepartment).HasMaxLength(64);
+            entity.Property(profile => profile.ProfilePath).HasMaxLength(512);
+            entity.Property(profile => profile.CreditsJson).IsRequired();
+            entity.Property(profile => profile.FetchedAt).HasConversion(dateTimeOffsetConverter);
+        });
+
+        modelBuilder.Entity<ArtworkAsset>(entity =>
+        {
+            entity.HasKey(asset => asset.Id);
+            entity.Property(asset => asset.Revision).HasDefaultValue(1L);
+            entity.Property(asset => asset.Kind).HasConversion<string>().HasMaxLength(16);
+            entity.Property(asset => asset.ProviderPath).HasMaxLength(512).IsRequired();
+            entity.Property(asset => asset.RelativeFilePath).HasMaxLength(512).IsRequired();
+            entity.Property(asset => asset.ContentType).HasMaxLength(64).IsRequired();
+            entity.Property(asset => asset.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(asset => new { asset.MediaItemId, asset.Kind, asset.ProviderPath }).IsUnique();
+            entity.HasIndex(asset => asset.RelativeFilePath).IsUnique();
+            entity.HasOne(asset => asset.Metadata).WithMany(metadata => metadata.Artwork)
+                .HasForeignKey(asset => asset.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MetadataReview>(entity =>
+        {
+            entity.HasKey(review => review.Id);
+            entity.Property(review => review.Reason).HasMaxLength(256).IsRequired();
+            entity.Property(review => review.CandidatesJson).HasMaxLength(32768).IsRequired();
+            entity.Property(review => review.State).HasConversion<string>().HasMaxLength(16);
+            entity.Property(review => review.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(review => review.UpdatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(review => review.MediaItemId).IsUnique();
+            entity.HasOne(review => review.MediaItem).WithMany(item => item.MetadataReviews)
+                .HasForeignKey(review => review.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MetadataJob>(entity =>
+        {
+            entity.HasKey(job => job.Id);
+            entity.Property(job => job.State).HasConversion<string>().HasMaxLength(16);
+            entity.Property(job => job.Mode).HasConversion<string>().HasMaxLength(16);
+            entity.Property(job => job.Error).HasMaxLength(1024);
+            entity.Property(job => job.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(job => job.StartedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(job => job.CompletedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(job => job.LeaseExpiresAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(job => job.HeartbeatAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(job => job.CancelRequestedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(job => job.NextAttemptAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(job => job.WaitReason).HasMaxLength(32);
+            entity.HasIndex(job => new { job.State, job.CreatedAt });
+            entity.HasIndex(job => new { job.State, job.NextAttemptAt, job.CreatedAt });
+        });
+        modelBuilder.Entity<MetadataJobItem>(entity =>
+        {
+            entity.HasKey(item => new { item.JobId, item.MediaItemId });
+            entity.Property(item => item.State).HasConversion<string>().HasMaxLength(16);
+            entity.Property(item => item.CompletedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.HasIndex(item => new { item.JobId, item.State, item.Ordinal });
+            entity.HasOne(item => item.Job).WithMany().HasForeignKey(item => item.JobId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<MetadataProviderCooldown>(entity =>
+        {
+            entity.HasKey(item => item.Provider);
+            entity.Property(item => item.Provider).HasMaxLength(32);
+            entity.Property(item => item.NotBefore).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(item => item.WaitReason).HasMaxLength(32);
+        });
+
+        modelBuilder.Entity<UserFavorite>(entity =>
+        {
+            entity.HasKey(favorite => favorite.Id);
+            entity.Property(favorite => favorite.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(favorite => new { favorite.UserId, favorite.MediaItemId }).IsUnique();
+            entity.HasOne(favorite => favorite.User).WithMany(user => user.Favorites)
+                .HasForeignKey(favorite => favorite.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(favorite => favorite.MediaItem).WithMany(item => item.Favorites)
+                .HasForeignKey(favorite => favorite.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MediaCollectionRecord>(entity =>
+        {
+            entity.HasKey(collection => collection.Id);
+            entity.Property(collection => collection.Name).HasMaxLength(512).IsRequired();
+            entity.Property(collection => collection.Overview).HasMaxLength(8192);
+            entity.Property(collection => collection.SortMode).HasMaxLength(16);
+            entity.Property(collection => collection.Provider).HasMaxLength(32);
+            entity.Property(collection => collection.ProviderCollectionId).HasMaxLength(64);
+            entity.Property(collection => collection.ProviderPosterPath).HasMaxLength(512);
+            entity.Property(collection => collection.ProviderBackdropPath).HasMaxLength(512);
+            entity.Property(collection => collection.SourceKey).HasMaxLength(4096);
+            entity.Property(collection => collection.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(collection => collection.UpdatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(collection => new { collection.Provider, collection.ProviderCollectionId });
+            entity.HasIndex(collection => collection.SourceKey);
+            entity.HasIndex(collection => collection.UserId);
+            entity.HasOne(collection => collection.User).WithMany()
+                .HasForeignKey(collection => collection.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<CollectionArtworkAsset>(entity =>
+        {
+            entity.HasKey(asset => asset.Id);
+            entity.Property(asset => asset.Revision).HasDefaultValue(1L);
+            entity.Property(asset => asset.Kind).HasConversion<string>().HasMaxLength(16);
+            entity.Property(asset => asset.ProviderPath).HasMaxLength(512).IsRequired();
+            entity.Property(asset => asset.RelativeFilePath).HasMaxLength(512).IsRequired();
+            entity.Property(asset => asset.ContentType).HasMaxLength(64).IsRequired();
+            entity.Property(asset => asset.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(asset => asset.RelativeFilePath).IsUnique();
+            entity.HasIndex(asset => new { asset.CollectionId, asset.Kind });
+            entity.HasOne(asset => asset.Collection).WithMany(collection => collection.Artwork)
+                .HasForeignKey(asset => asset.CollectionId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WatchEvent>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Timestamp).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(e => new { e.UserId, e.Timestamp });
+            entity.HasIndex(e => e.Timestamp);
+            entity.HasIndex(e => e.MediaItemId);
+            entity.HasOne(e => e.User).WithMany()
+                .HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.MediaItem).WithMany()
+                .HasForeignKey(e => e.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MediaCollectionMember>(entity =>
+        {
+            entity.HasKey(member => member.Id);
+            entity.Property(member => member.Id).ValueGeneratedNever();
+            entity.HasIndex(member => new { member.CollectionId, member.MediaItemId })
+                .IsUnique()
+                .HasFilter("\"SeasonNumber\" IS NULL");
+            entity.HasIndex(member => new { member.CollectionId, member.MediaItemId, member.SeasonNumber })
+                .IsUnique()
+                .HasFilter("\"SeasonNumber\" IS NOT NULL");
+            entity.HasOne(member => member.Collection).WithMany(collection => collection.Members)
+                .HasForeignKey(member => member.CollectionId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(member => member.MediaItem).WithMany(item => item.CollectionMemberships)
+                .HasForeignKey(member => member.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SyncChange>(entity =>
+        {
+            entity.HasKey(change => change.Cursor);
+            entity.Property(change => change.Cursor).ValueGeneratedOnAdd();
+            entity.Property(change => change.Area).HasConversion<string>().HasMaxLength(16);
+            entity.Property(change => change.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(change => new { change.UserId, change.Cursor });
+            entity.HasIndex(change => change.CreatedAt);
+        });
+    }
+}

@@ -1,24 +1,24 @@
 name: Bug report
-description: Something in Aurelia does not work as it should.
+description: Something in Tarven does not work as it should.
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report this. Please **do not** post security problems here; follow the [security policy](https://github.com/lucaskleinsteuber/Aurelia/security/policy) instead. Leave out passwords, pairing codes, tokens, personal media paths and other private information.
+        Thanks for taking the time to report this. Please **do not** post security problems here; follow the [security policy](https://github.com/lucaskleinsteuber/Tarven/security/policy) instead. Leave out passwords, pairing codes, tokens, personal media paths and other private information.
   - type: dropdown
     id: product
     attributes:
       label: Which app or part?
       multiple: true
       options:
-        - Aurelia for Mac
-        - Aurelia for Linux (desktop app)
-        - Aurelia Server on Linux
-        - Aurelia Server with Docker
-        - Aurelia for Apple TV
-        - Aurelia for iPhone or iPad
-        - Aurelia in a web browser
+        - Tarven for Mac
+        - Tarven for Linux (desktop app)
+        - Tarven Server on Linux
+        - Tarven Server with Docker
+        - Tarven for Apple TV
+        - Tarven for iPhone or iPad
+        - Tarven in a web browser
         - Documentation
     validations:
       required: true
@@ -26,7 +26,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: Settings › About shows it, for example "2.0.0 (153)". On a Linux server, run `aurelia status`.
+      description: Settings › About shows it, for example "2.0.0 (153)". On a Linux server, run `tarven status`.
       placeholder: "App 2.0.0 (153), server 2.0.0 (148)"
     validations:
       required: true

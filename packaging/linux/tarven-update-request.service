@@ -1,0 +1,9 @@
+[Unit]
+Description=Check for or install a Tarven Server update requested in the app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+TimeoutStartSec=1h
+ExecStart=/usr/local/bin/tarven update --from-app

@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Server benchmarks ("Messen statt raten"): a synthetic library of 20,000 episodes and 5,000
 # movies, over real HTTP, with limits for time and database queries in
-# tests/Aurelia.Server.Tests/Benchmarks/limits.json. Run before every server version; a path that
+# tests/Tarven.Server.Tests/Benchmarks/limits.json. Run before every server version; a path that
 # got slower or runs more queries fails. The limits were measured on a Mac, so run it there.
 set -euo pipefail
 
@@ -14,7 +14,7 @@ log="$other_root/Logs/$run_id.log"
 mkdir -p "$results" "$other_root/Logs"
 
 # One benchmark after another, so they never share the processor with each other.
-AURELIA_BENCHMARKS=1 "$DOTNET_BIN" test "$repository_root/tests/Aurelia.Server.Tests/Aurelia.Server.Tests.csproj" \
+TARVEN_BENCHMARKS=1 "$DOTNET_BIN" test "$repository_root/tests/Tarven.Server.Tests/Tarven.Server.Tests.csproj" \
   --configuration Release --filter "Category=Benchmark" \
   --results-directory "$results" --logger "trx;LogFileName=benchmarks.trx" \
   --logger "console;verbosity=detailed" \

@@ -1,4 +1,4 @@
-# Aurelia Server with Docker
+# Tarven Server with Docker
 
 For a NAS or a computer that already runs Docker. On a plain Ubuntu or Debian PC, the
 [one-line install](LINUX_SERVER.md#installing-and-updating) is simpler and adds power saving and
@@ -15,15 +15,15 @@ Save [`compose.yaml`](../packaging/docker/compose.yaml) in a new folder and chan
 folder in it (the left side of `/srv/media:/media:ro`) to where your movies and shows are. Then:
 
 ```sh
-docker compose run --rm aurelia setup   # owner name and Server Password, once
+docker compose run --rm tarven setup   # owner name and Server Password, once
 docker compose up -d
 ```
 
 `setup` asks for the owner's name and the Server Password (twice) and turns on network access.
 `setup --browser` instead turns on network access for setting up in a browser: start the server,
-show the one-time code with `docker compose exec aurelia aurelia setup-code`, and open
+show the one-time code with `docker compose exec tarven tarven setup-code`, and open
 `https://<host>:43111` ([details](WEB_APP.md#setting-up-a-new-server)).
-`AURELIA_SERVER_NAME` in the environment names the server.
+`TARVEN_SERVER_NAME` in the environment names the server.
 
 ## Connect devices and add media
 
@@ -31,12 +31,12 @@ Each command asks for the owner's name and Server Password; the first one also s
 viewing PIN.
 
 ```sh
-docker compose exec aurelia aurelia pair                 # a code to type on a new device (any app or browser)
-docker compose exec aurelia aurelia library add --kind automatic --path /media
-docker compose exec aurelia aurelia library scan --all
+docker compose exec tarven tarven pair                 # a code to type on a new device (any app or browser)
+docker compose exec tarven tarven library add --kind automatic --path /media
+docker compose exec tarven tarven library scan --all
 ```
 
-Inside the container your media folder is `/media`, mounted read-only: Aurelia only reads it.
+Inside the container your media folder is `/media`, mounted read-only: Tarven only reads it.
 
 ## Updating
 
@@ -45,7 +45,7 @@ docker compose build --pull --no-cache && docker compose up -d
 ```
 
 builds the image again from the newest stable release. Accounts, library, progress and settings
-stay in the `aurelia-data` volume. `--build-arg AURELIA_BUILD=175` builds a particular signed release (build 153 and newer; older unsigned builds are refused).
+stay in the `tarven-data` volume (a compose file from before the rename keeps its `aurelia-data` volume; see [RENAMED.md](RENAMED.md)). `--build-arg TARVEN_BUILD=175` builds a particular signed release (Tarven builds; Aurelia builds before the rename can't be chosen here, and unsigned ones are refused).
 
 ## Good to know
 
@@ -54,7 +54,7 @@ stay in the `aurelia-data` volume. `--build-arg AURELIA_BUILD=175` builds a part
 - **No power saving or app updates.** The container keeps running; the server's sleep and update
   settings in the Mac app are for the Linux package. Stop the container to save power.
 - **Not as root.** The container starts as root only to hand the data folder to the user
-  `aurelia`; the server itself always runs as `aurelia`.
+  `tarven`; the server itself always runs as `tarven`.
 - **Video chip.** Converting for browsers and for apps set to a streaming quality is much faster on
   a video chip. For Intel or AMD graphics, uncomment `devices` and `group_add` in `compose.yaml`
   and put in the number `getent group render | cut -d: -f3` prints; the image already has the

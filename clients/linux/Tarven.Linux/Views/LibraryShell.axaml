@@ -1,0 +1,99 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:Tarven.Linux.Controls"
+             xmlns:views="clr-namespace:Tarven.Linux.Views"
+             xmlns:library="clr-namespace:Tarven.Linux.Library"
+             x:Class="Tarven.Linux.Views.LibraryShell">
+  <Grid>
+    <!-- Pages run full height beneath the sidebar; each insets its content beside it. -->
+    <Panel x:Name="PageLayer" Background="{StaticResource TarvenBackdropBrush}">
+      <ContentControl x:Name="PageHost" />
+    </Panel>
+
+    <Grid x:Name="Sidebar" Width="{StaticResource TarvenSidebarWidth}" HorizontalAlignment="Left"
+          AutomationProperties.Name="Sidebar">
+      <controls:SidebarBackground x:Name="SidebarBackdrop" />
+      <Border Width="1" HorizontalAlignment="Right" Background="{StaticResource TarvenHairlineBrush}" />
+      <!-- Dragging the edge resizes the sidebar between 210 and 300, like the Mac app. -->
+      <Border x:Name="SidebarResizeHandle" Width="8" HorizontalAlignment="Right" Margin="0,0,-4,0"
+              Background="Transparent" Cursor="SizeWestEast" ZIndex="1" />
+      <DockPanel>
+        <!-- Room for the sidebar toggle above the first row. -->
+        <Panel DockPanel.Dock="Top" Height="58" />
+        <!-- The profile sits at the foot of the sidebar, like the account in the Apple TV app. -->
+        <DockPanel DockPanel.Dock="Bottom" Margin="12,0,12,16">
+          <Button x:Name="SettingsButton" DockPanel.Dock="Right" Classes="chrome" Margin="6,0,0,0"
+                  ToolTip.Tip="Settings (Ctrl+,)" AutomationProperties.Name="Settings">
+            <PathIcon Data="{StaticResource IconSettings}" Width="16" Height="16" />
+          </Button>
+          <Button x:Name="ProfileButton" Classes="sidebarFooter"
+                  ToolTip.Tip="Switch Profile" AutomationProperties.Name="Switch Profile">
+            <StackPanel x:Name="ProfileFooter" Orientation="Horizontal" Spacing="10">
+              <TextBlock x:Name="ConnectionLabel" Text="Not Connected" Classes="subdued" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+        </DockPanel>
+        <ListBox x:Name="SidebarList" Classes="sidebar" SelectionMode="Single,AlwaysSelected"
+                 AutomationProperties.Name="Library pages">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="views:SidebarItem">
+              <DockPanel AutomationProperties.Name="{Binding Title}">
+                <Border DockPanel.Dock="Right"
+                        IsVisible="{Binding HasBadge}"
+                        Background="{StaticResource TarvenAccentBrush}"
+                        CornerRadius="9"
+                        Padding="6,1"
+                        Margin="6,0,0,0"
+                        VerticalAlignment="Center">
+                  <TextBlock Text="{Binding BadgeText}"
+                             FontSize="11"
+                             FontWeight="SemiBold"
+                             Foreground="#0A0C12"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center" />
+                </Border>
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                  <PathIcon Data="{Binding Icon}" Width="18" Height="18" />
+                  <TextBlock Text="{Binding Title}" VerticalAlignment="Center" />
+                </StackPanel>
+              </DockPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Grid>
+
+    <Button x:Name="SidebarToggle" Classes="chrome" HorizontalAlignment="Left" VerticalAlignment="Top"
+            HotKey="F9" ToolTip.Tip="Hide Sidebar (F9)" AutomationProperties.Name="Hide Sidebar">
+      <PathIcon Data="{StaticResource IconSidebar}" Width="17" Height="17" />
+    </Button>
+
+    <!-- A problem from the server, with a way to try again, like the Mac app's error banner. -->
+    <Border x:Name="ErrorBanner" Classes="banner" IsVisible="False" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,24">
+      <StackPanel Orientation="Horizontal" Spacing="14">
+        <TextBlock x:Name="ErrorText" VerticalAlignment="Center" MaxWidth="560" TextWrapping="Wrap" />
+        <Button x:Name="ErrorRetry" Content="Try Again" Classes="chip" />
+        <Button x:Name="ErrorDismiss" Content="Dismiss" Classes="link" />
+      </StackPanel>
+    </Border>
+
+    <!-- The owner's notes about devices that signed in for the first time (Security). -->
+    <StackPanel x:Name="SecurityAlerts" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,16,0,0" Spacing="8" MaxWidth="600" />
+
+    <!-- Remote control of another device that plays a title from here (Play On). -->
+    <Border x:Name="RemoteBar" Classes="banner" IsVisible="False" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,24">
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <StackPanel VerticalAlignment="Center" Spacing="2">
+          <TextBlock x:Name="RemoteDevice" Classes="subdued" FontSize="12" />
+          <TextBlock x:Name="RemoteTitle" FontWeight="SemiBold" MaxWidth="320" TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+        <Button x:Name="RemoteBack" Classes="playerControl" AutomationProperties.Name="Back 10 Seconds"><PathIcon Data="{StaticResource IconBackward}" Width="16" Height="16" /></Button>
+        <Button x:Name="RemotePlayPause" Classes="playerControl" AutomationProperties.Name="Play or Pause"><PathIcon x:Name="RemotePlayPauseIcon" Data="{StaticResource IconPause}" Width="16" Height="16" /></Button>
+        <Button x:Name="RemoteForward" Classes="playerControl" AutomationProperties.Name="Forward 10 Seconds"><PathIcon Data="{StaticResource IconForward}" Width="16" Height="16" /></Button>
+        <Button x:Name="RemoteStop" Content="Stop" Classes="chip" />
+      </StackPanel>
+    </Border>
+
+    <library:SheetHost x:Name="Sheets" />
+  </Grid>
+</UserControl>

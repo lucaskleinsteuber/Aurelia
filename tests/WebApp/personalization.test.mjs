@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import * as logic from "../../src/Aurelia.Server/WebApp/js/logic.js";
-import { PROFILE_SYMBOL_PATHS } from "../../src/Aurelia.Server/WebApp/js/profile-symbols.js";
+import * as logic from "../../src/Tarven.Server/WebApp/js/logic.js";
+import { PROFILE_SYMBOL_PATHS } from "../../src/Tarven.Server/WebApp/js/profile-symbols.js";
 
 test("built-in pictures are known symbols on known palettes", () => {
   assert.equal(logic.PICTURE_SYMBOLS.length, 12);

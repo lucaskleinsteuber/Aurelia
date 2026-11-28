@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>Tarven.Server.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Fixtures/ImportStructurePaths.txt" />
+    <EmbeddedResource Include="../../clients/macos/TarvenTests/Fixtures/client-contracts-v1.json" LogicalName="client-contracts-v1.json" />
+    <ProjectReference Include="../../src/Tarven.Contracts/Tarven.Contracts.csproj" />
+    <ProjectReference Include="../../src/Tarven.Server/Tarven.Server.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+</Project>

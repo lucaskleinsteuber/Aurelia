@@ -3,5 +3,5 @@ MARKETING_VERSION = 2.13.0
 CURRENT_PROJECT_VERSION = 50
 TVOS_DEPLOYMENT_TARGET = 26.0
 TVVLCKIT_ROOT = $(SRCROOT)/Dependencies
-// "Aurelia Test" for the separate test edition (AURELIA_TEST_EDITION=1 in the build scripts).
-AURELIA_DISPLAY_NAME = Aurelia
+// "Tarven Test" for the separate test edition (TARVEN_TEST_EDITION=1 in the build scripts).
+TARVEN_DISPLAY_NAME = Tarven

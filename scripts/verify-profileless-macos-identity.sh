@@ -27,7 +27,7 @@ DEVELOPER_DIR="${DEVELOPER_DIR:-$(xcode-select -p)}" /usr/bin/xcrun swiftc -warn
 actual_team=$(/usr/bin/codesign --display --verbose=4 "$verification_root/identity-verifier" 2>&1 \
   | /usr/bin/sed -n 's/^TeamIdentifier=//p')
 if [[ "$actual_team" != "$team_identifier" ]]; then
-  print -u2 "The signing team does not match Aurelia's existing App Group identity."
+  print -u2 "The signing team does not match Tarven's existing App Group identity."
   exit 1
 fi
 /usr/bin/codesign --display --extract-certificates="$verification_root/certificate-" \

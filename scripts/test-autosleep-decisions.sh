@@ -1,5 +1,5 @@
 #!/bin/bash
-# Checks aurelia-autosleep's decisions on this Linux computer without root, systemd or a server:
+# Checks tarven-autosleep's decisions on this Linux computer without root, systemd or a server:
 # systemctl and ss are replaced by stand-ins and everything lives in a temporary folder. Only
 # dry runs are made, so the computer never sleeps and no service is touched.
 set -euo pipefail
@@ -26,16 +26,16 @@ printf 'MODE=sleep\nIDLE_MINUTES=15\n' > "$work/data/sleep-settings"
 decide() {
   local active=$1
   shift
-  PATH="${DECIDE_EXTRA_BIN:+$DECIDE_EXTRA_BIN:}$work/bin:$PATH" ACTIVE="aurelia $active" AURELIA_DATA_DIR="$work/data" \
-    AURELIA_SLEEP_SETTINGS_LIBRARY="$repository/packaging/linux/aurelia-sleep-settings" \
-    AURELIA_AUTOSLEEP_DRY_RUN=1 AURELIA_AUTOSLEEP_STATE="$work/state" \
-    bash "$repository/packaging/linux/aurelia-autosleep" "$@"
+  PATH="${DECIDE_EXTRA_BIN:+$DECIDE_EXTRA_BIN:}$work/bin:$PATH" ACTIVE="tarven $active" TARVEN_DATA_DIR="$work/data" \
+    TARVEN_SLEEP_SETTINGS_LIBRARY="$repository/packaging/linux/tarven-sleep-settings" \
+    TARVEN_AUTOSLEEP_DRY_RUN=1 TARVEN_AUTOSLEEP_STATE="$work/state" \
+    bash "$repository/packaging/linux/tarven-autosleep" "$@"
 }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 date +%s > "$work/data/sleep-ready"
 decide "" | grep -F 'A sleep timer ended' >/dev/null || fail "an ended sleep timer must lead to sleep"
-for unit in aurelia-update-request.service aurelia-update-check.service; do
+for unit in tarven-update-request.service tarven-update-check.service; do
   decide "$unit" | grep -Fx 'awake: updating' >/dev/null || fail "an ended sleep timer must not interrupt $unit"
 done
 [ -e "$work/data/sleep-ready" ] || fail "the sleep timer's signal must wait for the next check"
@@ -54,7 +54,7 @@ date +%s > "$work/state/last-active"
 decide "" | grep -F 'A sleep timer ended' >/dev/null && fail "a switched off sleep-timer rule must not power down"
 rm -f "$work/data/sleep-ready"
 
-# Woken (by a stray packet, perhaps) and nobody used Aurelia since: it sleeps again after five
+# Woken (by a stray packet, perhaps) and nobody used Tarven since: it sleeps again after five
 # minutes instead of a whole idle period; once someone used it, the idle period counts again.
 printf 'MODE=sleep\nIDLE_MINUTES=60\n' > "$work/data/sleep-settings"
 woken=$(( $(date +%s) - 400 ))
@@ -93,12 +93,12 @@ echo sleep > "$work/data/power-now"
 decide "" --now | grep -F 'sleep until a Wake-on-LAN call: Asked from an app' >/dev/null \
   || fail "a request to sleep now must put the computer to sleep"
 echo stop > "$work/data/power-now"
-decide "" --now | grep -F 'stop Aurelia until a device connects: Asked from an app' >/dev/null \
-  || fail "a request to stop now must stop only Aurelia"
+decide "" --now | grep -F 'stop Tarven until a device connects: Asked from an app' >/dev/null \
+  || fail "a request to stop now must stop only Tarven"
 echo reboot > "$work/data/power-now"
 [ -z "$(decide "" --now)" ] || fail "an unknown request must do nothing"
 echo shutdown > "$work/data/power-now"
-[ -z "$(decide aurelia-update-request.service --now)" ] || fail "a request must not interrupt an update"
+[ -z "$(decide tarven-update-request.service --now)" ] || fail "a request must not interrupt an update"
 rm -f "$work/data/power-now"
 echo shutdown > "$work/elsewhere"
 ln -s "$work/elsewhere" "$work/data/power-now"
@@ -132,16 +132,16 @@ decide "" | grep -F 'Unused for 15 minutes' >/dev/null || [ "$(awk '{ print ($1 
   || fail "an old work note must not count"
 rm -f "$work/data/work"
 
-# With MODE=stop and Aurelia already stopped behind aurelia-start.socket, --now must still consume
+# With MODE=stop and Tarven already stopped behind tarven-start.socket, --now must still consume
 # power-now rather than exiting early and causing systemd path unit start-limit-hit (audit LNX-PKG-007).
 printf 'MODE=stop\nIDLE_MINUTES=15\n' > "$work/data/sleep-settings"
 echo shutdown > "$work/data/power-now"
-PATH="$work/bin:$PATH" ACTIVE="aurelia-start.socket" AURELIA_DATA_DIR="$work/data" \
-  AURELIA_SLEEP_SETTINGS_LIBRARY="$repository/packaging/linux/aurelia-sleep-settings" \
-  AURELIA_AUTOSLEEP_DRY_RUN=1 AURELIA_AUTOSLEEP_STATE="$work/state" \
-  bash "$repository/packaging/linux/aurelia-autosleep" --now \
+PATH="$work/bin:$PATH" ACTIVE="tarven-start.socket" TARVEN_DATA_DIR="$work/data" \
+  TARVEN_SLEEP_SETTINGS_LIBRARY="$repository/packaging/linux/tarven-sleep-settings" \
+  TARVEN_AUTOSLEEP_DRY_RUN=1 TARVEN_AUTOSLEEP_STATE="$work/state" \
+  bash "$repository/packaging/linux/tarven-autosleep" --now \
   | grep -F 'turn off until a Wake-on-LAN call: Asked from an app' >/dev/null \
-  || fail "--now must still process power-now when MODE=stop and aurelia-start.socket is active"
+  || fail "--now must still process power-now when MODE=stop and tarven-start.socket is active"
 rm -f "$work/data/power-now"
 
 # Custom sshd port and local/remote loginctl sessions keep the computer awake (audit LNX-PKG-017).
@@ -181,7 +181,7 @@ DECIDE_EXTRA_BIN="$work/tty-bin" decide "" | grep -Fx 'awake: signed in on conso
 mkdir -p "$work/load-bin"
 cat > "$work/load-bin/id" <<'STUB'
 #!/bin/bash
-[ "${1:-}" = -u ] && [ "${2:-}" = aurelia ] && { echo 999; exit 0; }
+[ "${1:-}" = -u ] && [ "${2:-}" = tarven ] && { echo 999; exit 0; }
 exec /usr/bin/id "$@"
 STUB
 printf '#!/bin/bash\nprintf "999 80.0\\n1000 75.0\\n"\n' > "$work/load-bin/ps"
@@ -192,4 +192,4 @@ DECIDE_EXTRA_BIN="$work/load-bin" decide "" | grep -Fx 'awake: in use' >/dev/nul
   || fail "unrelated user CPU load during analysis must keep the computer awake"
 rm -f "$work/data/work"
 
-echo "aurelia-autosleep decisions: all checks passed."
+echo "tarven-autosleep decisions: all checks passed."

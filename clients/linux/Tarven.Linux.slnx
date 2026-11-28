@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/shared/">
+    <Project Path="../../src/Tarven.Contracts/Tarven.Contracts.csproj" />
+    <Project Path="../../src/Tarven.Server/Tarven.Server.csproj" />
+  </Folder>
+  <Project Path="Tarven.Linux.Core/Tarven.Linux.Core.csproj" />
+  <Project Path="Tarven.Linux/Tarven.Linux.csproj" />
+  <Project Path="Tarven.Linux.Tests/Tarven.Linux.Tests.csproj" />
+  <Project Path="Tarven.Linux.IntegrationTests/Tarven.Linux.IntegrationTests.csproj" />
+</Solution>

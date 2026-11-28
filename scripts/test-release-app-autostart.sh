@@ -4,17 +4,17 @@ set -euo pipefail
 repository_root=${0:A:h:h}
 source "$repository_root/scripts/workspace-paths.sh"
 build_number=$(sed -n 's/^CURRENT_PROJECT_VERSION = \([0-9][0-9]*\)$/\1/p' "$repository_root/clients/macos/Configuration/BuildNumber.xcconfig")
-source_candidate=${1:-"$other_root/Build/Build $build_number/Aurelia.app"}
+source_candidate=${1:-"$other_root/Build/Build $build_number/Tarven.app"}
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"
-runtime_root="/private/tmp/Aurelia/$run_id"
-candidate="$runtime_root/Aurelia.app"
+runtime_root="/private/tmp/Tarven/$run_id"
+candidate="$runtime_root/Tarven.app"
 data_root="$runtime_root/Data"
 host_log_root="$runtime_root/Logs"
 result_root="$other_root/Test Results"
 log_root="$other_root/Logs"
-report="$result_root/Aurelia-ReleaseAppAutostart-$run_id.txt"
-application="$candidate/Contents/MacOS/Aurelia"
-helper="$candidate/Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost"
+report="$result_root/Tarven-ReleaseAppAutostart-$run_id.txt"
+application="$candidate/Contents/MacOS/Tarven"
+helper="$candidate/Contents/Helpers/Tarven Server Host.app/Contents/MacOS/TarvenServerHost"
 application_pid=''
 helper_pid=''
 cleanup_finished=false
@@ -31,9 +31,9 @@ cleanup() {
     kill "$helper_pid" 2>/dev/null || true
   fi
   if [[ "$exit_code" -ne 0 && -f "$host_log_root/server.log" ]]; then
-    cp "$host_log_root/server.log" "$log_root/Aurelia-ReleaseAppAutostart-$run_id.log"
+    cp "$host_log_root/server.log" "$log_root/Tarven-ReleaseAppAutostart-$run_id.log"
   fi
-  if [[ "$runtime_root" == /private/tmp/Aurelia/* ]]; then
+  if [[ "$runtime_root" == /private/tmp/Tarven/* ]]; then
     find "$runtime_root" -depth -delete 2>/dev/null || true
   fi
   return "$exit_code"
@@ -56,24 +56,24 @@ chmod 700 "$runtime_root" "$data_root" "$host_log_root"
 /usr/bin/ditto "$source_candidate" "$candidate"
 [[ -x "$application" && -x "$helper" ]] || fail "The staged release app is incomplete."
 
-if pgrep -x Aurelia >/dev/null 2>&1 || pgrep -x AureliaServerHost >/dev/null 2>&1; then
-  fail "Aurelia is already running; no existing process was stopped."
+if pgrep -x Tarven >/dev/null 2>&1 || pgrep -x TarvenServerHost >/dev/null 2>&1; then
+  fail "Tarven is already running; no existing process was stopped."
 fi
 if lsof -nP -iTCP:43110 -sTCP:LISTEN >/dev/null 2>&1; then
   fail "Loopback port 43110 is already occupied; no existing process was stopped."
 fi
 
-print -r -- "Aurelia Build $build_number release app autostart smoke test" >"$report"
+print -r -- "Tarven Build $build_number release app autostart smoke test" >"$report"
 print -r -- "Run: $run_id" >>"$report"
 
 /usr/bin/open -n -g \
-  --env AURELIA_PREFLIGHT_TEST=1 \
-  --env "AURELIA_DATA_DIR=$data_root" \
-  --env "AURELIA_LOG_DIR=$host_log_root" \
+  --env TARVEN_PREFLIGHT_TEST=1 \
+  --env "TARVEN_DATA_DIR=$data_root" \
+  --env "TARVEN_LOG_DIR=$host_log_root" \
   "$candidate" --args \
   -ApplePersistenceIgnoreState YES \
-  -AureliaOperatingMode host \
-  -AureliaOperatingModeSelectionVersion 1
+  -TarvenOperatingMode host \
+  -TarvenOperatingModeSelectionVersion 1
 
 for _ in {1..100}; do
   application_pid="$(pgrep -f "^$application( |$)" | tail -1 || true)"

@@ -1,25 +1,25 @@
 import Darwin
 import Foundation
 
-/// Which Aurelia this build is: the real app, or "Aurelia Test" — a separate app with its own bundle
-/// identifier, App Group, Keychain entry and launch agents, built with AURELIA_TEST_EDITION=1 for trying
+/// Which Tarven this build is: the real app, or "Tarven Test" — a separate app with its own bundle
+/// identifier, App Group, Keychain entry and launch agents, built with TARVEN_TEST_EDITION=1 for trying
 /// the first run again and again. The test edition never updates itself or touches the real app.
 enum AppEdition {
-  #if AURELIA_TEST_EDITION
+  #if TARVEN_TEST_EDITION
     static let isTest = true
   #else
     static let isTest = false
   #endif
 
-  static let bundleIdentifier = isTest ? "com.lucas.aurelia.media.test" : "com.lucas.aurelia.media"
+  static let bundleIdentifier = isTest ? "org.tarven.mac.test" : "org.tarven.mac"
   /// The App Group the app shares with its server helper. Its prefix is the signing team, which
-  /// the build writes into both Info.plists (AureliaAppGroup); someone who builds Aurelia with
+  /// the build writes into both Info.plists (TarvenAppGroup); someone who builds Tarven with
   /// their own Apple ID gets their team's group. Without the key, the owner's group.
   static let appGroup = appGroup(
-    declared: Bundle.main.object(forInfoDictionaryKey: "AureliaAppGroup"))
+    declared: Bundle.main.object(forInfoDictionaryKey: "TarvenAppGroup"))
 
   static func appGroup(declared: Any?) -> String {
-    let suffix = isTest ? ".com.lucas.aurelia.media.test.host" : ".com.lucas.aurelia.media.host"
+    let suffix = isTest ? ".org.tarven.mac.test.host" : ".org.tarven.mac.host"
     if let declared = declared as? String, declared.hasSuffix(suffix),
       declared.count == 10 + suffix.count
     {
@@ -27,9 +27,9 @@ enum AppEdition {
     }
     return "B5N7JVK37J" + suffix
   }
-  static let displayName = isTest ? "Aurelia Test" : "Aurelia"
+  static let displayName = isTest ? "Tarven Test" : "Tarven"
   static func serverDataFolderName(isTest: Bool) -> String {
-    isTest ? "Aurelia Test Server" : "Aurelia Server"
+    isTest ? "Tarven Test Server" : "Tarven Server"
   }
   static func localPort(isTest: Bool) -> Int { isTest ? 43_120 : 43_110 }
   static func defaultLanPort(isTest: Bool) -> Int { isTest ? 43_121 : 43_111 }
@@ -45,9 +45,9 @@ enum AppEdition {
   }
 }
 
-/// Removes only Aurelia Test's own server data and log folders, never the real app's "Aurelia Server".
+/// Removes only Tarven Test's own server data and log folders, never the real app's "Tarven Server".
 enum TestEditionServerReset {
-  private static let testFolderName = "Aurelia Test Server"
+  private static let testFolderName = "Tarven Test Server"
 
   static func removeServerFolders(
     home: URL,

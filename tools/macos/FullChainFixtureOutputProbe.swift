@@ -31,7 +31,7 @@ enum FullChainFixtureOutputProbe {
       else { throw Failure.code("invalid_probe_arguments") }
       let root = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
       let parent = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Caches/Aurelia/TestRuns", isDirectory: true)
+        .appendingPathComponent("Library/Caches/Tarven/TestRuns", isDirectory: true)
       guard root.deletingLastPathComponent() == parent,
         root.lastPathComponent.hasPrefix("playback-evidence-mkv-probe-"),
         root.resolvingSymlinksInPath() == root,
@@ -50,7 +50,7 @@ enum FullChainFixtureOutputProbe {
         contentRect: view.frame, styleMask: [.titled, .closable], backing: .buffered, defer: false)
       outputWindow.isReleasedWhenClosed = false
       outputWindow.contentView = view
-      outputWindow.title = "Aurelia generated fixture decoder probe"
+      outputWindow.title = "Tarven generated fixture decoder probe"
       outputWindow.makeKeyAndOrderFront(nil)
       NSApp.activate(ignoringOtherApps: true)
       window = outputWindow

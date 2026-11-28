@@ -1,5 +1,5 @@
 #!/bin/bash
-# Checks the signature check that `aurelia update`, the one-line installer and the Docker build
+# Checks the signature check that `tarven update`, the one-line installer and the Docker build
 # share: all three carry the same check, the owner's key (the Linux app's) and no unsigned build
 # exception, and the check accepts only a valid signature by that key. Synthetic files and a
 # throwaway key only; with minisign installed it also confirms both formats match minisign's.
@@ -11,14 +11,14 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-scripts=(packaging/linux/aurelia packaging/linux/get-aurelia.sh packaging/docker/fetch-server.sh)
+scripts=(packaging/linux/tarven packaging/linux/get-tarven.sh packaging/docker/fetch-server.sh)
 function_of() { sed -n '/^# Succeeds when \$2 is a minisign signature/,/^}$/p' "$repository/$1"; }
 value_of() { sed -n "s/^$2=\\([A-Za-z0-9+\\/=]*\\)\$/\\1/p" "$repository/$1"; }
 
 function_of "${scripts[0]}" > "$work/check.sh"
 [ "$(grep -c '' "$work/check.sh")" -gt 5 ] || fail "${scripts[0]} has no signature check"
 app_key=$(sed -n 's/.*SigningPublicKey = "\([A-Za-z0-9+\/=]*\)";.*/\1/p' \
-  "$repository/clients/linux/Aurelia.Linux.Core/Updates/UpdateFeed.cs")
+  "$repository/clients/linux/Tarven.Linux.Core/Updates/UpdateFeed.cs")
 for script in "${scripts[@]}"; do
   function_of "$script" | cmp -s - "$work/check.sh" || fail "$script checks signatures differently"
   [ "$(value_of "$script" signing_public_key)" = "$app_key" ] || fail "$script does not carry the owner's key"
@@ -27,25 +27,25 @@ for script in "${scripts[@]}"; do
   [ -z "$first" ] && ! grep -q 'first_signed_build' "$repository/$script" \
     || fail "$script lets some builds go unsigned"
 done
-grep -F 'packaging/linux/aurelia' "$repository/scripts/publish-release.sh" >/dev/null \
+grep -F 'packaging/linux/tarven' "$repository/scripts/publish-release.sh" >/dev/null \
   && grep -F 'SHA256SUMS.minisig' "$repository/scripts/publish-release.sh" >/dev/null \
   || fail "server releases are not signed when they are published"
 
-# `aurelia update` finds the signature next to the package, and knows when there is none.
-sed -n '/^newest_package() {$/,/^}$/p' "$repository/packaging/linux/aurelia" > "$work/newest.sh"
+# `tarven update` finds the signature next to the package, and knows when there is none.
+sed -n '/^newest_package() {$/,/^}$/p' "$repository/packaging/linux/tarven" > "$work/newest.sh"
 . "$work/newest.sh"
 arch=x64
 jq -n '[{draft: false, prerelease: false, assets: [
-  {name: "Aurelia-Server-9.9.9-999-linux-x64.tar.gz", url: "https://example.invalid/package"},
+  {name: "Tarven-Server-9.9.9-999-linux-x64.tar.gz", url: "https://example.invalid/package"},
   {name: "SHA256SUMS", url: "https://example.invalid/sums"},
   {name: "SHA256SUMS.minisig", url: "https://example.invalid/signature"}]}]' > "$work/signed.json"
 IFS=$'\t' read -r _ _ _ _ sums_url signature_url <<<"$(newest_package "$work/signed.json")"
 [ "$sums_url" = https://example.invalid/sums ] && [ "$signature_url" = https://example.invalid/signature ] \
-  || fail "aurelia update does not find a release's signature"
+  || fail "tarven update does not find a release's signature"
 jq 'map(.assets |= map(select(.name != "SHA256SUMS.minisig")))' "$work/signed.json" > "$work/unsigned.json"
 IFS=$'\t' read -r _ _ _ _ sums_url signature_url <<<"$(newest_package "$work/unsigned.json")"
 [ "$sums_url" = https://example.invalid/sums ] && [ -z "$signature_url" ] \
-  || fail "aurelia update does not notice a release without a signature"
+  || fail "tarven update does not notice a release without a signature"
 
 . "$work/check.sh"
 check() { rm -rf "$work/scratch" && mkdir "$work/scratch" && signature_valid "$1" "$2" "$work/scratch"; }
@@ -53,8 +53,8 @@ check() { rm -rf "$work/scratch" && mkdir "$work/scratch" && signature_valid "$1
 mkdir "$work/key" "$work/other"
 signing_public_key=$(synthetic_signing_key "$work/key")
 synthetic_signing_key "$work/other" >/dev/null
-printf '%064d  ./Aurelia-Server-9.9.9-999-linux-x64.tar.gz\n' 0 > "$work/SHA256SUMS"
-synthetic_sign "$work/key" "$work/SHA256SUMS" "Aurelia Server 9.9.9 (999)"
+printf '%064d  ./Tarven-Server-9.9.9-999-linux-x64.tar.gz\n' 0 > "$work/SHA256SUMS"
+synthetic_sign "$work/key" "$work/SHA256SUMS" "Tarven Server 9.9.9 (999)"
 check "$work/SHA256SUMS" "$work/SHA256SUMS.minisig" || fail "a valid signature was refused"
 
 # A changed list.
@@ -65,10 +65,10 @@ if check "$work/changed" "$work/changed.minisig"; then fail "a changed checksum 
 
 # Another key, also one that claims the right key's number.
 cp "$work/SHA256SUMS" "$work/foreign"
-synthetic_sign "$work/other" "$work/foreign" "Aurelia Server 9.9.9 (999)"
+synthetic_sign "$work/other" "$work/foreign" "Tarven Server 9.9.9 (999)"
 if check "$work/foreign" "$work/foreign.minisig"; then fail "a signature by another key was accepted"; fi
 cp "$work/key/synthetic-key.id" "$work/other/synthetic-key.id"
-synthetic_sign "$work/other" "$work/foreign" "Aurelia Server 9.9.9 (999)"
+synthetic_sign "$work/other" "$work/foreign" "Tarven Server 9.9.9 (999)"
 if check "$work/foreign" "$work/foreign.minisig"; then fail "another key with the owner's key number was accepted"; fi
 
 # Not prehashed, cut short, or no signature at all.
@@ -86,14 +86,14 @@ if command -v minisign >/dev/null 2>&1; then
   minisign -V -P "$signing_public_key" -m "$work/SHA256SUMS" >/dev/null \
     || fail "minisign does not accept the synthetic signature"
   minisign -G -W -p "$work/real.pub" -s "$work/real.key" >/dev/null
-  minisign -S -s "$work/real.key" -m "$work/SHA256SUMS" -x "$work/real.minisig" -t "Aurelia Server 9.9.9 (999)" >/dev/null
+  minisign -S -s "$work/real.key" -m "$work/SHA256SUMS" -x "$work/real.minisig" -t "Tarven Server 9.9.9 (999)" >/dev/null
   signing_public_key=$(sed -n 2p "$work/real.pub")
   check "$work/SHA256SUMS" "$work/real.minisig" || fail "a signature made by minisign was refused"
 else
   echo "minisign is not installed; the comparison with minisign itself was skipped."
 fi
 
-# Exercise `aurelia update` against missing/unreadable VERSION and unsigned pre-153 builds (audit LNX-PKG-002),
+# Exercise `tarven update` against missing/unreadable VERSION and unsigned pre-153 builds (audit LNX-PKG-002),
 # plus CLI option parsing fixes (audit LNX-PKG-017), in an isolated copy without root.
 case "$(uname -m)" in
   x86_64|amd64) host_arch=x64 ;;
@@ -101,16 +101,16 @@ case "$(uname -m)" in
   *) host_arch="" ;;
 esac
 if [ -n "$host_arch" ]; then
-  mkdir -p "$work/cli/bin" "$work/cli/install" "$work/cli/etc" "$work/cli/data" "$work/cli/api/repos/test/aurelia/releases"
+  mkdir -p "$work/cli/bin" "$work/cli/install" "$work/cli/etc" "$work/cli/data" "$work/cli/api/repos/test/tarven/releases"
   touch "$work/cli/etc/test-update-source"
-  cp "$repository/packaging/linux/aurelia-sleep-settings" "$work/cli/install/aurelia-sleep-settings"
-  sed -e "s|^install_root=/opt/aurelia$|install_root=$work/cli/install|" \
-      -e "s|^data_dir=/var/lib/aurelia$|data_dir=$work/cli/data|" \
-      -e "s|/etc/aurelia/test-update-source|$work/cli/etc/test-update-source|g" \
-      -e "s|^token_file=/etc/aurelia/github-token$|token_file=$work/cli/etc/github-token|" \
-      -e "s|^channel_file=/etc/aurelia/update-channel$|channel_file=$work/cli/etc/update-channel|" \
-      "$repository/packaging/linux/aurelia" > "$work/cli/aurelia"
-  chmod +x "$work/cli/aurelia"
+  cp "$repository/packaging/linux/tarven-sleep-settings" "$work/cli/install/tarven-sleep-settings"
+  sed -e "s|^install_root=/opt/tarven$|install_root=$work/cli/install|" \
+      -e "s|^data_dir=/var/lib/tarven$|data_dir=$work/cli/data|" \
+      -e "s|/etc/tarven/test-update-source|$work/cli/etc/test-update-source|g" \
+      -e "s|^token_file=/etc/tarven/github-token$|token_file=$work/cli/etc/github-token|" \
+      -e "s|^channel_file=/etc/tarven/update-channel$|channel_file=$work/cli/etc/update-channel|" \
+      "$repository/packaging/linux/tarven" > "$work/cli/tarven"
+  chmod +x "$work/cli/tarven"
   cat > "$work/cli/bin/id" <<'STUB'
 #!/bin/bash
 [ "${1:-}" = -u ] && { echo 0; exit 0; }
@@ -138,63 +138,63 @@ STUB
   chmod +x "$work/cli/bin/id" "$work/cli/bin/systemctl" "$work/cli/bin/curl"
 
   # Option without a value must fail with a message rather than exiting silently under set -e.
-  if PATH="$work/cli/bin:$PATH" bash "$work/cli/aurelia" setup --name >"$work/cli/out" 2>&1; then
+  if PATH="$work/cli/bin:$PATH" bash "$work/cli/tarven" setup --name >"$work/cli/out" 2>&1; then
     fail "setup --name without a value must fail"
   fi
   grep -F -- '--name needs a value' "$work/cli/out" >/dev/null || fail "missing error for setup --name without value: $(cat "$work/cli/out")"
-  if PATH="$work/cli/bin:$PATH" bash "$work/cli/aurelia" sleep on --idle >"$work/cli/out" 2>&1; then
+  if PATH="$work/cli/bin:$PATH" bash "$work/cli/tarven" sleep on --idle >"$work/cli/out" 2>&1; then
     fail "sleep --idle without a value must fail"
   fi
   grep -F -- '--idle needs a number of minutes' "$work/cli/out" >/dev/null || fail "missing error for sleep --idle without value: $(cat "$work/cli/out")"
 
   # Leading-zero decimal values like 09 must not fail as invalid octal (audit LNX-PKG-017).
   # Without /sys/power/state or runuser the command fails later, never at the --idle validation.
-  if PATH="$work/cli/bin:$PATH" bash "$work/cli/aurelia" sleep server --idle 09 >"$work/cli/out" 2>&1; then
+  if PATH="$work/cli/bin:$PATH" bash "$work/cli/tarven" sleep server --idle 09 >"$work/cli/out" 2>&1; then
     :
   fi
   if grep -F -- '--idle needs a number of minutes' "$work/cli/out" >/dev/null; then
     fail "sleep --idle 09 was rejected as octal: $(cat "$work/cli/out")"
   fi
 
-  # Stopped manually (neither aurelia nor aurelia-start.socket active) must report stopped immediately.
-  if PATH="$work/cli/bin:$PATH" bash "$work/cli/aurelia" pair >"$work/cli/out" 2>&1; then
-    fail "ensure_running must fail when aurelia is stopped"
+  # Stopped manually (neither tarven nor tarven-start.socket active) must report stopped immediately.
+  if PATH="$work/cli/bin:$PATH" bash "$work/cli/tarven" pair >"$work/cli/out" 2>&1; then
+    fail "ensure_running must fail when tarven is stopped"
   fi
-  grep -F 'Aurelia Server is stopped' "$work/cli/out" >/dev/null || fail "ensure_running did not explain manual stop: $(cat "$work/cli/out")"
+  grep -F 'Tarven Server is stopped' "$work/cli/out" >/dev/null || fail "ensure_running did not explain manual stop: $(cat "$work/cli/out")"
 
   # Offer an unsigned build 100 (< 153) via the stand-in API.
-  printf '%064d  ./Aurelia-Server-1.0.0-100-linux-%s.tar.gz\n' 0 "$host_arch" > "$work/cli/api/SHA256SUMS"
-  jq -n --arg name "Aurelia-Server-1.0.0-100-linux-$host_arch.tar.gz" \
+  printf '%064d  ./Tarven-Server-1.0.0-100-linux-%s.tar.gz\n' 0 "$host_arch" > "$work/cli/api/SHA256SUMS"
+  jq -n --arg name "Tarven-Server-1.0.0-100-linux-$host_arch.tar.gz" \
     '{draft: false, prerelease: false, assets: [
       {name: $name, url: "http://standin/nonexistent.tar.gz"},
       {name: "SHA256SUMS", url: "http://standin/SHA256SUMS"}]}' \
-    > "$work/cli/api/repos/test/aurelia/releases/latest"
+    > "$work/cli/api/repos/test/tarven/releases/latest"
 
   # 1) Missing VERSION must fail closed (never skip downgrade protection).
-  if PATH="$work/cli/bin:$PATH" AURELIA_UPDATE_API="http://standin" \
-    AURELIA_UPDATE_REPOSITORY=test/aurelia AURELIA_UPDATE_LOCK="$work/cli/lock" \
-    bash "$work/cli/aurelia" update --yes >"$work/cli/out" 2>&1; then
-    fail "aurelia update proceeded without VERSION"
+  if PATH="$work/cli/bin:$PATH" TARVEN_UPDATE_API="http://standin" \
+    TARVEN_UPDATE_REPOSITORY=test/tarven TARVEN_UPDATE_LOCK="$work/cli/lock" \
+    bash "$work/cli/tarven" update --yes >"$work/cli/out" 2>&1; then
+    fail "tarven update proceeded without VERSION"
   fi
   grep -F 'Cannot read the installed build' "$work/cli/out" >/dev/null \
     || fail "missing unreadable-VERSION error: $(cat "$work/cli/out")"
 
   # 2) Corrupted/unparseable VERSION must also fail closed.
   printf 'corrupted\n' > "$work/cli/install/VERSION"
-  if PATH="$work/cli/bin:$PATH" AURELIA_UPDATE_API="http://standin" \
-    AURELIA_UPDATE_REPOSITORY=test/aurelia AURELIA_UPDATE_LOCK="$work/cli/lock" \
-    bash "$work/cli/aurelia" update --yes >"$work/cli/out" 2>&1; then
-    fail "aurelia update proceeded with unreadable VERSION"
+  if PATH="$work/cli/bin:$PATH" TARVEN_UPDATE_API="http://standin" \
+    TARVEN_UPDATE_REPOSITORY=test/tarven TARVEN_UPDATE_LOCK="$work/cli/lock" \
+    bash "$work/cli/tarven" update --yes >"$work/cli/out" 2>&1; then
+    fail "tarven update proceeded with unreadable VERSION"
   fi
   grep -F 'Cannot read the installed build' "$work/cli/out" >/dev/null \
     || fail "missing corrupted-VERSION error: $(cat "$work/cli/out")"
 
   # 3) Valid older VERSION + unsigned build 100 (< 153) must be refused as unsigned.
   printf '0.9.0 (50)\n' > "$work/cli/install/VERSION"
-  if PATH="$work/cli/bin:$PATH" AURELIA_UPDATE_API="http://standin" \
-    AURELIA_UPDATE_REPOSITORY=test/aurelia AURELIA_UPDATE_LOCK="$work/cli/lock" \
-    bash "$work/cli/aurelia" update --yes >"$work/cli/out" 2>&1; then
-    fail "aurelia update accepted an unsigned build < 153"
+  if PATH="$work/cli/bin:$PATH" TARVEN_UPDATE_API="http://standin" \
+    TARVEN_UPDATE_REPOSITORY=test/tarven TARVEN_UPDATE_LOCK="$work/cli/lock" \
+    bash "$work/cli/tarven" update --yes >"$work/cli/out" 2>&1; then
+    fail "tarven update accepted an unsigned build < 153"
   fi
   grep -F 'not signed by the owner' "$work/cli/out" >/dev/null \
     || fail "unsigned build < 153 was not refused as unsigned: $(cat "$work/cli/out")"

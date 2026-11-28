@@ -1,0 +1,62 @@
+[Unit]
+Description=Tarven media server
+After=network-online.target local-fs.target remote-fs.target
+Wants=network-online.target
+# While Tarven is stopped to save power, this socket waits for devices in its place.
+Conflicts=tarven-start.socket
+
+[Service]
+Type=simple
+User=tarven
+Group=tarven
+# A power cut in the very moment an update swaps the program leaves only server.old: it is put back
+# (as root, before the sandbox below applies) instead of the server never starting (audit S-X22).
+ExecStartPre=+/bin/sh -c 'if [ ! -d /opt/tarven/server ] && [ -d /opt/tarven/server.old ]; then mv /opt/tarven/server.old /opt/tarven/server; fi'
+ExecStart=/opt/tarven/server/Tarven.Server run --data-dir /var/lib/tarven
+WorkingDirectory=/var/lib/tarven
+Environment=HOME=/var/lib/tarven
+# Root-run parts of the package act on what the app changes: power saving, updates.
+Environment=TARVEN_LINUX_PACKAGE=1
+StateDirectory=tarven
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5
+# Restart Server in the app ends the server with this status for systemd to start it again.
+RestartForceExitStatus=75
+SuccessExitStatus=75
+TimeoutStopSec=30
+LimitNOFILE=65536
+# Tarven only reads media: everything outside its own data folder is read-only for it.
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+# It needs no privileges at all (its ports are above 1024), sees no other processes, and talks
+# only over the network and local sockets (audit S-X17). Unknown system calls fail instead of
+# ending the server.
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectProc=invisible
+ProtectKernelLogs=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# Hardware video encoding needs GPU render/video devices only, never webcams (/dev/video*).
+DevicePolicy=closed
+DeviceAllow=char-drm rw
+DeviceAllow=char-nvidia-frontend rw
+DeviceAllow=char-nvidia-uvm rw
+DeviceAllow=char-nvidia-caps rw
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

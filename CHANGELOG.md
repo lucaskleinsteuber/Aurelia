@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Aurelia are documented here. The format is based on
+All notable changes to Tarven, called Aurelia until Server 3.0.0 and Mac 2.30.0, are documented here. Entries from before the rename keep the old name. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and new versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
@@ -61,6 +61,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Changed
 
+- Server and all apps: Aurelia is now **Tarven** (tarven.org). Everything carries the new name: apps, commands (`tarven`), packages, services, folders and identifiers (`org.tarven.*`). Your library, profiles, progress and settings stay. A Linux server takes its Aurelia installation over in place when updated (user, folders, database, services, settings; `aurelia` keeps working as a command), the Linux app replaces `aurelia-desktop` and takes over its folders and keyring entry, and Tarven on the Mac takes over Aurelia's connection, settings and server folder when installed by hand once. iPhone, iPad and Apple TV connect once again. Servers still answer apps called Aurelia, and Aurelia backups and moving files can be restored. See docs/RENAMED.md.
 - Mac: every Mac version is a beta, because the download starts only on Macs registered to the developer's Apple account; all earlier Mac releases on GitHub are now pre-releases and say so. Beta Updates is on from the start and Settings › Updates explains why; with it off, the app says there is no stable Mac version instead of an error.
 - Mac: anyone can build the Mac app with their own free Apple ID: `zsh scripts/build-mac-app-yourself.sh` checks Xcode, installs what is missing, finds the certificate and builds for the Mac's processor, and [Build Aurelia for Mac yourself](docs/BUILD_MAC_APP.md) explains every step for people who have never built an app. Such a build signs without a provisioning profile, so it runs for a year instead of seven days.
 - Server: the newest stable server is GitHub's Latest release, and `aurelia update`, the one-line install and the Docker build read the release list page by page; with more than 30 newer betas of all products they no longer missed the stable server.

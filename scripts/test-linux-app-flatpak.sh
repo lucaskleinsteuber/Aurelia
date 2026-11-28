@@ -14,7 +14,7 @@ states, toplevels = {}, {}
 for line in pathlib.Path(sys.argv[1]).read_text(errors='replace').splitlines():
     match = re.search(r'xdg_wm_base[#@]\d+\.get_xdg_surface\(new id xdg_surface[#@](\d+), wl_surface[#@](\d+)\)', line)
     if match:
-        states[match[1]] = dict(surface=match[2], lines=[line], configured=set(), acknowledged=False, attached=False, aurelia=False)
+        states[match[1]] = dict(surface=match[2], lines=[line], configured=set(), acknowledged=False, attached=False, tarven=False)
         continue
     match = re.search(r'xdg_surface[#@](\d+)\.get_toplevel\(new id xdg_toplevel[#@](\d+)\)', line)
     if match and match[1] in states:
@@ -24,7 +24,7 @@ for line in pathlib.Path(sys.argv[1]).read_text(errors='replace').splitlines():
     match = re.search(r'xdg_toplevel[#@](\d+)\.set_app_id\("([^"]+)"\)', line)
     if match and match[1] in toplevels:
         state = toplevels[match[1]]
-        state['aurelia'] = match[2] == 'io.github.lucasfd3.Aurelia'
+        state['tarven'] = match[2] == 'org.tarven.Tarven'
         state['lines'].append(line)
         continue
     match = re.search(r'xdg_surface[#@](\d+)\.(configure|ack_configure)\((\d+)\)', line)
@@ -40,7 +40,7 @@ for line in pathlib.Path(sys.argv[1]).read_text(errors='replace').splitlines():
             if state['surface'] != match[1] or not state['acknowledged']: continue
             if match[2].startswith('attach'): state['attached'] = True
             state['lines'].append(line)
-            if match[2] == 'commit()' and state['attached'] and state['aurelia']:
+            if match[2] == 'commit()' and state['attached'] and state['tarven']:
                 pathlib.Path(sys.argv[2]).write_text('\n'.join(state['lines']) + '\n')
                 sys.exit(0)
 sys.exit(1)
@@ -55,7 +55,7 @@ isolated_check() {
   export XDG_RUNTIME_DIR="/run/user/$(id -u)"
   mkdir -p "$XDG_RUNTIME_DIR" "$work/evidence" "$work/installation"
   chmod 700 "$XDG_RUNTIME_DIR"
-  local app_id=io.github.lucasfd3.Aurelia
+  local app_id=org.tarven.Tarven
   # All process/instance ids belong to this private runtime directory and PID namespace.
   app_job='' compositor_job='' app_instance=''
   stop_job() {
@@ -82,7 +82,7 @@ isolated_check() {
   local cache_repo="$work/runtime-repo"
   ostree --repo="$cache_repo" init --mode=archive
   while IFS=$'\t' read -r ref commit; do
-    ostree --repo="$cache_repo" pull-local --untrusted --disable-fsync /run/aurelia-runtime-source "$commit"
+    ostree --repo="$cache_repo" pull-local --untrusted --disable-fsync /run/tarven-runtime-source "$commit"
     ostree --repo="$cache_repo" refs --create="$ref" "$commit"
   done < "$work/runtime-source.tsv"
   flatpak build-update-repo "$cache_repo"
@@ -91,18 +91,18 @@ isolated_check() {
     flatpak install --user --assumeyes --noninteractive --no-deps --no-related cached-runtimes "$ref"
     [ "$(flatpak info --user --show-commit "$ref")" = "$commit" ]
   done < "$work/runtime-source.tsv"
-  flatpak install --user --assumeyes --noninteractive --no-deps --no-related --bundle /run/aurelia-candidate.flatpak
+  flatpak install --user --assumeyes --noninteractive --no-deps --no-related --bundle /run/tarven-candidate.flatpak
   flatpak info --user "$app_id" > "$work/evidence/installed.txt"
   flatpak info --user --show-metadata "$app_id" > "$work/evidence/metadata.txt"
   local common=(run --user --no-documents-portal --no-a11y-bus)
-  flatpak "${common[@]}" --command=sh "$app_id" -c 'cat /app/lib/aurelia-desktop/VERSION' > "$work/evidence/version.txt"
+  flatpak "${common[@]}" --command=sh "$app_id" -c 'cat /app/lib/tarven-desktop/VERSION' > "$work/evidence/version.txt"
   [ "$(cat "$work/evidence/version.txt")" = "$expected" ] || { echo "The installed bundle has the wrong version." >&2; return 1; }
   flatpak "${common[@]}" --command=sh "$app_id" -c '
     set -eu
     export LD_LIBRARY_PATH="/app/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     ldd /app/lib/libvlc.so.5
     ldd /app/lib/vlc/plugins/codec/libavcodec_plugin.so
-    test -x /app/lib/aurelia-desktop/server/Aurelia.Server
+    test -x /app/lib/tarven-desktop/server/Tarven.Server
     test -f /app/lib/vlc/plugins/audio_output/libpulse_plugin.so
   ' > "$work/evidence/libraries.txt" 2>&1
   if rg -q 'not found' "$work/evidence/libraries.txt"; then
@@ -133,8 +133,8 @@ import json, os, pathlib, secrets, signal, socket, ssl, subprocess, sys, time, u
 out, app_id = pathlib.Path(sys.argv[1]), sys.argv[2]
 dependencies = json.loads(subprocess.check_output([
     'flatpak', 'run', '--user', '--no-documents-portal', '--no-a11y-bus', '--die-with-parent',
-    '--command=cat', app_id, '/app/lib/aurelia-desktop/server/Aurelia.Server.deps.json']))
-expected = next(name.split('/', 1)[1] for name in dependencies['libraries'] if name.startswith('Aurelia.Server/'))
+    '--command=cat', app_id, '/app/lib/tarven-desktop/server/Tarven.Server.deps.json']))
+expected = next(name.split('/', 1)[1] for name in dependencies['libraries'] if name.startswith('Tarven.Server/'))
 def port():
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', 0))
@@ -146,11 +146,11 @@ export LD_LIBRARY_PATH="/app/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" VLC_PLUGI
 filtered=$(printf "%s" "${LD_LIBRARY_PATH:-}" | tr ":" "\n" | awk '$0 != "/app/lib" && $0 != "/app/lib64" && index($0,"/app/lib/") != 1 && index($0,"/app/lib64/") != 1 && length($0) { p=p (length(p)?":":"") $0 } END { print p }')
 export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/codecs-extra/lib:/usr/lib/x86_64-linux-gnu${filtered:+:$filtered}"
 unset VLC_PLUGIN_PATH
-exec /app/lib/aurelia-desktop/server/Aurelia.Server "$@"'''
+exec /app/lib/tarven-desktop/server/Tarven.Server "$@"'''
 command = ['flatpak', 'run', '--user', '--no-documents-portal', '--no-a11y-bus', '--die-with-parent',
-           '--env=AURELIA_BOOTSTRAP_TOKEN=' + secrets.token_hex(32), '--env=AURELIA_LAN_ENABLED=false',
-           '--env=Aurelia__Ffmpeg=off', '--command=sh', app_id, '-c', filtered, 'aurelia-server-probe',
-           'run', '--data-dir', '/tmp/aurelia-synthetic-server', '--urls', f'http://127.0.0.1:{http}',
+           '--env=TARVEN_BOOTSTRAP_TOKEN=' + secrets.token_hex(32), '--env=TARVEN_LAN_ENABLED=false',
+           '--env=Tarven__Ffmpeg=off', '--command=sh', app_id, '-c', filtered, 'tarven-server-probe',
+           'run', '--data-dir', '/tmp/tarven-synthetic-server', '--urls', f'http://127.0.0.1:{http}',
            '--local-https', '--lan-port', str(https)]
 log = (out / 'server.log').open('w')
 process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
@@ -196,10 +196,10 @@ PYTHON
       export DISPLAY=":$(cat "$evidence/display")"
       unset WAYLAND_DISPLAY
     else
-      weston --no-config --backend=headless --renderer=pixman --socket=wayland-aurelia-test --idle-time=0 \
+      weston --no-config --backend=headless --renderer=pixman --socket=wayland-tarven-test --idle-time=0 \
         --width=1280 --height=800 > "$evidence/compositor.log" 2>&1 &
       compositor_job=$!
-      export WAYLAND_DISPLAY=wayland-aurelia-test
+      export WAYLAND_DISPLAY=wayland-tarven-test
       unset DISPLAY
       for _ in $(seq 1 100); do [ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ] && break; sleep .1; done
       [ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ] || { cat "$evidence/compositor.log" >&2; return 1; }
@@ -207,9 +207,9 @@ PYTHON
     local display_options=(--socket="$backend")
     if [ "$backend" = x11 ]; then display_options+=(--nosocket=wayland); else display_options+=(--nosocket=x11); fi
     flatpak "${common[@]}" --die-with-parent --instance-id-fd=3 "${display_options[@]}" \
-      --env=AURELIA_DISPLAY_BACKEND="$backend" --env=WAYLAND_DEBUG=client \
+      --env=TARVEN_DISPLAY_BACKEND="$backend" --env=WAYLAND_DEBUG=client \
       --env=LIBGL_ALWAYS_SOFTWARE=1 --env=GALLIUM_DRIVER=llvmpipe \
-      --env=AURELIA_DESKTOP_SERVER=/tmp/disabled-server \
+      --env=TARVEN_DESKTOP_SERVER=/tmp/disabled-server \
       "$app_id" > "$evidence/app.log" 2>&1 3> "$evidence/instance" &
     app_job=$!
     local ready=false
@@ -217,7 +217,7 @@ PYTHON
       kill -0 "$app_job" 2>/dev/null || { cat "$evidence/app.log" >&2; return 1; }
       if [ "$backend" = x11 ]; then
         xwininfo -root -tree > "$evidence/window-tree.txt"
-        window_id=$(sed -nE '/"Aurelia"/s/^[[:space:]]*(0x[0-9a-fA-F]+).*/\1/p' "$evidence/window-tree.txt" | head -1)
+        window_id=$(sed -nE '/"Tarven"/s/^[[:space:]]*(0x[0-9a-fA-F]+).*/\1/p' "$evidence/window-tree.txt" | head -1)
         if [ -n "$window_id" ]; then
           xwininfo -id "$window_id" -stats > "$evidence/backend-proof.txt"
           if rg -q 'Map State: IsViewable' "$evidence/backend-proof.txt"; then ready=true; break; fi
@@ -293,10 +293,10 @@ cat > "$work/bus.conf" <<'BUS'
 BUS
 # Hide the real home directory selected by passwd, without substituting another HOME. The user repository is only
 # available through the explicit read-only runtime source mount; its objects are checksum-verified.
-bwrap --die-with-parent --unshare-pid --unshare-ipc --unshare-net --unshare-uts --hostname aurelia-flatpak-test \
+bwrap --die-with-parent --unshare-pid --unshare-ipc --unshare-net --unshare-uts --hostname tarven-flatpak-test \
   --ro-bind / / --dev /dev --proc /proc \
   --tmpfs /tmp --tmpfs /var/tmp --tmpfs /run --tmpfs "$HOME" --bind "$work" "$work" \
-  --ro-bind "$source_repo" /run/aurelia-runtime-source --ro-bind "$bundle" /run/aurelia-candidate.flatpak \
+  --ro-bind "$source_repo" /run/tarven-runtime-source --ro-bind "$bundle" /run/tarven-candidate.flatpak \
   --clearenv --setenv PATH /usr/bin:/bin --setenv USER "$(id -un)" --setenv LOGNAME "$(id -un)" \
   --setenv LANG C.UTF-8 --setenv XDG_RUNTIME_DIR "/run/user/$(id -u)" --chdir "$work" \
   dbus-run-session --config-file "$work/bus.conf" -- bash "$work/checker.sh" --isolated "$work" "$expected" \

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { POWER_ACTIONS, powerNowActions, powerNowOptionsPath, supportsPowerNow } from "../../src/Aurelia.Server/WebApp/js/power-now.js";
+import { POWER_ACTIONS, powerNowActions, powerNowOptionsPath, supportsPowerNow } from "../../src/Tarven.Server/WebApp/js/power-now.js";
 
 test("power now is offered by new servers and by servers that had Smart Home", () => {
   assert.equal(supportsPowerNow(["power-now-v1"]), true);

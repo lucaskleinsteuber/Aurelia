@@ -10,14 +10,14 @@ set -euo pipefail
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$repository_root/scripts/workspace-paths.sh"
 /bin/sh "$repository_root/scripts/prune-workspace.sh" || true
-project="$repository_root/clients/linux/Aurelia.Linux/Aurelia.Linux.csproj"
+project="$repository_root/clients/linux/Tarven.Linux/Tarven.Linux.csproj"
 version=$("$DOTNET_BIN" msbuild "$project" -getProperty:Version)
-build=$("$DOTNET_BIN" msbuild "$project" -getProperty:AureliaLinuxBuildNumber)
+build=$("$DOTNET_BIN" msbuild "$project" -getProperty:TarvenLinuxBuildNumber)
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$build" =~ ^[0-9]+$ ]] \
   || { echo "Use a MAJOR.MINOR.PATCH version and numeric build." >&2; exit 1; }
 tag="linux-app-$version-$build"
 output="$other_root/Build/LinuxApp/$version-$build"
-base="Aurelia-Desktop-$version-$build"
+base="Tarven-Desktop-$version-$build"
 files=("$output/$base-amd64.deb" "$output/$base-x86_64.rpm"
   "$output/$base-x86_64.pkg.tar.zst" "$output/$base-x86_64.flatpak"
   "$output/$base-arm64.deb" "$output/$base-aarch64.rpm" "$output/$base-aarch64.pkg.tar.zst")
@@ -64,31 +64,31 @@ files+=("$checksums")
 # (docs/LINUX_UPDATE_SIGNING.md). The secret key stays on this Mac and never goes to GitHub.
 command -v minisign >/dev/null \
   || { echo "Install minisign (brew install minisign) to sign the release." >&2; exit 1; }
-signing_key="${AURELIA_MINISIGN_SECRET_KEY:-$HOME/.minisign/aurelia-linux.key}"
+signing_key="${TARVEN_MINISIGN_SECRET_KEY:-$HOME/.minisign/tarven-linux.key}"
 [ -s "$signing_key" ] \
   || { echo "Missing the minisign secret key $signing_key; see docs/LINUX_UPDATE_SIGNING.md." >&2; exit 1; }
 public_key=$(sed -n 's/.*SigningPublicKey = "\([A-Za-z0-9+\/=]*\)";.*/\1/p' \
-  "$repository_root/clients/linux/Aurelia.Linux.Core/Updates/UpdateFeed.cs")
+  "$repository_root/clients/linux/Tarven.Linux.Core/Updates/UpdateFeed.cs")
 [ -n "$public_key" ] \
   || { echo "UpdateFeed.SigningPublicKey is empty; the app could not check this signature." >&2; exit 1; }
 rm -f "$checksums.minisig"
 channel=stable
-if [ "${AURELIA_RELEASE_BETA:-false}" = true ]; then channel=beta; fi
+if [ "${TARVEN_RELEASE_BETA:-false}" = true ]; then channel=beta; fi
 # The channel and repository are part of the signed comment: a beta cannot be passed off as
 # stable, nor a release moved to another repository, without the secret key (audit C-L14).
 # Promoting a beta signs its SHA256SUMS again for the stable channel.
 minisign -S -s "$signing_key" -m "$checksums" -x "$checksums.minisig" \
-  -t "Aurelia for Linux $version ($build) channel=$channel repository=$repository"
+  -t "Tarven for Linux $version ($build) channel=$channel repository=$repository"
 # Check with the exact key the published app carries, before anything is uploaded.
 minisign -V -P "$public_key" -m "$checksums" -x "$checksums.minisig" >/dev/null \
   || { echo "The signature does not match the app's public key; nothing was uploaded." >&2; exit 1; }
 files+=("$checksums.minisig")
-notes_file="${AURELIA_RELEASE_NOTES:-$other_root/Release Notes/$tag.md}"
+notes_file="${TARVEN_RELEASE_NOTES:-$other_root/Release Notes/$tag.md}"
 [ -s "$notes_file" ] || { echo "Write the Linux desktop release notes to $notes_file first." >&2; exit 1; }
 rendered_notes=$(mktemp)
 trap 'rm -f "$rendered_notes"' EXIT
-beta=${AURELIA_RELEASE_BETA:-false}
-title="Aurelia for Linux $version ($build)"
+beta=${TARVEN_RELEASE_BETA:-false}
+title="Tarven for Linux $version ($build)"
 if [ "$beta" = true ]; then title="$title Beta"; fi
 {
   if [ "$beta" = true ]; then cat "$repository_root/scripts/beta-notice.md"; printf '\n'; fi
@@ -139,9 +139,9 @@ gh release edit "$tag" --notes-file "$notes_file" --draft=false --latest=false -
 gh api "repos/$repository/releases/$release_id" > "$verification/release.json"
 jq -e --arg tag "$tag" '.tag_name == $tag and .draft == false and (.assets | length) == 9' \
   "$verification/release.json" >/dev/null
-echo "Published Aurelia for Linux $version ($build): $(jq -r .html_url "$verification/release.json")"
+echo "Published Tarven for Linux $version ($build): $(jq -r .html_url "$verification/release.json")"
 echo "Download verification receipts: $verification"
-if [ "${AURELIA_KEEP_LOCAL_BUILDS:-0}" != 1 ]; then
+if [ "${TARVEN_KEEP_LOCAL_BUILDS:-0}" != 1 ]; then
   rm -rf -- "$output"
   echo "Removed the local build output; the verified release is on GitHub."
 fi

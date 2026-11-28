@@ -1,4 +1,4 @@
-# Aurelia for Linux: Flatpak components
+# Tarven for Linux: Flatpak components
 
 The Flatpak includes libVLC 3.0.24 and its dynamically loaded plugins from VideoLAN. libVLC is
 licensed under LGPL 2.1 or later; VLC also contains GPL 2 or later components. Both complete
@@ -17,11 +17,11 @@ It includes libass 0.17.5 (ISC), libebml 1.4.5 (LGPL 2.1 or later) and libmatros
 - https://dl.matroska.org/downloads/libmatroska/libmatroska-1.7.1.tar.xz
 
 The exact module versions, SHA-256 hashes and configuration options are versioned in
-`clients/linux/packaging/flatpak/` in Aurelia's source archive. Library binaries may
+`clients/linux/packaging/flatpak/` in Tarven's source archive. Library binaries may
 be replaced in a rebuilt Flatpak using that manifest. These notices do not choose a license
-for Aurelia's own source. The Freedesktop runtime is installed separately by Flatpak.
+for Tarven's own source. The Freedesktop runtime is installed separately by Flatpak.
 
 The source patches in that folder are part of the build recipe. They preserve compiler
 hardening, update dependency APIs, and correct the checked error paths described in each
 patch. The build omits VLC's desktop controls, discovery services, capture inputs and music
-visualizers because Aurelia supplies its own interface and server connection.
+visualizers because Tarven supplies its own interface and server connection.

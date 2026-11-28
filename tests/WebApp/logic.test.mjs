@@ -2,9 +2,9 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import * as logic from "../../src/Aurelia.Server/WebApp/js/logic.js";
+import * as logic from "../../src/Tarven.Server/WebApp/js/logic.js";
 
-test("a PIN is 4 to 8 digits, like on every other Aurelia device", () => {
+test("a PIN is 4 to 8 digits, like on every other Tarven device", () => {
   assert.equal(logic.isPin("1234"), true);
   assert.equal(logic.isPin("12345678"), true);
   assert.equal(logic.isPin("123"), false);
@@ -553,7 +553,7 @@ test("a speech job's line says how far the server is", () => {
 });
 
 test("the server policy keeps numbers in range and refuses impossible combinations", async () => {
-  const { serverPolicyDraft } = await import("../../src/Aurelia.Server/WebApp/js/logic.js");
+  const { serverPolicyDraft } = await import("../../src/Tarven.Server/WebApp/js/logic.js");
   const stored = { deviceSessionDays: 30, globalStreamLimit: 8, userStreamLimit: 4, reconciliationMinutes: 360, maintenanceStartHour: 0,
     maintenanceEndHour: 24, jobQueueLimit: 1000, backupIntervalHours: 24, dailyBackupsRetained: 7, weeklyBackupsRetained: 4,
     eventRetentionDays: 30, maximumEvents: 1000, revision: 5 };

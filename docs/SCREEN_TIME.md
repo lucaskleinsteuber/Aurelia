@@ -1,7 +1,7 @@
 # Screen time for children's profiles
 
 Parents can give a children's profile a bedtime and a daily limit. When the time is up,
-Aurelia does not start the next episode and ends with a calm good-night screen instead.
+Tarven does not start the next episode and ends with a calm good-night screen instead.
 
 ## Setting it up
 

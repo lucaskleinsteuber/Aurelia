@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 test("every block in app.css closes, so no rule falls into the wrong media query", () => {
-  const css = readFileSync(new URL("../../src/Aurelia.Server/WebApp/app.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const css = readFileSync(new URL("../../src/Tarven.Server/WebApp/app.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
   let depth = 0, line = 1;
   for (const character of css) {
     if (character === "\n") line++;
@@ -21,12 +21,12 @@ test("every block in app.css closes, so no rule falls into the wrong media query
 });
 
 test("text fields inside vertical editor fields do not collapse under flex: 1", () => {
-  const css = readFileSync(new URL("../../src/Aurelia.Server/WebApp/app.css", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../../src/Tarven.Server/WebApp/app.css", import.meta.url), "utf8");
   assert.match(css, /\.editor-field\s+\.text-field[^{]*\{[^}]*flex:\s*(?:none|0\s+0\s+auto)/);
 });
 
 test("palette color swatches keep their gradient backgrounds and increased-contrast + skip-link rules exist", () => {
-  const css = readFileSync(new URL("../../src/Aurelia.Server/WebApp/app.css", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../../src/Tarven.Server/WebApp/app.css", import.meta.url), "utf8");
   assert.doesNotMatch(css, /\.picture-choice,\s*\.palette-choice\s*\{[^}]*background:\s*none/);
   assert.match(css, /\.statistics-body\s*\{[^}]*padding:\s*0\s+var\(--gutter\)/);
   assert.match(css, /\.skip-link\s*\{/);
@@ -34,7 +34,7 @@ test("palette color swatches keep their gradient backgrounds and increased-contr
 });
 
 test("path containers preserve repeated spaces and sidebar resize handle has a keyboard focus style", () => {
-  const css = readFileSync(new URL("../../src/Aurelia.Server/WebApp/app.css", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../../src/Tarven.Server/WebApp/app.css", import.meta.url), "utf8");
   assert.match(css, /\.mono\s*\{[^}]*white-space:\s*pre-wrap/);
   assert.match(css, /\.import-path\s*\{[^}]*white-space:\s*pre-wrap/);
   assert.match(css, /\.health-file\s*\{[^}]*white-space:\s*pre-wrap/);

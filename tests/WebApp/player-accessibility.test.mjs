@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import * as logic from "../../src/Aurelia.Server/WebApp/js/logic.js";
-import { Player } from "../../src/Aurelia.Server/WebApp/js/player.js";
+import * as logic from "../../src/Tarven.Server/WebApp/js/logic.js";
+import { Player } from "../../src/Tarven.Server/WebApp/js/player.js";
 import { installDOM } from "./dom-fixture.mjs";
 
 test("timeline and volume value texts format accessible values", () => {

@@ -1,4 +1,4 @@
-From: Aurelia contributors
+From: Tarven contributors
 Subject: Fix VLC core buffer sizes, FIFO access and current toolchain diagnostics
 
 Keep borrowed input pointers const, allocate terminators for C-string lookup tables,

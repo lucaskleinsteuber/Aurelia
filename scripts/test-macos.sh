@@ -7,32 +7,32 @@ source "$repository_root/scripts/workspace-paths.sh"
 /bin/sh "$repository_root/scripts/prune-workspace.sh" || true
 # Unformatted Swift fails here, before anything is built (scripts/check-swift-format.sh).
 bash "$repository_root/scripts/check-swift-format.sh"
-runtime_parent="$HOME/Library/Caches/Aurelia/TestRuns"
+runtime_parent="$HOME/Library/Caches/Tarven/TestRuns"
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 runtime_root="$runtime_parent/$run_id"
 derived_data="$runtime_root/DerivedData"
-temporary_unit_result="$runtime_root/Aurelia-Unit.xcresult"
-temporary_ui_result="$runtime_root/Aurelia-UI.xcresult"
+temporary_unit_result="$runtime_root/Tarven-Unit.xcresult"
+temporary_ui_result="$runtime_root/Tarven-UI.xcresult"
 temporary_log="$runtime_root/xcodebuild.log"
 result_root="$other_root/Test Results"
 log_root="$other_root/Logs"
-final_unit_result="$result_root/Aurelia-macOS-Unit-$run_id.xcresult"
-final_ui_result="$result_root/Aurelia-macOS-UI-$run_id.xcresult"
-final_log="$log_root/Aurelia-macOS-$run_id.log"
-unit_test_filter="${AURELIA_UNIT_TEST_FILTER:-AureliaTests}"
-unit_test_exclusions=(-skip-testing:AureliaTests/PlaybackFullChainTests)
+final_unit_result="$result_root/Tarven-macOS-Unit-$run_id.xcresult"
+final_ui_result="$result_root/Tarven-macOS-UI-$run_id.xcresult"
+final_log="$log_root/Tarven-macOS-$run_id.log"
+unit_test_filter="${TARVEN_UNIT_TEST_FILTER:-TarvenTests}"
+unit_test_exclusions=(-skip-testing:TarvenTests/PlaybackFullChainTests)
 
-if [[ "${AURELIA_LOGIC_ONLY:-0}" == "1" ]]; then
+if [[ "${TARVEN_LOGIC_ONLY:-0}" == "1" ]]; then
   # Keep native engines, decoder/rendering probes and optional live-server credentials out
   # of this explicit logic-only run. Controller/transport tests with injected fakes remain.
-  if [[ "$unit_test_filter" != AureliaTests && "$unit_test_filter" != AureliaTests/* ]]; then
-    print -u2 "Logic-only runs must select AureliaTests, not a UI test target."
+  if [[ "$unit_test_filter" != TarvenTests && "$unit_test_filter" != TarvenTests/* ]]; then
+    print -u2 "Logic-only runs must select TarvenTests, not a UI test target."
     exit 1
   fi
   for suite in PlaybackEngineReliabilityTests PlaybackStartTests PlayerComfortTests \
-    ScrubPreviewTests AureliaIntegrationTests ImportPlanningTests MetadataEditorTests \
+    ScrubPreviewTests TarvenIntegrationTests ImportPlanningTests MetadataEditorTests \
     ServerSettingsRenderTests PlayerFullScreenKeyboardTests; do
-    unit_test_exclusions+=("-skip-testing:AureliaTests/$suite")
+    unit_test_exclusions+=("-skip-testing:TarvenTests/$suite")
   done
 fi
 
@@ -41,7 +41,7 @@ mkdir -p "$runtime_root" "$result_root" "$log_root"
 stop_test_hosts() {
   # Never stop the installed app or another task's host. Only this run owns these PIDs.
   local test_pid test_command
-  for test_pid in $(pgrep -x Aurelia 2>/dev/null || true) $(pgrep -x AureliaUITests-Runner 2>/dev/null || true); do
+  for test_pid in $(pgrep -x Tarven 2>/dev/null || true) $(pgrep -x TarvenUITests-Runner 2>/dev/null || true); do
     test_command=$(ps -p "$test_pid" -o comm= 2>/dev/null || true)
     if [[ "$test_command" == "$runtime_root/"* ]]; then
       kill -TERM "$test_pid" 2>/dev/null || true
@@ -71,8 +71,8 @@ stop_test_hosts
 "$repository_root/scripts/prepare-vlckit.sh"
 
 DEVELOPER_DIR="$developer_dir" xcodebuild \
-  -project "$repository_root/clients/macos/Aurelia.xcodeproj" \
-  -scheme Aurelia \
+  -project "$repository_root/clients/macos/Tarven.xcodeproj" \
+  -scheme Tarven \
   -destination "platform=macOS,arch=$(uname -m)" \
   -derivedDataPath "$derived_data" \
   -enableCodeCoverage NO \
@@ -83,7 +83,7 @@ DEVELOPER_DIR="$developer_dir" xcodebuild \
 # copy embedded in the host. XCFramework processing leaves that standalone
 # copy unsigned, so use this run's already signed embedded copy for both paths.
 # Never re-sign or modify the shared vendor framework or the installed app.
-embedded_vlc="$derived_data/Build/Products/Debug/Aurelia.app/Contents/Frameworks/VLCKit.framework"
+embedded_vlc="$derived_data/Build/Products/Debug/Tarven.app/Contents/Frameworks/VLCKit.framework"
 test_vlc="$derived_data/Build/Products/Debug/VLCKit.framework"
 if [[ ! -d "$embedded_vlc" || ! -d "$test_vlc" || -L "$test_vlc" ]]; then
   print -u2 "The test host's isolated VLC framework copies are missing or unsafe."
@@ -93,10 +93,10 @@ fi
 /usr/bin/ditto "$embedded_vlc" "$test_vlc"
 /usr/bin/codesign --verify --strict "$test_vlc"
 
-TEST_RUNNER_AURELIA_PLAYBACK_SOAK_SECONDS="${AURELIA_PLAYBACK_SOAK_SECONDS:-15}" \
+TEST_RUNNER_TARVEN_PLAYBACK_SOAK_SECONDS="${TARVEN_PLAYBACK_SOAK_SECONDS:-15}" \
 DEVELOPER_DIR="$developer_dir" xcodebuild \
-  -project "$repository_root/clients/macos/Aurelia.xcodeproj" \
-  -scheme Aurelia \
+  -project "$repository_root/clients/macos/Tarven.xcodeproj" \
+  -scheme Tarven \
   -destination "platform=macOS,arch=$(uname -m)" \
   -derivedDataPath "$derived_data" \
   -resultBundlePath "$temporary_unit_result" \
@@ -108,15 +108,15 @@ DEVELOPER_DIR="$developer_dir" xcodebuild \
 
 stop_test_hosts
 
-if [[ "${AURELIA_SKIP_UI_TESTS:-0}" != "1" && "${AURELIA_LOGIC_ONLY:-0}" != "1" ]]; then
-  # AURELIA_UI_TEST_FILTER takes one or more comma-separated test identifiers.
+if [[ "${TARVEN_SKIP_UI_TESTS:-0}" != "1" && "${TARVEN_LOGIC_ONLY:-0}" != "1" ]]; then
+  # TARVEN_UI_TEST_FILTER takes one or more comma-separated test identifiers.
   ui_test_filters=()
-  for filter in "${(@s:,:)${AURELIA_UI_TEST_FILTER:-AureliaUITests}}"; do
+  for filter in "${(@s:,:)${TARVEN_UI_TEST_FILTER:-TarvenUITests}}"; do
     ui_test_filters+=("-only-testing:$filter")
   done
   DEVELOPER_DIR="$developer_dir" xcodebuild \
-    -project "$repository_root/clients/macos/Aurelia.xcodeproj" \
-    -scheme Aurelia \
+    -project "$repository_root/clients/macos/Tarven.xcodeproj" \
+    -scheme Tarven \
     -destination "platform=macOS,arch=$(uname -m)" \
     -derivedDataPath "$derived_data" \
     -resultBundlePath "$temporary_ui_result" \

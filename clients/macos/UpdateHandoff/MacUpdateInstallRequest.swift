@@ -27,7 +27,7 @@ struct MacUpdateInstallRequest: Codable, Equatable, Sendable {
 
   static func updatesDirectory() -> URL? {
     FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)?
-      .appendingPathComponent("Library/Caches/Aurelia/Updates", isDirectory: true)
+      .appendingPathComponent("Library/Caches/Tarven/Updates", isDirectory: true)
   }
 
   static func prepare(image: URL, build: Int, appPID: Int32, root: URL, now: Date = Date()) throws
@@ -50,7 +50,7 @@ struct MacUpdateInstallRequest: Codable, Equatable, Sendable {
       now.timeIntervalSince(createdAt) < 120, imageName.utf8.count <= 160,
       imageName.range(
         of:
-          "\\AAurelia-(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)-\(build)-macOS-(universal|arm64|x64)\\.dmg\\z",
+          "\\ATarven-(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)-\(build)-macOS-(universal|arm64|x64)\\.dmg\\z",
         options: .regularExpression) != nil
     else { throw Failure.invalidRequest }
     let directory = root.appendingPathComponent(directory.uuidString, isDirectory: true)

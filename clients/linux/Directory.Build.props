@@ -1,10 +1,10 @@
 <Project>
-  <!-- Aurelia for Linux is its own product with its own version and build counter (see AGENTS.md). -->
+  <!-- Tarven for Linux is its own product with its own version and build counter (see AGENTS.md). -->
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
   <PropertyGroup>
-    <AureliaLinuxBuildNumber>45</AureliaLinuxBuildNumber>
+    <TarvenLinuxBuildNumber>45</TarvenLinuxBuildNumber>
     <Version>2.16.0</Version>
-    <FileVersion>2.16.0.$(AureliaLinuxBuildNumber)</FileVersion>
-    <InformationalVersion>2.16.0+build.$(AureliaLinuxBuildNumber)</InformationalVersion>
+    <FileVersion>2.16.0.$(TarvenLinuxBuildNumber)</FileVersion>
+    <InformationalVersion>2.16.0+build.$(TarvenLinuxBuildNumber)</InformationalVersion>
   </PropertyGroup>
 </Project>

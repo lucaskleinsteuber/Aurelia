@@ -15,7 +15,7 @@ While the test mode was enabled on Mac or is enabled on Linux, the clients do no
 Release metadata, checksums and packages must belong to the selected repository.
 Redirects retain no Authorization or Cookie headers. The bounded Linux diagnostic
 records only host and whether Authorization is present; Mac records that boolean in
-the `com.lucas.aurelia.media` / `UpdateTest` log. Neither records tokens or signed URLs.
+the `org.tarven.mac` / `UpdateTest` log. Neither records tokens or signed URLs.
 
 Mac caches a validated release body together with its ETag per repository. A 304
 reuses that release; without a usable body it retries without a validator. Linux
@@ -89,7 +89,7 @@ See Apple's [background-process rules](https://developer.apple.com/documentation
 
 `scripts/test-update-worker.sh --build-only` compiles the optimized, signed synthetic
 fixture without executing UI. A full run requires explicit per-run approval, then
-`AURELIA_UPDATE_UI_TESTS=1`; it shows temporary installer/test-app windows and checks
+`TARVEN_UPDATE_UI_TESTS=1`; it shows temporary installer/test-app windows and checks
 survival, real DMG mount, identity/team/build/signature validation, replacement,
 automatic relaunch, and the new app remaining alive after the installer exits.
 It uses no automated input, personal App Group, server, library or media. The approved
@@ -99,7 +99,7 @@ installer status for build 132. After that historical test the main repository w
 temporarily returned to private; as noted at the top of this document, the owner
 later made it public permanently.
 
-The Aurelia menu’s Check for Updates command is available before profile unlock
+The Tarven menu’s Check for Updates command is available before profile unlock
 and while the server is unreachable. Local update settings skip server administration
 requests and errors. The optional profile session close request is bounded to two
 seconds during an update.

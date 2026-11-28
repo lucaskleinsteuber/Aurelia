@@ -3,11 +3,11 @@
 # Build and test scripts call this before they write anything new. It keeps:
 #   - the newest numbered Mac builds ("Build <n>", "Build <n> x64", "Build <n> Test", "Build <n> Test x64")
 #     and the newest tvOS, iOS, iPad, Linux server, Linux app and notarized Releases outputs
-#     (AURELIA_KEEP_BUILDS, default 1 each); every release is on GitHub;
+#     (TARVEN_KEEP_BUILDS, default 1 each); every release is on GitHub;
 #   - .NET configurations/frameworks/RIDs used in the last seven days, for incremental builds;
 #     shared restore files at the project level stay. Older whole units are pruned only while
 #     no .NET build/test tool or executable from this build cache is running;
-#   - the newest test result bundles (AURELIA_KEEP_TEST_RESULTS, default 10);
+#   - the newest test result bundles (TARVEN_KEEP_TEST_RESULTS, default 10);
 #   - logs from the last 30 days;
 #   - one-off output in Build/ and test run folders from the last day, so a run in progress is
 #     never touched.
@@ -16,9 +16,9 @@ set -eu
 
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$repository_root/scripts/workspace-paths.sh"
-keep_builds=${AURELIA_KEEP_BUILDS:-1}
-keep_results=${AURELIA_KEEP_TEST_RESULTS:-10}
-dotnet_days=${AURELIA_DOTNET_CACHE_DAYS:-7}
+keep_builds=${TARVEN_KEEP_BUILDS:-1}
+keep_results=${TARVEN_KEEP_TEST_RESULTS:-10}
+dotnet_days=${TARVEN_DOTNET_CACHE_DAYS:-7}
 dry_run=false
 workspace_only=false
 for option do
@@ -114,7 +114,7 @@ old_entries() {
 
 dotnet_is_busy() {
   # Executable names only: process arguments can contain credentials. Long-lived installed
-  # Aurelia servers do not block cleanup; only an executable inside this build cache does.
+  # Tarven servers do not block cleanup; only an executable inside this build cache does.
   processes=$(ps -A -o pid=,comm= 2>/dev/null) || return 0
   if printf '%s\n' "$processes" | awk -v cache="$other_root/Build/" '
     { path=$0; sub(/^[[:space:]]*[0-9]+[[:space:]]+/, "", path); name=path; sub(/^.*\//, "", name)
@@ -122,7 +122,7 @@ dotnet_is_busy() {
     END { exit !busy }'; then return 0; fi
   # Linux ps reports a basename for comm. Resolve only server executable links, never argv.
   if [ -d /proc ]; then
-    server_pids=$(printf '%s\n' "$processes" | awk '$2 ~ /^Aurelia\.Server/ { print $1 }')
+    server_pids=$(printf '%s\n' "$processes" | awk '$2 ~ /^Tarven\.Server/ { print $1 }')
     for server_pid in $server_pids; do
       executable=$(readlink "/proc/$server_pid/exe" 2>/dev/null) || continue
       case "$executable" in "$other_root/Build/"*) return 0 ;; esac
@@ -207,7 +207,7 @@ if real_directory "$other_root/Logs"; then
 fi
 
 if ! "$workspace_only" && [ "$(uname -s)" = Darwin ]; then
-  for runs in "$HOME/Library/Caches/Aurelia/TestRuns" /private/tmp/Aurelia; do
+  for runs in "$HOME/Library/Caches/Tarven/TestRuns" /private/tmp/Tarven; do
     old_entries "$runs" 0
   done
 fi

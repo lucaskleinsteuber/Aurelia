@@ -1,12 +1,12 @@
-# Contributing to Aurelia
+# Contributing to Tarven
 
-Thank you for helping. Aurelia is maintained by one person in their free time, so clear reports
+Thank you for helping. Tarven is maintained by one person in their free time, so clear reports
 and focused changes help the most.
 
 ## Questions and problems
 
 - Look in the [guides](docs/README.md) and [Troubleshooting](docs/TROUBLESHOOTING.md) first.
-- Search the [issues](https://github.com/lucaskleinsteuber/Aurelia/issues) before opening a new one.
+- Search the [issues](https://github.com/lucaskleinsteuber/Tarven/issues) before opening a new one.
 - Use the **Bug report** or **Feature request** form. Name the app, its version
   (*Settings › About*) and your system.
 - Never post passwords, pairing codes, tokens, real media paths or other private information.
@@ -21,12 +21,12 @@ The repository holds:
 
 | Folder | What | Language |
 | --- | --- | --- |
-| `src/Aurelia.Server` | The server and the browser app (`WebApp`, plain HTML, CSS and JavaScript) | C# / .NET 10 |
-| `src/Aurelia.Contracts` | Requests and responses shared by the server and the Linux app | C# |
-| `clients/macos` | Aurelia for Mac | Swift / SwiftUI |
-| `clients/linux` | Aurelia for Linux | C# / Avalonia |
-| `clients/tvos` | Aurelia for Apple TV | Swift / SwiftUI |
-| `clients/ios` | Aurelia for iPhone and iPad | Swift / SwiftUI |
+| `src/Tarven.Server` | The server and the browser app (`WebApp`, plain HTML, CSS and JavaScript) | C# / .NET 10 |
+| `src/Tarven.Contracts` | Requests and responses shared by the server and the Linux app | C# |
+| `clients/macos` | Tarven for Mac | Swift / SwiftUI |
+| `clients/linux` | Tarven for Linux | C# / Avalonia |
+| `clients/tvos` | Tarven for Apple TV | Swift / SwiftUI |
+| `clients/ios` | Tarven for iPhone and iPad | Swift / SwiftUI |
 | `packaging` | Linux server packages and Docker | Shell |
 | `scripts` | Building, testing and releasing | Shell |
 | `tests` | Server and browser app tests | C# / JavaScript |
@@ -46,13 +46,13 @@ The most important ones:
 Use the pinned SDKs; the scripts find them. Run the checks for what you changed:
 
 ```sh
-dotnet format Aurelia.slnx --verify-no-changes   # server formatting
-dotnet build Aurelia.slnx -c Release             # server, warning-free
-dotnet test Aurelia.slnx -c Release              # server tests
+dotnet format Tarven.slnx --verify-no-changes   # server formatting
+dotnet build Tarven.slnx -c Release             # server, warning-free
+dotnet test Tarven.slnx -c Release              # server tests
 zsh scripts/test-server-benchmarks.sh            # server benchmarks: time and query limits, before every server version
 node --test "tests/WebApp/*.test.mjs"            # browser app
 zsh scripts/test-linux-app.sh                    # Linux app (headless, no screen needed)
-AURELIA_LOGIC_ONLY=1 zsh scripts/test-macos.sh   # Mac app without UI tests
+TARVEN_LOGIC_ONLY=1 zsh scripts/test-macos.sh   # Mac app without UI tests
 zsh scripts/test-tvos-logic.sh                   # Apple TV logic
 zsh scripts/test-ios-logic.sh && zsh scripts/build-ios.sh   # iPhone and iPad
 ```

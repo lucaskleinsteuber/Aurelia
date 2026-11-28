@@ -12,12 +12,12 @@ import { installCaptureMedia } from "../../scripts/web-showcase-media.mjs";
 async function testRoot(prefix) {
   const cache = process.platform === "darwin" ? join(homedir(), "Library", "Caches")
     : process.env.XDG_CACHE_HOME || join(homedir(), ".cache");
-  const parent = join(cache, "Aurelia", "TestRuns");
+  const parent = join(cache, "Tarven", "TestRuns");
   await mkdir(parent, { recursive: true });
   return mkdtemp(join(parent, prefix));
 }
 async function fixture(t) {
-  const root = await testRoot("aurelia-web-showcase-test-");
+  const root = await testRoot("tarven-web-showcase-test-");
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, "web")); await mkdir(join(root, "showcase/items"), { recursive: true }); await mkdir(join(root, "showcase/artwork"));
   await writeFile(join(root, "web/index.html"), "<html>Invented fixture only</html>");
@@ -39,7 +39,7 @@ test("fixture refuses linked web assets instead of reading outside its explicit 
   await assert.rejects(startShowcaseFixture(paths), /symbolic links/);
 });
 test("capture media intercepts src, load and play before any native media implementation can run", async (t) => {
-  const keys = ["Date", "HTMLMediaElement", "HTMLVideoElement", "MediaSource", "ManagedMediaSource", "fetch", "location", "__aureliaCaptureMedia"];
+  const keys = ["Date", "HTMLMediaElement", "HTMLVideoElement", "MediaSource", "ManagedMediaSource", "fetch", "location", "__tarvenCaptureMedia"];
   const prior = keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]);
   t.after(() => { for (const [key, descriptor] of prior) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; } });
   class Media extends EventTarget {
@@ -53,20 +53,20 @@ test("capture media intercepts src, load and play before any native media implem
   const video = new Video(); video.src = "/not-a-real-video"; video.load(); await video.play(); video.pause(); video.currentTime = 123; await Promise.resolve();
   assert.equal(video.paused, true); assert.equal(video.duration, 2880); assert.equal(video.currentTime, 123); assert.equal(video.poster, "http://127.0.0.1:1234/generated.jpg");
   assert.equal(Date.now(), 1234567890000); assert.equal(globalThis.MediaSource, undefined);
-  assert.deepEqual(globalThis.__aureliaCaptureMedia, { simulatedPlayCalls: 1, simulatedLoadCalls: 1 });
+  assert.deepEqual(globalThis.__tarvenCaptureMedia, { simulatedPlayCalls: 1, simulatedLoadCalls: 1 });
 });
 
 test("canceling the wrapper terminates its capture child and removes only its unique fixture folder", async (t) => {
-  const root = await testRoot("aurelia-web-capture-cancel-");
+  const root = await testRoot("tarven-web-capture-cancel-");
   t.after(() => rm(root, { recursive: true, force: true }));
   const bin = join(root, "bin"); await mkdir(bin);
   const swift = join(bin, "swift"), node = join(bin, "node");
-  await writeFile(swift, '#!/bin/sh\nprintf "%s\\n" "$2" > "$AURELIA_CAPTURE_FIXTURE_TRACE"\n');
-  await writeFile(node, '#!/bin/sh\nif [ "$2" = "--check" ]; then exit 0; fi\nprintf "%s\\n" "$$" > "$AURELIA_CAPTURE_PID_TRACE"\nexec sleep 30\n');
+  await writeFile(swift, '#!/bin/sh\nprintf "%s\\n" "$2" > "$TARVEN_CAPTURE_FIXTURE_TRACE"\n');
+  await writeFile(node, '#!/bin/sh\nif [ "$2" = "--check" ]; then exit 0; fi\nprintf "%s\\n" "$$" > "$TARVEN_CAPTURE_PID_TRACE"\nexec sleep 30\n');
   await chmod(swift, 0o700); await chmod(node, 0o700);
   const fixtureTrace = join(root, "fixture"), pidTrace = join(root, "pid");
   const script = fileURLToPath(new URL("../../scripts/capture-web-showcase.sh", import.meta.url));
-  const child = spawn("sh", [script], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, AURELIA_NODE: node, AURELIA_OTHER_ROOT: join(root, "Local"), AURELIA_CAPTURE_FIXTURE_TRACE: fixtureTrace, AURELIA_CAPTURE_PID_TRACE: pidTrace }, stdio: "ignore" });
+  const child = spawn("sh", [script], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TARVEN_NODE: node, TARVEN_OTHER_ROOT: join(root, "Local"), TARVEN_CAPTURE_FIXTURE_TRACE: fixtureTrace, TARVEN_CAPTURE_PID_TRACE: pidTrace }, stdio: "ignore" });
   t.after(() => { if (child.exitCode == null) child.kill("SIGTERM"); });
   let capturePID;
   for (let attempt = 0; attempt < 200; attempt++) {
@@ -82,7 +82,7 @@ test("canceling the wrapper terminates its capture child and removes only its un
 });
 
 test("the approved web-only entrypoint dispatches before any native workspace or UI command", async (t) => {
-  const root = await testRoot("aurelia-web-showcase-route-");
+  const root = await testRoot("tarven-web-showcase-route-");
   t.after(() => rm(root, { recursive: true, force: true }));
   const scripts = join(root, "scripts"); await mkdir(scripts);
   const wrapper = fileURLToPath(new URL("../../scripts/capture-showcase.sh", import.meta.url));

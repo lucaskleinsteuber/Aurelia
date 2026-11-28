@@ -39,13 +39,13 @@ to the selected leveling mode. Other preferences and track choices remain intact
 Each native client has one configuration that owns the full `compressor:equalizer` chain.
 The public libVLC equalizer API sets band gains, but also replaces both the player's
 and active output's audio-filter string. Merely setting an equalizer after enabling
-compression would remove the compressor. Aurelia restores the complete chain and
+compression would remove the compressor. Tarven restores the complete chain and
 recreates the audio output before opening the title. The browser player applies the same
 presets through Web Audio (`BiquadFilterNode` equalizer bands feeding a `DynamicsCompressorNode`,
 so equalization runs before compression in the browser).
 
 With compression Off, Dialogue Boost can change through the public equalizer API
-immediately. With compression active, or when changing compressor profiles, Aurelia
+immediately. With compression active, or when changing compressor profiles, Tarven
 reopens with the complete configuration and restores position, paused/playing state,
 rate and remembered audio/subtitle tracks. This avoids depending on private active
 output structures or silently dropping a filter.
@@ -55,7 +55,7 @@ modules. Missing support produces a visible message. Native Linux packages use t
 distribution's VLC 3; the Flatpak includes both modules and verifies their entry
 points and dependencies. The Apple bridges inspect the bundled VLC library.
 The Apple clients retain `.moviePlayback` for routes eligible for Apple's system
-dialogue enhancement; Aurelia does not change the user's system setting.
+dialogue enhancement; Tarven does not change the user's system setting.
 
 Audio is processed locally. Original media remains read-only; no converted audio
 or video copies are stored. These presets are starting points for the owner's

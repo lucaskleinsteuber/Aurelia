@@ -38,11 +38,11 @@ TMDB API tokens stay exclusively on the server. When TMDB is enabled, `/api/v1/w
 
 Clients use matching bounded caches so scrolling many wishes stays fast and memory-safe:
 
-- **Browser (`src/Aurelia.Server/WebApp/js/wishes.js`):** Bounded LRU object-URL cache whose blob URLs are revoked on eviction or when leaving a profile.
-- **macOS (`clients/macos/Aurelia/Networking/WishPosterCache.swift`, `Views/WishesPage.swift`):** `24 MiB` / `150`-entry encoded byte cache, `64 MiB` disk cache under `Caches/Aurelia/WishPosters`, and a `48 MiB` / `120`-item decoded image `NSCache`.
-- **Linux Desktop (`clients/linux/Aurelia.Linux.Core/Library/WishPosterCache.cs`, `Library/WishesPage.cs`):** `24 MiB` / `150`-entry LRU encoded byte cache, `64 MiB` disk cache, and bounded decoded bitmap cache.
-- **iPhone & iPad (`clients/ios/AureliaIOS/Core/IOSWishPosterCache.swift`, `Views/IOSWishesView.swift`):** `24 MiB` / `150`-entry encoded byte cache, `64 MiB` disk cache, and `48 MiB` / `120`-item ImageIO-downsampled `UIImage` cache.
-- **Apple TV (`clients/tvos/AureliaTV/Core/TVWishPosterCache.swift`, `Views/TVWishesView.swift`):** Read-only Wishes tab (`24 MiB` / `150`-entry encoded byte cache, `64 MiB` disk cache, `24 MiB` / `80`-item ImageIO-downsampled `UIImage` cache).
+- **Browser (`src/Tarven.Server/WebApp/js/wishes.js`):** Bounded LRU object-URL cache whose blob URLs are revoked on eviction or when leaving a profile.
+- **macOS (`clients/macos/Tarven/Networking/WishPosterCache.swift`, `Views/WishesPage.swift`):** `24 MiB` / `150`-entry encoded byte cache, `64 MiB` disk cache under `Caches/Tarven/WishPosters`, and a `48 MiB` / `120`-item decoded image `NSCache`.
+- **Linux Desktop (`clients/linux/Tarven.Linux.Core/Library/WishPosterCache.cs`, `Library/WishesPage.cs`):** `24 MiB` / `150`-entry LRU encoded byte cache, `64 MiB` disk cache, and bounded decoded bitmap cache.
+- **iPhone & iPad (`clients/ios/TarvenIOS/Core/IOSWishPosterCache.swift`, `Views/IOSWishesView.swift`):** `24 MiB` / `150`-entry encoded byte cache, `64 MiB` disk cache, and `48 MiB` / `120`-item ImageIO-downsampled `UIImage` cache.
+- **Apple TV (`clients/tvos/TarvenTV/Core/TVWishPosterCache.swift`, `Views/TVWishesView.swift`):** Read-only Wishes tab (`24 MiB` / `150`-entry encoded byte cache, `64 MiB` disk cache, `24 MiB` / `80`-item ImageIO-downsampled `UIImage` cache).
 
 ## Notifications and badges
 

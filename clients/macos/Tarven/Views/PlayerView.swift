@@ -1,0 +1,1986 @@
+import AVKit
+import AppKit
+import SwiftUI
+import UniformTypeIdentifiers
+
+struct PlayerView: View {
+  private let profile: StoredServerProfile
+  @EnvironmentObject private var model: AppModel
+  @StateObject private var controller: PlaybackController
+  @StateObject private var sceneNotes: SceneNotesController
+  @StateObject private var previews = ScrubPreviewController()
+  @State private var hoverPosition: Double?
+  @State private var notesPresented = false
+  @State private var upNextMedia: CatalogItemSummary?
+  @State private var notesNavigationRevision: UInt64 = 0
+  @ObservedObject private var preferencesStore = PlaybackPreferencesStore.shared
+  @State private var controlsVisible = true
+  @State private var isScrubbing = false
+  @State private var scrubPosition: Double = 0
+  @State private var previewControlsHeight: CGFloat?
+  @State private var hideTask: Task<Void, Never>?
+  @State private var windowPresentation = PlayerWindowPresentation()
+  @State private var fullScreenKeyboard = PlayerFullScreenKeyboard()
+  @State private var isNativeFullScreen = false
+  @State private var isPictureInPicture = false
+  @State private var isAdjustingVolume = false
+  @State private var controlsPolicy = PlayerControlsPolicy()
+  @FocusState private var focusedControl: String?
+  @StateObject private var cursor = PlayerCursorCoordinator()
+  @State private var confirmProgressReplacement = false
+  @State private var videoSize: CGSize = .zero
+  /// Cinema mode's ad and trailers, shown before the film starts.
+  @State private var preShow: CinemaPreShow?
+  @Environment(\.tarvenReduceMotion) private var reduceMotion
+  @Environment(\.tarvenReduceTransparency) private var reduceTransparency
+
+  init(profile: StoredServerProfile, presentation: PlaybackPresentation) {
+    self.profile = profile
+    _sceneNotes = StateObject(
+      wrappedValue: SceneNotesController(profile: profile, mediaId: presentation.mediaId))
+    #if DEBUG
+      if CinemaUITestFixture.playsSimulatedTitles {
+        _controller = StateObject(
+          wrappedValue: CinemaUITestFixture.player(profile: profile, presentation: presentation))
+        return
+      }
+    #endif
+    if let id = presentation.offlineID, let title = OfflineDownloads.shared.title(id) {
+      // A download plays through the same player, with the file and progress on this Mac.
+      let engine = VLCPlaybackEngine()
+      engine.profileScope = profile.user?.id ?? profile.serverId
+      _controller = StateObject(
+        wrappedValue: PlaybackController(
+          client: OfflinePlaybackClient(profile: profile, title: title),
+          presentation: presentation, engine: engine,
+          preferences: PlaybackPreferencesStore.shared.preferences,
+          relayFactory: { _, _ in OfflineFileRelay(title: title) }))
+      return
+    }
+    _controller = StateObject(
+      wrappedValue: PlaybackController(profile: profile, presentation: presentation))
+  }
+
+  var body: some View {
+    GeometryReader { geometry in
+      let viewport = geometry.size
+
+      ZStack {
+        Color.black
+          .frame(width: viewport.width, height: viewport.height)
+
+        PlayerVideoSurface(
+          controller: controller,
+          onInteraction: { revealControls() },
+          onPointer: { inside, moved in
+            updateCursorEnvironment()
+            cursor.pointer(inside: inside, physicallyMoved: moved)
+          },
+          onKeyDown: handleKey
+        )
+        .frame(width: viewport.width, height: viewport.height)
+        .onGeometryChange(for: CGSize.self) {
+          $0.size
+        } action: { size in
+          videoSize = size
+          controller.setVideoFill(preferencesStore.preferences.fillsScreen, size: size)
+        }
+        .onChange(of: preferencesStore.preferences.fillsScreen) { _, fills in
+          controller.setVideoFill(fills, size: videoSize)
+        }
+
+        if startScreenVisible {
+          PlayerStartScreen(reduceMotion: reduceMotion)
+            .frame(width: viewport.width, height: viewport.height)
+            .transition(.opacity)
+        }
+
+        if let preShow {
+          CinemaPreShowView(
+            show: preShow, reduceMotion: reduceMotion, onClose: { closePlayer() }
+          )
+          .frame(width: viewport.width, height: viewport.height)
+          .transition(.opacity)
+          // Moving the pointer shows it again over the pre-show, and it hides after a while.
+          .onContinuousHover { phase in
+            updateCursorEnvironment()
+            if case .active = phase {
+              cursor.pointer(inside: true, physicallyMoved: true)
+              revealControls()
+            } else {
+              cursor.pointer(inside: false, physicallyMoved: false)
+            }
+          }
+        }
+
+        if preShow == nil,
+          controlsVisible || controller.isPreparing || controller.errorMessage != nil
+        {
+          controls(in: viewport)
+            .frame(width: viewport.width, height: viewport.height)
+            .transition(.opacity)
+        }
+
+        if let upNext = controller.upNext, controller.errorMessage == nil {
+          upNextCard(upNext)
+            .padding(.trailing, 28)
+            .padding(.bottom, controlsVisible ? Self.overlayBottomWithControls : 40)
+            .frame(width: viewport.width, height: viewport.height, alignment: .bottomTrailing)
+            .transition(.opacity)
+        }
+
+        if controller.showsSuggestionCard, let first = controller.suggestions.first,
+          controller.errorMessage == nil
+        {
+          suggestionCard(first)
+            .padding(.trailing, 28)
+            .padding(.bottom, controlsVisible ? Self.overlayBottomWithControls : 40)
+            .frame(width: viewport.width, height: viewport.height, alignment: .bottomTrailing)
+            .transition(.opacity)
+        }
+
+        if controller.showsSuggestionEndScreen, !controller.suggestions.isEmpty {
+          suggestionEndScreen
+            .frame(width: viewport.width, height: viewport.height)
+            .transition(.opacity)
+        }
+
+        if let note = controller.lastTitleNote, controlsVisible, !controller.showsGoodNight {
+          Label(note, systemImage: "moon.fill")
+            .font(.callout.weight(.medium))
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
+            .padding(.top, 96)
+            .frame(width: viewport.width, height: viewport.height, alignment: .top)
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("player-last-title-note")
+        }
+
+        if controller.showsGoodNight {
+          goodNightScreen
+            .frame(width: viewport.width, height: viewport.height)
+            .transition(.opacity)
+        }
+
+        // Skip Intro stays in view while the intro plays, also after the controls have hidden.
+        if controller.showsSkipIntro, controller.upNext == nil, controller.errorMessage == nil,
+          preShow == nil
+        {
+          skipIntroButton
+            .padding(.trailing, 28)
+            .padding(.bottom, controlsVisible ? Self.overlayBottomWithControls : 40)
+            .frame(width: viewport.width, height: viewport.height, alignment: .bottomTrailing)
+            .transition(.opacity)
+        }
+
+        if let note = sceneNotes.cueText {
+          VStack {
+            HStack {
+              Spacer()
+              Text(note).font(.callout).lineLimit(6).padding(12).frame(
+                maxWidth: 320, alignment: .leading
+              )
+              .playerMaterial(
+                reduceTransparency: reduceTransparency,
+                shape: RoundedRectangle(cornerRadius: TarvenDesign.compactRadius)
+              )
+              .accessibilityIdentifier("scene-note-hint")
+            }
+            Spacer()
+          }
+          .padding(.trailing, 26).padding(.top, controlsVisible ? 96 : 32)
+          .allowsHitTesting(false)
+        }
+
+        Color.clear
+          .frame(width: 1, height: 1)
+          .accessibilityElement()
+          .accessibilityLabel("Native Player · \(controller.presentation.title)")
+          .accessibilityIdentifier("native-player")
+      }
+      .frame(width: viewport.width, height: viewport.height)
+      .animation(reduceMotion ? nil : .easeInOut(duration: 0.5), value: startScreenVisible)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: controller.upNext != nil)
+      .animation(
+        reduceMotion ? nil : .easeOut(duration: 0.3), value: controller.showsSuggestionCard
+      )
+      .animation(
+        reduceMotion ? nil : .easeOut(duration: 0.3), value: controller.showsSuggestionEndScreen
+      )
+      .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: controller.showsGoodNight)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: controller.showsSkipIntro)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .ignoresSafeArea()
+    .background(
+      PlayerWindowAccessor { window in
+        guard !cursor.isRetired else { return }
+        windowPresentation.apply(to: window)
+        isNativeFullScreen = window.styleMask.contains(.fullScreen)
+        fullScreenKeyboard.install(
+          on: window,
+          isBlocked: {
+            notesPresented || confirmProgressReplacement || model.isSettingsPresented
+              || controlsPolicy.holds.contains("diagnostics-export")
+              || controlsPolicy.holds.contains { $0.hasPrefix("menu-") }
+          }, onToggle: toggleFullScreen)
+        updateCursorEnvironment()
+      }
+    )
+    .preferredColorScheme(.dark)
+    .focusedSceneObject(episodeShortcutController)
+    .contextMenu {
+      Button("Export Playback Diagnostics…") { exportPlaybackDiagnostics() }
+        .accessibilityIdentifier("player-export-diagnostics")
+    }
+    .task {
+      PlaybackShutdownCoordinator.shared.register(controller)
+      if ProcessInfo.processInfo.environment["TARVEN_UI_TEST_MODE"] == nil {
+        let loader = model.artworkLoader
+        SystemMediaPlaybackCoordinator.shared.register(controller) { artwork in
+          try await loader.image(for: artwork, profile: profile, width: 640)
+        }
+      }
+      revealControls()
+      sceneNotes.reload()
+      await runPreShow()
+      guard !Task.isCancelled else { return }
+      await controller.start()
+    }
+    .onChange(of: controller.showsStartScreen) { _, waiting in
+      if !waiting { preShow?.filmStarted() }
+    }
+    .onDisappear {
+      preShow?.stop()
+      hideTask?.cancel()
+      sceneNotes.stop()
+      previews.reset()
+      cursor.retire()
+      fullScreenKeyboard.retire()
+      PlaybackShutdownCoordinator.shared.unregister(controller)
+      SystemMediaPlaybackCoordinator.shared.unregister(controller)
+      windowPresentation.restore()
+      model.reportPlayerPlaying(false)
+      Task { await controller.shutdown() }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) {
+      notification in
+      guard let window = notification.object as? NSWindow,
+        window === windowPresentation.window
+      else { return }
+      isNativeFullScreen = true
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) {
+      notification in
+      guard let window = notification.object as? NSWindow,
+        window === windowPresentation.window
+      else { return }
+      isNativeFullScreen = false
+    }
+    .onChange(of: controller.isPreparing) {
+      revealControls(scheduleHide: !controller.isPreparing)
+    }
+    .onChange(of: controller.errorMessage) {
+      revealControls(scheduleHide: controller.errorMessage == nil)
+    }
+    .onChange(of: controller.sleepTimerFinished) { _, finished in
+      if finished { closePlayer() }
+    }
+    .onChange(of: controller.suggestionToStart) { _, suggestion in
+      if let suggestion { playSuggestion(suggestion.item) }
+    }
+    .task(id: controller.wantsSuggestions) { await loadSuggestions() }
+    .onChange(of: controller.isPlaying) {
+      model.reportPlayerPlaying(controller.isPlaying)
+      if controller.isPlaying {
+        revealControls(scheduleHide: true)
+      } else if preShow == nil {
+        revealControls(scheduleHide: false)
+      }
+      advanceSceneNotes()
+    }
+    .onChange(of: controller.endHandled) { _, ended in
+      if ended { revealControls(scheduleHide: false) }
+    }
+    .onChange(of: controller.currentTimeMilliseconds) { advanceSceneNotes() }
+    .onChange(of: controller.navigationRevision) { advanceSceneNotes() }
+    .onChange(of: controller.presentation.mediaId) {
+      sceneNotes.changeMedia(controller.presentation.mediaId)
+      configurePreviews()
+    }
+    .onAppear { configurePreviews() }
+    .onChange(of: controller.previewSourceURL) { configurePreviews() }
+    .onChange(of: controller.durationMilliseconds) { configurePreviews() }
+    .onChange(of: model.libraryCapabilities) { configurePreviews() }
+    .onChange(of: previewPosition.map { previews.bucket(for: Int64($0)) }) {
+      if let position = previewPosition { previews.request(at: Int64(position)) }
+    }
+    .onReceive(model.$sceneNotesVersion.dropFirst()) { _ in sceneNotes.reload() }
+    .onChange(of: model.catalogVisibilityRevision) { sceneNotes.reload() }
+    .onChange(of: notesPresented) { interaction("scene-notes", active: notesPresented) }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification))
+    { _ in
+      suspendCursorHiding()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification))
+    { _ in
+      updateCursorEnvironment()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) {
+      notification in
+      if notification.object as? NSWindow === windowPresentation.window { suspendCursorHiding() }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) {
+      notification in
+      if notification.object as? NSWindow === windowPresentation.window { cursor.retire() }
+    }
+    .modifier(PlayerAudioPreferencesModifier(preferences: preferencesStore, controller: controller))
+    .onChange(of: preferencesStore.preferences.controlsAutoHideDelay) {
+      revealControls()
+    }
+    .onChange(of: focusedControl) { interaction("keyboard", active: focusedControl != nil) }
+    .onChange(of: confirmProgressReplacement) {
+      interaction("progress-confirmation", active: confirmProgressReplacement)
+    }
+    .alert("Replace the server playback position?", isPresented: $confirmProgressReplacement) {
+      Button("Use Current Position") { Task { await controller.useCurrentProgress() } }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text(
+        "Another device changed this title's progress. Use the position currently shown in this player instead? Your local draft remains saved if you cancel."
+      )
+    }
+  }
+
+  private func controls(in viewport: CGSize) -> some View {
+    let controlWidth = max(viewport.width - 96, 0)
+    let topInset: CGFloat = isNativeFullScreen ? 16 : 42
+    let bottomInset: CGFloat = isNativeFullScreen ? 34 : 24
+
+    return ZStack {
+      LinearGradient(
+        colors: [.black.opacity(0.42), .clear, .black.opacity(0.78)],
+        startPoint: .top,
+        endPoint: .bottom
+      )
+
+      HStack {
+        controlButton("Back", systemImage: "chevron.left") { closePlayer() }
+          .accessibilityIdentifier("player-back")
+          .focused($focusedControl, equals: "back")
+          .onHover { interaction("back-hover", active: $0) }
+        Spacer(minLength: 24)
+        playerMenus
+      }
+      .padding(.horizontal, 18)
+      .frame(width: viewport.width - 36, height: 52)
+      .position(x: viewport.width / 2, y: topInset + 26)
+
+      if !startScreenVisible {
+        bottomControls
+          .frame(width: controlWidth, alignment: .leading)
+          .fixedSize(horizontal: false, vertical: true)
+          .position(
+            x: viewport.width / 2,
+            y: viewport.height - bottomInset - 56)
+      }
+
+      if let notice = controller.noticeMessage, controller.errorMessage == nil {
+        HStack(spacing: 8) {
+          Image(systemName: "info.circle")
+          Text(notice).font(.caption).lineLimit(2)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
+        .frame(maxWidth: controlWidth)
+        .allowsHitTesting(false)
+        .position(
+          x: viewport.width / 2,
+          y: viewport.height - bottomInset - (controller.progressMessage == nil ? 142 : 186))
+      }
+
+      if let message = controller.progressMessage {
+        HStack(spacing: 10) {
+          Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
+          Text(message).font(.caption).lineLimit(2)
+          if controller.hasProgressConflict {
+            Button("Use Current Position…") { confirmProgressReplacement = true }
+              .buttonStyle(.bordered)
+              .accessibilityIdentifier("player-resolve-progress-conflict")
+          }
+        }
+        .padding(10)
+        .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
+        .frame(maxWidth: controlWidth)
+        .onHover { interaction("progress-hover", active: $0) }
+        .position(x: viewport.width / 2, y: viewport.height - bottomInset - 142)
+      }
+
+      if !controller.isPreparing, !startScreenVisible, controller.errorMessage == nil {
+        HStack(spacing: 4) {
+          Button {
+            _ = controller.playPreviousFromSystemMedia()
+            revealControls()
+          } label: {
+            Image(systemName: "backward.end.fill").frame(width: 36, height: 44)
+          }
+          .buttonStyle(.plain).disabled(!controller.canPlayPrevious)
+          .accessibilityLabel("Previous Episode").help("Previous Episode (P)")
+          .focused($focusedControl, equals: "previous")
+          seekButton(forward: false)
+          Button {
+            controller.togglePlayback()
+            revealControls()
+          } label: {
+            Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
+              .font(.system(size: 21, weight: .bold))
+              .offset(x: controller.isPlaying ? 0 : 1)
+              .frame(width: 50, height: 50)
+              .background(.white, in: Circle())
+              .foregroundStyle(.black)
+          }
+          .buttonStyle(PlayerPressButtonStyle(reduceMotion: reduceMotion))
+          .accessibilityLabel(controller.isPlaying ? "Pause" : "Play")
+          .help(controller.isPlaying ? "Pause (Space)" : "Play (Space)")
+          .accessibilityIdentifier("player-play-pause")
+          .focused($focusedControl, equals: "play")
+          seekButton(forward: true)
+          Button {
+            _ = controller.playNextFromSystemMedia()
+            revealControls()
+          } label: {
+            Image(systemName: "forward.end.fill").frame(width: 36, height: 44)
+          }
+          .buttonStyle(.plain).disabled(!controller.canPlayNext)
+          .accessibilityLabel("Next Episode").help("Next Episode (N)")
+          .focused($focusedControl, equals: "next")
+        }
+        .padding(6)
+        .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
+        .onHover { interaction("transport-hover", active: $0) }
+        .position(x: viewport.width / 2, y: viewport.height / 2)
+      }
+
+      // The start screen has its own ring; reconnecting still explains itself here.
+      if controller.isPreparing, controller.errorMessage == nil,
+        !startScreenVisible || controller.recoveryMessage != nil
+      {
+        VStack(spacing: 12) {
+          ProgressView(controller.recoveryMessage ?? "Preparing playback…")
+            .controlSize(.large)
+          if controller.recoveryMessage != nil {
+            Button("Stop Retrying") { controller.cancelRecovery() }
+              .buttonStyle(.bordered)
+              .accessibilityIdentifier("player-stop-recovery")
+          }
+        }
+        .padding(20)
+        .playerMaterial(
+          reduceTransparency: reduceTransparency,
+          shape: RoundedRectangle(cornerRadius: TarvenDesign.cardRadius, style: .continuous)
+        )
+        .accessibilityIdentifier("player-preparing")
+      }
+
+      if let error = controller.errorMessage {
+        playbackError(error)
+      }
+    }
+    .frame(width: viewport.width, height: viewport.height)
+  }
+
+  private var playerMenus: some View {
+    HStack(spacing: 4) {
+      trackedMenu(
+        "Playback Rate", id: "rate",
+        options:
+          PlaybackPreferences.supportedRates.map { rate in
+            PlayerMenuOption(
+              title:
+                rate == 1 ? "Standard" : rateLabel(rate),
+              selected: controller.playbackRate == rate
+            ) {
+              controller.setPlaybackRate(rate)
+              revealControls()
+            }
+          }
+      ) {
+        PlayerControlLabel(height: 30, minWidth: 38) {
+          Text(rateLabel(controller.playbackRate))
+            .font(.system(size: 14, weight: .bold).monospacedDigit())
+        }
+      }
+      .accessibilityValue(rateLabel(controller.playbackRate))
+
+      trackedMenu(
+        "Audio", id: "audio",
+        options: (controller.audioTracks.isEmpty
+          ? [PlayerMenuOption(title: "No audio tracks available", enabled: false)]
+          : controller.audioTracks.map { track in
+            PlayerMenuOption(
+              title: PlaybackTrackNames.menuTitle(for: track, in: controller.audioTracks),
+              selected: controller.selectedAudioTrackID == track.id
+            ) {
+              controller.selectAudioTrack(track.id)
+              revealControls()
+            }
+          })
+          + [.divider, PlayerMenuOption(title: "Dialogue Boost", enabled: false)]
+          + DialogueBoost.allCases.map { mode in
+            PlayerMenuOption(
+              title: mode.title, selected: preferencesStore.preferences.dialogueBoost == mode
+            ) {
+              preferencesStore.preferences.dialogueBoost = mode
+              revealControls()
+            }
+          }
+          + [.divider, PlayerMenuOption(title: "Volume Leveling", enabled: false)]
+          + VolumeLeveling.allCases.map { mode in
+            PlayerMenuOption(
+              title: mode.title, selected: preferencesStore.preferences.volumeLeveling == mode
+            ) {
+              preferencesStore.preferences.volumeLeveling = mode
+              revealControls()
+            }
+          }
+      ) {
+        PlayerControlLabel { Image(systemName: "waveform") }
+      }
+      .accessibilityValue(
+        controller.audioTracks.first(where: { $0.id == controller.selectedAudioTrackID })?.title
+          ?? "Default"
+      )
+
+      trackedMenu("Subtitles", id: "subtitle", options: subtitleOptions) {
+        PlayerControlLabel {
+          Image(
+            systemName: controller.selectedSubtitleTrackID == nil
+              ? "captions.bubble" : "captions.bubble.fill")
+        }
+      }
+      .accessibilityValue(
+        controller.selectedSubtitleTrackID == nil
+          ? "Off"
+          : (controller.subtitleTracks.first(where: { $0.id == controller.selectedSubtitleTrackID }
+          )?
+          .title ?? "On")
+      )
+
+      trackedMenu("Sleep Timer", id: "sleep", options: sleepOptions) {
+        PlayerControlLabel {
+          Image(systemName: controller.sleepTimer == .off ? "moon.zzz" : "moon.zzz.fill")
+        }
+      }
+      .accessibilityValue(
+        controller.sleepTimer == .off
+          ? "Off" : (controller.sleepTimer == .endOfEpisode ? "At end of episode" : "Active")
+      )
+
+      Button {
+        if !notesPresented { sceneNotes.create(at: controller.currentTimeMilliseconds) }
+        notesPresented.toggle()
+      } label: {
+        PlayerControlLabel { Image(systemName: "bookmark") }
+      }
+      .buttonStyle(.plain).accessibilityLabel("Scene Notes")
+      .help("Scene Notes")
+      .accessibilityIdentifier("player-notes")
+      .focused($focusedControl, equals: "notes")
+      .popover(isPresented: $notesPresented, arrowEdge: .bottom) {
+        SceneNotesPopover(
+          notes: sceneNotes, currentPosition: { controller.currentTimeMilliseconds },
+          seek: { controller.seek(to: $0) })
+      }
+
+      PlayerControlLabel(height: 30, minWidth: 38) {
+        AirPlayRoutePickerButton()
+          .frame(width: 22, height: 22)
+      }
+      .accessibilityLabel("AirPlay")
+      .accessibilityIdentifier("player-airplay")
+
+    }
+    .padding(4)
+    .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
+    .onHover { interaction("menus-hover", active: $0) }
+  }
+
+  private var subtitleOptions: [PlayerMenuOption] {
+    [
+      PlayerMenuOption(title: "Off", selected: controller.selectedSubtitleTrackID == nil) {
+        controller.selectSubtitleTrack(nil)
+        revealControls()
+      }, .divider,
+    ]
+      + (controller.subtitleTracks.isEmpty
+        ? [PlayerMenuOption(title: "No subtitles available", enabled: false)]
+        : controller.subtitleTracks.map { track in
+          PlayerMenuOption(
+            title: PlaybackTrackNames.menuTitle(for: track, in: controller.subtitleTracks),
+            selected: controller.selectedSubtitleTrackID == track.id
+          ) {
+            controller.selectSubtitleTrack(track.id)
+            revealControls()
+          }
+        })
+  }
+
+  private var sleepOptions: [PlayerMenuOption] {
+    [
+      PlayerMenuOption(title: "Off", selected: controller.sleepTimer == .off) {
+        controller.setSleepTimer(.off)
+        revealControls()
+      }, .divider,
+      PlayerMenuOption(title: "At end of episode", selected: controller.sleepTimer == .endOfEpisode)
+      {
+        controller.setSleepTimer(.endOfEpisode)
+        revealControls()
+      },
+    ]
+      + [15, 30, 45, 60, 90].map { minutes in
+        PlayerMenuOption(
+          title: "\(minutes) minutes", selected: controller.sleepTimer == .minutes(minutes)
+        ) {
+          controller.setSleepTimer(.minutes(minutes))
+          revealControls()
+        }
+      }
+  }
+
+  private func trackedMenu<Label: View>(
+    _ title: String, id: String, options: [PlayerMenuOption],
+    @ViewBuilder label: @escaping () -> Label
+  ) -> some View {
+    TrackedPlayerMenu(
+      title: title, identifier: "player-\(id)-menu", options: options,
+      onOpen: { interaction("menu-\(id)", active: $0) },
+      onFocus: { interaction("focus-\(id)", active: $0) }, label: label)
+  }
+
+  private var bottomControls: some View {
+    VStack(alignment: .leading, spacing: 9) {
+      HStack(alignment: .bottom, spacing: 24) {
+        VStack(alignment: .leading, spacing: 2) {
+          Text(controller.presentation.subtitle ?? "NOW PLAYING")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white.opacity(0.68))
+            .accessibilityIdentifier("player-subtitle")
+          Text(controller.presentation.title)
+            .font(.title3.weight(.semibold))
+            .lineLimit(2)
+            .accessibilityIdentifier("player-title")
+        }
+        Spacer(minLength: 30)
+        trailingControls
+      }
+      .onGeometryChange(for: CGFloat.self) {
+        $0.size.height
+      } action: { height in
+        previewControlsHeight = height
+      }
+
+      HStack(spacing: 10) {
+        Text(formatTime(displayedPosition)).monospacedDigit().frame(
+          minWidth: 44, alignment: .trailing
+        )
+        .accessibilityIdentifier("player-elapsed")
+        PlayerTimeline(
+          position: Binding(
+            get: { displayedPosition },
+            set: { handleTimelineValueChange($0) }),
+          duration: max(Double(controller.durationMilliseconds), 1),
+          chapters: controller.chapters,
+          notes: sceneNotes.notes,
+          hoverPosition: $hoverPosition,
+          previewClearance: (previewControlsHeight ?? 0) + 9,
+          preview: previewPosition.flatMap { position -> PlayerTimelinePreview? in
+            guard previewControlsHeight != nil else { return nil }
+            return PlayerTimelinePreview(
+              position: position, label: formatTime(position),
+              image: previews.imageBucket == previews.bucket(for: Int64(position))
+                ? previews.image : nil)
+          },
+          valueDescription:
+            "\(formatTime(displayedPosition)) of \(formatTime(max(Double(controller.durationMilliseconds), 1)))",
+          onAdjustableStep: handleTimelineAdjustableStep,
+          onEditingChanged: timelineEditingChanged
+        )
+        .focused($focusedControl, equals: "timeline")
+        Text(formatTime(Double(controller.durationMilliseconds)))
+          .monospacedDigit().frame(minWidth: 44, alignment: .leading)
+      }
+      .font(.caption)
+
+      if let endsAt = PlaybackEndTime.text(
+        position: Int64(displayedPosition), duration: controller.durationMilliseconds,
+        rate: controller.playbackRate, now: Date())
+      {
+        Text(endsAt)
+          .font(.caption2.weight(.medium))
+          .foregroundStyle(.white.opacity(0.62))
+          .monospacedDigit()
+          .frame(maxWidth: .infinity, alignment: .trailing)
+          .accessibilityIdentifier("player-ends-at")
+      }
+    }
+    .frame(maxWidth: .infinity)
+    .onHover { interaction("bottom-hover", active: $0) }
+  }
+
+  private var trailingControls: some View {
+    HStack(spacing: 2) {
+      if !controller.chapters.isEmpty {
+        trackedMenu(
+          "Chapters", id: "chapter",
+          options:
+            controller.chapters.map { chapter in
+              PlayerMenuOption(
+                title: "\(chapter.title)  \(formatTime(Double(chapter.timeOffsetMilliseconds)))",
+                selected: controller.currentChapterIndex == chapter.index
+              ) {
+                controller.selectChapter(chapter)
+                revealControls()
+              }
+            }
+        ) {
+          PlayerControlLabel { Image(systemName: "list.bullet.rectangle") }
+        }
+      }
+      Button {
+        controller.toggleMute()
+        revealControls()
+      } label: {
+        Image(systemName: controller.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+          .frame(width: 42, height: 42)
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel(controller.isMuted ? "Unmute" : "Mute")
+      .help(controller.isMuted ? "Unmute" : "Mute")
+      .focused($focusedControl, equals: "mute")
+
+      Slider(
+        value: Binding(get: { controller.volume }, set: { controller.setVolume($0) }),
+        in: 0...1,
+        onEditingChanged: { editing in
+          isAdjustingVolume = editing
+          interaction("volume", active: editing)
+        }
+      )
+      .frame(width: 96)
+      .tint(.white)
+      .frame(minHeight: 42)
+      .accessibilityLabel("Volume")
+      .accessibilityValue("\(Int(controller.volume * 100)) percent")
+      .focused($focusedControl, equals: "volume")
+
+      if !isNativeFullScreen {
+        Button {
+          togglePictureInPicture()
+        } label: {
+          Image(systemName: isPictureInPicture ? "pip.exit" : "pip.enter")
+            .frame(width: 42, height: 42)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(
+          isPictureInPicture ? "Exit Picture in Picture" : "Enter Picture in Picture"
+        )
+        .accessibilityIdentifier("player-picture-in-picture")
+        .help(isPictureInPicture ? "Exit Picture in Picture" : "Picture in Picture")
+        .focused($focusedControl, equals: "pip")
+      }
+
+      Button {
+        toggleVideoFill()
+      } label: {
+        Image(
+          systemName: preferencesStore.preferences.fillsScreen ? "aspectratio.fill" : "aspectratio"
+        )
+        .frame(width: 42, height: 42)
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel(
+        preferencesStore.preferences.fillsScreen ? "Show Whole Picture" : "Fill Screen"
+      )
+      .help(
+        preferencesStore.preferences.fillsScreen
+          ? "Show Whole Picture (Z)" : "Fill Screen, Without Black Bars (Z)"
+      )
+      .accessibilityIdentifier("player-video-fill")
+      .focused($focusedControl, equals: "fill")
+
+      Button {
+        toggleFullScreen()
+      } label: {
+        Image(
+          systemName: isNativeFullScreen
+            ? "arrow.down.right.and.arrow.up.left"
+            : "arrow.up.left.and.arrow.down.right"
+        )
+        .frame(width: 42, height: 42)
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel(isNativeFullScreen ? "Exit Full Screen" : "Enter Full Screen")
+      .accessibilityIdentifier("player-fullscreen")
+      .help(isNativeFullScreen ? "Exit Full Screen" : "Full Screen")
+      .focused($focusedControl, equals: "fullscreen")
+    }
+    .padding(7)
+    .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
+  }
+
+  private func playbackError(_ error: String) -> some View {
+    VStack(spacing: 14) {
+      Image(systemName: "exclamationmark.triangle").font(.largeTitle)
+      Text("Playback Unavailable").font(.title2.bold())
+      Text(error).foregroundStyle(.secondary).multilineTextAlignment(.center)
+      HStack {
+        Button("Back") { closePlayer() }
+        Button("Try Again") { Task { await controller.retry() } }
+          .buttonStyle(TarvenPrimaryActionButtonStyle())
+      }
+      Button("Export Playback Diagnostics…") { exportPlaybackDiagnostics() }
+        .font(.caption).accessibilityIdentifier("player-error-diagnostics")
+    }
+    .padding(26)
+    .frame(maxWidth: 440)
+    .playerMaterial(
+      reduceTransparency: reduceTransparency,
+      shape: RoundedRectangle(cornerRadius: TarvenDesign.heroRadius, style: .continuous))
+  }
+
+  private func exportPlaybackDiagnostics() {
+    interaction("diagnostics-export", active: true)
+    defer { interaction("diagnostics-export", active: false) }
+    let panel = NSSavePanel()
+    panel.title = "Export Playback Diagnostics"
+    panel.nameFieldStringValue = "Tarven Playback Diagnostics.json"
+    panel.allowedContentTypes = [.json]
+    panel.message =
+      "Includes bounded playback events and positions, without media paths, titles, server addresses or credentials."
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    do { try controller.diagnostics.export().write(to: url, options: .atomic) } catch {
+      let alert = NSAlert()
+      alert.messageText = "Diagnostics could not be exported"
+      alert.informativeText = "Check the destination and available disk space, then try again."
+      alert.runModal()
+    }
+  }
+
+  private func seekButton(forward: Bool) -> some View {
+    let interval = preferencesStore.preferences.seekInterval
+    return Button {
+      controller.skip(seconds: Int64(forward ? interval : -interval))
+      revealControls()
+    } label: {
+      PlayerSeekGlyph(interval: interval, forward: forward)
+        .frame(width: 42, height: 42)
+    }
+    .buttonStyle(PlayerPressButtonStyle(reduceMotion: reduceMotion))
+    .accessibilityLabel("\(forward ? "Forward" : "Back") \(interval) Seconds")
+    .help("\(forward ? "Forward" : "Back") \(interval) Seconds (\(forward ? "→" : "←"))")
+    .focused($focusedControl, equals: forward ? "forward" : "backward")
+  }
+
+  private func controlButton(
+    _ title: String,
+    systemImage: String,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      Image(systemName: systemImage)
+        .font(.system(size: 18, weight: .semibold))
+        .frame(width: TarvenDesign.minimumControlSize, height: TarvenDesign.minimumControlSize)
+        .playerMaterial(reduceTransparency: reduceTransparency, shape: Circle())
+    }
+    .buttonStyle(PlayerPressButtonStyle(reduceMotion: reduceMotion))
+    .help(title)
+    .accessibilityLabel(title)
+  }
+
+  /// Jumps past the intro the server found; Return or S does the same.
+  /// Skip Intro and Up Next sit above the bottom controls while they show, never on them.
+  static let overlayBottomWithControls: CGFloat = 200
+
+  private var skipIntroButton: some View {
+    Button {
+      controller.skipIntro()
+      revealControls()
+    } label: {
+      HStack(spacing: 12) {
+        Image(systemName: "forward.end.fill")
+        Text("Skip Intro")
+        // The key that skips without the mouse (S works too).
+        Label("Return", systemImage: "return")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.secondary)
+          .padding(.horizontal, 7)
+          .padding(.vertical, 3)
+          .overlay(
+            RoundedRectangle(cornerRadius: TarvenDesign.tinyRadius)
+              .strokeBorder(.secondary.opacity(0.6))
+          )
+          .accessibilityHidden(true)
+      }
+      .font(.title3.weight(.semibold))
+      .padding(.horizontal, 26)
+      .frame(minHeight: 58)
+      .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
+    }
+    .buttonStyle(PlayerPressButtonStyle(reduceMotion: reduceMotion))
+    .help("Jumps to the end of the intro. Return or S does the same.")
+    .accessibilityLabel("Skip Intro")
+    .accessibilityHint("Jumps to the end of the intro. Return or S does the same.")
+    .accessibilityIdentifier("player-skip-intro")
+    .onHover { interaction("skip-intro-hover", active: $0) }
+  }
+
+  /// After a movie or a series' last episode, from the credits on: the server's suggestion,
+  /// without a countdown.
+  private func suggestionCard(_ suggestion: MediaSuggestion) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("UP NEXT").font(.caption.weight(.bold)).tracking(1.2).foregroundStyle(.secondary)
+      HStack(alignment: .top, spacing: 12) {
+        AuthenticatedArtwork(
+          artwork: suggestion.item.poster, symbol: suggestion.item.kind == .movie ? "film" : "tv"
+        )
+        .frame(width: 54, height: 80)
+        .clipShape(RoundedRectangle(cornerRadius: TarvenDesign.tinyRadius, style: .continuous))
+        VStack(alignment: .leading, spacing: 4) {
+          Text(suggestion.item.title).font(.title3.weight(.semibold)).lineLimit(2)
+          Text(SuggestionPolicy.caption(suggestion)).font(.callout).foregroundStyle(.secondary)
+            .lineLimit(2)
+        }
+      }
+      HStack(spacing: 10) {
+        Button {
+          playSuggestion(suggestion.item)
+        } label: {
+          Label("Watch Now", systemImage: "play.fill").frame(minWidth: 110)
+        }
+        .buttonStyle(TarvenPrimaryActionButtonStyle())
+        .help("Starts \(suggestion.item.title); this title counts as watched.")
+        .accessibilityIdentifier("player-suggestion-play")
+        Button("Watch Credits") { controller.dismissSuggestionCard() }
+          .buttonStyle(.bordered)
+          .help("Hides the suggestion and plays the credits to the end.")
+          .accessibilityIdentifier("player-suggestion-credits")
+        Button("Done") { finishWithoutSuggestion() }
+          .buttonStyle(.bordered)
+          .help("Closes the player; this title counts as watched.")
+          .accessibilityIdentifier("player-suggestion-done")
+      }
+      .controlSize(.large)
+      .padding(.top, 4)
+    }
+    .padding(18)
+    .frame(width: 400, alignment: .leading)
+    .playerMaterial(
+      reduceTransparency: reduceTransparency,
+      shape: RoundedRectangle(cornerRadius: TarvenDesign.cardRadius, style: .continuous)
+    )
+    .onHover { interaction("suggestion-hover", active: $0) }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("player-suggestion")
+  }
+
+  /// Screen time is over (docs/SCREEN_TIME.md): a calm moon, the profile's name and when Tarven
+  /// opens again. Done closes the player; a whole-profile lock then returns to "Who's watching?".
+  private var goodNightScreen: some View {
+    let name = profile.user?.shownName ?? ""
+    let isSleepTimer = controller.showsSleepTimerGoodNight
+    let words =
+      isSleepTimer
+      ? ScreenTimeText.goodNight(sleepTimerStatus: controller.sleepTimerEndedStatus, name: name)
+      : ScreenTimeText.goodNight(controller.screenTime, name: name)
+    return ZStack {
+      RadialGradient(
+        colors: [
+          Color(red: 0.16, green: 0.2, blue: 0.38), Color(red: 0.02, green: 0.02, blue: 0.06),
+        ],
+        center: .init(x: 0.5, y: 0.35), startRadius: 20, endRadius: 700
+      )
+      .opacity(0.96)
+      .ignoresSafeArea()
+      VStack(spacing: 18) {
+        Image(systemName: "moon.stars.fill")
+          .font(.system(size: 72))
+          .foregroundStyle(Color(red: 0.95, green: 0.89, blue: 0.66))
+          .shadow(color: Color(red: 0.95, green: 0.89, blue: 0.66).opacity(0.45), radius: 24)
+          .accessibilityHidden(true)
+        Text(words.title).font(.largeTitle.weight(.bold))
+        Text(words.text).font(.title3).foregroundStyle(.secondary)
+        Button("Done") { goodNightDone() }
+          .buttonStyle(TarvenPrimaryActionButtonStyle())
+          .controlSize(.large)
+          .keyboardShortcut(.defaultAction)
+          .padding(.top, 8)
+          .accessibilityIdentifier("player-good-night-done")
+      }
+      .multilineTextAlignment(.center)
+      .padding(40)
+    }
+    .contentShape(Rectangle())
+    .onTapGesture { if isSleepTimer { goodNightDone() } }
+    .focusable(isSleepTimer)
+    .onKeyPress(phases: .down) { press in
+      guard isSleepTimer,
+        press.modifiers.intersection([.command, .control, .option]).isEmpty
+      else { return .ignored }
+      goodNightDone()
+      return .handled
+    }
+    .onExitCommand { if isSleepTimer { goodNightDone() } }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("player-good-night")
+  }
+
+  private func goodNightDone() {
+    let wholeProfile =
+      !controller.showsSleepTimerGoodNight && controller.screenTime?.lockScope == .wholeProfile
+    if controller.showsSleepTimerGoodNight {
+      controller.dismissSleepGoodNight()
+    }
+    closePlayer()
+    if wholeProfile { Task { await model.switchWatchingProfile() } }
+  }
+
+  /// When the file ended: the suggestion and two more, each with Watch Now, and Done.
+  private var suggestionEndScreen: some View {
+    let list = Array(controller.suggestions.prefix(3))
+    return ZStack {
+      Color.black.opacity(0.78).ignoresSafeArea()
+      VStack(spacing: 22) {
+        Text("What's Next").font(.largeTitle.weight(.bold))
+        HStack(alignment: .top, spacing: 28) {
+          ForEach(Array(list.enumerated()), id: \.element.id) { index, suggestion in
+            VStack(alignment: .leading, spacing: 8) {
+              AuthenticatedArtwork(
+                artwork: suggestion.item.poster,
+                symbol: suggestion.item.kind == .movie ? "film" : "tv"
+              )
+              .frame(width: index == 0 ? 200 : 150, height: index == 0 ? 300 : 225)
+              .clipShape(
+                RoundedRectangle(cornerRadius: TarvenDesign.smallRadius, style: .continuous))
+              Text(suggestion.item.title).font(index == 0 ? .title3.weight(.semibold) : .headline)
+                .lineLimit(2)
+              Text(SuggestionPolicy.caption(suggestion)).font(.callout).foregroundStyle(.secondary)
+                .lineLimit(2)
+              let watchNow = Button {
+                playSuggestion(suggestion.item)
+              } label: {
+                Label("Watch Now", systemImage: "play.fill")
+              }
+              // The main suggestion is the screen's one primary action; the others stay quieter.
+              Group {
+                if index == 0 {
+                  watchNow.buttonStyle(TarvenPrimaryActionButtonStyle())
+                } else {
+                  watchNow.buttonStyle(.bordered)
+                }
+              }
+              .controlSize(.large)
+              .accessibilityIdentifier("player-end-suggestion-\(index)")
+            }
+            .frame(width: index == 0 ? 200 : 150, alignment: .leading)
+          }
+        }
+        Button("Done") { closePlayer() }
+          .buttonStyle(.bordered)
+          .controlSize(.large)
+          .keyboardShortcut(.cancelAction)
+          .accessibilityIdentifier("player-end-suggestions-done")
+      }
+      .padding(40)
+    }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("player-end-suggestions")
+  }
+
+  /// Asks the server once what follows a movie or a series' last episode.
+  private func loadSuggestions() async {
+    guard controller.wantsSuggestions, controller.suggestions.isEmpty,
+      model.libraryCapabilities.contains(ServerFeatureNames.suggestions),
+      model.profile?.sessionId == profile.sessionId, controller.presentation.offlineID == nil
+    else { return }
+    let mediaId = controller.presentation.mediaId
+    guard
+      let list = try? await APIClient(profile: profile).suggestions(mediaId: mediaId, limit: 3),
+      !Task.isCancelled, controller.presentation.mediaId == mediaId
+    else { return }
+    controller.offerSuggestions(list)
+  }
+
+  /// Watch Now: this title counts as watched from its credits on, and the suggestion starts in
+  /// a new player, from its own plan (a series at its next episode).
+  private func playSuggestion(_ item: CatalogItemSummary) {
+    guard !cursor.isRetired else { return }
+    controller.finishForSuggestion()
+    hideTask?.cancel()
+    controlsPolicy.invalidate()
+    cursor.retire()
+    fullScreenKeyboard.retire()
+    model.dismissPlayback()
+    Task {
+      await controller.shutdown()
+      model.startPlayback(item: item)
+    }
+  }
+
+  private func finishWithoutSuggestion() {
+    controller.finishForSuggestion()
+    closePlayer()
+  }
+
+  /// The next episode with a countdown: when the credits begin, or in this title's last seconds.
+  private func upNextCard(_ upNext: PlaybackUpNext) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("UP NEXT").font(.caption.weight(.bold)).tracking(1.2).foregroundStyle(.secondary)
+      Text(upNext.title).font(.title3.weight(.semibold)).lineLimit(2)
+      if let subtitle = upNext.subtitle {
+        Text(subtitle).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+      }
+      HStack(spacing: 10) {
+        Button {
+          controller.playNextNow()
+        } label: {
+          Label("Play Now · \(upNext.seconds)", systemImage: "play.fill")
+            .monospacedDigit()
+            .frame(minWidth: 120)
+        }
+        .buttonStyle(TarvenPrimaryActionButtonStyle())
+        .accessibilityIdentifier("player-up-next-play")
+        Button(upNext.duringCredits ? "Watch Credits" : "Cancel") { controller.dismissUpNext() }
+          .buttonStyle(.bordered)
+          .accessibilityIdentifier("player-up-next-cancel")
+      }
+      .controlSize(.large)
+      .padding(.top, 4)
+    }
+    .padding(18)
+    .frame(width: 320, alignment: .leading)
+    .playerMaterial(
+      reduceTransparency: reduceTransparency,
+      shape: RoundedRectangle(cornerRadius: TarvenDesign.cardRadius, style: .continuous)
+    )
+    .onHover { interaction("up-next-hover", active: $0) }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("player-up-next")
+    .modifier(
+      PlayerUpNextActions(
+        item: upNextMedia?.id == controller.nextQueueItem?.mediaId ? upNextMedia : nil,
+        nextID: controller.nextQueueItem?.mediaId, seriesID: controller.presentation.trackScope,
+        onPlay: { id in
+          guard controller.nextQueueItem?.mediaId == id else { return }
+          controller.playNextNow()
+        },
+        onResume: { id in
+          guard controller.nextQueueItem?.mediaId == id else { return }
+          _ = controller.resumeNextNow()
+        },
+        onGoToSeries: { id in
+          closePlayer()
+          model.requestedMediaDetail = id
+        })
+    )
+    .task(id: controller.nextQueueItem?.mediaId) {
+      upNextMedia = nil
+      guard let next = controller.nextQueueItem,
+        model.profile?.sessionId == profile.sessionId
+      else { return }
+      if let listed = model.listedItem(id: next.mediaId) {
+        upNextMedia = listed
+        return
+      }
+      do {
+        let detail = try await model.catalogDetail(id: next.mediaId)
+        guard !Task.isCancelled, model.profile?.sessionId == profile.sessionId,
+          controller.nextQueueItem?.mediaId == next.mediaId
+        else { return }
+        upNextMedia = detail.item
+      } catch {
+        // Do not invent favorite/progress/permission state if the catalog request fails.
+      }
+    }
+  }
+
+  /// Cinema mode: the ad and trailers before a film, when it gets them. The film starts behind
+  /// the curtain, which opens once its picture moves.
+  private func runPreShow() async {
+    #if DEBUG
+      if CinemaUITestFixture.playsSimulatedTitles { return }
+    #endif
+    guard
+      let show = await CinemaPreShow.prepare(
+        profile: profile, presentation: controller.presentation,
+        preferences: preferencesStore.preferences, capabilities: model.libraryCapabilities),
+      !Task.isCancelled
+    else { return }
+    show.onFeature = { [controller] in Task { await controller.start() } }
+    preShow = show
+    await show.run()
+    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.4)) { preShow = nil }
+  }
+
+  private var startScreenVisible: Bool {
+    controller.showsStartScreen && controller.errorMessage == nil
+  }
+
+  /// Previews belong to the open title; the next one discards them from memory.
+  private func configurePreviews() {
+    let useServer = model.libraryCapabilities.contains(
+      ScrubPreviewController.serverScrubPreviewsFeature)
+    let client = APIClient(profile: profile)
+    var fetcher: (@MainActor (UUID, Int64) async -> Data?)?
+    if useServer {
+      fetcher = { mediaId, seconds in
+        try? await client.scrubPreviewFrame(mediaId: mediaId, seconds: Int(seconds))
+      }
+    }
+    previews.configure(
+      mediaID: controller.presentation.mediaId, source: controller.previewSourceURL,
+      duration: controller.durationMilliseconds,
+      parallel: model.libraryCapabilities.contains(ScrubPreviewController.serverFeature),
+      serverFrameFetcher: fetcher)
+  }
+
+  private var displayedPosition: Double {
+    isScrubbing ? scrubPosition : Double(controller.currentTimeMilliseconds)
+  }
+
+  /// Where a live preview frame is wanted: the dragged knob, else the pointer over the timeline.
+  private var previewPosition: Double? {
+    guard controller.previewSourceURL != nil, controller.durationMilliseconds > 0 else {
+      return nil
+    }
+    return isScrubbing ? scrubPosition : hoverPosition
+  }
+
+  private func advanceSceneNotes() {
+    if notesNavigationRevision != controller.navigationRevision {
+      notesNavigationRevision = controller.navigationRevision
+      sceneNotes.seek()
+    }
+    sceneNotes.advance(
+      position: controller.currentTimeMilliseconds, playing: controller.isPlaying,
+      preparing: controller.isPreparing)
+  }
+
+  private func handleTimelineValueChange(_ newValue: Double) {
+    switch PlayerTimelineSeekPolicy.valueChanged(
+      to: newValue, isScrubbing: isScrubbing, duration: controller.durationMilliseconds)
+    {
+    case .updateScrub(let clamped):
+      scrubPosition = clamped
+    case .seekImmediately(let target):
+      scrubPosition = Double(target)
+      controller.seek(to: target)
+      revealControls()
+    }
+  }
+
+  private func handleTimelineAdjustableStep(_ direction: AccessibilityAdjustmentDirection) {
+    let increment: Bool
+    switch direction {
+    case .increment: increment = true
+    case .decrement: increment = false
+    @unknown default: return
+    }
+    let target = PlayerTimelineSeekPolicy.adjustableTarget(
+      current: Int64(displayedPosition.rounded()),
+      duration: controller.durationMilliseconds,
+      seekIntervalSeconds: preferencesStore.preferences.seekInterval,
+      increment: increment)
+    scrubPosition = Double(target)
+    controller.seek(to: target)
+    revealControls()
+  }
+
+  private func timelineEditingChanged(_ editing: Bool) {
+    isScrubbing = editing
+    controlsPolicy.hold("scrubbing", active: editing)
+    if editing {
+      scrubPosition = Double(controller.currentTimeMilliseconds)
+      revealControls(scheduleHide: false)
+    } else {
+      controller.seek(to: Int64(scrubPosition.rounded()))
+      revealControls()
+    }
+  }
+
+  private var episodeShortcutController: PlaybackController? {
+    let blocked =
+      notesPresented || confirmProgressReplacement
+      || controlsPolicy.holds.contains("diagnostics-export")
+      || controlsPolicy.holds.contains { $0.hasPrefix("menu-") }
+    return blocked ? nil : controller
+  }
+
+  private func handleKey(_ event: NSEvent) -> Bool {
+    // Settings opened over the player take the keyboard: Esc closes them (instead of the
+    // player), and every other key belongs to them.
+    if model.isSettingsPresented {
+      if event.keyCode == 53 {
+        model.isSettingsPresented = false
+        return true
+      }
+      return false
+    }
+    if controller.showsGoodNight {
+      if controller.showsSleepTimerGoodNight,
+        !event.isARepeat,
+        event.modifierFlags.intersection([.command, .control, .option]).isEmpty
+      {
+        goodNightDone()
+        return true
+      }
+      return false
+    }
+    if let preShow, event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+      switch event.keyCode {
+      case 36, 76: preShow.startFilm()
+      case 124: preShow.skip()
+      case 53: closePlayer()
+      default: break
+      }
+      return true
+    }
+    revealControls()
+    guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {
+      return false
+    }
+    // Only the video surface calls this handler, so text fields keep their normal typing behavior.
+    if let command = SystemMediaCommand.episodeShortcut(
+      characters: event.charactersIgnoringModifiers, modified: false, isRepeat: event.isARepeat)
+    {
+      if command == .previousEpisode {
+        _ = controller.playPreviousFromSystemMedia()
+      } else {
+        _ = controller.playNextFromSystemMedia()
+      }
+      return true
+    }
+    guard
+      let action = PlayerKeyboardShortcutPolicy.action(
+        keyCode: event.keyCode, characters: event.charactersIgnoringModifiers,
+        isRepeat: event.isARepeat, showsSkipIntro: controller.showsSkipIntro)
+    else { return false }
+    switch action {
+    case .togglePlayback:
+      controller.togglePlayback()
+    case .toggleMute:
+      controller.toggleMute()
+    case .toggleVideoFill:
+      toggleVideoFill()
+      return true
+    case .showShortcuts:
+      model.isKeyboardShortcutsPresented = true
+      return true
+    case .skipIntro:
+      controller.skipIntro()
+      return true
+    case .seekBackward:
+      controller.skip(seconds: -Int64(preferencesStore.preferences.seekInterval))
+    case .seekForward:
+      controller.skip(seconds: Int64(preferencesStore.preferences.seekInterval))
+    case .escape:
+      if isPictureInPicture {
+        togglePictureInPicture()
+      } else if isNativeFullScreen {
+        toggleFullScreen()
+      } else {
+        closePlayer()
+      }
+    case .consume:
+      return true
+    }
+    revealControls()
+    return true
+  }
+
+  private func toggleVideoFill() {
+    preferencesStore.preferences.fillsScreen.toggle()
+    revealControls()
+  }
+
+  private func toggleFullScreen() {
+    guard let window = windowPresentation.window, fullScreenKeyboard.beginToggle(on: window)
+    else { return }
+    if isPictureInPicture {
+      _ = windowPresentation.togglePictureInPicture()
+      isPictureInPicture = false
+    }
+    window.toggleFullScreen(nil)
+    revealControls()
+  }
+
+  private func togglePictureInPicture() {
+    isPictureInPicture = windowPresentation.togglePictureInPicture()
+    revealControls()
+  }
+
+  private func revealControls(scheduleHide: Bool = true) {
+    guard !cursor.isRetired else { return }
+    hideTask?.cancel()
+    let generation = controlsPolicy.invalidate()
+    showCursor()
+    let controlsWereHidden = !controlsVisible
+    if controlsWereHidden {
+      withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) { controlsVisible = true }
+    }
+    guard scheduleHide, canAutoHide else { return }
+    let delay = preferencesStore.preferences.controlsAutoHideDelay
+    hideTask = Task {
+      try? await Task.sleep(for: .seconds(delay))
+      guard !Task.isCancelled, canAutoHide,
+        controlsPolicy.permitsHide(
+          generation, preparing: filmPreparing, error: controller.errorMessage != nil,
+          playing: isActivelyPlaying)
+      else { return }
+      withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { controlsVisible = false }
+      updateCursorEnvironment()
+      // An ad, a trailer or the curtain plays like the film itself.
+      cursor.hideIfPermitted(playing: isActivelyPlaying, blocked: !canAutoHide)
+    }
+  }
+
+  /// The film is loading in view; behind cinema mode's curtain it loads out of sight.
+  private var filmPreparing: Bool { controller.isPreparing && preShow == nil }
+
+  private var isActivelyPlaying: Bool {
+    (controller.isPlaying && !controller.endHandled) || preShow != nil
+  }
+
+  private var canAutoHide: Bool {
+    !cursor.isRetired && !filmPreparing && controller.errorMessage == nil && isActivelyPlaying
+      && !isScrubbing
+      && !isAdjustingVolume
+      && controlsPolicy.holds.isEmpty
+  }
+
+  private func interaction(_ reason: String, active: Bool) {
+    // Dismantled native menu buttons report focus-end even without prior focus.
+    // Cleanup must not resurrect the overlay that just removed those buttons.
+    guard controlsPolicy.hold(reason, active: active), active || controlsVisible else { return }
+    revealControls(scheduleHide: !active)
+  }
+
+  private func updateCursorEnvironment() {
+    cursor.environment(
+      active: NSApplication.shared.isActive,
+      keyWindow: windowPresentation.window?.isKeyWindow == true)
+  }
+
+  private func suspendCursorHiding() {
+    hideTask?.cancel()
+    controlsPolicy.invalidate()
+    cursor.environment(active: false, keyWindow: false)
+  }
+
+  private func showCursor() {
+    cursor.show()
+  }
+
+  private func closePlayer() {
+    guard !cursor.isRetired else { return }
+    hideTask?.cancel()
+    controlsPolicy.invalidate()
+    cursor.retire()
+    fullScreenKeyboard.retire()
+    let retiringProfile = model.profile
+    model.dismissPlayback()
+    Task {
+      await controller.shutdown()
+      if model.profile?.sessionId == retiringProfile?.sessionId { await model.refreshHome() }
+    }
+  }
+
+  private func rateLabel(_ rate: Double) -> String {
+    rate == rate.rounded()
+      ? "\(Int(rate))x"
+      : "\(String(format: "%g", locale: Locale(identifier: "en_US_POSIX"), rate))x"
+  }
+
+  private func formatTime(_ milliseconds: Double) -> String {
+    let seconds = max(0, Int(milliseconds / 1_000))
+    let hours = seconds / 3_600
+    let minutes = (seconds % 3_600) / 60
+    let remainder = seconds % 60
+    return hours > 0
+      ? String(format: "%d:%02d:%02d", hours, minutes, remainder)
+      : String(format: "%d:%02d", minutes, remainder)
+  }
+}
+
+struct PlayerTimelinePreview: Equatable {
+  let position: Double
+  let label: String
+  let image: CGImage?
+}
+
+private struct PlayerTimeline: View {
+  @Binding var position: Double
+  let duration: Double
+  let chapters: [PlaybackChapter]
+  let notes: [SceneNote]
+  @Binding var hoverPosition: Double?
+  let previewClearance: CGFloat
+  let preview: PlayerTimelinePreview?
+  let valueDescription: String
+  let onAdjustableStep: (AccessibilityAdjustmentDirection) -> Void
+  let onEditingChanged: (Bool) -> Void
+
+  var body: some View {
+    GeometryReader { proxy in
+      ZStack {
+        ForEach(chapters) { chapter in
+          Rectangle()
+            .fill(.white.opacity(0.62))
+            .frame(width: 1, height: 7)
+            .position(
+              x: proxy.size.width
+                * min(max(Double(chapter.timeOffsetMilliseconds) / duration, 0), 1),
+              y: proxy.size.height / 2)
+        }
+        Slider(value: $position, in: 0...duration, onEditingChanged: onEditingChanged)
+          .tint(.white)
+          .accessibilityValue(valueDescription)
+        ForEach(notes) { note in
+          let start = min(max(Double(note.startMilliseconds) / duration, 0), 1) * proxy.size.width
+          let end =
+            min(max(Double(note.endMilliseconds ?? note.startMilliseconds) / duration, 0), 1)
+            * proxy.size.width
+          Capsule().fill(.white.opacity(0.65)).frame(width: max(3, end - start), height: 3)
+            .position(x: (start + end) / 2, y: proxy.size.height / 2 + 9)
+            .allowsHitTesting(false).accessibilityHidden(true)
+        }
+      }
+      .onContinuousHover { phase in
+        switch phase {
+        case .active(let location):
+          let fraction = min(max(location.x / max(proxy.size.width, 1), 0), 1)
+          hoverPosition = fraction * duration
+        case .ended:
+          hoverPosition = nil
+        }
+      }
+      .overlay(alignment: .topLeading) {
+        if let preview {
+          let width = PlayerPreviewPlacement.width(in: proxy.size.width)
+          let x = PlayerPreviewPlacement.leading(
+            timelineWidth: proxy.size.width, position: preview.position, duration: duration,
+            previewWidth: width)
+          let bubbleHeight = width * 9 / 16 + 32
+          let y = PlayerPreviewPlacement.verticalOffset(
+            previewHeight: bubbleHeight, controlsHeight: previewClearance)
+          PlayerPreviewBubble(preview: preview, width: width)
+            .offset(x: x, y: y)
+            .allowsHitTesting(false)
+        }
+      }
+    }
+    .frame(minHeight: 44)
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel("Playback Position")
+    .accessibilityAdjustableAction(onAdjustableStep)
+    .accessibilityIdentifier("player-timeline")
+  }
+}
+
+/// A live frame above the timeline while hovering or dragging; it never leaves memory.
+private struct PlayerPreviewBubble: View {
+  let preview: PlayerTimelinePreview
+  let width: CGFloat
+
+  var body: some View {
+    VStack(spacing: 6) {
+      ZStack {
+        Color.black
+        if let image = preview.image {
+          Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fit)
+        } else {
+          ProgressView().controlSize(.small)
+        }
+      }
+      .frame(width: width, height: width * 9 / 16)
+      .clipShape(RoundedRectangle(cornerRadius: TarvenDesign.smallRadius))
+      .overlay {
+        RoundedRectangle(cornerRadius: TarvenDesign.smallRadius)
+          .stroke(.white.opacity(0.35), lineWidth: 1)
+      }
+      .shadow(color: .black.opacity(0.45), radius: 10, y: 4)
+      Text(preview.label)
+        .font(.caption.weight(.semibold)).monospacedDigit()
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(.black.opacity(0.6), in: Capsule())
+    }
+    .accessibilityHidden(true)
+  }
+}
+
+private struct PlayerPressButtonStyle: ButtonStyle {
+  let reduceMotion: Bool
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
+      .opacity(configuration.isPressed ? 0.82 : 1)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: configuration.isPressed)
+  }
+}
+
+/// Stable hit target for a control inside one shared glass capsule. Hover only
+/// changes opacity, so the pointer can never move in and out because the
+/// control scaled underneath it.
+private struct PlayerControlLabel<Content: View>: View {
+  @State private var isHovering = false
+  let height: CGFloat
+  let minWidth: CGFloat
+  private let content: Content
+
+  init(
+    height: CGFloat = 30,
+    minWidth: CGFloat = 30,
+    @ViewBuilder content: () -> Content
+  ) {
+    self.height = height
+    self.minWidth = minWidth
+    self.content = content()
+  }
+
+  var body: some View {
+    content
+      .font(.system(size: 14, weight: .semibold))
+      .frame(minWidth: minWidth, minHeight: height)
+      .background(.white.opacity(isHovering ? 0.12 : 0), in: Capsule())
+      .contentShape(Capsule())
+      .onHover { isHovering = $0 }
+      .animation(.easeOut(duration: 0.12), value: isHovering)
+  }
+}
+
+private struct PlayerMaterialModifier<S: InsettableShape>: ViewModifier {
+  @Environment(\.tarvenContrast) private var contrast
+  let reduceTransparency: Bool
+  let shape: S
+
+  func body(content: Content) -> some View {
+    content
+      .background {
+        if reduceTransparency {
+          shape.fill(Color(red: 0.11, green: 0.12, blue: 0.14).opacity(0.98))
+        } else {
+          shape.fill(.ultraThinMaterial)
+        }
+      }
+      .clipShape(shape)
+      .overlay {
+        shape.strokeBorder(
+          .white.opacity(contrast == .increased ? 0.56 : 0.12),
+          lineWidth: contrast == .increased ? 1.5 : 1)
+      }
+  }
+}
+
+extension View {
+  func playerMaterial<S: InsettableShape>(reduceTransparency: Bool, shape: S) -> some View {
+    modifier(PlayerMaterialModifier(reduceTransparency: reduceTransparency, shape: shape))
+  }
+}
+
+private struct PlayerVideoSurface: NSViewRepresentable {
+  let controller: PlaybackController
+  let onInteraction: () -> Void
+  let onPointer: (Bool, Bool) -> Void
+  let onKeyDown: (NSEvent) -> Bool
+
+  func makeNSView(context: Context) -> PlayerTrackingView {
+    let view = PlayerTrackingView()
+    view.onInteraction = onInteraction
+    view.onPointer = onPointer
+    view.onKeyDown = onKeyDown
+    controller.attachVideoView(view)
+    return view
+  }
+
+  func updateNSView(_ nsView: PlayerTrackingView, context: Context) {
+    nsView.onInteraction = onInteraction
+    nsView.onPointer = onPointer
+    nsView.onKeyDown = onKeyDown
+  }
+}
+
+private final class PlayerTrackingView: NSView {
+  var onInteraction: (() -> Void)?
+  var onPointer: ((Bool, Bool) -> Void)?
+  var onKeyDown: ((NSEvent) -> Bool)?
+  private var trackingArea: NSTrackingArea?
+  private var pointerActivity = PlayerPointerActivity(position: NSEvent.mouseLocation)
+
+  override var acceptsFirstResponder: Bool { true }
+
+  private var reclaimObserver: NSObjectProtocol?
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.window?.makeFirstResponder(self)
+    }
+    // Settings shown over the player leave their search field's editor behind; the player takes
+    // the keyboard back when they close, so Space, the arrows and F work again at once.
+    if reclaimObserver == nil {
+      reclaimObserver = NotificationCenter.default.addObserver(
+        forName: .tarvenPlayerReclaimKeyboard, object: nil, queue: .main
+      ) { [weak self] _ in
+        MainActor.assumeIsolated {
+          guard let self, let window = self.window else { return }
+          window.makeFirstResponder(self)
+        }
+      }
+    }
+  }
+
+  isolated deinit {
+    if let reclaimObserver { NotificationCenter.default.removeObserver(reclaimObserver) }
+  }
+
+  override func updateTrackingAreas() {
+    // inVisibleRect follows the viewport; keep the area across overlay/layout changes.
+    if trackingArea == nil {
+      let trackingArea = NSTrackingArea(
+        rect: .zero,
+        options: [.activeInKeyWindow, .mouseMoved, .mouseEnteredAndExited, .inVisibleRect],
+        owner: self)
+      addTrackingArea(trackingArea)
+      self.trackingArea = trackingArea
+    }
+    super.updateTrackingAreas()
+  }
+
+  override func mouseMoved(with event: NSEvent) {
+    guard pointerActivity.moved(to: NSEvent.mouseLocation) else { return }
+    onPointer?(bounds.contains(convert(event.locationInWindow, from: nil)), true)
+    onInteraction?()
+  }
+  override func mouseEntered(with event: NSEvent) { onPointer?(true, false) }
+  override func mouseExited(with event: NSEvent) { onPointer?(false, false) }
+  override func mouseDown(with event: NSEvent) {
+    window?.makeFirstResponder(self)
+    onInteraction?()
+    super.mouseDown(with: event)
+  }
+  override func keyDown(with event: NSEvent) {
+    if onKeyDown?(event) != true { super.keyDown(with: event) }
+  }
+}
+
+private struct PlayerWindowAccessor: NSViewRepresentable {
+  let configure: (NSWindow) -> Void
+
+  func makeNSView(context: Context) -> NSView {
+    let view = NSView()
+    DispatchQueue.main.async { if let window = view.window { configure(window) } }
+    return view
+  }
+
+  func updateNSView(_ nsView: NSView, context: Context) {
+    DispatchQueue.main.async { if let window = nsView.window { configure(window) } }
+  }
+}
+
+@MainActor
+private final class PlayerWindowPresentation {
+  weak var window: NSWindow?
+  private var originalStyleMask: NSWindow.StyleMask?
+  private var originalTitleVisibility: NSWindow.TitleVisibility?
+  private var originalTitlebarAppearsTransparent: Bool?
+  private var originalTitlebarSeparatorStyle: NSTitlebarSeparatorStyle?
+  private var originalBackgroundColor: NSColor?
+  private var originalTitle: String?
+  private var originalToolbarVisibility: Bool?
+  private var originalFrame: NSRect?
+  private var originalLevel: NSWindow.Level?
+  private var originalCollectionBehavior: NSWindow.CollectionBehavior?
+  private var originalAspectRatio: NSSize?
+  private var originalMinSize: NSSize?
+  private var pictureInPictureFrame: NSRect?
+  private var fullscreenExitObserver: NSObjectProtocol?
+  private(set) var isPictureInPicture = false
+
+  func apply(to window: NSWindow) {
+    guard self.window == nil else { return }
+    self.window = window
+    originalStyleMask = window.styleMask
+    originalTitleVisibility = window.titleVisibility
+    originalTitlebarAppearsTransparent = window.titlebarAppearsTransparent
+    originalTitlebarSeparatorStyle = window.titlebarSeparatorStyle
+    originalBackgroundColor = window.backgroundColor
+    originalTitle = window.title
+    originalToolbarVisibility = window.toolbar?.isVisible
+    originalFrame = window.styleMask.contains(.fullScreen) ? nil : window.frame
+    originalLevel = window.level
+    originalCollectionBehavior = window.collectionBehavior
+    originalAspectRatio = window.contentAspectRatio
+    window.styleMask.insert(.fullSizeContentView)
+    window.titleVisibility = .hidden
+    window.titlebarAppearsTransparent = true
+    window.titlebarSeparatorStyle = .none
+    window.backgroundColor = .black
+    window.title = "\u{2060}"
+    window.toolbar?.isVisible = false
+    TarvenWindowControls.revealIfWindowed(window)
+  }
+
+  @discardableResult
+  func togglePictureInPicture() -> Bool {
+    guard let window, !window.styleMask.contains(.fullScreen) else { return false }
+    if isPictureInPicture {
+      if let originalLevel { window.level = originalLevel }
+      if let originalCollectionBehavior { window.collectionBehavior = originalCollectionBehavior }
+      restoreAspectRatio(of: window)
+      if let pictureInPictureFrame {
+        window.setFrame(pictureInPictureFrame, display: true, animate: true)
+      }
+      if let originalMinSize { window.contentMinSize = originalMinSize }
+      isPictureInPicture = false
+      return false
+    }
+
+    pictureInPictureFrame = window.frame
+    let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? window.frame
+    let width = min(max(visibleFrame.width * 0.3, 420), 560)
+    let height = width * 9 / 16
+    let frame = NSRect(
+      x: visibleFrame.maxX - width - 24,
+      y: visibleFrame.minY + 24,
+      width: width,
+      height: height)
+    window.level = .floating
+    window.collectionBehavior.formUnion([.canJoinAllSpaces, .fullScreenAuxiliary])
+    // The minimum must fit the 16:9 ratio, or resizing the small window has no valid size.
+    originalMinSize = window.contentMinSize
+    window.contentMinSize = NSSize(width: 320, height: 180)
+    window.contentAspectRatio = NSSize(width: 16, height: 9)
+    window.setFrame(frame, display: true, animate: true)
+    isPictureInPicture = true
+    return true
+  }
+
+  /// Undoes the 16:9 picture-in-picture ratio. A zero ratio is not "no ratio": assigning it made
+  /// every later edge drag compute an invalid frame and abort, so free resizing is restored
+  /// through the resize increments, as AppKit documents.
+  private func restoreAspectRatio(of window: NSWindow) {
+    if let originalAspectRatio, originalAspectRatio.width > 0, originalAspectRatio.height > 0 {
+      window.contentAspectRatio = originalAspectRatio
+    } else {
+      window.contentResizeIncrements = NSSize(width: 1, height: 1)
+    }
+  }
+
+  func restore() {
+    guard let window else { return }
+    if isPictureInPicture { _ = togglePictureInPicture() }
+    if TarvenWindowRestorePolicy.shouldExitFullScreen(
+      original: originalStyleMask, current: window.styleMask)
+    {
+      if fullscreenExitObserver == nil {
+        fullscreenExitObserver = NotificationCenter.default.addObserver(
+          forName: NSWindow.didExitFullScreenNotification,
+          object: window,
+          queue: .main
+        ) { [self] _ in
+          MainActor.assumeIsolated { restoreWindowPresentation() }
+        }
+      }
+      window.toggleFullScreen(nil)
+      return
+    }
+    restoreWindowPresentation()
+  }
+
+  private func restoreWindowPresentation() {
+    guard let window else { return }
+    if let originalStyleMask {
+      window.styleMask = TarvenWindowRestorePolicy.restoredStyle(
+        original: originalStyleMask, current: window.styleMask)
+    }
+    if let originalTitleVisibility { window.titleVisibility = originalTitleVisibility }
+    if let originalTitlebarAppearsTransparent {
+      window.titlebarAppearsTransparent = originalTitlebarAppearsTransparent
+    }
+    if let originalTitlebarSeparatorStyle {
+      window.titlebarSeparatorStyle = originalTitlebarSeparatorStyle
+    }
+    if let originalBackgroundColor { window.backgroundColor = originalBackgroundColor }
+    if let originalTitle { window.title = originalTitle }
+    if let originalToolbarVisibility { window.toolbar?.isVisible = originalToolbarVisibility }
+    TarvenWindowControls.revealIfWindowed(window)
+    if let originalLevel { window.level = originalLevel }
+    if let originalCollectionBehavior { window.collectionBehavior = originalCollectionBehavior }
+    if let originalFrame, !window.styleMask.contains(.fullScreen) {
+      window.setFrame(originalFrame, display: true)
+      DispatchQueue.main.async { [weak window] in
+        guard let window, !window.styleMask.contains(.fullScreen) else { return }
+        window.setFrame(originalFrame, display: true)
+      }
+    }
+    if let fullscreenExitObserver {
+      NotificationCenter.default.removeObserver(fullscreenExitObserver)
+      self.fullscreenExitObserver = nil
+    }
+    self.window = nil
+  }
+}
+
+/// Up Next shares the catalog's real item menu without manufacturing state from a queue label.
+private struct PlayerUpNextActions: ViewModifier {
+  let item: CatalogItemSummary?
+  let nextID: UUID?
+  let seriesID: UUID?
+  let onPlay: (UUID) -> Void
+  let onResume: (UUID) -> Void
+  let onGoToSeries: (UUID) -> Void
+
+  @ViewBuilder func body(content: Content) -> some View {
+    if let item {
+      content.mediaActions(
+        item: item, onPlay: { onPlay(item.id) }, onResume: { onResume(item.id) },
+        onGoToSeries: onGoToSeries)
+    } else {
+      content.contextMenu {
+        if let nextID { Button("Play", systemImage: "play.fill") { onPlay(nextID) } }
+        if let seriesID { Button("Go to Series", systemImage: "tv") { onGoToSeries(seriesID) } }
+      }
+    }
+  }
+}
+
+struct AirPlayRoutePickerButton: NSViewRepresentable {
+  func makeNSView(context: Context) -> AVRoutePickerView {
+    let picker = AVRoutePickerView()
+    picker.isRoutePickerButtonBordered = false
+    return picker
+  }
+
+  func updateNSView(_ nsView: AVRoutePickerView, context: Context) {}
+}
+
+@MainActor
+private struct PlayerAudioPreferencesModifier: ViewModifier {
+  @ObservedObject var preferences: PlaybackPreferencesStore
+  let controller: PlaybackController
+
+  func body(content: Content) -> some View {
+    content
+      .onChange(of: preferences.preferences.dialogueBoost) { old, new in
+        if !controller.setDialogueBoost(new) { preferences.preferences.dialogueBoost = old }
+      }
+      .onChange(of: preferences.preferences.volumeLeveling) { controller.reopenForAudioChange() }
+  }
+}
+
+extension Notification.Name {
+  /// Asks the open player to take the keyboard back, for example after Settings over it closed.
+  static let tarvenPlayerReclaimKeyboard = Notification.Name("TarvenPlayerReclaimKeyboard")
+}

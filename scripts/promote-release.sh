@@ -1,6 +1,6 @@
 #!/bin/bash
 # Turn a tested beta (a GitHub pre-release) into the stable release of its product, with the
-# same verified downloads. A promoted server becomes GitHub's Latest, which `aurelia update`, the
+# same verified downloads. A promoted server becomes GitHub's Latest, which `tarven update`, the
 # one-line install and Docker read first; Linux desktop tags stay independent and Mac versions stay
 # betas. Afterwards record the version in docs/RELEASE_VERSIONS.json.
 set -euo pipefail
@@ -34,10 +34,10 @@ if [[ "$tag" == linux-app-* ]]; then
   # sign the same SHA256SUMS again for the stable channel before the release turns stable.
   . "$repository_root/scripts/workspace-paths.sh"
   command -v minisign >/dev/null || { echo "Install minisign to promote a Linux app release." >&2; exit 1; }
-  signing_key="${AURELIA_MINISIGN_SECRET_KEY:-$HOME/.minisign/aurelia-linux.key}"
+  signing_key="${TARVEN_MINISIGN_SECRET_KEY:-$HOME/.minisign/tarven-linux.key}"
   [ -s "$signing_key" ] || { echo "Missing the minisign secret key $signing_key." >&2; exit 1; }
   public_key=$(sed -n 's/.*SigningPublicKey = "\([A-Za-z0-9+\/=]*\)";.*/\1/p' \
-    "$repository_root/clients/linux/Aurelia.Linux.Core/Updates/UpdateFeed.cs")
+    "$repository_root/clients/linux/Tarven.Linux.Core/Updates/UpdateFeed.cs")
   repository=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
   signing=$(mktemp -d)
   trap 'rm -f "$notes"; rm -rf "$signing"' EXIT
