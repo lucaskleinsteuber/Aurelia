@@ -1,8 +1,7 @@
 # Tarven used to be Aurelia
 
 Tarven was called Aurelia until Server 3.0.0, Mac 2.30.0, Linux 2.16.0, Apple TV 2.13.0 and
-iPhone & iPad 2.23.0. The name changed because many other products are called Aurelia; Tarven
-now has its own website at [tarven.org](https://tarven.org). Your library, profiles, progress and
+iPhone & iPad 2.23.0. The name changed because many other products are called Aurelia. Your library, profiles, progress and
 favorites stay as they are. This page says what happens on each device.
 
 ## Server on Linux
