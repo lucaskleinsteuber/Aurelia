@@ -7,10 +7,10 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <Deterministic>true</Deterministic>
     <Copyright>Copyright (c) 2026 Lucas Kleinsteuber</Copyright>
-    <TarvenBuildNumber>180</TarvenBuildNumber>
-    <Version>3.0.0</Version>
-    <FileVersion>3.0.0.$(TarvenBuildNumber)</FileVersion>
-    <InformationalVersion>3.0.0+build.$(TarvenBuildNumber)</InformationalVersion>
+    <TarvenBuildNumber>181</TarvenBuildNumber>
+    <Version>3.1.0</Version>
+    <FileVersion>3.1.0.$(TarvenBuildNumber)</FileVersion>
+    <InformationalVersion>3.1.0+build.$(TarvenBuildNumber)</InformationalVersion>
     <!-- Generated output goes to the git-ignored Local folder unless TARVEN_OTHER_ROOT is set. -->
     <TarvenOtherRoot Condition="'$(TARVEN_OTHER_ROOT)' == ''">$([System.IO.Path]::Combine('$(MSBuildThisFileDirectory)', 'Local'))</TarvenOtherRoot>
     <TarvenOtherRoot Condition="'$(TARVEN_OTHER_ROOT)' != ''">$(TARVEN_OTHER_ROOT)</TarvenOtherRoot>

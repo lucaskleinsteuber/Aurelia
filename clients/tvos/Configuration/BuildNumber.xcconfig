@@ -1,6 +1,6 @@
 // The TV client has its own release lifecycle, independent of the Mac/server.
-MARKETING_VERSION = 2.13.0
-CURRENT_PROJECT_VERSION = 50
+MARKETING_VERSION = 3.0.0
+CURRENT_PROJECT_VERSION = 51
 TVOS_DEPLOYMENT_TARGET = 26.0
 TVVLCKIT_ROOT = $(SRCROOT)/Dependencies
 // "Tarven Test" for the separate test edition (TARVEN_TEST_EDITION=1 in the build scripts).

@@ -1,5 +1,5 @@
-CURRENT_PROJECT_VERSION = 189
-MARKETING_VERSION = 2.30.0
+CURRENT_PROJECT_VERSION = 190
+MARKETING_VERSION = 3.0.0
 // The real app. TARVEN_TEST_EDITION=1 in build-macos-release.sh builds "Tarven Test" with
 // org.tarven.mac.test, its own App Group and launch agents, beside the real app.
 TARVEN_BUNDLE_ID_BASE = org.tarven.mac

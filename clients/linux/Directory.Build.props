@@ -2,9 +2,9 @@
   <!-- Tarven for Linux is its own product with its own version and build counter (see AGENTS.md). -->
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
   <PropertyGroup>
-    <TarvenLinuxBuildNumber>45</TarvenLinuxBuildNumber>
-    <Version>2.16.0</Version>
-    <FileVersion>2.16.0.$(TarvenLinuxBuildNumber)</FileVersion>
-    <InformationalVersion>2.16.0+build.$(TarvenLinuxBuildNumber)</InformationalVersion>
+    <TarvenLinuxBuildNumber>46</TarvenLinuxBuildNumber>
+    <Version>2.17.0</Version>
+    <FileVersion>2.17.0.$(TarvenLinuxBuildNumber)</FileVersion>
+    <InformationalVersion>2.17.0+build.$(TarvenLinuxBuildNumber)</InformationalVersion>
   </PropertyGroup>
 </Project>
