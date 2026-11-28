@@ -474,7 +474,7 @@
               "posterUrl": NSNull(),
               "ageRating": "FSK 12",
               "minimumAge": 12,
-              "note": "For Friday Movie Night!",
+              "note": "For Friday evening!",
               "state": "open",
               "resolvedByUserId": NSNull(),
               "resolvedByUserName": NSNull(),
@@ -495,8 +495,6 @@
           "newlyFulfilledCount": 0,
           "providerEnabled": true,
         ]
-      } else if path == "/api/v1/movie-nights" || path == "/api/v1/watch-together" {
-        body = []
       } else if path.contains("/scrub-previews/") {
         return IOSHTTPResponse(
           statusCode: 503, headers: [:], body: Data(), fingerprint: IOSUITestFixtures.fingerprint)

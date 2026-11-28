@@ -140,10 +140,12 @@ struct ServerPowerEditor: View {
       }
       stored = settings
       draft = settings
+      model.noteServerPowerSettings(settings)
     } catch let failure as APIClientError where failure.httpStatus == 404 {
       // Servers before 1.8.4 have no sleep mode settings.
       stored = nil
       unsupported = true
+      model.noteServerPowerSaving(false)
     } catch is CancellationError {
       // A newer load of this page runs instead, unless the page itself went away.
       if !Task.isCancelled { loadFailed = true }
@@ -166,6 +168,7 @@ struct ServerPowerEditor: View {
         }
         stored = saved
         self.draft = saved
+        model.noteServerPowerSettings(saved)
       } catch {
         message = scope.message(for: error)
       }

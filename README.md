@@ -59,8 +59,7 @@ home network; details and artwork from [TMDB](https://www.themoviedb.org) are op
   time a title ends.
 - Cinema Mode on the Mac: a made-up ad and trailers of films you haven't watched yet before the
   film starts.
-- *Play On* sends a title to another screen at home; *Watch Together* keeps several screens on
-  the same moment.
+- *Play On* sends a title to another screen at home and controls it from there.
 - Downloads on Mac, Linux, iPhone and iPad for watching without the server, with an offline
   mode when the server is out of reach.
 
@@ -73,7 +72,7 @@ home network; details and artwork from [TMDB](https://www.themoviedb.org) are op
 - Sleeps when nobody watches and wakes by Wake-on-LAN when you open an app.
 - Server Health and Library Health show free space, warnings, duplicates and missing titles.
 - A file watch reads every file in the background and finds damaged, cut-off and silently
-  changed files (bit rot) before movie night, and shows how the drives are doing.
+  changed files (bit rot) early, and shows how the drives are doing.
 - Daily database backups and checks; updates from the app or with one command.
 
 **Private by design**

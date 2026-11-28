@@ -107,8 +107,6 @@ public sealed class ServerPerformanceTests
     [InlineData("/api/v1/home", "", true)]
     [InlineData("/api/v1/streams/abc/live", "", false)]
     [InlineData("/api/v1/sync/changes", "?after=1&waitSeconds=25", false)]
-    [InlineData("/api/v1/watch-together/abc", "?after=1&waitMs=20000", false)]
-    [InlineData("/api/v1/watch-together/abc", "?after=1&waitMs=0", true)]
     [InlineData("/api/v1/devices/player/commands", "?deviceId=x", false)]
     [InlineData("/api/v1/server/backups/uploads/abc", "", false)]
     [InlineData("/web/app.js", "", false)]

@@ -1,8 +1,8 @@
 import Foundation
 
 struct TVAPIClient: Sendable {
-  /// Reads the app makes by itself (a reload after the server reported a change, Home asking for
-  /// watch parties) must not keep an idle server awake (server 2.21+), as on iPhone and iPad.
+  /// Reads the app makes by itself (such as a reload after the server reported a change) must not
+  /// keep an idle server awake (server 2.21+), as on iPhone and iPad.
   /// Task-local, so it follows child tasks without touching requests someone asked for.
   @TaskLocal private static var requestsInBackground = false
 
@@ -689,24 +689,6 @@ struct TVAPIClient: Sendable {
       throw TVCoreError.invalidResponse
     }
     return response.body
-  }
-
-  // Watch Together requests (see TVWatchTogether.swift).
-  func getWatchTogether<Value: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws
-    -> Value
-  {
-    try Self.decode(Value.self, data: await send(path, query: query))
-  }
-
-  func postWatchTogether<Value: Decodable>(_ path: String, _ payload: some Encodable) async throws
-    -> Value
-  {
-    try Self.decode(
-      Value.self, data: await send(path, method: "POST", body: try JSONEncoder().encode(payload)))
-  }
-
-  func deleteWatchTogether(_ path: String) async throws {
-    _ = try await send(path, method: "DELETE")
   }
 
   // Server administration (TVAdminAPI.swift). A protected change is refused with

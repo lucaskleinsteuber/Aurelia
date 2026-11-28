@@ -82,7 +82,6 @@ struct AureliaApp: App {
               hasProfile: model.profile != nil,
               canManageMedia: model.canManageMedia,
               isPlaying: model.playback != nil,
-              isInMovieNight: model.movieNightLaunch != nil,
               isInWrapped: model.wrappedLaunch != nil,
               isOfflineMode: model.offlineMode != nil))
       }
@@ -106,19 +105,17 @@ enum AppMenuCommandPolicy {
     hasProfile: Bool,
     canManageMedia: Bool,
     isPlaying: Bool,
-    isInMovieNight: Bool,
     isInWrapped: Bool,
     isOfflineMode: Bool
   ) -> Bool {
-    hasProfile && canManageMedia && !isPlaying && !isInMovieNight && !isInWrapped && !isOfflineMode
+    hasProfile && canManageMedia && !isPlaying && !isInWrapped && !isOfflineMode
   }
 
   static func settingsCoversFullWindowOverlay(
     isPlaying: Bool,
-    isInMovieNight: Bool,
     isInWrapped: Bool
   ) -> Bool {
-    isPlaying || isInMovieNight || isInWrapped
+    isPlaying || isInWrapped
   }
 }
 

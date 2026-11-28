@@ -197,30 +197,22 @@ struct TVCinemaTests {
     var preferences = TVPlaybackPreferences()
     #expect(
       !TVCinemaPlan.wanted(
-        preferences: preferences, isEpisode: false, capabilities: [TVCinemaPlan.feature],
-        watchingTogether: false))
+        preferences: preferences, isEpisode: false, capabilities: [TVCinemaPlan.feature]))
     preferences.cinemaMode = true
     #expect(
       TVCinemaPlan.wanted(
-        preferences: preferences, isEpisode: false, capabilities: [TVCinemaPlan.feature],
-        watchingTogether: false))
+        preferences: preferences, isEpisode: false, capabilities: [TVCinemaPlan.feature]))
     #expect(
       !TVCinemaPlan.wanted(
-        preferences: preferences, isEpisode: true, capabilities: [TVCinemaPlan.feature],
-        watchingTogether: false))
+        preferences: preferences, isEpisode: true, capabilities: [TVCinemaPlan.feature]))
     #expect(
       !TVCinemaPlan.wanted(
-        preferences: preferences, isEpisode: false, capabilities: [], watchingTogether: false))
-    #expect(
-      !TVCinemaPlan.wanted(
-        preferences: preferences, isEpisode: false, capabilities: [TVCinemaPlan.feature],
-        watchingTogether: true))
+        preferences: preferences, isEpisode: false, capabilities: []))
     preferences.cinemaAds = false
     preferences.cinemaTrailers = 0
     #expect(
       !TVCinemaPlan.wanted(
-        preferences: preferences, isEpisode: false, capabilities: [TVCinemaPlan.feature],
-        watchingTogether: false))
+        preferences: preferences, isEpisode: false, capabilities: [TVCinemaPlan.feature]))
   }
 
   @Test func aFilmPickedUpInTheMiddleGetsNoPreShow() throws {

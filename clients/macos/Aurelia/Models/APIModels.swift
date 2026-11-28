@@ -17,6 +17,8 @@ struct ServerInfoResponse: Codable, Equatable, Sendable {
   /// From server 2.18.0: where a server that moved to another computer went. It still answers at
   /// its old address so devices can follow it.
   var moved: ServerMoveTarget? = nil
+  /// Whether the server saves power when unused (false when unknown or off).
+  var powerSavingEnabled: Bool? = nil
 }
 
 /// Where a moved server went. Only HTTPS addresses of the same server are followed, and each one
@@ -1697,7 +1699,14 @@ struct StoredServerProfile: Codable, Equatable, Sendable {
   let locallyManaged: Bool?
   /// Present only in memory; Keychain rejects viewing credentials.
   let viewingSession: Bool?
+  /// Whether the server powers down when unused; defaults to false until the server says so.
+  var powerSavingEnabled: Bool
   var isViewingSession: Bool { viewingSession == true }
+
+  private enum CodingKeys: String, CodingKey {
+    case serverId, name, baseURL, publicKeyFingerprint, token, sessionId, expiresAt, user
+    case locallyManaged, viewingSession, powerSavingEnabled
+  }
 
   init(
     serverId: UUID,
@@ -1709,7 +1718,8 @@ struct StoredServerProfile: Codable, Equatable, Sendable {
     expiresAt: String,
     user: UserSummary? = nil,
     locallyManaged: Bool? = nil,
-    viewingSession: Bool? = nil
+    viewingSession: Bool? = nil,
+    powerSavingEnabled: Bool = false
   ) {
     self.serverId = serverId
     self.name = name
@@ -1721,6 +1731,23 @@ struct StoredServerProfile: Codable, Equatable, Sendable {
     self.user = user
     self.locallyManaged = locallyManaged
     self.viewingSession = viewingSession
+    self.powerSavingEnabled = powerSavingEnabled
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    serverId = try container.decode(UUID.self, forKey: .serverId)
+    name = try container.decode(String.self, forKey: .name)
+    baseURL = try container.decode(URL.self, forKey: .baseURL)
+    publicKeyFingerprint = try container.decode(String.self, forKey: .publicKeyFingerprint)
+    token = try container.decode(String.self, forKey: .token)
+    sessionId = try container.decode(UUID.self, forKey: .sessionId)
+    expiresAt = try container.decode(String.self, forKey: .expiresAt)
+    user = try container.decodeIfPresent(UserSummary.self, forKey: .user)
+    locallyManaged = try container.decodeIfPresent(Bool.self, forKey: .locallyManaged)
+    viewingSession = try container.decodeIfPresent(Bool.self, forKey: .viewingSession)
+    powerSavingEnabled =
+      try container.decodeIfPresent(Bool.self, forKey: .powerSavingEnabled) ?? false
   }
 
   func retainingLocalHosting() -> StoredServerProfile {
@@ -1728,7 +1755,7 @@ struct StoredServerProfile: Codable, Equatable, Sendable {
       serverId: serverId, name: name, baseURL: baseURL,
       publicKeyFingerprint: publicKeyFingerprint, token: token,
       sessionId: sessionId, expiresAt: expiresAt, user: user, locallyManaged: true,
-      viewingSession: viewingSession)
+      viewingSession: viewingSession, powerSavingEnabled: powerSavingEnabled)
   }
 
   /// The same sign-in with the profile's new name or picture.
@@ -1737,7 +1764,7 @@ struct StoredServerProfile: Codable, Equatable, Sendable {
       serverId: serverId, name: name, baseURL: baseURL,
       publicKeyFingerprint: publicKeyFingerprint, token: token, sessionId: sessionId,
       expiresAt: expiresAt, user: user, locallyManaged: locallyManaged,
-      viewingSession: viewingSession)
+      viewingSession: viewingSession, powerSavingEnabled: powerSavingEnabled)
   }
 
   func changingAddress(_ address: URL, name: String? = nil) -> StoredServerProfile {
@@ -1745,7 +1772,15 @@ struct StoredServerProfile: Codable, Equatable, Sendable {
       serverId: serverId, name: name ?? self.name, baseURL: address,
       publicKeyFingerprint: publicKeyFingerprint, token: token, sessionId: sessionId,
       expiresAt: expiresAt, user: user, locallyManaged: locallyManaged,
-      viewingSession: viewingSession)
+      viewingSession: viewingSession, powerSavingEnabled: powerSavingEnabled)
+  }
+
+  func changingPowerSaving(_ enabled: Bool) -> StoredServerProfile {
+    StoredServerProfile(
+      serverId: serverId, name: name, baseURL: baseURL,
+      publicKeyFingerprint: publicKeyFingerprint, token: token, sessionId: sessionId,
+      expiresAt: expiresAt, user: user, locallyManaged: locallyManaged,
+      viewingSession: viewingSession, powerSavingEnabled: enabled)
   }
 }
 
@@ -1927,75 +1962,6 @@ enum SubtitleLanguages {
   static func name(_ code: String) -> String {
     Locale(identifier: "en").localizedString(forLanguageCode: code) ?? code
   }
-}
-
-// MARK: - Watch Together
-
-struct WatchPartySummary: Codable, Identifiable, Equatable, Sendable {
-  let id: UUID
-  let mediaId: UUID
-  let title: String
-  let hostName: String
-  let memberCount: Int
-  let isPlaying: Bool
-}
-
-struct WatchPartyMember: Codable, Identifiable, Equatable, Sendable {
-  let id: UUID
-  let name: String
-  let deviceName: String
-  let isBuffering: Bool
-  let isHost: Bool
-  let isYou: Bool
-}
-
-/// The shared state of a Watch Together party; dates are ISO 8601 strings from the server.
-struct WatchPartyState: Codable, Identifiable, Equatable, Sendable {
-  let id: UUID
-  let mediaId: UUID
-  let title: String
-  let isPlaying: Bool
-  let isWaiting: Bool
-  let positionMilliseconds: Int64
-  let updatedAt: String
-  let serverTime: String
-  let revision: Int64
-  let members: [WatchPartyMember]
-  let lastAction: String?
-  let lastActionBy: String?
-
-  var me: WatchPartyMember? { members.first { $0.isYou } }
-
-  /// "Mia paused", the last thing someone else did, for a short notice in the player.
-  var notice: String? {
-    guard let lastAction, let lastActionBy else { return nil }
-    switch lastAction {
-    case "play": return "\(lastActionBy) pressed play"
-    case "pause": return "\(lastActionBy) paused"
-    case "seek": return "\(lastActionBy) jumped to another moment"
-    case "joined": return "\(lastActionBy) joined"
-    case "left": return "\(lastActionBy) left"
-    case "change": return "\(lastActionBy) started \(title)"
-    default: return nil
-    }
-  }
-}
-
-struct CreateWatchPartyRequest: Encodable, Sendable {
-  let mediaId: UUID
-  let positionMilliseconds: Int64
-  let isPlaying: Bool
-  let deviceName: String?
-}
-
-struct JoinWatchPartyRequest: Encodable, Sendable {
-  let deviceName: String?
-}
-
-struct WatchPartyCommandRequest: Encodable, Sendable {
-  let action: String
-  var positionMilliseconds: Int64? = nil
-  var mediaId: UUID? = nil
 }
 
 /// The year as slides, chosen and written by the server; the app only shows them.

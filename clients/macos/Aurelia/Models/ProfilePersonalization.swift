@@ -138,8 +138,6 @@ enum ServerFeatureNames {
   static let screenTime = "screen-time-v1"
   /// Trailers of films not watched yet, for cinema mode's pre-show.
   static let cinemaTrailers = "cinema-trailers-v1"
-  /// Movie Night: the household swipes one deck until everyone likes a title.
-  static let movieNight = "movie-night-v1"
   /// The year as slides with the server's lines.
   static let yearWrapped = "year-wrapped-v1"
   static let monthlyWrapped = "monthly-wrapped-v1"

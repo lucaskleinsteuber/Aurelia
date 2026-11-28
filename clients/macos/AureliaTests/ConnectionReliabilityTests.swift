@@ -49,17 +49,18 @@ struct ConnectionReliabilityTests {
 
     func rests(
       enabled: Bool = true, idle: TimeInterval = 15 * 60, playing: Bool = false,
-      elsewhere: Bool = true
+      elsewhere: Bool = true, powerSaving: Bool = true
     ) -> Bool {
       AureliaRest.shouldRest(
         enabled: enabled, minutes: 15, secondsWithoutInput: idle, playing: playing,
-        connectedElsewhere: elsewhere)
+        connectedElsewhere: elsewhere, serverPowerSavingEnabled: powerSaving)
     }
     #expect(rests())
     #expect(!rests(idle: 14 * 60))
     #expect(!rests(playing: true), "A title playing through the night is still watched.")
     #expect(!rests(enabled: false))
     #expect(!rests(elsewhere: false), "A server on this Mac is not left alone.")
+    #expect(!rests(powerSaving: false), "A server with power saving off never rests.")
   }
 
   @Test func onlyUsingAureliaItselfCountsAsUse() {
@@ -69,6 +70,11 @@ struct ConnectionReliabilityTests {
       AureliaRest.secondsWithoutUse(
         isActive: true, secondsWithoutInput: 40, lastActive: left, now: now) == 40,
       "In front, the last input went to Aurelia.")
+    #expect(
+      AureliaRest.secondsWithoutUse(
+        isActive: true, secondsWithoutInput: 20 * 60, lastActive: now.addingTimeInterval(-3),
+        now: now) == 3,
+      "Just focusing Aurelia resets idle time even before any new key or mouse input.")
     #expect(
       AureliaRest.secondsWithoutUse(
         isActive: false, secondsWithoutInput: 2, lastActive: left, now: now) == 20 * 60,
@@ -97,7 +103,7 @@ struct ConnectionReliabilityTests {
   }
 
   @Test func restingClosesThePlayerAndStaysQuiet() async {
-    let profile = syntheticProfile()
+    let profile = syntheticProfile().changingPowerSaving(true)
     let model = AppModel(store: FailingDisconnectStore(profile: profile), initialProfile: profile)
     guard model.operatingMode != .host else { return }
     model.startRemoteDeviceService()
@@ -115,6 +121,78 @@ struct ConnectionReliabilityTests {
     #expect(!model.hasActiveRemoteDeviceTasks)
     #expect(model.errorMessage == nil)
     #expect(model.isResting)
+  }
+
+  @Test func serverWithoutPowerSavingOrLoopbackNeverRestsAndActivationLeavesRest() async throws {
+    let suite = "AureliaRestPolicyTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    // Default profile has powerSavingEnabled == false: never rests.
+    let defaultProfile = syntheticProfile()
+    #expect(!defaultProfile.powerSavingEnabled)
+    let defaultModel = AppModel(
+      store: FailingDisconnectStore(profile: defaultProfile), initialProfile: defaultProfile)
+    defaultModel.restDefaults = defaults
+    defaultModel.secondsWithoutUse = { 30 * 60 }
+    await defaultModel.start()
+    #expect(!defaultModel.shouldRest())
+    await defaultModel.enterRest()
+    #expect(!defaultModel.isResting)
+
+    // Loopback servers never rest even if powerSavingEnabled == true.
+    for address in [
+      "https://127.0.0.1:43111", "https://localhost:43111", "https://[::1]:43111",
+    ] {
+      let url = try #require(URL(string: address))
+      #expect(AppModel.isLoopbackHost(url))
+      let loopback = syntheticProfile().changingAddress(url).changingPowerSaving(true)
+      let loopModel = AppModel(
+        store: FailingDisconnectStore(profile: loopback), initialProfile: loopback)
+      loopModel.restDefaults = defaults
+      loopModel.secondsWithoutUse = { 30 * 60 }
+      await loopModel.start()
+      #expect(!loopModel.shouldRest())
+      await loopModel.enterRest()
+      #expect(!loopModel.isResting)
+    }
+
+    // Remote server with powerSavingEnabled == true rests when idle, and leaves rest automatically
+    // when Aurelia becomes active or when server power saving is turned off.
+    let remote = syntheticProfile().changingPowerSaving(true)
+    let model = AppModel(store: InMemoryServerProfileStore(profile: remote), initialProfile: remote)
+    model.restDefaults = defaults
+    model.serverWakeUp.probe = { _ in true }
+    model.secondsWithoutUse = { 30 * 60 }
+    await model.start()
+    guard model.operatingMode != .host else { return }
+    #expect(model.shouldRest())
+    await model.enterRest()
+    #expect(model.isResting)
+
+    await model.setApplicationActive(true)
+    #expect(!model.isResting)
+
+    // Notification-driven activation also leaves rest automatically.
+    await model.enterRest()
+    #expect(model.isResting)
+    NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+    for _ in 0..<100 where model.isResting {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(!model.isResting)
+
+    // Turning power saving off on the server prevents resting and leaves rest if active.
+    await model.enterRest()
+    #expect(model.isResting)
+    model.noteServerPowerSettings(
+      ServerPowerSettings(
+        available: true, mode: "off", idleMinutes: 15, awakeFrom: nil, awakeUntil: nil))
+    #expect(!model.serverPowerSavingEnabled)
+    for _ in 0..<100 where model.isResting {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(!model.isResting)
   }
 
   @Test func systemSleepStopsRemoteDeviceTasks() async {

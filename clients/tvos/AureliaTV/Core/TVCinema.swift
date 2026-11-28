@@ -44,13 +44,12 @@ enum TVCinemaPlan {
   static let lastAdKey = "AureliaCinemaLastAd"
 
   /// Whether a title may get a pre-show: a film (not an episode), cinema mode on with ads or
-  /// trailers, a server that lists trailers, and no one watching along.
+  /// trailers, and a server that lists trailers.
   static func wanted(
-    preferences: TVPlaybackPreferences, isEpisode: Bool, capabilities: [String],
-    watchingTogether: Bool
+    preferences: TVPlaybackPreferences, isEpisode: Bool, capabilities: [String]
   ) -> Bool {
     preferences.cinemaMode && (preferences.cinemaAds || preferences.cinemaTrailers > 0)
-      && !isEpisode && !watchingTogether && capabilities.contains(feature)
+      && !isEpisode && capabilities.contains(feature)
   }
 
   /// Whether the film starts from its beginning; a film picked up in the middle gets no pre-show.

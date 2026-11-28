@@ -85,11 +85,10 @@ struct RootView: View {
       // with every frame of Settings (audit M3). It keeps its state and shows again at once.
       .opacity(
         model.isSettingsPresented && model.playback == nil && model.offlineMode == nil
-          && model.movieNightLaunch == nil && model.wrappedLaunch == nil ? 0 : 1
+          && model.wrappedLaunch == nil ? 0 : 1
       )
       .accessibilityHidden(
-        model.playback != nil || model.isSettingsPresented || model.movieNightLaunch != nil
-          || model.wrappedLaunch != nil)
+        model.playback != nil || model.isSettingsPresented || model.wrappedLaunch != nil)
 
       if let replay = introductionReplay {
         SetupIntroductionView(guide: guide, replay: true) { introductionReplay = nil }
@@ -103,24 +102,15 @@ struct RootView: View {
         // controls while it faded and slid made every frame redraw and stutter (audit M3).
         AppSettingsView(initialCategory: model.requestedSettingsCategory)
           .transition(.identity)
-          // Opened while a title plays or during Movie Night / Wrapped (⌘, or the menu), Settings
+          // Opened while a title plays or during Wrapped (⌘, or the menu), Settings
           // cover the full-window overlay too; Done or Esc returns to it.
           .zIndex(
             AppMenuCommandPolicy.settingsCoversFullWindowOverlay(
               isPlaying: model.playback != nil,
-              isInMovieNight: model.movieNightLaunch != nil,
               isInWrapped: model.wrappedLaunch != nil) ? 11 : 5)
       }
 
-      // Movie Night and Wrapped take the whole window, over the library and Settings.
-      if model.playback == nil, !model.requiresProfileSelection,
-        let launch = model.movieNightLaunch, let api = model.profileClient()
-      {
-        MovieNightView(api: api, joining: launch.joining)
-          .id(launch.id)
-          .transition(.opacity)
-          .zIndex(8)
-      }
+      // Wrapped takes the whole window, over the library and Settings.
       if model.playback == nil, !model.requiresProfileSelection, let launch = model.wrappedLaunch {
         WrappedStoryView(launch: launch)
           .id(launch.id)
@@ -130,7 +120,7 @@ struct RootView: View {
 
       if let profile = model.profile, let playback = model.playback {
         PlayerView(profile: profile, presentation: playback)
-          // A new title (such as one a Watch Together party moved to) gets a new player.
+          // Each title gets its own player.
           .id(playback.id)
           .transition(.opacity)
           .zIndex(10)
@@ -153,7 +143,6 @@ struct RootView: View {
       }
     }
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: model.isResting)
-    .aureliaAnimation(AureliaMotion.page, value: model.movieNightLaunch)
     .aureliaAnimation(AureliaMotion.page, value: model.wrappedLaunch)
     .aureliaAnimation(AureliaMotion.standard, value: phase)
     .preferredColorScheme(.dark)
@@ -180,10 +169,13 @@ struct RootView: View {
       model.isSettingsPresented = false
       introductionReplay = UUID()
     }
-    // A server this Mac hosts that stopped for being unused starts again when Aurelia is opened.
+    // Focusing Aurelia leaves rest immediately and starts an idle hosted server again.
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification))
     { _ in
-      Task { await model.resumeIdleHost() }
+      Task {
+        if model.isResting { await model.leaveRest() }
+        await model.resumeIdleHost()
+      }
     }
     .task { await model.resumeIdleHost() }
   }

@@ -171,11 +171,9 @@ those in the most titles first, with a search (Ctrl+F there searches people). A 
 the library's titles first and adds, when TMDB is on, life dates, biography and a Known For row
 with Wish or Me Too; `Core/Library/PeoplePresentation.cs` holds the words.
 
-**Movie Night** on Home covers the window while everyone at home swipes the same posters (drag, the
-buttons or the arrow keys; phones join from their own Aurelia or a browser), and the first title
-every voter likes shows as a ticket with Play. Statistics plays the year as **Wrapped** slides
-over the whole window (click right or left, ← → Space, Esc closes), and from the 2nd of a month
-last month's Wrapped, also on Home in that first week. `Core/Playback/MovieNight.cs` holds the rules.
+**Wrapped** in Statistics plays the year as slides over the whole window (click right or left,
+← → Space, Esc closes), and from the 2nd of a month last month's Wrapped, also on Home in that
+first week. `Core/Playback/WrappedStory.cs` holds the rules.
 
 **Download** keeps a movie or episode on this PC, in the app's data folder. With Aurelia Server
 2.20 or newer it can be a smaller copy (1080p, 720p or 480p, with its size and how long the
@@ -200,9 +198,9 @@ library (Done or Esc returns), with a search field (`Settings/SettingsView.cs`):
 - Advanced: the server connection (name, address, fingerprint, profile) and "Disconnect This PC".
 
 When nothing plays and nobody used Aurelia for the chosen minutes, Aurelia lets go of a server on
-another computer so it can sleep: the sync stops, idle connections close and "Aurelia Is Resting"
-shows. Any click or key wakes the server and continues with the open profile. Ctrl+/ lists the
-keyboard shortcuts.
+another computer that has power saving enabled so it can sleep: the sync stops, idle connections
+close and "Aurelia Is Resting" shows. Switching back to Aurelia, clicking or pressing any key wakes
+the server and continues with the open profile automatically. Ctrl+/ lists the keyboard shortcuts.
 
 ## App updates
 

@@ -156,7 +156,7 @@ struct LibraryShellView: View {
     .background {
       LibraryFindShortcut(
         isBlocked: {
-          model.playback != nil || model.movieNightLaunch != nil || model.wrappedLaunch != nil
+          model.playback != nil || model.wrappedLaunch != nil
         },
         canGoBack: { selection != nil },
         back: { goBack() }
@@ -441,7 +441,6 @@ struct LibraryShellView: View {
         browsePage
       }
       .equatable()
-      .environment(\.aureliaBrowsePageCovered, selection != nil)
       .id(destination)
       .transition(.opacity)
       .opacity(selection == nil ? 1 : 0)
@@ -650,7 +649,6 @@ private struct HomePage: View {
           if model.supportsMonthlyWrapped, WrappedStory.monthIsNew() {
             MonthlyWrappedButton().padding(.horizontal, AureliaDesign.pagePadding)
           }
-          if model.supportsMovieNight { MovieNightHomeStrip() }
           landscapeRow(
             "Continue Watching",
             items: model.home?.continueWatching ?? [])

@@ -269,8 +269,6 @@ builder.Services.AddScoped<ServerHealthService>();
 builder.Services.AddScoped<WatchHistoryService>();
 builder.Services.AddScoped<LibraryHealthService>();
 builder.Services.AddSingleton<RemotePlaybackService>();
-builder.Services.AddSingleton<WatchTogetherService>();
-builder.Services.AddSingleton<MovieNightService>();
 builder.Services.AddSingleton<MetadataProviderSettingsStore>();
 builder.Services.AddSingleton<ArtworkStore>();
 builder.Services.AddSingleton<ArtworkVariantStore>();
@@ -612,8 +610,6 @@ app.MapRemotePlayback();
 app.MapSubtitleDownloads();
 app.MapSpeechSubtitles();
 app.MapServerSpeech();
-app.MapWatchTogether();
-app.MapMovieNight();
 app.MapWishes();
 app.MapSecurityEndpoints();
 

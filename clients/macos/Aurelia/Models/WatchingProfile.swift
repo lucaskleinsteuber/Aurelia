@@ -56,6 +56,7 @@ struct ProfilePickerResponse: Decodable, Sendable {
   let profiles: [WatchingProfile]
   var wakeOnLanAddresses: [String]? = nil
   var hosting: String? = nil
+  var powerSavingEnabled: Bool? = nil
 }
 
 struct ProfileSessionResponse: Decodable, Sendable {

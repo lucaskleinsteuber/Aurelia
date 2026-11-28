@@ -14,7 +14,6 @@ namespace Aurelia.Linux.Core.Library;
 /// profile's token over the pinned connection.
 /// </summary>
 public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSession profile, IReadOnlyCollection<string> capabilities)
-    : Aurelia.Linux.Core.Playback.IMovieNightApi
 {
     public const int DefaultPageSize = 100;
     public const int LargePageSize = 500;
@@ -28,8 +27,6 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
     public bool SupportsWatchlist => Supports("watchlist-people-v1");
 
     public bool SupportsArtworkVariants => Supports("artwork-variants-v1");
-
-    public bool SupportsMovieNight => Supports(ServerFeatures.MovieNight);
 
     public bool SupportsWrapped => Supports(ServerFeatures.YearWrapped);
 
@@ -286,63 +283,6 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
             if (items.Count >= page.Total || page.Items.Count == 0) return items;
         }
     }
-
-    // Watch Together.
-    public Task<IReadOnlyList<WatchPartySummary>> WatchPartiesAsync(CancellationToken cancellation) =>
-        Get<IReadOnlyList<WatchPartySummary>>("/api/v1/watch-together", cancellation);
-
-    public Task<WatchPartyState> CreateWatchPartyAsync(CreateWatchPartyRequest request, CancellationToken cancellation) =>
-        Send<WatchPartyState>(HttpMethod.Post, "/api/v1/watch-together", request, cancellation);
-
-    public Task<WatchPartyState> JoinWatchPartyAsync(Guid partyId, JoinWatchPartyRequest request, CancellationToken cancellation) =>
-        Send<WatchPartyState>(HttpMethod.Post, $"/api/v1/watch-together/{partyId}/join", request, cancellation);
-
-    /// <summary>The party once its revision is newer than <paramref name="after"/>, or after the wait.</summary>
-    public Task<WatchPartyState> WatchPartyAsync(Guid partyId, long? after, int waitMilliseconds, CancellationToken cancellation) =>
-        Get<WatchPartyState>(after is { } revision
-            ? $"/api/v1/watch-together/{partyId}?after={revision.ToString(System.Globalization.CultureInfo.InvariantCulture)}&waitMs={waitMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
-            : $"/api/v1/watch-together/{partyId}", cancellation, TimeSpan.FromMilliseconds(waitMilliseconds + 10_000));
-
-    public Task<WatchPartyState> WatchPartyCommandAsync(Guid partyId, WatchPartyCommandRequest request, CancellationToken cancellation) =>
-        Send<WatchPartyState>(HttpMethod.Post, $"/api/v1/watch-together/{partyId}/commands", request, cancellation);
-
-    public Task LeaveWatchPartyAsync(Guid partyId, CancellationToken cancellation) =>
-        Send<AureliaApi.NoContent>(HttpMethod.Delete, $"/api/v1/watch-together/{partyId}/members/me", null, cancellation);
-
-    // Movie Night.
-    public Task<IReadOnlyList<MovieNightSummary>> MovieNightsAsync(CancellationToken cancellation) =>
-        Get<IReadOnlyList<MovieNightSummary>>("/api/v1/movie-night", cancellation);
-
-    public Task<MovieNightState> CreateMovieNightAsync(CreateMovieNightRequest request, CancellationToken cancellation) =>
-        Send<MovieNightState>(HttpMethod.Post, "/api/v1/movie-night", request, cancellation);
-
-    public Task<MovieNightState> JoinMovieNightAsync(Guid nightId, JoinMovieNightRequest request, CancellationToken cancellation) =>
-        Send<MovieNightState>(HttpMethod.Post, $"/api/v1/movie-night/{nightId}/join", request, cancellation);
-
-    /// <summary>The night once its revision is newer than <paramref name="after"/>, or after the wait.</summary>
-    public Task<MovieNightState> MovieNightAsync(Guid nightId, long? after, int? deckVersion, int waitMilliseconds, CancellationToken cancellation) =>
-        Get<MovieNightState>(after is { } revision
-            ? $"/api/v1/movie-night/{nightId}?after={revision.ToString(CultureInfo.InvariantCulture)}&waitMs={waitMilliseconds.ToString(CultureInfo.InvariantCulture)}"
-              + (deckVersion is { } known ? "&deckVersion=" + known.ToString(CultureInfo.InvariantCulture) : "")
-            : $"/api/v1/movie-night/{nightId}", cancellation, TimeSpan.FromMilliseconds(waitMilliseconds + 10_000));
-
-    public Task<MovieNightState> MovieNightSettingsAsync(Guid nightId, MovieNightSettingsRequest request, CancellationToken cancellation) =>
-        Send<MovieNightState>(HttpMethod.Post, $"/api/v1/movie-night/{nightId}/settings", request, cancellation);
-
-    public Task<MovieNightState> DealMovieNightAsync(Guid nightId, CancellationToken cancellation) =>
-        Send<MovieNightState>(HttpMethod.Post, $"/api/v1/movie-night/{nightId}/deal", new { }, cancellation);
-
-    public Task<MovieNightState> VoteMovieNightAsync(Guid nightId, MovieNightVoteRequest request, CancellationToken cancellation) =>
-        Send<MovieNightState>(HttpMethod.Post, $"/api/v1/movie-night/{nightId}/votes", request, cancellation);
-
-    public Task<MovieNightState> KeepSwipingAsync(Guid nightId, CancellationToken cancellation) =>
-        Send<MovieNightState>(HttpMethod.Post, $"/api/v1/movie-night/{nightId}/keep-swiping", new { }, cancellation);
-
-    public Task<MovieNightState> MovieNightRoleAsync(Guid nightId, MovieNightRoleRequest request, CancellationToken cancellation) =>
-        Send<MovieNightState>(HttpMethod.Post, $"/api/v1/movie-night/{nightId}/role", request, cancellation);
-
-    public Task LeaveMovieNightAsync(Guid nightId, CancellationToken cancellation) =>
-        Send<AureliaApi.NoContent>(HttpMethod.Delete, $"/api/v1/movie-night/{nightId}/members/me", null, cancellation);
 
     // Family Wishes.
     public Task<WishSummaryResponse> WishSummaryAsync(CancellationToken cancellation) =>

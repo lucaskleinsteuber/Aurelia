@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 import Testing
 
-@Suite("iPhone and iPad catch-up: chapters, notes, photo, Movie Night, collections")
+@Suite("iPhone and iPad catch-up: chapters, notes, photo, collections")
 struct IOSParityTests {
   private let chapters = [
     IOSPlaybackChapter(
@@ -56,26 +56,6 @@ struct IOSParityTests {
     let clamped = IOSPhotoCrop.clamped(
       offset: CGSize(width: 900, height: 900), imageSize: size, side: 300, zoom: 1)
     #expect(clamped.width == 50 && clamped.height == 0)
-  }
-
-  @Test func tonightsProgramSummarizesTheHostsChoice() throws {
-    let state = try JSONDecoder().decode(
-      IOSMovieNightState.self,
-      from: Data(
-        """
-        {"id":"00000000-0000-0000-0000-000000000001","phase":"lobby","revision":1,"round":0,
-        "deckVersion":0,"kinds":"movies","genre":"Comedy","genreOptions":["Comedy"],"members":[],
-        "deck":null,"yourVotes":[],"result":null,"lastAction":null,"lastActionBy":null,
-        "era":"2010s","length":"short"}
-        """.utf8))
-    let program = IOSMovieNightProgram(state)
-    #expect(program.summary == "Movies · Comedy · 2010s · Short")
-    let encoded = try JSONEncoder().encode(program)
-    let json = try #require(String(data: encoded, encoding: .utf8))
-    #expect(json.contains("\"era\":\"2010s\""))
-    #expect(
-      IOSMovieNightProgram(kinds: "all", genre: nil, era: "any", length: "any").summary
-        == "Movies and shows")
   }
 
   @Test func onlyOwnAndAdministeredCollectionsCanBeEdited() {

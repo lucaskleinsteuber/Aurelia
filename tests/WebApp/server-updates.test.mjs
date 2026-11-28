@@ -34,9 +34,34 @@ function fixture(t, { initialStatus = initial, api: override = {}, current = () 
 test("status summaries use the server contract without inventing a percentage", () => {
   assert.match(updateSummary(status("checking")), /Looking for/);
   assert.match(updateSummary(status("installing")), /1\.15\.0 \(102\)/);
+  assert.equal(updateSummary(status("installing", { progressPercent: 54, phase: "downloading" })), "Downloading 1.15.0 (102)… (54%)");
+  assert.equal(updateSummary(status("installing", { progressPercent: 92, phase: "restarting" }), { reconnecting: true }), "Restarting Aurelia Server… (95%)");
   assert.equal(updateSummary(status("failed", { message: "Synthetic checksum failure" })), "Synthetic checksum failure");
   assert.match(updateSummary(status("idle", { updateAvailable: false })), /up to date/);
   assert.match(updateSummary(status("idle", { available: false })), /Linux/);
+});
+
+test("determinate progress bar reflects reported download percentage and restart reconnect", async (t) => {
+  let step = 0;
+  const f = fixture(t, {
+    initialStatus: status("installing", { progressPercent: 48, phase: "downloading" }),
+    api: {
+      serverUpdates: async () => {
+        if (++step === 1) throw new ApiError(0, "offline", "Restarting");
+        return status("idle", { installed: initial.newest, updateAvailable: false });
+      },
+    },
+  });
+  let bar = all(f.component.element).find((node) => node.tagName === "PROGRESS");
+  assert.equal(bar.getAttribute("value"), "48");
+  assert.equal(bar.getAttribute("max"), "100");
+  assert.match(f.component.element.textContent, /48%/);
+  await f.tick();
+  bar = all(f.component.element).find((node) => node.tagName === "PROGRESS");
+  assert.equal(bar.getAttribute("value"), "95");
+  assert.match(f.component.element.textContent, /95%/);
+  await f.tick();
+  assert.match(f.component.element.textContent, /now running 1\.15\.0 \(102\)/);
 });
 
 test("a check polls only status every two seconds and keeps installed/newest versions visible", async (t) => {

@@ -11,15 +11,35 @@ function checkedStatus(value) {
     || typeof value.updateAvailable !== "boolean"
     || (value.newest != null && typeof value.newest !== "string")
     || (value.checkedAt != null && typeof value.checkedAt !== "string")
-    || (value.message != null && typeof value.message !== "string"))
+    || (value.message != null && typeof value.message !== "string")
+    || (value.progressPercent != null && (typeof value.progressPercent !== "number" || !Number.isFinite(value.progressPercent)))
+    || (value.phase != null && typeof value.phase !== "string"))
     throw new Error("The server returned an unreadable update status. Try again.");
   return value;
 }
 
-export function updateSummary(status) {
+export function updatePhaseLabel(status, { reconnecting = false } = {}) {
+  if (reconnecting) return "Restarting Aurelia Server…";
+  switch (status?.phase) {
+    case "starting": return "Starting update…";
+    case "checking": return "Checking GitHub for updates…";
+    case "verifying": return "Verifying release signature…";
+    case "downloading": return `Downloading ${status?.newest ?? "server update"}…`;
+    case "unpacking": return "Checking SHA-256 and unpacking…";
+    case "restarting": return "Installing and restarting server…";
+    default: return null;
+  }
+}
+
+export function updateSummary(status, { reconnecting = false } = {}) {
   if (!status.available) return "Updates are available on Linux servers installed from the Aurelia package.";
-  if (status.state === "checking") return "Looking for a new version…";
-  if (status.state === "installing") return `Installing ${status.newest ?? "the update"}… The server restarts during the update.`;
+  const phase = updatePhaseLabel(status, { reconnecting });
+  const pct = reconnecting ? 95 : (typeof status.progressPercent === "number" ? Math.max(0, Math.min(100, Math.round(status.progressPercent))) : null);
+  if (status.state === "checking") return phase ? (pct != null ? `${phase} (${pct}%)` : phase) : "Looking for a new version…";
+  if (status.state === "installing") {
+    if (phase) return pct != null ? `${phase} (${pct}%)` : phase;
+    return `Installing ${status.newest ?? "the update"}… The server restarts during the update.`;
+  }
   if (status.state === "failed") return status.message || "The last update did not work.";
   if (status.updateAvailable) return "A new version is ready to install.";
   return status.checkedAt ? "The server is up to date." : "Not checked yet.";
@@ -183,9 +203,20 @@ export function createServerUpdates({ api, initial, isCurrent = () => true, onLo
     if (!current()) return;
     clear(rows);
     const inProgress = working || busy(status) || reconnecting;
+    const isReconnectingInstall = reconnecting && (operation === "install" || status?.state === "installing");
+    const percent = isReconnectingInstall
+      ? 95
+      : (typeof status?.progressPercent === "number" ? Math.max(0, Math.min(100, Math.round(status.progressPercent))) : null);
     if (status) rows.append(row("Installed", status.installed), row("Newest", status.newest ?? (status.checkedAt ? "Up to date" : "Not checked yet")),
-      h("p", { class: status.state === "failed" ? "error-text" : "muted small", role: "status", "aria-live": "polite" }, updateSummary(status)));
-    if (inProgress && !locked && !sessionError) rows.append(h("progress", { "aria-label": "Server update progress" }));
+      h("p", { class: status.state === "failed" ? "error-text" : "muted small", role: "status", "aria-live": "polite" }, updateSummary(status, { reconnecting: isReconnectingInstall })));
+    if (inProgress && !locked && !sessionError) {
+      const barAttrs = percent != null
+        ? { class: "update-progress", "aria-label": "Server update progress", max: "100", value: String(percent) }
+        : { class: "update-progress", "aria-label": "Server update progress" };
+      rows.append(h("div", { class: "update-progress-row" },
+        h("progress", barAttrs),
+        percent != null ? h("span", { class: "muted small update-progress-pct" }, `${percent}%`) : null));
+    }
     if (result) rows.append(h("p", { class: "muted small", role: "status" }, result));
     if (message) rows.append(h("p", { class: "error-text", role: "alert" }, message));
     if (locked) rows.append(h("button", { class: "primary-button", onclick: () => { if (current()) onLocked(); } }, "Unlock Server Management"));

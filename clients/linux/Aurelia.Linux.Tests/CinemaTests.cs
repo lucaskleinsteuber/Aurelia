@@ -13,12 +13,11 @@ public sealed class CinemaTests
     public void OnlyFilmsWithCinemaModeAndATrailerServerGetAPreShow()
     {
         var on = new PlaybackPreferences(CinemaMode: true);
-        Assert.True(CinemaPlan.Wanted(on, MediaKind.Movie, serverListsTrailers: true, watchingTogether: false));
-        Assert.False(CinemaPlan.Wanted(new PlaybackPreferences(), MediaKind.Movie, true, false));
-        Assert.False(CinemaPlan.Wanted(on, MediaKind.Episode, true, false));
-        Assert.False(CinemaPlan.Wanted(on, MediaKind.Movie, false, false));
-        Assert.False(CinemaPlan.Wanted(on, MediaKind.Movie, true, true));
-        Assert.False(CinemaPlan.Wanted(on with { CinemaAds = false, CinemaTrailers = 0 }, MediaKind.Movie, true, false));
+        Assert.True(CinemaPlan.Wanted(on, MediaKind.Movie, serverListsTrailers: true));
+        Assert.False(CinemaPlan.Wanted(new PlaybackPreferences(), MediaKind.Movie, true));
+        Assert.False(CinemaPlan.Wanted(on, MediaKind.Episode, true));
+        Assert.False(CinemaPlan.Wanted(on, MediaKind.Movie, false));
+        Assert.False(CinemaPlan.Wanted(on with { CinemaAds = false, CinemaTrailers = 0 }, MediaKind.Movie, true));
     }
 
     [Fact]

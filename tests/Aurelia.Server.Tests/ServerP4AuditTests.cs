@@ -119,7 +119,7 @@ public sealed class ServerP4AuditTests
     }
 
     [Fact]
-    public async Task ContractValidationHardeningCoversWishesTrailersSpeechSessionsWatchTogetherCapabilitiesAndGuard()
+    public async Task ContractValidationHardeningCoversWishesTrailersSpeechSessionsCapabilitiesAndGuard()
     {
         using var factory = new AureliaServerFactory();
         using var client = factory.CreateClient();
@@ -166,13 +166,6 @@ public sealed class ServerP4AuditTests
             Assert.Equal(HttpStatusCode.NotFound, sessionsResp.StatusCode);
             Assert.Equal("user_not_found", (await ApiTestClient.ReadAsync<ApiProblem>(sessionsResp)).Code);
         }
-
-        // SRV-API-015: Watch Together "change" clamps negative positionMilliseconds to 0.
-        var partyService = new WatchTogetherService(TimeProvider.System);
-        var hostSession = Guid.NewGuid();
-        var party = partyService.Create(hostSession, "Host", "Mac", movieId, "Initial", 0, false);
-        var changed = partyService.Command(party.Id, hostSession, new WatchPartyCommandRequest("change", -5000, Guid.NewGuid()), "Next");
-        Assert.Equal(0, changed.PositionMilliseconds);
 
         // SRV-API-015: /api/v1/server/capabilities reports actual encoder availability.
         var live = factory.Services.GetRequiredService<LiveConversionService>();

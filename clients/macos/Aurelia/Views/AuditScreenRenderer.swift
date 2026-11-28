@@ -354,9 +354,6 @@
             AuditRenderSignals.search.send("zzqxj Ünbekannt")
           }),
         Screen(
-          name: "movie-night", scenario: .library,
-          prepare: { $0.movieNightLaunch = MovieNightLaunch(joining: nil) }),
-        Screen(
           name: "wrapped", scenario: .library,
           prepare: { $0.wrappedLaunch = WrappedLaunch(year: 2025) }),
         Screen(name: "player-controls", scenario: .player, rebuildsForEachPicture: true),

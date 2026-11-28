@@ -221,19 +221,16 @@ struct ProfilePickerLifecycleTests {
     #expect(await model.selectWatchingProfile(selection, pin: "1234"))
 
     model.wrappedLaunch = WrappedLaunch(year: 2026)
-    model.movieNightLaunch = MovieNightLaunch(joining: nil)
     model.requestedMediaDetail = UUID()
     model.requestedDestination = .wishes
     model.showingCollectionEditor = true
 
     await model.switchWatchingProfile()
     #expect(model.wrappedLaunch == nil)
-    #expect(model.movieNightLaunch == nil)
     #expect(model.requestedMediaDetail == nil)
     #expect(model.requestedDestination == nil)
     #expect(!model.showingCollectionEditor)
     #expect(model.activeRemotePlayer == nil)
-    #expect(model.watchParty == nil)
     await controller.stop()
   }
 

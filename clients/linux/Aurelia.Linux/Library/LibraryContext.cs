@@ -38,14 +38,6 @@ public interface ILibraryNavigator
     /// <summary>An administrator's change to a title: edit its metadata, match it or remove it from the library.</summary>
     Task ManageTitleAsync(CatalogItemSummary item, TitleAction action) => Task.CompletedTask;
 
-    /// <summary>Watch Together parties on the server, to join from a title's page.</summary>
-    Task<IReadOnlyList<WatchPartySummary>> WatchPartiesAsync() => Task.FromResult<IReadOnlyList<WatchPartySummary>>([]);
-
-    Task JoinWatchTogetherAsync(WatchPartySummary party) => Task.CompletedTask;
-
-    /// <summary>Opens Movie Night: a new night, or <paramref name="joining"/>.</summary>
-    Task ShowMovieNightAsync(MovieNightSummary? joining) => Task.CompletedTask;
-
     /// <summary>Plays the profile's year as Wrapped slides.</summary>
     Task ShowWrappedAsync(int year, int? month = null) => Task.CompletedTask;
 

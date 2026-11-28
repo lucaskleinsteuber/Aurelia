@@ -55,7 +55,7 @@
     static let capabilities: Set<String> = [
       "watchlist-people-v1", "artwork-variants-v1", "server-readiness-v1",
       "device-authorization-v1", "security-v1",
-      ServerFeatureNames.wishes, ServerFeatureNames.people, ServerFeatureNames.movieNight,
+      ServerFeatureNames.wishes, ServerFeatureNames.people,
       ServerFeatureNames.yearWrapped, ServerFeatureNames.monthlyWrapped,
       ServerFeatureNames.profilePersonalization, ServerFeatureNames.ageLimits,
       ServerFeatureNames.screenTime, ServerFeatureNames.mediaSegments,
@@ -364,7 +364,6 @@
         return try encoder.encode(
           WatchHistoryPage(items: emptyData ? [] : history, offset: 0, limit: 50, total: 3))
       case "/api/v1/statistics": return try encoder.encode(statistics)
-      case "/api/v1/movie-night": return Data("[]".utf8)
       case "/api/v1/watchlist":
         return try encoder.encode(
           WatchlistResponse(

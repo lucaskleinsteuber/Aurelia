@@ -179,26 +179,25 @@ struct LibraryReviewFixTests {
 
     #expect(
       AppMenuCommandPolicy.canAddMedia(
-        hasProfile: true, canManageMedia: true, isPlaying: false, isInMovieNight: false,
+        hasProfile: true, canManageMedia: true, isPlaying: false,
         isInWrapped: false, isOfflineMode: false))
     #expect(
       !AppMenuCommandPolicy.canAddMedia(
-        hasProfile: true, canManageMedia: true, isPlaying: true, isInMovieNight: false,
+        hasProfile: true, canManageMedia: true, isPlaying: true,
         isInWrapped: false, isOfflineMode: false))
     #expect(
       !AppMenuCommandPolicy.canAddMedia(
-        hasProfile: true, canManageMedia: true, isPlaying: false, isInMovieNight: true,
-        isInWrapped: false, isOfflineMode: false))
-    #expect(
-      !AppMenuCommandPolicy.canAddMedia(
-        hasProfile: true, canManageMedia: true, isPlaying: false, isInMovieNight: false,
+        hasProfile: true, canManageMedia: true, isPlaying: false,
         isInWrapped: true, isOfflineMode: false))
     #expect(
-      AppMenuCommandPolicy.settingsCoversFullWindowOverlay(
-        isPlaying: false, isInMovieNight: true, isInWrapped: false))
+      !AppMenuCommandPolicy.settingsCoversFullWindowOverlay(
+        isPlaying: false, isInWrapped: false))
     #expect(
       AppMenuCommandPolicy.settingsCoversFullWindowOverlay(
-        isPlaying: false, isInMovieNight: false, isInWrapped: true))
+        isPlaying: true, isInWrapped: false))
+    #expect(
+      AppMenuCommandPolicy.settingsCoversFullWindowOverlay(
+        isPlaying: false, isInWrapped: true))
   }
 
   @Test
@@ -228,17 +227,6 @@ struct LibraryReviewFixTests {
       quip: "", accent: "night", mediaId: nil, poster: nil, posters: nil, facts: nil)
     let populated = YearWrapped(year: 2026, profileName: "Alex", slides: [slide], month: nil)
     #expect(WrappedDisplayState.resolve(wrapped: populated, index: 5, error: nil) == .slide(0))
-  }
-
-  @Test
-  func movieNightIntroNeverSpinsAfterFailureOrDismissedError() {
-    #expect(MovieNightIntroState.resolve(isStarting: true, errorText: nil) == .starting)
-    #expect(
-      MovieNightIntroState.resolve(isStarting: false, errorText: "Invalid response")
-        == .failed("Invalid response"))
-    #expect(
-      MovieNightIntroState.resolve(isStarting: false, errorText: nil)
-        == .failed("Couldn't reach the server to start Movie Night."))
   }
 
   @Test

@@ -137,13 +137,20 @@ public sealed class StoredConnectionTests
     [Fact]
     public void RoundTripsThroughTheKeyringFormat()
     {
-        var server = Sample();
+        var server = Sample() with { PowerSavingEnabled = true };
         var restored = StoredServerSerializer.Deserialize(StoredServerSerializer.Serialize(server))!;
         Assert.Equal(server.ServerId, restored.ServerId);
         Assert.Equal(server.Address, restored.Address);
         Assert.Equal(server.Fingerprint, restored.Fingerprint);
         Assert.Equal(server.DeviceToken, restored.DeviceToken);
         Assert.Equal(server.WakeOnLanAddresses, restored.WakeOnLanAddresses);
+        Assert.True(restored.PowerSavingEnabled);
+
+        // Older keyring entries without powerSavingEnabled default to false.
+        var legacy = $$"""
+            {"serverId":"{{server.ServerId}}","name":"Living Room","address":"https://192.168.1.20:43111","fingerprint":"{{server.Fingerprint}}","deviceToken":"{{server.DeviceToken}}","sessionId":"{{server.SessionId}}","expiresAt":"2026-12-01T00:00:00Z"}
+            """;
+        Assert.False(StoredServerSerializer.Deserialize(legacy)!.PowerSavingEnabled);
     }
 
     [Theory]

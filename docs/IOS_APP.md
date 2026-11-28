@@ -50,8 +50,6 @@ its screens are its own:
 - **Play On…** in a title's More menu starts it on another Aurelia player of the server and turns
   the sheet into its remote (play, pause, skipping, position, stop). Other devices' commands also
   pause, resume, seek and skip here.
-- **Movie Night** shows *Tonight's program*: the host picks kind, genre, era and length right in
-  the lobby card and deals; everyone else sees the choice.
 - **Collections**: Add to Collection… in a title's menu chooses your own collections or starts a
   new one; a collection's page edits it (cover, backdrop, description, order, seasons and single
   episodes) or deletes it. **Smart Lists** are made there too: movies or shows, genres, a decade
@@ -110,9 +108,6 @@ its screens are its own:
   now and every ten seconds for two minutes and connects as soon as it answers. Settings › Server
   shows whether waking can work (how many network cards the server reported) and sends one packet
   on request. A server found with Bonjour is looked up to its IPv4 address so waking reaches it.
-- **Movie Night** starts from Home, or joins a night someone else started there: everyone swipes
-  the same posters (right for yes, left for nope, or the buttons), and the first title all
-  voters like shows as a ticket with Play. Closing it leaves the night.
 
 ## Streaming quality
 
@@ -147,8 +142,7 @@ Good to know:
   for a while in the background with the system's progress, and **Try Again** continues where
   it stopped. Either way it comes with the subtitle files next to it, its poster and its
   description. It plays with the normal player: sound tracks, subtitles, speed, Dialogue Boost,
-  scrub previews, the sleep timer and Up Next for the next downloaded episode. Watch Together
-  needs the server and is off for downloads.
+  scrub previews, the sleep timer and Up Next for the next downloaded episode.
 - Downloads live in Aurelia's own storage on the device, are left out of iCloud backups and
   are never written next to your media or on the server. Swipe a download in Settings ›
   Downloads to remove it; deleting the app removes all of them.

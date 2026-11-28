@@ -10,6 +10,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using static Aurelia.Linux.Management.AdminScope;
 using static Aurelia.Linux.Settings.SettingsRows;
 
@@ -276,51 +277,173 @@ public sealed class ServerPage : StackPanel
     private async Task<Control> UpdatesAsync()
     {
         var note = Message();
-        ServerUpdateStatus? updates = null;
-        await scope.RunAsync(async () => updates = await Client.UpdatesAsync(), note);
-        if (updates is not { Available: true })
+        ServerUpdateStatus? loaded = null;
+        await scope.RunAsync(async () => loaded = await Client.UpdatesAsync(), note);
+        if (loaded is not { Available: true } initial)
         {
             return Section("Server Updates", Block(Note("This server cannot update itself from here."), note));
         }
-        var state = new TextBlock { Classes = { "subdued" }, FontSize = 12, TextWrapping = TextWrapping.Wrap };
-        var panel = Block();
-        void Show(ServerUpdateStatus current)
+        var updates = initial;
+        var values = new StackPanel { Spacing = 2 };
+        var state = new TextBlock { Classes = { "subdued" }, FontSize = 12, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+        var percent = new TextBlock { Classes = { "subdued" }, FontSize = 12, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0), IsVisible = false };
+        var progress = new ProgressBar { Minimum = 0, Maximum = 100, Height = 6, HorizontalAlignment = HorizontalAlignment.Stretch, IsVisible = false };
+        AutomationProperties.SetName(progress, "Server Update Progress");
+        var check = new Button { Content = "Check Now", Classes = { "chip" } };
+        var install = new Button { Content = "Install Update…", Classes = { "primary" } };
+        var poll = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+        var sawInstalling = updates.State == "installing";
+        var reconnectAttempts = 0;
+        var polling = false;
+        void Show(ServerUpdateStatus current, bool reconnecting = false)
         {
-            state.Text = current.State switch
+            var busy = reconnecting || current.State is "checking" or "installing";
+            var clamped = reconnecting ? 95 : current.ProgressPercent is { } raw ? (int?)Math.Clamp(raw, 0, 100) : null;
+            values.Children.Clear();
+            values.Children.Add(Value("Installed", current.Installed));
+            values.Children.Add(Value("Available", current.Newest ?? "—"));
+            state.Text = UpdatePhaseText(current, reconnecting);
+            progress.IsVisible = busy;
+            progress.IsIndeterminate = busy && clamped is null;
+            progress.Value = clamped ?? 0;
+            percent.Text = clamped is { } p ? $"{p}%" : "";
+            percent.IsVisible = busy && clamped is not null;
+            check.IsEnabled = !busy;
+            install.IsEnabled = !busy;
+            install.IsVisible = !busy && current.UpdateAvailable;
+            if (busy)
             {
-                "checking" => "Looking for a new version…",
-                "installing" => $"Installing {current.Newest ?? "the update"}…",
-                "failed" => current.Message ?? "The last update did not work.",
-                _ when current.CheckedAt is { } checkedAt => $"Up to date · checked {Date(checkedAt)}",
-                _ => "Not checked yet.",
-            };
-            if (current.State == "idle" && current.UpdateAvailable && current.Newest is { } newest) state.Text = $"Aurelia Server {newest} is available.";
+                if (!poll.IsEnabled) poll.Start();
+            }
+            else
+            {
+                poll.Stop();
+                reconnectAttempts = 0;
+            }
         }
-        Show(updates);
-        var install = Button("Install Update…", async () =>
+        poll.Tick += async (_, _) =>
+        {
+            if (polling) return;
+            polling = true;
+            try
+            {
+                using (AureliaApi.Background())
+                {
+                    var next = await Client.UpdatesAsync();
+                    reconnectAttempts = 0;
+                    if (next.State == "installing") sawInstalling = true;
+                    else if (next.State is "idle" or "failed") sawInstalling = false;
+                    updates = next;
+                    Show(next);
+                }
+            }
+            catch (Exception failure) when (failure is AureliaApiException or HttpRequestException or OperationCanceledException)
+            {
+                if (sawInstalling && failure is AureliaApiException { Status: 401 } expired && expired.Code != "invalid_credentials")
+                {
+                    poll.Stop();
+                    scope.Session.HandleSessionFailure(expired);
+                    return;
+                }
+                if (sawInstalling && ++reconnectAttempts <= 90)
+                {
+                    Show(updates, reconnecting: true);
+                }
+                else
+                {
+                    poll.Stop();
+                    if (sawInstalling)
+                    {
+                        note.Text = "The server is still restarting. Refresh in a moment to check its version.";
+                        note.IsVisible = true;
+                    }
+                    sawInstalling = false;
+                    Show(updates);
+                }
+            }
+            finally
+            {
+                polling = false;
+            }
+        };
+        check.Click += async (_, _) =>
+        {
+            check.IsEnabled = false;
+            await scope.RunAsync(async () =>
+            {
+                updates = await Client.CheckUpdatesAsync();
+                if (updates.State == "installing") sawInstalling = true;
+            }, note);
+            Show(updates);
+        };
+        install.Click += async (_, _) =>
         {
             if (!await scope.Sheets.ConfirmAsync($"Install Aurelia Server {updates.Newest}?",
                 "The server stops for about a minute while it updates; playback pauses meanwhile. Accounts, library and settings stay.", "Install Update", destructive: false)) return;
-            await scope.RunAsync(async () => Show(updates = await Client.InstallUpdateAsync()), note);
-        }, "primary");
-        install.IsVisible = updates.UpdateAvailable;
-        panel.Children.Add(Note("Aurelia Server looks for a new version once a day. Installing waits for you."));
-        panel.Children.Add(new StackPanel { Spacing = 2, Children = { Value("Installed", updates.Installed), Value("Available", updates.Newest ?? "—") } });
-        panel.Children.Add(state);
-        panel.Children.Add(Buttons(Button("Check Now", async () => await scope.RunAsync(async () =>
+            install.IsEnabled = false;
+            check.IsEnabled = false;
+            if (await scope.RunAsync(async () => updates = await Client.InstallUpdateAsync(), note))
+            {
+                sawInstalling = true;
+            }
+            Show(updates);
+        };
+        Show(updates);
+        var statusRow = new DockPanel
         {
-            Show(updates = await Client.CheckUpdatesAsync());
-            install.IsVisible = updates.UpdateAvailable;
-        }, note)), install));
-        panel.Children.Add(note);
-        return Section("Server Updates", panel);
+            Children =
+            {
+                percent.Also(t => DockPanel.SetDock(t, Dock.Right)),
+                state,
+            },
+        };
+        var panel = Block(
+            Note("Aurelia Server looks for a new version once a day. Installing waits for you."),
+            values,
+            statusRow,
+            progress,
+            Buttons(check, install),
+            note);
+        var section = Section("Server Updates", panel);
+        section.DetachedFromVisualTree += (_, _) => poll.Stop();
+        return section;
+    }
+
+    internal static string UpdatePhaseText(ServerUpdateStatus current, bool reconnecting = false)
+    {
+        if (reconnecting) return "Waiting for server to restart…";
+        var percent = current.ProgressPercent is { } raw ? (int?)Math.Clamp(raw, 0, 100) : null;
+        return current.State switch
+        {
+            "checking" => current.Phase switch
+            {
+                "verifying" => "Verifying release signature…",
+                _ => "Checking GitHub for updates…",
+            },
+            "installing" => current.Phase switch
+            {
+                "starting" or "checking" => "Checking GitHub for updates…",
+                "verifying" => "Verifying release signature…",
+                "downloading" => percent is { } p ? $"Downloading server update… {p}%" : "Downloading server update…",
+                "unpacking" => "Verifying checksum and unpacking…",
+                "restarting" => "Installing and restarting server…",
+                _ => percent is { } p ? $"Installing {current.Newest ?? "the update"}… {p}%" : $"Installing {current.Newest ?? "the update"}…",
+            },
+            "failed" => current.Message ?? "The last update did not work.",
+            "idle" when current.UpdateAvailable && current.Newest is { } newest => $"Aurelia Server {newest} is available.",
+            _ when current.CheckedAt is { } checkedAt => $"Up to date · checked {Date(checkedAt)}",
+            _ => "Not checked yet.",
+        };
     }
 
     private async Task<Control?> PowerAsync()
     {
         var note = Message();
-        ServerPowerSettings? power = null;
-        if (!await scope.RunAsync(async () => power = await Client.PowerAsync(), note) || power is not { Available: true }) return null;
+        ServerPowerSettings? loaded = null;
+        if (!await scope.RunAsync(async () => loaded = await Client.PowerAsync(), note) || loaded is null) return null;
+        await scope.Session.RememberPowerSavingAsync(loaded.Available && loaded.Mode != "off");
+        if (!loaded.Available) return null;
+        var power = loaded;
         var mode = power.Mode;
         var idle = power.IdleMinutes;
         string? from = power.AwakeFrom;
@@ -402,6 +525,7 @@ public sealed class ServerPage : StackPanel
                 if (await scope.RunAsync(async () => power = await Client.SavePowerAsync(new UpdateServerPowerSettingsRequest(mode, idle, from, until,
                     !byApp && (power.WakeSupport ?? "").Contains('u', StringComparison.Ordinal) ? wakeOnAccess : null, afterSleepTimer)), note))
                 {
+                    await scope.Session.RememberPowerSavingAsync(power.Available && power.Mode != "off");
                     Changed();
                     saved.IsVisible = true;
                 }

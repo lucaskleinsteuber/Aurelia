@@ -45,10 +45,6 @@ struct TVDetailView: View {
     if let target = plan?.target, target.kind == .episode { return target }
     return nil
   }
-  private var joinableParties: [TVWatchPartySummary] {
-    let ids = Set([item.id] + seasons.flatMap { $0.episodes.map(\.item.id) })
-    return model.watchParties.filter { ids.contains($0.mediaId) }
-  }
   private var season: TVSeason? { seasons.first { $0.number == selectedSeason } }
 
   var body: some View {
@@ -201,15 +197,6 @@ struct TVDetailView: View {
             }.buttonStyle(TVButtonStyle(kind: .icon))
               .accessibilityIdentifier("detail-favorite")
               .accessibilityLabel(item.isFavorite ? "Remove from Favorites" : "Add to Favorites")
-          }
-          // Parties others started for this title or one of its episodes.
-          ForEach(joinableParties) { party in
-            Button {
-              Task { await model.joinWatchTogether(party) }
-            } label: {
-              Label("Join \(party.hostName)", systemImage: "person.2.fill")
-            }.buttonStyle(TVButtonStyle())
-              .accessibilityIdentifier("detail-watch-together")
           }
           Menu {
             if plan?.action == .resume, plan?.target?.isPlayable == true {

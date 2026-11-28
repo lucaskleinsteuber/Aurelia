@@ -163,13 +163,7 @@ library, those in the most titles first; ⌘F searches them. A person's page, fr
 Cast & Crew, shows their titles in the library at once and adds, when TMDB is on, their life
 dates, biography and a Known For row of titles the library doesn't have, each with Wish or Me Too.
 
-## Movie Night
-
-Can't decide? **Movie Night** on Home lets everyone at home swipe through the same posters, on
-their phones, in a browser or here with the trackpad, the arrow keys or the buttons. The first
-title every voter likes shows as a ticket with **Play**. A Mac can also just show the lobby
-(**Just Watch on This Mac**). The host picks *Tonight's program* in the lobby: movies or also
-shows, a genre, an era and a length. Movie Night covers the whole window; ✕ or Esc leaves the night.
+## Motion
 
 Motion follows one set of curves (`AureliaMotion` in `Views/AureliaDesign.swift`): `press` for
 buttons and cards, `quick` for hover, `standard` for content that changes in place, `page` for
@@ -201,7 +195,7 @@ most ten seconds.
 **Ads** and the number of **Trailers** (none to three) can be chosen there. **Skip** (→) jumps
 to the next part, **Start Film** (Return) straight to the film, and Esc closes the player.
 
-A film picked up in the middle, an episode, a download and Watch Together start without a
+A film picked up in the middle, an episode and a download start without a
 pre-show. It needs server 2.3.0 or newer; the trailers come from the trailer files in your film
 folders (see [Organizing your media](MEDIA_LIBRARY.md)).
 

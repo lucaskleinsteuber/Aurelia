@@ -10,7 +10,7 @@ namespace Aurelia.Server.Services;
 public sealed class ProfileService(AureliaDbContext database, IPasswordHasher<ServerUser> hasher,
     CredentialAttemptGuard passwords, ProfilePinAttemptGuard pins, ProfileSessionStore sessions,
     CatalogMutationGate mutations, ActiveStreamRegistry streams, ScreenTimeService? screenTime = null,
-    ServerRuntimeOptions? runtime = null)
+    ServerRuntimeOptions? runtime = null, ServerPowerSettingsStore? power = null)
 {
     public async Task<ProfilePickerResponse> PickerAsync(CancellationToken token)
     {
@@ -26,9 +26,10 @@ public sealed class ProfileService(AureliaDbContext database, IPasswordHasher<Se
         var wakeOnLan = runtime is not null && runtime.LanAccessEnabled && !ServerHosting.ByApp(hosting!)
             ? WakeOnLan.LocalAddresses()
             : null;
+        var powerSavingEnabled = power?.Read() is { Available: true } powerSettings && powerSettings.Mode != "off";
         return new(2, "1.5.1", !await database.AdministrationCredentials.AnyAsync(token),
             profiles.OrderBy(profile => profile.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
-            wakeOnLan, hosting);
+            wakeOnLan, hosting, powerSavingEnabled);
     }
 
     /// <summary>A whole-profile screen time lock keeps a children's profile closed until its wake time.</summary>

@@ -43,19 +43,28 @@ public sealed partial class ServerUpdateStore(ServerRuntimeOptions runtime, Time
             var changedAt = Seconds(values.GetValueOrDefault("CHANGED_AT")) ?? checkedAt;
             var state = values.GetValueOrDefault("STATE") ?? "idle";
             string? message = values.GetValueOrDefault("MESSAGE") is { Length: > 0 } text ? text : null;
+            var progress = Percent(values.GetValueOrDefault("PROGRESS"));
+            string? phase = values.GetValueOrDefault("PHASE") is { Length: > 0 } currentPhase ? currentPhase : null;
 
-            if (File.Exists(PathOf(InstallRequestFileName))) (state, message) = ("installing", null);
-            else if (File.Exists(PathOf(CheckRequestFileName))) (state, message) = ("checking", null);
+            if (File.Exists(PathOf(InstallRequestFileName)))
+                (state, message, progress, phase) = ("installing", null, 2, "starting");
+            else if (File.Exists(PathOf(CheckRequestFileName)))
+                (state, message, progress, phase) = ("checking", null, 5, "checking");
             else if (state == "installing")
             {
                 if (Number(values.GetValueOrDefault("TARGET_BUILD")) is { } target && InstalledBuild >= target)
-                    (state, message, updateAvailable) = ("idle", null, newestBuild > InstalledBuild);
+                    (state, message, updateAvailable, progress, phase) = ("idle", null, newestBuild > InstalledBuild, null, null);
                 else if (changedAt is null || now - changedAt > InstallTimeout)
-                    (state, message) = ("failed", message ?? "The update did not finish. Aurelia Server keeps its previous version.");
+                    (state, message, progress, phase) = ("failed", message ?? "The update did not finish. Aurelia Server keeps its previous version.", null, null);
             }
-            else if (state == "checking" && (changedAt is null || now - changedAt > CheckTimeout)) state = "idle";
-            else if (state is not ("idle" or "failed")) state = "idle";
-            return new(true, installed, newest, updateAvailable, state, checkedAt, message);
+            else if (state == "checking" && (changedAt is null || now - changedAt > CheckTimeout))
+                (state, progress, phase) = ("idle", null, null);
+            else if (state is not ("idle" or "failed"))
+                (state, progress, phase) = ("idle", null, null);
+
+            if (state is "idle" or "failed")
+                (progress, phase) = (null, null);
+            return new(true, installed, newest, updateAvailable, state, checkedAt, message, progress, phase);
         }
     }
 
@@ -110,6 +119,7 @@ public sealed partial class ServerUpdateStore(ServerRuntimeOptions runtime, Time
     private static bool IsValid(string key, string value) => key switch
     {
         "STATE" => value is "idle" or "checking" or "installing" or "failed",
+        "PHASE" => value is "starting" or "checking" or "verifying" or "downloading" or "unpacking" or "restarting",
         "NEWEST_VERSION" => VersionText().IsMatch(value),
         "MESSAGE" => value.Length <= 200 && value.All(character => character is >= ' ' and <= '~'),
         _ => value.Length <= 12 && value.All(char.IsAsciiDigit),
@@ -118,11 +128,14 @@ public sealed partial class ServerUpdateStore(ServerRuntimeOptions runtime, Time
     private static int? Number(string? value) =>
         int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var number) && number > 0 ? number : null;
 
+    private static int? Percent(string? value) =>
+        int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var number) && number is >= 0 and <= 100 ? number : null;
+
     private static DateTimeOffset? Seconds(string? value) =>
         long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds) && seconds > 0
             ? DateTimeOffset.FromUnixTimeSeconds(seconds) : null;
 
-    [GeneratedRegex(@"^(STATE|CHECKED_AT|CHANGED_AT|NEWEST_BUILD|TARGET_BUILD|NEWEST_VERSION|MESSAGE)=(.*)\z")]
+    [GeneratedRegex(@"^(STATE|CHECKED_AT|CHANGED_AT|NEWEST_BUILD|TARGET_BUILD|NEWEST_VERSION|PROGRESS|PHASE|MESSAGE)=(.*)\z")]
     private static partial Regex StatusLine();
 
     [GeneratedRegex(@"^[0-9]+(\.[0-9]+){1,3}\z")]

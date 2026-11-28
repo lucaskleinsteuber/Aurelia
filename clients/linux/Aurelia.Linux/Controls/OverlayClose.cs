@@ -7,7 +7,7 @@ using Avalonia.Media;
 namespace Aurelia.Linux.Controls;
 
 /// <summary>
-/// The Close button of a view that covers the whole window (Movie Night, Wrapped): the round
+/// The Close button of a view that covers the whole window (such as Wrapped): the round
 /// button of the detail pages, at the top right below the window buttons, so it never sits on
 /// the window's own close button.
 /// </summary>

@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Covers the window while Aurelia rests. Only Continue (or Return) goes on: that wakes the server
-/// and loads what was showing again. Other clicks, such as closing the window, leave it asleep.
+/// Covers the window while Aurelia rests. Switching back to Aurelia, clicking anywhere, or
+/// pressing any key automatically wakes the server and reconnects immediately.
 struct AureliaRestView: View {
   @EnvironmentObject private var model: AppModel
   @State private var monitor: Any?
@@ -31,7 +31,7 @@ struct AureliaRestView: View {
             )
             .font(.callout)
             .foregroundStyle(.secondary)
-            Text("Click Continue or press Return to connect again.")
+            Text("Switch to Aurelia, click anywhere, or press any key to connect again.")
               .font(.callout)
               .foregroundStyle(.secondary)
           }
@@ -45,15 +45,20 @@ struct AureliaRestView: View {
       .padding(40)
     }
     .contentShape(Rectangle())
+    .onTapGesture { resume() }
     .accessibilityIdentifier("aurelia-rest")
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification))
+    { _ in
+      resume()
+    }
     .onAppear {
-      // Keys do not reach the library beneath, and only Return continues. Clicks stay with the
-      // window, so closing it or clicking beside Continue does not wake the server.
-      monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+      monitor = NSEvent.addLocalMonitorForEvents(
+        matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]
+      ) { event in
         guard model.isResting else { return event }
-        if event.modifierFlags.contains(.command) { return event }
-        if AureliaRestView.continueKeys.contains(event.keyCode) { resume() }
-        return nil
+        if event.type == .keyDown, event.modifierFlags.contains(.command) { return event }
+        resume()
+        return event.type == .keyDown ? nil : event
       }
     }
     .onDisappear {
@@ -61,9 +66,6 @@ struct AureliaRestView: View {
       monitor = nil
     }
   }
-
-  /// Return and the keypad's Enter.
-  static let continueKeys: Set<UInt16> = [36, 76]
 
   private var serverName: String? { model.deviceConnection?.name ?? model.profile?.name }
 

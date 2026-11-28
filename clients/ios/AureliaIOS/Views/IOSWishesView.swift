@@ -244,7 +244,7 @@ struct IOSWishesView: View {
       }
 
       if providerEnabled {
-        TextField("Optional note (e.g. for Friday movie night)", text: $wishNote)
+        TextField("Optional note (e.g. director’s cut or season)", text: $wishNote)
           .textFieldStyle(.plain)
           .padding(10)
           .background(IOSDesign.canvas, in: RoundedRectangle(cornerRadius: 10, style: .continuous))

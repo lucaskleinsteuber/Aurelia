@@ -21,21 +21,29 @@ enum AureliaRest {
     return minuteChoices.contains(stored) ? stored : defaultMinutes
   }
 
-  /// Rest only when connected to a server elsewhere: a server on this Mac stops with the app anyway.
+  /// Loopback addresses run on this Mac and never enter remote power-saving rest.
+  static func isLoopbackHost(_ url: URL) -> Bool {
+    guard let host = url.host?.lowercased() else { return false }
+    return host == "127.0.0.1" || host == "::1" || host == "[::1]" || host == "localhost"
+  }
+
+  /// Rest only when connected to a remote non-loopback server whose power saving is enabled.
   static func shouldRest(
     enabled: Bool, minutes: Int, secondsWithoutInput: TimeInterval, playing: Bool,
-    connectedElsewhere: Bool
+    connectedElsewhere: Bool, serverPowerSavingEnabled: Bool
   ) -> Bool {
-    enabled && connectedElsewhere && !playing && secondsWithoutInput >= TimeInterval(minutes * 60)
+    enabled && connectedElsewhere && serverPowerSavingEnabled && !playing
+      && secondsWithoutInput >= TimeInterval(minutes * 60)
   }
 
   /// Time since someone used Aurelia. While Aurelia is the active app, keyboard, mouse and
-  /// trackpad go to it, so that is the time since the last input; while another app is in
-  /// front, it is the time since Aurelia was last in front.
+  /// trackpad go to it, bounded by when Aurelia was brought to the front so focusing Aurelia
+  /// never counts as idle; while another app is in front, it is the time since Aurelia was last active.
   static func secondsWithoutUse(
     isActive: Bool, secondsWithoutInput: TimeInterval, lastActive: Date, now: Date
   ) -> TimeInterval {
-    isActive ? secondsWithoutInput : max(0, now.timeIntervalSince(lastActive))
+    let sinceActive = max(0, now.timeIntervalSince(lastActive))
+    return isActive ? min(secondsWithoutInput, sinceActive) : sinceActive
   }
 
   /// Time since the last keyboard, mouse or trackpad use on this Mac, in any app.
@@ -45,8 +53,8 @@ enum AureliaRest {
   }
 }
 
-/// Remembers when Aurelia was last the active app. AppKit posts the notification on the main
-/// thread and the observer runs on the main queue.
+/// Remembers when Aurelia was last brought to the front or left. AppKit posts the notifications on
+/// the main thread and the observers run on the main queue.
 @MainActor
 final class AureliaUseClock {
   static let shared = AureliaUseClock()
@@ -54,10 +62,19 @@ final class AureliaUseClock {
 
   private init() {
     NotificationCenter.default.addObserver(
+      forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+    ) { _ in
+      MainActor.assumeIsolated { AureliaUseClock.shared.lastActive = Date() }
+    }
+    NotificationCenter.default.addObserver(
       forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
     ) { _ in
       MainActor.assumeIsolated { AureliaUseClock.shared.lastActive = Date() }
     }
+  }
+
+  func noteActive(at date: Date = Date()) {
+    lastActive = date
   }
 
   var secondsWithoutUse: TimeInterval {

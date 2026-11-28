@@ -37,8 +37,7 @@ public sealed class WindowChrome : Panel
 
     /// <summary>
     /// The top margin that keeps a full-window view's own Close button clear of the window
-    /// buttons, wherever the desktop puts them (audit Linux D1: Movie Night's × sat on the
-    /// window's close button, so leaving Movie Night quit Aurelia).
+    /// buttons, wherever the desktop puts them.
     /// </summary>
     public const double ClearTop = Inset + ButtonSize + 18;
 

@@ -29,11 +29,31 @@ struct ServerUpdatesEditor: View {
             if let newest = status.newest, status.updateAvailable {
               LabeledContent("Available", value: newest)
             }
-            if let operation {
+            if operation != nil || busy(status) {
+              let reconnecting = operation?.reconnecting ?? false
+              let text =
+                operation?.progressText(status: status, reconnecting: reconnecting)
+                ?? status.phaseText(reconnecting: reconnecting)
               VStack(alignment: .leading, spacing: 6) {
-                ProgressView().progressViewStyle(.linear)
-                Text(operation.progressText(status: status, reconnecting: operation.reconnecting))
-                  .font(.callout).foregroundStyle(.secondary)
+                if let fraction = status.progressFraction(reconnecting: reconnecting) {
+                  ProgressView(value: fraction, total: 1.0)
+                    .progressViewStyle(.linear)
+                } else {
+                  ProgressView()
+                    .progressViewStyle(.linear)
+                }
+                HStack(spacing: 8) {
+                  Text(text)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                  Spacer(minLength: 8)
+                  if let percent = status.displayPercent(reconnecting: reconnecting) {
+                    Text("\(percent)%")
+                      .font(.callout.monospacedDigit())
+                      .foregroundStyle(.secondary)
+                      .accessibilityIdentifier("server-update-percent")
+                  }
+                }
               }
               .frame(maxWidth: 520, alignment: .leading)
               .accessibilityIdentifier("server-update-progress")
@@ -99,10 +119,10 @@ struct ServerUpdatesEditor: View {
     }
     .task(id: operation?.id) { await follow() }
     .task(id: operation == nil && busy(status)) {
-      // A check the server started itself (once a day) is picked up without a click.
+      // A check or installation the server is running is picked up without a click.
       guard operation == nil, busy(status) else { return }
       while !Task.isCancelled, operation == nil, busy(status) {
-        do { try await Task.sleep(for: .seconds(3)) } catch { return }
+        do { try await Task.sleep(for: .milliseconds(1500)) } catch { return }
         await load(quietly: true)
       }
     }
@@ -179,7 +199,7 @@ struct ServerUpdatesEditor: View {
     guard let running = operation else { return }
     var current = running
     while !Task.isCancelled {
-      do { try await Task.sleep(for: .seconds(3)) } catch { return }
+      do { try await Task.sleep(for: .milliseconds(1500)) } catch { return }
       guard operation?.id == running.id else { return }
       do {
         let read = try await client.serverUpdates()
@@ -238,14 +258,19 @@ struct ServerUpdateOperation: Identifiable, Equatable {
   var timedOut: Bool { timedOut(at: Date()) }
 
   func progressText(status: ServerUpdateStatus, reconnecting: Bool) -> String {
+    if reconnecting {
+      return "Waiting for server to restart…"
+    }
+    if status.phase != nil || status.state == "checking" || status.state == "installing" {
+      return status.phaseText(reconnecting: false)
+    }
     switch kind {
-    case .check: return "Looking for a new version…"
+    case .check: return "Checking GitHub for updates…"
     case .install:
-      if reconnecting {
-        return "Aurelia Server is restarting with the new version… This takes about a minute."
+      if let newest = status.newest {
+        return "Installing \(newest)… The server restarts by itself."
       }
-      return
-        "Downloading and installing \(status.newest ?? "the update")… The server restarts by itself."
+      return "Preparing server update…"
     }
   }
 

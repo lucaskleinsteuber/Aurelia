@@ -70,7 +70,7 @@ enum TVCoreError: LocalizedError, Equatable, Sendable {
 
 /// Since iOS and tvOS 16 the system name of a device is only its kind, such as "iPhone", unless
 /// the app has a special entitlement. A short tag that stays the same for this app tells several
-/// such devices apart when the Mac approves one or Watch Together lists them.
+/// such devices apart when the Mac approves one.
 enum TVDeviceName {
   static func display(systemName: String, model: String, tag: UUID?) -> String {
     let name = systemName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -211,8 +211,6 @@ struct TVCapabilities: Codable, Equatable, Sendable {
   var supportsCollectionsV3: Bool { capabilities?.contains("collections-v3") == true }
   var supportsWatchlistAndPeople: Bool { capabilities?.contains("watchlist-people-v1") == true }
   var supportsScrubPreviews: Bool { capabilities?.contains("scrub-previews-v1") == true }
-  /// Movie Night: the household swipes one deck until everyone likes a title.
-  var supportsMovieNight: Bool { capabilities?.contains("movie-night-v1") == true }
   /// What to watch next after a movie or a series' last episode, and Home's "Because You Watched".
   var supportsSuggestions: Bool { capabilities?.contains("suggestions-v1") == true }
   var supportsWrapped: Bool { capabilities?.contains("year-wrapped-v1") == true }

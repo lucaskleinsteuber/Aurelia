@@ -64,6 +64,7 @@ public sealed class PeoplePage : StackPanel
         try
         {
             info = await scope.Session.Api.ServerInfoAsync(Client.Library.Server, CancellationToken.None, TimeSpan.FromSeconds(5));
+            await scope.Session.RememberPowerSavingAsync(info.PowerSavingEnabled);
         }
         catch (Exception failure) when (failure is AureliaApiException or HttpRequestException or TaskCanceledException or IOException)
         {

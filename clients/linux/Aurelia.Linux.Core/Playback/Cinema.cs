@@ -38,10 +38,10 @@ public static class CinemaPlan
     public const double TrailerLongestSeconds = 300;
     public const string LastAdKey = "playback.cinema.lastAd";
 
-    /// <summary>A film (no series queue), cinema mode on with ads or trailers, a server that lists trailers, nobody watching along.</summary>
-    public static bool Wanted(PlaybackPreferences preferences, MediaKind kind, bool serverListsTrailers, bool watchingTogether) =>
+    /// <summary>A film (no series queue), cinema mode on with ads or trailers, and a server that lists trailers.</summary>
+    public static bool Wanted(PlaybackPreferences preferences, MediaKind kind, bool serverListsTrailers) =>
         preferences.CinemaMode && (preferences.CinemaAds || preferences.CinemaTrailers > 0)
-        && kind == MediaKind.Movie && serverListsTrailers && !watchingTogether;
+        && kind == MediaKind.Movie && serverListsTrailers;
 
     /// <summary>Only a film that starts from its beginning gets a pre-show.</summary>
     public static bool StartsAtBeginning(bool resume, long? startAt, PlaybackProgressResponse? progress, PlaybackPreferences preferences)
@@ -159,9 +159,9 @@ public sealed class CinemaPreShow
 
     /// <summary>The pre-show for <paramref name="film"/>, or null when it gets none. A slow server never holds up the film for more than five seconds.</summary>
     public static async Task<CinemaPreShow?> PrepareAsync(PlaybackClient client, IVideoEngineFactory engines, TimeProvider time, Action<Action> post,
-        CatalogItemSummary film, bool resume, long? startAt, PlaybackPreferences preferences, Settings.ISettingsStore settings, bool watchingTogether)
+        CatalogItemSummary film, bool resume, long? startAt, PlaybackPreferences preferences, Settings.ISettingsStore settings)
     {
-        if (!CinemaPlan.Wanted(preferences, film.Kind, client.Library.Supports(ServerFeatures.CinemaTrailers), watchingTogether)) return null;
+        if (!CinemaPlan.Wanted(preferences, film.Kind, client.Library.Supports(ServerFeatures.CinemaTrailers))) return null;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         IReadOnlyList<CinemaTrailer> trailers;
         try

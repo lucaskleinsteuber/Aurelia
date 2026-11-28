@@ -201,8 +201,8 @@ public sealed class MetadataPresentationTests
             Assert.Equal(2, created.Items.Count);
 
             var updated = await SendAsync<CollectionSummary>(client, owner.Token, HttpMethod.Put, $"/api/v1/collections/{created.Id}",
-                new SaveCollectionRequest("Movie Night", movies.Reverse().Select(movie => movie.Id).ToList()));
-            Assert.Equal("Movie Night", updated.Name);
+                new SaveCollectionRequest("Weekend Classics", movies.Reverse().Select(movie => movie.Id).ToList()));
+            Assert.Equal("Weekend Classics", updated.Name);
             Assert.Equal(movies[1].Id, updated.Items[0].Id);
 
             var user = await SendAsync<UserSummary>(client, owner.Token, HttpMethod.Post, "/api/v1/users",

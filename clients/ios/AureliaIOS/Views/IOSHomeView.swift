@@ -4,7 +4,6 @@ import SwiftUI
 /// horizontal shelves. Focus moves only through the native focus engine.
 struct IOSHomeView: View {
   @EnvironmentObject private var model: IOSAppModel
-  @Environment(\.scenePhase) private var scenePhase
   @Environment(\.horizontalSizeClass) private var sizeClass
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @StateObject private var actions = IOSLibraryActions()
@@ -12,8 +11,6 @@ struct IOSHomeView: View {
   @State private var launching = false
   @State private var detailItem: IOSHomeDetail?
   @State private var unavailable: IOSCatalogItem?
-  @State private var movieNight: IOSMovieNightLaunch?
-  @State private var movieNights: [IOSMovieNightSummary] = []
   @State private var monthlyWrapped: IOSWrappedLaunch?
   @State private var loadedRevision: UUID?
   @State private var failedHeroArtwork: IOSArtwork?
@@ -21,62 +18,6 @@ struct IOSHomeView: View {
   /// The server returns at most this many items in Home's catalog shelves.
   private static let shelfLimit = 30
   private var margin: CGFloat { IOSDesign.margin(for: sizeClass) }
-
-  /// Parties others started at home, to join with one tap.
-  private var watchTogether: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text("Watch Together").font(.title2.bold()).accessibilityAddTraits(.isHeader)
-      ForEach(model.watchParties) { party in
-        Button {
-          Task { await model.joinWatchTogether(party) }
-        } label: {
-          Label("Join \(party.hostName) · \(party.title)", systemImage: "person.2.fill")
-        }
-        .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
-        .accessibilityIdentifier("home-watch-together")
-      }
-    }
-    .frame(maxWidth: IOSLayoutMetrics.readableContentMaxWidth, alignment: .leading)
-    .padding(.horizontal, margin)
-  }
-
-  /// Starts a Movie Night, or joins one someone else started.
-  private var movieNightStrip: some View {
-    let open = movieNights.first
-    return Button {
-      movieNight = IOSMovieNightLaunch(joining: open)
-    } label: {
-      HStack(spacing: 14) {
-        if !dynamicTypeSize.isAccessibilitySize {
-          ZStack {
-            RoundedRectangle(cornerRadius: 5).fill(Color(red: 1, green: 0.30, blue: 0.35))
-              .frame(width: 22, height: 32).rotationEffect(.degrees(-12)).offset(x: -10)
-            RoundedRectangle(cornerRadius: 5).fill(IOSDesign.raised).frame(width: 22, height: 32)
-            RoundedRectangle(cornerRadius: 5).fill(Color(red: 1, green: 0.79, blue: 0.24))
-              .frame(width: 22, height: 32).rotationEffect(.degrees(12)).offset(x: 10)
-          }
-          .frame(width: 46, height: 40)
-          .accessibilityHidden(true)
-        }
-        VStack(alignment: .leading, spacing: 2) {
-          Text(open.map { "\($0.hostName)'s Movie Night is on" } ?? "Can't decide what to watch?")
-            .font(.body.weight(.semibold))
-          Text(
-            open == nil ? "Start a Movie Night and let everyone swipe." : "Join and start swiping."
-          )
-          .font(.caption).foregroundStyle(.secondary)
-        }
-        Spacer()
-        Image(systemName: "chevron.right").foregroundStyle(.secondary).accessibilityHidden(true)
-      }
-      .padding(14)
-      .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-    .buttonStyle(.plain)
-    .frame(maxWidth: IOSLayoutMetrics.readableContentMaxWidth, alignment: .leading)
-    .padding(.horizontal, margin)
-    .accessibilityIdentifier("home-movie-night")
-  }
 
   private var familyWishesStrip: some View {
     let badge = model.wishBadgeCount
@@ -139,13 +80,11 @@ struct IOSHomeView: View {
             Text("Home").font(.largeTitle.bold()).accessibilityAddTraits(.isHeader)
               .padding(.horizontal, margin).padding(.top, 12)
           }
-          if !model.watchParties.isEmpty { watchTogether }
           if model.supportsMonthlyWrapped, IOSWrapped.monthIsNew() {
             IOSMonthlyWrappedButton { monthlyWrapped = $0 }
               .frame(maxWidth: IOSLayoutMetrics.readableContentMaxWidth, alignment: .leading)
               .padding(.horizontal, margin)
           }
-          if model.supportsMovieNight { movieNightStrip }
           if model.supportsWishes { familyWishesStrip }
           // Same order as the Mac Home page.
           shelf("Continue Watching", items: home.continueWatching, section: .continueWatching)
@@ -196,19 +135,6 @@ struct IOSHomeView: View {
     .ignoresSafeArea(edges: showsHeroArtwork ? .top : [])
     .toolbar(.hidden, for: .navigationBar)
     .background(IOSDesign.canvas.ignoresSafeArea())
-    .task(id: PollingKey(sessionID: model.session?.sessionId, phase: scenePhase)) {
-      guard scenePhase == .active, model.session != nil else { return }
-      // Parties others start appear on Home within a few seconds.
-      while !Task.isCancelled {
-        await IOSAPIClient.withBackgroundRequests {
-          await model.refreshWatchParties()
-          if model.supportsMovieNight, let api = model.client {
-            movieNights = (try? await api.background.movieNights()) ?? movieNights
-          }
-        }
-        do { try await Task.sleep(for: .seconds(15)) } catch { return }
-      }
-    }
     .task(id: model.libraryRefresh) {
       let revision = model.libraryRefresh
       let automatic = loadedRevision != nil && loadedRevision != revision
@@ -264,25 +190,8 @@ struct IOSHomeView: View {
     .fullScreenCover(item: $monthlyWrapped) { launch in
       IOSWrappedView(launch: launch).environmentObject(model)
     }
-    .fullScreenCover(item: $movieNight) { launch in
-      if let api = model.client {
-        IOSMovieNightView(api: api, deviceName: model.deviceName, joining: launch.joining) {
-          mediaID in
-          Task {
-            // The match plays the way Home plays anything, once Movie Night has closed: the plan
-            // picks the episode for a show.
-            try? await Task.sleep(for: .milliseconds(700))
-            if let item = try? await model.client?.summary(id: mediaID) {
-              play(item, viaPlan: true)
-            }
-          }
-        }
-        .environmentObject(model)
-      }
-    }
     .onChange(of: model.session?.sessionId) { _, _ in
       playback = nil
-      movieNight = nil
     }
     .onChange(of: featuredArtwork) { _, _ in failedHeroArtwork = nil }
     .onChange(of: model.libraryRefresh) { _, _ in failedHeroArtwork = nil }
@@ -329,22 +238,17 @@ struct IOSHomeView: View {
     }
   }
 
-  private struct PollingKey: Equatable {
-    let sessionID: UUID?
-    let phase: ScenePhase
-  }
-
   private func refreshHome() async {
     await model.loadHome()
     await model.preloadLibrary()
   }
 
   /// Continue Watching starts playback right away from the server's resume target.
-  /// `viaPlan` plays a show from its plan (Movie Night's match, a suggestion): a show itself is
+  /// `viaPlan` plays a show from its plan (such as a suggestion): a show itself is
   /// not playable; its plan picks the episode.
   private func play(_ item: IOSCatalogItem, viaPlan: Bool = false) {
     // Offline titles stay reachable in Continue Watching; selecting one explains why. A show
-    // from Movie Night is not playable itself; its plan picks the episode.
+    // started from a suggestion is not playable itself; its plan picks the episode.
     guard item.isPlayable || (viaPlan && item.kind == .series) else {
       unavailable = item
       return
@@ -710,10 +614,4 @@ private struct IOSHomePlayback: Identifiable {
   let queue: [IOSCatalogItem]
   let title: String
   var id: UUID { target.id }
-}
-
-/// Opens Movie Night: a new night, or the one to join.
-struct IOSMovieNightLaunch: Identifiable {
-  let id = UUID()
-  let joining: IOSMovieNightSummary?
 }

@@ -9,7 +9,7 @@ public static class ServerFeatures
     {
         "library-state-v1", "server-readiness-v1", "device-authorization-v1", "artwork-variants-v1",
         "catalog-pages-500-v1", PreviewStreams, WebApp, ProfilePersonalization, AgeLimits,
-        WebPairingCode, CinemaTrailers, MovieNight, YearWrapped, MonthlyWrapped, MediaSegments, ServerSpeech, Suggestions,
+        WebPairingCode, CinemaTrailers, YearWrapped, MonthlyWrapped, MediaSegments, ServerSpeech, Suggestions,
         ScreenTime, Wishes, Security, ServerPerformance, PowerNow, FileChecks, People, SetupCode,
     });
 
@@ -19,9 +19,6 @@ public static class ServerFeatures
     /// 1.7.9 and is never reported again.
     /// </summary>
     public const string MediaSegments = "media-segments-v2";
-
-    /// <summary>Movie Night: the household swipes through one deck until everyone likes a title ("movie-night-v1").</summary>
-    public const string MovieNight = "movie-night-v1";
 
     /// <summary>A profile's year as slides with cheeky lines ("year-wrapped-v1", docs/CLIENT_PROTOCOL.md).</summary>
     public const string YearWrapped = "year-wrapped-v1";

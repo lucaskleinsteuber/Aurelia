@@ -49,9 +49,8 @@ public sealed class ServerUseClock(ServerRuntimeOptions runtime, TimeProvider cl
         var path = context.Request.Path;
         foreach (var background in Background)
             if (path.Equals(background, StringComparison.OrdinalIgnoreCase)) return false;
-        // A Watch Together player asks for the party while it waits, and a Movie Night screen for
-        // the night; an app's Home asks every few seconds whether someone started either. Playing,
-        // swiping and dealing count.
+        // Watch Together and Movie Night are gone, but Home in apps from before their removal
+        // still asks every few seconds whether a party or a night is on; that is nobody using it.
         if (HttpMethods.IsGet(context.Request.Method)
             && (path.StartsWithSegments("/api/v1/watch-together") || path.StartsWithSegments("/api/v1/movie-night"))) return false;
         // A small remote asks every few seconds how the other device plays; the other device counts.

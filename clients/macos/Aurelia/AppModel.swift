@@ -12,12 +12,8 @@ final class AppModel: ObservableObject {
   @Published var preselectedCollectionItem: CatalogItemSummary?
   @Published var preselectedCollectionSeasonNumber: Int?
   @Published var showingCollectionEditor = false
-  /// Movie Night over the whole window: a new night, or the one to join.
-  @Published var movieNightLaunch: MovieNightLaunch?
   /// Wrapped over the whole window: a year, or one month.
   @Published var wrappedLaunch: WrappedLaunch?
-
-  func closeMovieNight() { movieNightLaunch = nil }
 
   func presentNewCollection(with item: CatalogItemSummary? = nil, seasonNumber: Int? = nil) {
     preselectedCollectionItem = item
@@ -46,6 +42,7 @@ final class AppModel: ObservableObject {
   /// The setup assistant: introduction, guided setup and the library tour.
   let setupGuide: SetupGuide
   private var setupGuideObservation: AnyCancellable?
+  private var activationObservation: AnyCancellable?
   @Published private(set) var deviceConnection: StoredServerProfile?
   @Published private(set) var watchingProfiles: [WatchingProfile] = []
   @Published private(set) var managementSetupRequired = false
@@ -116,8 +113,6 @@ final class AppModel: ObservableObject {
   @Published private(set) var wishSummary: WishSummaryResponse?
   @Published var requestedDestination: LibraryDestination?
   @Published private(set) var playback: PlaybackPresentation?
-  /// The Watch Together party this Mac is in, if any.
-  @Published private(set) var watchParty: WatchTogetherSession?
   @Published private(set) var sceneNotesVersion: UInt64 = 0
   @Published private(set) var catalogVisibilityRevision: UInt64 = 0
   @Published private(set) var libraryCapabilities: Set<String> = [] {
@@ -234,6 +229,9 @@ final class AppModel: ObservableObject {
   @Published private(set) var isResting = false
   /// Using Aurelia again: the server is woken and the library loads.
   @Published private(set) var isLeavingRest = false
+  /// Whether the connected server saves power when unused (false when unknown or off).
+  @Published private(set) var serverPowerSavingEnabled = false
+  var restDefaults: UserDefaults = .standard
   /// Whether a title plays now; the player reports it.
   private(set) var playerIsPlaying = false
   var secondsWithoutUse: @MainActor () -> TimeInterval = {
@@ -508,6 +506,7 @@ final class AppModel: ObservableObject {
     self.administrationFetcher = administrationFetcher
     self.libraryStateClientFactory = libraryStateClientFactory
     self.profile = initialProfile
+    self.serverPowerSavingEnabled = initialProfile?.powerSavingEnabled ?? false
     self.libraryCapabilities = initialLibraryCapabilities
     self.macDeviceId = Self.loadOrCreateMacDeviceId(
       defaults: Self.isTestProcess
@@ -527,6 +526,17 @@ final class AppModel: ObservableObject {
     // The root view follows the assistant through the model.
     setupGuideObservation = setupGuide.objectWillChange.sink { [weak self] _ in
       self?.objectWillChange.send()
+    }
+    activationObservation = NotificationCenter.default.publisher(
+      for: NSApplication.didBecomeActiveNotification
+    )
+    .receive(on: DispatchQueue.main)
+    .sink { [weak self] _ in
+      guard let self else { return }
+      AureliaUseClock.shared.noteActive()
+      if self.isResting {
+        Task { await self.leaveRest() }
+      }
     }
     ProfilePhotoCache.shared.loader = { [weak self] id, revision in
       guard let self, let connection = self.photoConnection else {
@@ -614,7 +624,6 @@ final class AppModel: ObservableObject {
   var supportsScreenTime: Bool {
     libraryCapabilities.contains(ServerFeatureNames.screenTime)
   }
-  var supportsMovieNight: Bool { libraryCapabilities.contains(ServerFeatureNames.movieNight) }
   var supportsWrapped: Bool { libraryCapabilities.contains(ServerFeatureNames.yearWrapped) }
   var supportsMonthlyWrapped: Bool {
     libraryCapabilities.contains(ServerFeatureNames.monthlyWrapped)
@@ -864,6 +873,7 @@ final class AppModel: ObservableObject {
     do {
       profile = try store.load()
       deviceConnection = profile
+      serverPowerSavingEnabled = profile?.powerSavingEnabled ?? false
       operatingMode = OperatingModePolicy.resolve(
         storedMode: operatingMode,
         storedSelectionVersion: UserDefaults.standard.integer(
@@ -895,6 +905,42 @@ final class AppModel: ObservableObject {
 
   // MARK: Rest
 
+  static func isLoopbackHost(_ url: URL) -> Bool {
+    AureliaRest.isLoopbackHost(url)
+  }
+
+  private var isRemoteNonLoopbackServer: Bool {
+    guard operatingMode != .host, let profile, !Self.isLoopbackHost(profile.baseURL) else {
+      return false
+    }
+    if let deviceConnection, Self.isLoopbackHost(deviceConnection.baseURL) {
+      return false
+    }
+    return true
+  }
+
+  func noteServerPowerSaving(_ enabled: Bool) {
+    serverPowerSavingEnabled = enabled
+    // Saved only when it changed, not on every connection.
+    if let current = profile, current.powerSavingEnabled != enabled {
+      let updated = current.changingPowerSaving(enabled)
+      profile = updated
+      if deviceConnection == nil, !updated.isViewingSession { try? store.save(updated) }
+    }
+    if let paired = deviceConnection, paired.powerSavingEnabled != enabled {
+      let updated = paired.changingPowerSaving(enabled)
+      deviceConnection = updated
+      if !updated.isViewingSession { try? store.save(updated) }
+    }
+    if !enabled, isResting {
+      Task { await leaveRest() }
+    }
+  }
+
+  func noteServerPowerSettings(_ settings: ServerPowerSettings) {
+    noteServerPowerSaving(settings.available && settings.mode != "off")
+  }
+
   func reportPlayerPlaying(_ playing: Bool) {
     playerIsPlaying = playing
   }
@@ -916,18 +962,22 @@ final class AppModel: ObservableObject {
   func shouldRest() -> Bool {
     !isResting && !isLeavingRest && !isStarting && offlineMode == nil
       && AureliaRest.shouldRest(
-        enabled: AureliaRest.isEnabled(), minutes: AureliaRest.minutes(),
-        secondsWithoutInput: secondsWithoutUse(), playing: playerIsPlaying,
-        connectedElsewhere: operatingMode != .host && profile != nil)
+        enabled: AureliaRest.isEnabled(defaults: restDefaults),
+        minutes: AureliaRest.minutes(defaults: restDefaults),
+        secondsWithoutInput: secondsWithoutUse(),
+        playing: playerIsPlaying,
+        connectedElsewhere: isRemoteNonLoopbackServer,
+        serverPowerSavingEnabled: serverPowerSavingEnabled)
   }
 
   /// Lets go of the server: a paused title closes with its progress saved, and no requests,
   /// reconnects or Wake-on-LAN packets go out until Aurelia is used again.
   func enterRest() async {
-    guard !isResting, operatingMode != .host, profile != nil else { return }
+    guard !isResting, AureliaRest.isEnabled(defaults: restDefaults),
+      isRemoteNonLoopbackServer, serverPowerSavingEnabled
+    else { return }
     isResting = true
     if playback != nil { dismissPlayback() }
-    if watchParty != nil { await leaveWatchTogether() }
     connectionStatus = nil
     await systemWillSleep()
     PinnedSessionPool.shared.removeAll()
@@ -1871,6 +1921,7 @@ final class AppModel: ObservableObject {
       try store.save(paired)
       deviceConnection = paired
       profile = paired
+      serverPowerSavingEnabled = paired.powerSavingEnabled
       generation = connectionGeneration
       self.inspectedServer = nil
       try await refresh()
@@ -1916,6 +1967,7 @@ final class AppModel: ObservableObject {
     WakeOnLan.remember(info)
     guard isCurrent(generation)
     else { return }
+    noteServerPowerSaving(info.powerSavingEnabled ?? false)
     if profile.user == nil || profile.isViewingSession {
       let user = try await client.currentUser()
       guard isCurrent(generation)
@@ -1932,7 +1984,8 @@ final class AppModel: ObservableObject {
         sessionId: profile.sessionId,
         expiresAt: profile.expiresAt,
         user: user,
-        locallyManaged: profile.locallyManaged, viewingSession: profile.viewingSession)
+        locallyManaged: profile.locallyManaged, viewingSession: profile.viewingSession,
+        powerSavingEnabled: self.serverPowerSavingEnabled)
       if !updated.isViewingSession { try store.save(updated) }
       self.profile = updated
     }
@@ -2879,7 +2932,13 @@ final class AppModel: ObservableObject {
       // Keep real lifecycle observation enabled for unit and preflight tests.
       if Self.uiTestMode != nil { return }
     #endif
-    // A resting Aurelia stays quiet until someone uses it again.
+    if active {
+      AureliaUseClock.shared.noteActive()
+      if isResting {
+        await leaveRest()
+        return
+      }
+    }
     if isResting { return }
     let canObserve = !isStarting && !isRecoveringLocalHost && !requiresProfileSelection
     // Opening Aurelia while its server sleeps wakes it now instead of at the next retry.
@@ -3416,89 +3475,10 @@ final class AppModel: ObservableObject {
     }
   }
 
-  // MARK: Movie Night
-
-  /// Nights others started on this server, to join from Home.
-  func movieNights() async -> [MovieNightSummary] {
-    guard supportsMovieNight, let profile, !requiresProfileSelection else { return [] }
-    return (try? await APIClient(profile: profile).movieNights()) ?? []
-  }
-
-  /// A client for the open profile, for Movie Night and Wrapped; nil without one.
+  /// A client for the open profile, for Wrapped and server moves; nil without one.
   func profileClient() -> APIClient? {
     guard let profile, !requiresProfileSelection else { return nil }
     return APIClient(profile: profile)
-  }
-
-  /// Plays the night's match the usual way: a show starts where its plan says.
-  func playMovieNightMatch(_ mediaId: UUID) {
-    movieNightLaunch = nil
-    Task { [weak self] in
-      // Movie Night fades out first, so the player opens over the library.
-      try? await Task.sleep(for: .milliseconds(400))
-      guard let self else { return }
-      do {
-        let detail = try await self.catalogDetail(id: mediaId)
-        self.startPlayback(item: detail.item)
-      } catch {
-        if !(error is CancellationError) {
-          self.errorMessage = "Couldn't start tonight's movie. \(self.failureMessage(error))"
-        }
-      }
-    }
-  }
-
-  // MARK: Watch Together
-
-  /// Parties on the server, for one title or all.
-  func watchParties(mediaId: UUID? = nil) async -> [WatchPartySummary] {
-    guard let profile, !requiresProfileSelection else { return [] }
-    return (try? await APIClient(profile: profile).watchParties(mediaId: mediaId)) ?? []
-  }
-
-  private func makeWatchParty() -> WatchTogetherSession? {
-    guard let profile else { return nil }
-    let session = WatchTogetherSession(client: APIClient(profile: profile))
-    session.openTitle = { [weak self] mediaId, title in
-      guard let self else { return }
-      if self.playback?.mediaId == mediaId {
-        // The player already moved away from this title on its own; open it afresh.
-        self.playback = nil
-        Task { @MainActor in self.startPlayback(mediaId: mediaId, title: title) }
-      } else {
-        self.startPlayback(mediaId: mediaId, title: title)
-      }
-    }
-    return session
-  }
-
-  /// Starts a party for the title playing in `controller`.
-  func startWatchTogether(with controller: PlaybackController) async {
-    await leaveWatchTogether()
-    guard let session = makeWatchParty() else { return }
-    watchParty = session
-    if await session.start(
-      mediaId: controller.presentation.mediaId, position: controller.currentTimeMilliseconds,
-      playing: controller.isPlaying)
-    {
-      session.attach(controller)
-    }
-  }
-
-  /// Joins a party and opens its title; the player then follows the others.
-  func joinWatchTogether(_ party: WatchPartySummary) async {
-    await leaveWatchTogether()
-    guard let session = makeWatchParty() else { return }
-    watchParty = session
-    if await session.join(party), let state = session.state {
-      startPlayback(mediaId: state.mediaId, title: state.title)
-    }
-  }
-
-  func leaveWatchTogether() async {
-    guard let session = watchParty else { return }
-    watchParty = nil
-    await session.leave()
   }
 
   func dismissPlayback() {
@@ -3538,6 +3518,7 @@ final class AppModel: ObservableObject {
     guard isCurrent(generation), profileSelectionGeneration == selection,
       profile?.isViewingSession != true, !Task.isCancelled
     else { throw CancellationError() }
+    noteServerPowerSaving(response.powerSavingEnabled ?? info.powerSavingEnabled ?? false)
     watchingProfiles = response.profiles
     managementSetupRequired = response.managementSetupRequired
     profileSelectionError = nil
@@ -3706,7 +3687,6 @@ final class AppModel: ObservableObject {
   }
 
   func switchWatchingProfile() async {
-    await leaveWatchTogether()
     guard let device = deviceConnection, !isSelectingProfile else { return }
     let expected = UUID()
     isSelectingProfile = true
@@ -3877,7 +3857,7 @@ final class AppModel: ObservableObject {
       publicKeyFingerprint: device.publicKeyFingerprint, token: response.token,
       sessionId: response.sessionId,
       expiresAt: response.expiresAt, user: response.user, locallyManaged: device.locallyManaged,
-      viewingSession: true)
+      viewingSession: true, powerSavingEnabled: device.powerSavingEnabled)
   }
 
   private func clearPersonalViewState() {
@@ -3902,7 +3882,6 @@ final class AppModel: ObservableObject {
     clearAdministrationState()
     artworkLoader.removeAll()
     wrappedLaunch = nil
-    movieNightLaunch = nil
     requestedMediaDetail = nil
     requestedPersonDetail = nil
     requestedDestination = nil
@@ -3985,7 +3964,6 @@ final class AppModel: ObservableObject {
     }
     let current = profile
     let paired = deviceConnection
-    await leaveWatchTogether()
     if let server = paired?.serverId ?? current?.serverId {
       offlineProfileStore.forget(serverId: server)
       PasskeyStore.removeAll(server: server)
@@ -3996,7 +3974,6 @@ final class AppModel: ObservableObject {
     offlineProfileChoices = []
     clearRemotePlaybackState()
     wrappedLaunch = nil
-    movieNightLaunch = nil
     requestedMediaDetail = nil
     requestedPersonDetail = nil
     requestedDestination = nil
@@ -4007,6 +3984,7 @@ final class AppModel: ObservableObject {
     inspectionGeneration = UUID()
     profile = nil
     deviceConnection = nil
+    serverPowerSavingEnabled = false
     isSwitchingProfile = false
     isSelectingProfile = false
     watchingProfiles = []
@@ -4380,10 +4358,14 @@ final class AppModel: ObservableObject {
         guard let model = self, model.isCurrent(generation) else { return }
         let device = model.deviceConnection ?? current
         guard !device.isViewingSession else { throw APIClientError.invalidResponse }
+        let powerSaving = inspected.info.powerSavingEnabled ?? model.serverPowerSavingEnabled
         let paired = device.changingAddress(inspected.baseURL, name: inspected.info.name)
+          .changingPowerSaving(powerSaving)
         try model.store.save(paired)
         model.deviceConnection = paired
         model.profile = current.changingAddress(inspected.baseURL, name: inspected.info.name)
+          .changingPowerSaving(powerSaving)
+        model.serverPowerSavingEnabled = powerSaving
         // Retire all captured old-address requests before publishing a fresh snapshot.
         model.reconnectTask = nil
         model.invalidateLibraryWork()
@@ -4446,10 +4428,6 @@ final class AppModel: ObservableObject {
     // Keep the saved credential until an explicit disconnect/replacement. A network
     // failure never erases it; a confirmed device rejection shows connection UI.
     guard usesProfileSelection else { return }
-    if let session = watchParty {
-      watchParty = nil
-      Task { await session.leave() }
-    }
     profileExpiryTask?.cancel()
     managementExpiryTask?.cancel()
     managementExpiresAt = nil
@@ -4457,6 +4435,7 @@ final class AppModel: ObservableObject {
     wishPosterCache.clear()
     profile = nil
     deviceConnection = nil
+    serverPowerSavingEnabled = false
     watchingProfiles = []
     inspectedServer = nil
     errorMessage = "This device is no longer authorized. Pair it with your server again."

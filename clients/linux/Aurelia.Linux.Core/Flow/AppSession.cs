@@ -29,6 +29,7 @@ public sealed class AppSession : ObservableObject
     private LibraryStore? library;
     private IReadOnlyList<string> capabilities = [];
     private bool isResting;
+    private bool leavingRest;
     private bool following;
     private Moving.MovedServer? movedAway;
     private StoredServer? server;
@@ -134,15 +135,18 @@ public sealed class AppSession : ObservableObject
         private set => SetProperty(ref status, value);
     }
 
-    /// <summary>Aurelia let go of the server because nobody used it (see <see cref="RestAsync"/>).</summary>
+    /// <summary>Aurelia let go of the server because nobody used it (see <see cref="Rest"/>).</summary>
     public bool IsResting
     {
         get => isResting;
         private set => SetProperty(ref isResting, value);
     }
 
-    /// <summary>True when the saved server runs on another computer, the only case in which Aurelia rests.</summary>
+    /// <summary>True when the saved server runs on another computer.</summary>
     public bool ConnectedElsewhere => Server is { } saved && !saved.LocallyManaged && !ServerAddress.IsLoopback(saved.Address);
+
+    /// <summary>True only when connected to a remote server that actually has power saving enabled.</summary>
+    public bool CanServerRest => ConnectedElsewhere && Server?.PowerSavingEnabled == true;
 
     /// <summary>Where the saved server moved when Aurelia could not follow it there; null otherwise.</summary>
     public Moving.MovedServer? MovedAway
@@ -297,15 +301,27 @@ public sealed class AppSession : ObservableObject
         flow.Show(AppScreen.ProfilePicker);
     }
 
-    /// <summary>Remembers Wake-on-LAN addresses and hosting from an authenticated profile-picker response.</summary>
-    public async Task RememberWakeOnLanAsync(IReadOnlyList<string>? wakeOnLanAddresses, string? hosting)
+    /// <summary>Remembers Wake-on-LAN addresses, hosting and power-saving state from an authenticated profile-picker response.</summary>
+    public async Task RememberWakeOnLanAsync(IReadOnlyList<string>? wakeOnLanAddresses, string? hosting, bool? powerSavingEnabled = null)
     {
         if (Server is not { } saved) return;
         var nextHosting = hosting ?? saved.Hosting;
         var nextWake = nextHosting is "macApp" or "linuxApp" ? null
             : wakeOnLanAddresses is { Count: > 0 } known ? known : saved.WakeOnLanAddresses;
-        if (nextHosting == saved.Hosting && SameAddresses(nextWake, saved.WakeOnLanAddresses)) return;
-        await SaveAsync(saved with { WakeOnLanAddresses = nextWake, Hosting = nextHosting });
+        var nextPowerSaving = powerSavingEnabled ?? saved.PowerSavingEnabled;
+        if (nextHosting == saved.Hosting && nextPowerSaving == saved.PowerSavingEnabled && SameAddresses(nextWake, saved.WakeOnLanAddresses)) return;
+        await SaveAsync(saved with { WakeOnLanAddresses = nextWake, Hosting = nextHosting, PowerSavingEnabled = nextPowerSaving });
+        if (!nextPowerSaving && IsResting) await LeaveRestAsync();
+    }
+
+    /// <summary>Updates whether the connected server has power saving enabled, leaving rest immediately when turned off.</summary>
+    public async Task RememberPowerSavingAsync(bool enabled)
+    {
+        if (Server is { } saved && saved.PowerSavingEnabled != enabled)
+        {
+            await SaveAsync(saved with { PowerSavingEnabled = enabled });
+        }
+        if (!enabled && IsResting) await LeaveRestAsync();
     }
 
     private static bool SameAddresses(IReadOnlyList<string>? left, IReadOnlyList<string>? right) =>
@@ -477,47 +493,60 @@ public sealed class AppSession : ObservableObject
     }
 
     /// <summary>
-    /// Lets go of the server so it can sleep, as the Mac app does: the sync stops and idle connections
-    /// close. The profile stays open; using Aurelia again wakes the server and continues.
+    /// Lets go of a remote power-saving server so it can sleep, as the Mac app does: the sync stops
+    /// and idle connections close. The profile stays open; using or focusing Aurelia again wakes the
+    /// server and continues automatically.
     /// </summary>
     public void Rest()
     {
-        if (IsResting) return;
+        if (IsResting || !CanServerRest) return;
         syncing?.Cancel();
         syncing = null;
         Api.DropConnections();
         IsResting = true;
     }
 
+    public Task ResumeFromRestAsync() => LeaveRestAsync();
+
     /// <summary>Wakes and reaches the server after a rest, then reloads the library and resumes its sync.</summary>
-    public async Task ResumeFromRestAsync()
+    public async Task LeaveRestAsync()
     {
-        if (!IsResting || Server is not { } saved) return;
+        if (!IsResting) return;
         IsResting = false;
-        Status = ConnectionStatus.Connecting;
-        ReachedServer? reached;
+        if (Server is not { } saved || leavingRest) return;
+        leavingRest = true;
         try
         {
-            reached = await wakeUp.ReachAsync(saved, value => Status = value, CancellationToken.None);
+            Status = ConnectionStatus.Connecting;
+            ReachedServer? reached;
+            try
+            {
+                reached = await wakeUp.ReachAsync(saved, value => Status = value, CancellationToken.None);
+            }
+            catch (AureliaApiException error)
+            {
+                // A server that moved where it can't be followed, or presents another key.
+                MovedAway = error.MovedTo;
+                Message = error.Message;
+                reached = null;
+            }
+            Status = ConnectionStatus.Idle;
+            if (reached is null)
+            {
+                CloseLibrary();
+                ShowUnreachable();
+                return;
+            }
+            Capabilities = reached.Info.Capabilities ?? Capabilities;
+            // A server found at another address or with updated power/hosting metadata keeps the sign-in current.
+            if (reached.Server != saved) await SaveAsync(reached.Server);
+            if (Profile is { } open && open.ExpiresAt > time.GetUtcNow()) OpenProfile(open);
+            else await SwitchProfileAsync();
         }
-        catch (AureliaApiException error)
+        finally
         {
-            // A server that moved where it can't be followed, or presents another key.
-            MovedAway = error.MovedTo;
-            Message = error.Message;
-            reached = null;
+            leavingRest = false;
         }
-        Status = ConnectionStatus.Idle;
-        if (reached is null)
-        {
-            CloseLibrary();
-            ShowUnreachable();
-            return;
-        }
-        // A server found at another address (on the network, or where it moved) keeps the sign-in there.
-        if (reached.Server.Address != saved.Address) await SaveAsync(reached.Server);
-        if (Profile is { } open && open.ExpiresAt > time.GetUtcNow()) OpenProfile(open);
-        else await SwitchProfileAsync();
     }
 
     private async Task StartLibraryAsync(LibraryStore store, CancellationToken cancellation)

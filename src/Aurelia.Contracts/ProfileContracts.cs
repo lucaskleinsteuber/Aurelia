@@ -8,7 +8,8 @@ public enum ProfileAccessMode { LegacyLibraries, EntireLibrary, SelectedTitles }
 public sealed record WatchingProfile(Guid Id, string Name, UserRole Role, bool NeedsPinSetup, bool PinProtectionEnabled = true,
     string? PictureKey = null, long PictureRevision = 0, int? AgeLimit = null, DateTimeOffset? ClosedUntil = null);
 public sealed record ProfilePickerResponse(int FormatVersion, string MinimumClientVersion, bool ManagementSetupRequired,
-    IReadOnlyList<WatchingProfile> Profiles, IReadOnlyList<string>? WakeOnLanAddresses = null, string? Hosting = null);
+    IReadOnlyList<WatchingProfile> Profiles, IReadOnlyList<string>? WakeOnLanAddresses = null, string? Hosting = null,
+    bool PowerSavingEnabled = false);
 public sealed record InitializeProfilesRequest(string Password, string Pin);
 public sealed record UnlockProfileRequest(string? Pin = null);
 public sealed record ChangeProfilePinRequest(string CurrentPin, string NewPin);

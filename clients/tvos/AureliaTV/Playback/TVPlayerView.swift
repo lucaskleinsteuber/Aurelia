@@ -16,7 +16,7 @@ struct TVPlayerView: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private enum Control: Hashable {
-    case surface, close, backward, play, forward, timeline, audio, subtitles, rate, sleep, together,
+    case surface, close, backward, play, forward, timeline, audio, subtitles, rate, sleep,
       chapters, notes,
       retry,
       closeMenu, upNextPlay, upNextCancel, skipIntro, suggestionPlay, suggestionCredits,
@@ -110,13 +110,11 @@ struct TVPlayerView: View {
           .ignoresSafeArea()
           .transition(.opacity)
       }
-      if let party = model.watchParty { TVWatchTogetherNotice(session: party) }
     }
     .animation(.easeInOut(duration: 0.45), value: controller.isStarting)
     .preferredColorScheme(.dark)
     .onAppear {
-      // A party this Apple TV is in follows into the player before it starts.
-      model.attachWatchParty(to: controller)
+      model.playerOpened(controller)
       configurePreviews()
     }
     .task { await startWithPreShow() }
@@ -267,19 +265,6 @@ struct TVPlayerView: View {
           }
           if !controller.sceneNotes.isEmpty {
             icon("Scene Notes", symbol: "bookmark", id: .notes) { controller.trackMenu = .notes }
-          }
-          // Watch Together: start a party for this title, or leave the one this Apple TV is in.
-          icon(
-            model.watchParty?.state != nil ? "Leave Watch Together" : "Start Watch Together",
-            symbol: model.watchParty?.state != nil ? "person.2.fill" : "person.2", id: .together
-          ) {
-            Task {
-              if model.watchParty?.state != nil {
-                await model.leaveWatchTogether()
-              } else {
-                await model.startWatchTogether(with: controller)
-              }
-            }
           }
         }
         // Up from the transport row always lands on the speed, the first of the track controls.
@@ -537,8 +522,7 @@ struct TVPlayerView: View {
   private func startWithPreShow() async {
     guard
       let show = await controller.cinemaPreShow(
-        capabilities: model.capabilities?.capabilities ?? [],
-        watchingTogether: model.watchParty != nil),
+        capabilities: model.capabilities?.capabilities ?? []),
       !Task.isCancelled
     else {
       controller.start()
@@ -921,30 +905,5 @@ private struct TVStartRing: View {
           .rotationEffect(.degrees(rotation - 90))
       }
     }
-  }
-}
-
-/// A short notice at the top of the picture when someone in the party acts, such as "Mia paused".
-private struct TVWatchTogetherNotice: View {
-  @ObservedObject var session: TVWatchTogetherSession
-
-  var body: some View {
-    let text =
-      session.notice
-      ?? (session.state?.isWaiting == true ? "Waiting until everyone is ready…" : nil)
-    VStack {
-      if let text {
-        Label(text, systemImage: "person.2.fill")
-          .font(.system(size: 26, weight: .semibold))
-          .padding(.horizontal, 28).padding(.vertical, 14)
-          .background(.ultraThinMaterial, in: Capsule())
-          .transition(.opacity)
-          .accessibilityIdentifier("watch-together-notice")
-      }
-      Spacer()
-    }
-    .padding(.top, 60)
-    .animation(.easeInOut(duration: 0.3), value: text)
-    .allowsHitTesting(false)
   }
 }

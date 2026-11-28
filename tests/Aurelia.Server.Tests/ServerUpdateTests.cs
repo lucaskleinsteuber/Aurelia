@@ -26,13 +26,18 @@ public sealed class ServerUpdateTests
         Assert.Equal(fixture.Clock.GetUtcNow().ToUnixTimeSeconds(), found.CheckedAt?.ToUnixTimeSeconds());
 
         Assert.Equal("installing", fixture.Store.RequestInstall().State);
+        Assert.Equal(2, fixture.Store.Read().ProgressPercent);
+        Assert.Equal("starting", fixture.Store.Read().Phase);
         Assert.True(File.Exists(fixture.PathOf(ServerUpdateStore.InstallRequestFileName)));
         Assert.Equal(409, Assert.Throws<AccountException>(() => fixture.Store.RequestInstall()).StatusCode);
 
         // The new program reports its own build after the restart.
         File.Delete(fixture.PathOf(ServerUpdateStore.InstallRequestFileName));
-        fixture.WriteStatus("STATE=installing", $"CHANGED_AT={fixture.Seconds}", "NEWEST_VERSION=1.8.8", "NEWEST_BUILD=92", "TARGET_BUILD=92");
-        Assert.Equal("installing", fixture.Store.Read().State);
+        fixture.WriteStatus("STATE=installing", $"CHANGED_AT={fixture.Seconds}", "NEWEST_VERSION=1.8.8", "NEWEST_BUILD=92", "TARGET_BUILD=92", "PROGRESS=54", "PHASE=downloading");
+        var midInstall = fixture.Store.Read();
+        Assert.Equal("installing", midInstall.State);
+        Assert.Equal(54, midInstall.ProgressPercent);
+        Assert.Equal("downloading", midInstall.Phase);
         var updated = new ServerUpdateStore(fixture.Runtime, fixture.Clock, true, "1.8.8", 92).Read();
         Assert.Equal(new ServerUpdateStatus(true, "1.8.8 (92)", "1.8.8 (92)", false, "idle", null, null), updated);
     }

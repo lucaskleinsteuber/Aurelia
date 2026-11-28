@@ -26,7 +26,8 @@ public sealed record StoredServer(
     UserSummary? User = null,
     bool LocallyManaged = false,
     IReadOnlyList<string>? WakeOnLanAddresses = null,
-    string? Hosting = null)
+    string? Hosting = null,
+    bool PowerSavingEnabled = false)
 {
     /// <summary>"macApp" or "linuxApp": the Aurelia app hosts it on a desktop or laptop, which its owner starts, never Wake-on-LAN.</summary>
     public bool HostedByApp => Hosting is "macApp" or "linuxApp";

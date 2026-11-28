@@ -84,7 +84,7 @@ public sealed class ProfilePickerModel : ObservableObject
         try
         {
             var response = await session.Api.ProfilesAsync(server, CancellationToken.None);
-            await session.RememberWakeOnLanAsync(response.WakeOnLanAddresses, response.Hosting);
+            await session.RememberWakeOnLanAsync(response.WakeOnLanAddresses, response.Hosting, response.PowerSavingEnabled);
             NeedsSetup = response.ManagementSetupRequired;
             Profiles.Clear();
             foreach (var profile in response.Profiles) Profiles.Add(profile);

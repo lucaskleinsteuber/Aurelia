@@ -218,6 +218,26 @@ public sealed class ManagementScreenTests
     }
 
     [AvaloniaFact]
+    public void ServerUpdatesShowDeterminateProgressBarAndPhaseWhileInstalling()
+    {
+        var server = Server().Replace("GET", "/api/v1/server/updates",
+            Json(new ServerUpdateStatus(true, "2.21.0 (169)", "2.22.0 (170)", true, "installing", DateTimeOffset.UtcNow, null,
+                ProgressPercent: 54, Phase: "downloading")));
+        var (window, settings, _) = Open(SettingsCategory.Server, server);
+        var page = settings.Page!;
+        FakeLibrary.Pump(() => Shows(page, "Downloading server update… 54%"), rounds: 40);
+        var bar = All<ProgressBar>(page).Single(p => AutomationProperties.GetName(p) == "Server Update Progress");
+        Assert.True(bar.IsVisible);
+        Assert.False(bar.IsIndeterminate);
+        Assert.Equal(0, bar.Minimum);
+        Assert.Equal(100, bar.Maximum);
+        Assert.Equal(54, bar.Value);
+        Assert.True(Shows(page, "Downloading server update… 54%"));
+        Assert.True(Shows(page, "54%"));
+        window.Close();
+    }
+
+    [AvaloniaFact]
     public void ProfilesAndDevicesListPeopleAndMakeCodes()
     {
         var (_, settings, server) = Open(SettingsCategory.ProfilesAndDevices);
@@ -450,6 +470,12 @@ public sealed class ManagementScreenTests
         Assert.False((laptop with { Hosting = "linuxServer" }).HostedByApp);
         Assert.Equal("2 GB", ServerPage.FormatCap(2000));
         Assert.Equal("250 MB", ServerPage.FormatCap(250));
+        Assert.Equal("Checking GitHub for updates…", ServerPage.UpdatePhaseText(new ServerUpdateStatus(true, "2.0.0", null, false, "checking", null, null, 10, "checking")));
+        Assert.Equal("Verifying release signature…", ServerPage.UpdatePhaseText(new ServerUpdateStatus(true, "2.0.0", "2.1.0", true, "installing", null, null, 20, "verifying")));
+        Assert.Equal("Downloading server update… 54%", ServerPage.UpdatePhaseText(new ServerUpdateStatus(true, "2.0.0", "2.1.0", true, "installing", null, null, 54, "downloading")));
+        Assert.Equal("Verifying checksum and unpacking…", ServerPage.UpdatePhaseText(new ServerUpdateStatus(true, "2.0.0", "2.1.0", true, "installing", null, null, 85, "unpacking")));
+        Assert.Equal("Installing and restarting server…", ServerPage.UpdatePhaseText(new ServerUpdateStatus(true, "2.0.0", "2.1.0", true, "installing", null, null, 92, "restarting")));
+        Assert.Equal("Waiting for server to restart…", ServerPage.UpdatePhaseText(new ServerUpdateStatus(true, "2.0.0", "2.1.0", true, "installing", null, null, 92, "restarting"), reconnecting: true));
         Assert.Equal("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", ManagementClient.PayloadHash([]));
 
         var remote = BrowserAddress.Resolve(new Uri("https://192.168.1.20:43111"), null, null);

@@ -91,18 +91,74 @@ github_fetch() {
 report_update=false
 update_status_final=false
 status_newest_version="" status_newest_build="" status_target="" status_checked_at=""
+status_progress="" status_phase=""
 write_update_status() {
-  local state=$1 message=${2:-}
+  local state=$1 message=${2:-} progress=${3:-$status_progress} phase=${4:-$status_phase}
   $report_update || return 0
-  if [ "$state" = idle ] || [ "$state" = failed ]; then update_status_final=true; fi
+  if [ "$state" = idle ] || [ "$state" = failed ]; then
+    update_status_final=true
+    progress=""
+    phase=""
+  fi
   message=$(printf '%s' "$message" | tr -cd '[:print:]' | cut -c1-200)
   # Written as the server's user: root changing owners in that user's folder could be led along
   # a link onto any file of the computer.
-  printf 'STATE=%s\nCHANGED_AT=%s\nCHECKED_AT=%s\nNEWEST_VERSION=%s\nNEWEST_BUILD=%s\nTARGET_BUILD=%s\nMESSAGE=%s\n' \
+  printf 'STATE=%s\nCHANGED_AT=%s\nCHECKED_AT=%s\nNEWEST_VERSION=%s\nNEWEST_BUILD=%s\nTARGET_BUILD=%s\nPROGRESS=%s\nPHASE=%s\nMESSAGE=%s\n' \
     "$state" "$(date +%s)" "$status_checked_at" "$status_newest_version" "$status_newest_build" "$status_target" \
-    "$message" \
+    "$progress" "$phase" "$message" \
     | runuser -u aurelia -- /bin/sh -c 'umask 077; t=$(mktemp "$1.XXXXXX") && cat > "$t" && mv -f "$t" "$1"' sh "$data_dir/update-status" \
     || true
+}
+
+# Draws a single-line progress bar when stderr is an interactive terminal (`sudo aurelia update`).
+terminal_bar_active=false
+show_update_bar() {
+  local pct=$1 label=$2 filled empty bar=""
+  [ -t 2 ] || return 0
+  [ "$pct" -lt 0 ] && pct=0
+  [ "$pct" -gt 100 ] && pct=100
+  filled=$(( pct * 30 / 100 ))
+  empty=$(( 30 - filled ))
+  bar=$(printf '%*s' "$filled" '' | tr ' ' '#')$(printf '%*s' "$empty" '' | tr ' ' '-')
+  printf '\r  [%s] %3d%%  %-46.46s' "$bar" "$pct" "$label" >&2
+  terminal_bar_active=true
+}
+
+end_update_bar() {
+  if $terminal_bar_active; then
+    printf '\n' >&2
+    terminal_bar_active=false
+  fi
+}
+
+# Downloads the server archive while updating both the terminal progress bar and update-status.
+github_fetch_package() {
+  local url=$1 output=$2 expected_bytes=${3:-0} label=${4:-package} status_file="$work/fetch_status"
+  rm -f "$status_file" "$output"
+  ( github_fetch "$url" "$output" application/octet-stream > "$status_file" ) &
+  local fetch_pid=$! last_written=-1 now=0
+  while kill -0 "$fetch_pid" 2>/dev/null; do
+    if [ "$expected_bytes" -gt 0 ] && [ -f "$output" ]; then
+      local current_bytes
+      current_bytes=$(wc -c < "$output" 2>/dev/null | tr -d '[:space:]' || echo 0)
+      if [[ "$current_bytes" =~ ^[0-9]+$ ]] && [ "$current_bytes" -gt 0 ]; then
+        local dl_pct=$(( current_bytes * 100 / expected_bytes ))
+        [ "$dl_pct" -gt 100 ] && dl_pct=100
+        local overall=$(( 15 + dl_pct * 65 / 100 ))
+        local mb_done=$(( current_bytes / 1048576 )) mb_total=$(( expected_bytes / 1048576 ))
+        show_update_bar "$overall" "Downloading $label (${mb_done}/${mb_total} MB)"
+        now=$(date +%s)
+        if [ "$overall" != "$status_progress" ] && [ $(( now - last_written )) -ge 1 ]; then
+          status_progress=$overall status_phase=downloading
+          write_update_status installing
+          last_written=$now
+        fi
+      fi
+    fi
+    sleep 0.3
+  done
+  wait "$fetch_pid" || true
+  cat "$status_file" 2>/dev/null || true
 }
 
 github_failure() {
@@ -546,6 +602,7 @@ case "$command" in
     work=""
     cleanup_update() {
       local rc=$?
+      end_update_bar
       [ -n "$work" ] && rm -rf "$work"
       if [ "$rc" -ne 0 ] && $report_update && ! $update_status_final; then
         write_update_status failed "The update stopped unexpectedly. See: journalctl -u aurelia-update-request"
@@ -554,9 +611,11 @@ case "$command" in
     trap cleanup_update EXIT
     if [ "$from_app_kind" = install ]; then
       assume_yes=true
+      status_progress=5 status_phase=checking
       write_update_status installing
     elif [ "$from_app_kind" = check ]; then
       check_only=true
+      status_progress=5 status_phase=checking
       write_update_status checking
     fi
     if [ -z "$update_repository" ]; then
@@ -675,30 +734,46 @@ case "$command" in
     fi
 
     status_target=$build
+    package_size=$(jq -r --arg name "$name" '[.[].assets[]? | select(.name == $name) | (.size // 0)][0] // 0' "$work/releases.json" 2>/dev/null || echo 0)
+    [[ "$package_size" =~ ^[0-9]+$ ]] || package_size=0
+    status_progress=12 status_phase=verifying
     write_update_status installing
-    echo "Downloading $name..."
+    if [ -t 2 ]; then
+      show_update_bar 12 "Verifying release signature..."
+    else
+      echo "Downloading $name..."
+    fi
     status=$(github_fetch "$sums_url" "$work/SHA256SUMS" application/octet-stream)
-    [ "$status" = 200 ] || github_failed "$status" SHA256SUMS
+    [ "$status" = 200 ] || { end_update_bar; github_failed "$status" SHA256SUMS; }
     unsigned="The release is not signed by the owner of Aurelia; nothing was installed."
     if [ -z "$signature_url" ]; then
+      end_update_bar
       echo "$unsigned" >&2
       write_update_status failed "$unsigned"
       exit 1
     fi
     status=$(github_fetch "$signature_url" "$work/SHA256SUMS.minisig" application/octet-stream)
-    [ "$status" = 200 ] || github_failed "$status" SHA256SUMS.minisig
+    [ "$status" = 200 ] || { end_update_bar; github_failed "$status" SHA256SUMS.minisig; }
     mkdir "$work/signature"
     if ! signature_valid "$work/SHA256SUMS" "$work/SHA256SUMS.minisig" "$work/signature"; then
+      end_update_bar
       echo "$unsigned" >&2
       write_update_status failed "$unsigned"
       exit 1
     fi
-    status=$(github_fetch "$url" "$work/$name" application/octet-stream)
-    [ "$status" = 200 ] || github_failed "$status" "$name"
+    status_progress=15 status_phase=downloading
+    write_update_status installing
+    show_update_bar 15 "Downloading $name..."
+    status=$(github_fetch_package "$url" "$work/$name" "$package_size" "$name")
+    [ "$status" = 200 ] || { end_update_bar; github_failed "$status" "$name"; }
+    status_progress=85 status_phase=unpacking
+    write_update_status installing
+    show_update_bar 85 "Checking SHA-256 and unpacking..."
     expected=$(awk -v name="$name" '{ file = $2; sub(/^\*/, "", file); sub(/^\.\//, "", file); if (file == name) print $1 }' \
       "$work/SHA256SUMS")
     actual=$(sha256sum "$work/$name" | awk '{ print $1 }')
     if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+      end_update_bar
       echo "The download does not match its checksum; nothing was installed." >&2
       write_update_status failed "The download does not match its checksum; nothing was installed."
       exit 1
@@ -708,6 +783,7 @@ case "$command" in
     tar -tzf "$work/$name" > "$work/contents"
     if ! awk -v folder="$folder" 'index($0, folder "/") != 1 || /(^|\/)\.\.(\/|$)/ { bad = 1 } END { exit bad }' \
       "$work/contents"; then
+      end_update_bar
       echo "The download is not an Aurelia Server package; nothing was installed." >&2
       write_update_status failed "The download is not an Aurelia Server package; nothing was installed."
       exit 1
@@ -717,16 +793,25 @@ case "$command" in
     package="$work/package/$folder"
     if [ "$(cat "$package/VERSION" 2>/dev/null)" != "$version ($build)" ] \
       || [ "$(cat "$package/ARCHITECTURE" 2>/dev/null)" != "$arch" ]; then
+      end_update_bar
       echo "The download is not Aurelia Server $version ($build) for $arch; nothing was installed." >&2
       write_update_status failed "The download is not Aurelia Server $version ($build) for $arch; nothing was installed."
       exit 1
     fi
+    status_progress=92 status_phase=restarting
+    write_update_status installing
+    show_update_bar 92 "Installing and restarting Aurelia Server..."
+    end_update_bar
     # The installer stops Aurelia, also when power saving stopped it, replaces only the program and
     # starts it again. It replaces this command too; bash read this whole case statement before
     # running it, so the lines after the installer still run as written here.
     status=0
     "$package/install.sh" || status=$?
     if [ "$status" -eq 0 ]; then
+      if [ -t 2 ]; then
+        show_update_bar 100 "Updated to Aurelia Server $version ($build)"
+        end_update_bar
+      fi
       write_update_status idle
     else
       write_update_status failed "Installing $version ($build) failed; Aurelia Server keeps its previous version where possible."

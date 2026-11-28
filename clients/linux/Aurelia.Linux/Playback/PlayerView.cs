@@ -106,24 +106,10 @@ public sealed class PlayerView : UserControl, IDisposable
 
     internal Func<Task<Stream?>>? DiagnosticsDestination { get; set; }
 
-    private readonly IWatchTogetherHost? together;
-    private readonly Border togetherNotice = new()
-    {
-        HorizontalAlignment = HorizontalAlignment.Center,
-        VerticalAlignment = VerticalAlignment.Top,
-        Margin = new Thickness(0, 90, 0, 0),
-        Padding = new Thickness(14, 8),
-        CornerRadius = new CornerRadius(18),
-        Background = new SolidColorBrush(Color.FromArgb(0xCC, 0x1C, 0x1E, 0x22)),
-        IsVisible = false,
-        IsHitTestVisible = false,
-    };
-
-    public PlayerView(PlaybackController controller, Window? window, IWatchTogetherHost? together = null)
+    public PlayerView(PlaybackController controller, Window? window)
     {
         this.controller = controller;
         this.window = window;
-        this.together = together;
         Focusable = true;
         Background = Brushes.Black;
         var diagnostics = new MenuItem { Header = "Export Playback Diagnostics…" };
@@ -155,8 +141,7 @@ public sealed class PlayerView : UserControl, IDisposable
                 Children =
                 {
                     close.Also(c => DockPanel.SetDock(c, Dock.Left)),
-                    (together is null ? Capsule(speed, audio, subtitles, sleep, notes) : Capsule(speed, audio, subtitles, sleep, notes, TogetherButton()))
-                        .Also(c => DockPanel.SetDock(c, Dock.Right)),
+                    Capsule(speed, audio, subtitles, sleep, notes).Also(c => DockPanel.SetDock(c, Dock.Right)),
                 },
             },
         };
@@ -288,8 +273,7 @@ public sealed class PlayerView : UserControl, IDisposable
         chrome.Children.Add(conflict);
         lastTitle.Child = lastTitleText;
         goodNight.PointerPressed += (_, _) => { if (controller.ShowsSleepTimerGoodNight) _ = controller.DismissSleepGoodNightAsync(); };
-        Content = new Grid { Children = { surface, chrome, status, skipIntro, upNext, suggestionCard, endScreen, lastTitle, goodNight, noteCues, togetherNotice } };
-        if (together is not null) together.WatchPartyChanged += ShowTogetherNotice;
+        Content = new Grid { Children = { surface, chrome, status, skipIntro, upNext, suggestionCard, endScreen, lastTitle, goodNight, noteCues } };
 
         controller.PropertyChanged += OnControllerChanged;
         sceneNotes.CuesChanged += ShowCues;
@@ -321,7 +305,6 @@ public sealed class PlayerView : UserControl, IDisposable
 
     public void Dispose()
     {
-        if (together is not null) together.WatchPartyChanged -= ShowTogetherNotice;
         controller.PropertyChanged -= OnControllerChanged;
         if (window is not null) window.PropertyChanged -= OnWindowChanged;
         sceneNotes.CuesChanged -= ShowCues;
@@ -848,72 +831,6 @@ public sealed class PlayerView : UserControl, IDisposable
     private static MenuItem Note(string header) =>
         new() { Header = header, IsEnabled = false, Focusable = false, Classes = { "menuNote" } };
 
-    /// <summary>Watch Together: start a party for this title, or see who watches along and leave.</summary>
-    private Button TogetherButton()
-    {
-        var button = Control("IconPeople", "Watch Together", () => { });
-        var content = new StackPanel { Spacing = 10, Width = 280, Margin = new Thickness(6) };
-        var flyout = new Flyout { Content = content, Placement = PlacementMode.BottomEdgeAlignedRight };
-        flyout.Opening += (_, _) => FillTogether(content, flyout);
-        Track(flyout);
-        button.Flyout = flyout;
-        return button;
-    }
-
-    private void FillTogether(StackPanel content, Flyout flyout)
-    {
-        content.Children.Clear();
-        content.Children.Add(new TextBlock { Text = "Watch Together", FontWeight = FontWeight.SemiBold, FontSize = 15 });
-        if (together?.WatchParty is { State: { } state })
-        {
-            foreach (var member in state.Members)
-            {
-                content.Children.Add(new StackPanel
-                {
-                    Spacing = 1,
-                    Children =
-                    {
-                        new TextBlock { Text = (member.IsYou ? $"{member.Name} (You)" : member.Name) + (member.IsHost ? " · Host" : "") + (member.IsBuffering ? " · Loading…" : "") },
-                        new TextBlock { Text = member.DeviceName, FontSize = 11, Foreground = Secondary },
-                    },
-                });
-            }
-            if (state.IsWaiting) content.Children.Add(new TextBlock { Text = "Waiting until everyone is ready…", FontSize = 12, Foreground = Secondary });
-            var leave = new Button { Content = "Leave Watch Together", Classes = { "destructive" } };
-            leave.Click += async (_, _) => { flyout.Hide(); await together.LeaveWatchTogetherAsync(); };
-            content.Children.Add(leave);
-            return;
-        }
-        content.Children.Add(new TextBlock
-        {
-            Text = "Watch this title in step with other devices at home. They join from the title's page, and play, pause and jumps apply to everyone.",
-            TextWrapping = TextWrapping.Wrap,
-            FontSize = 12,
-            Foreground = Secondary,
-        });
-        var start = new Button { Content = "Start Watch Together", Classes = { "primary" } };
-        AutomationProperties.SetName(start, "Start Watch Together");
-        start.Click += async (_, _) =>
-        {
-            start.IsEnabled = false;
-            if (together is not null) await together.StartWatchTogetherAsync(controller);
-            FillTogether(content, flyout);
-        };
-        content.Children.Add(start);
-        if (together?.WatchParty?.Error is { } error) content.Children.Add(new TextBlock { Text = error, TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.Parse("#FFB36B")) });
-    }
-
-    /// <summary>"Mia paused" and similar, shown briefly at the top of the picture.</summary>
-    private void ShowTogetherNotice()
-    {
-        var party = together?.WatchParty;
-        var text = party?.Notice ?? (party?.State is { IsWaiting: true } ? "Waiting until everyone is ready…" : null);
-        togetherNotice.Child = new TextBlock { Text = text, Foreground = Brushes.White, FontSize = 13 };
-        togetherNotice.IsVisible = text is not null;
-    }
-
-    internal string? TogetherNoticeText => togetherNotice.IsVisible ? (togetherNotice.Child as TextBlock)?.Text : null;
-
     private Button Menu(string icon, string label, Func<List<Control>> items, PlacementMode placement)
     {
         // The entries are filled before the menu opens: filled only while opening, the menu
@@ -1015,17 +932,4 @@ public sealed class PlayerView : UserControl, IDisposable
             new GradientStop(Color.FromArgb(0xC7, 0, 0, 0), 1),
         },
     };
-}
-
-/// <summary>Where the player finds this computer's Watch Together party (the main window).</summary>
-public interface IWatchTogetherHost
-{
-    WatchTogetherSession? WatchParty { get; }
-
-    /// <summary>Raised on the UI thread when the party, its state or its notice changes.</summary>
-    event Action? WatchPartyChanged;
-
-    Task StartWatchTogetherAsync(PlaybackController controller);
-
-    Task LeaveWatchTogetherAsync();
 }

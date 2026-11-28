@@ -89,10 +89,11 @@ public sealed class GeneralPreferences(ISettingsStore store)
 
     /// <summary>
     /// Whether Aurelia lets go of its server now (Mac: AureliaRest): only for a server on another
-    /// computer, while nothing plays and nobody used Aurelia for the chosen minutes.
+    /// computer that actually has power saving enabled, while nothing plays and nobody used Aurelia
+    /// for the chosen minutes.
     /// </summary>
-    public static bool ShouldRest(bool enabled, int minutes, TimeSpan withoutUse, bool playing, bool connectedElsewhere) =>
-        enabled && connectedElsewhere && !playing && withoutUse >= TimeSpan.FromMinutes(minutes);
+    public static bool ShouldRest(bool enabled, int minutes, TimeSpan withoutUse, bool playing, bool connectedElsewhere, bool powerSavingEnabled = false) =>
+        enabled && connectedElsewhere && powerSavingEnabled && !playing && withoutUse >= TimeSpan.FromMinutes(minutes);
 
     /// <summary>The last page shown, per server and profile.</summary>
     public LibraryDestination? LastDestination(Guid serverId, Guid userId) =>

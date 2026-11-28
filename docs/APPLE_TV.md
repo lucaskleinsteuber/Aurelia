@@ -78,11 +78,6 @@ Play/Pause holds, Back leaves).
 nobody has watched yet and the curtain before a film that starts from its beginning, as on the
 Mac. Skip and Start Film take the focus; Back leaves the player.
 
-**Movie Night** on Home turns the Apple TV into the screen everyone looks at: it shows who
-joined from their phones, how far each has swiped, and the match as a ticket with Play already
-selected, so one click starts it. The remote can swipe too (**Swipe with the Remote**). Back
-leaves the night.
-
 The player also has **Chapters** (a menu and marks on the timeline) and shows the profile's
 **Scene Notes** at their moment, with a list to jump to them; the notes are written on the other
 apps. Settings › Playback sets the default audio and subtitle languages and the subtitles' size

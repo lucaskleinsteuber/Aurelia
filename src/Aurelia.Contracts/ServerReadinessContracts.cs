@@ -29,10 +29,12 @@ public sealed record ServerStatusResponse(
 
 /// <summary>
 /// Updates of a Linux server installed from the package. Versions read "1.8.7 (91)". State is
-/// "idle", "checking", "installing" or "failed"; Message explains a failure.
+/// "idle", "checking", "installing" or "failed"; Message explains a failure; ProgressPercent
+/// (0–100) and Phase ("starting", "checking", "verifying", "downloading", "unpacking", "restarting")
+/// report progress while checking or installing.
 /// </summary>
 public sealed record ServerUpdateStatus(bool Available, string Installed, string? Newest, bool UpdateAvailable,
-    string State, DateTimeOffset? CheckedAt, string? Message);
+    string State, DateTimeOffset? CheckedAt, string? Message, int? ProgressPercent = null, string? Phase = null);
 
 public sealed record ServerHealthResponse(
     double UptimeSeconds,

@@ -344,6 +344,7 @@ public sealed class SetupFinishView : UserControl
         try
         {
             hostInfo = await session.Api.ServerInfoAsync(server, CancellationToken.None, TimeSpan.FromSeconds(5));
+            await session.RememberPowerSavingAsync(hostInfo.PowerSavingEnabled);
         }
         catch (Exception failure) when (failure is AureliaApiException or HttpRequestException or TaskCanceledException or IOException)
         {

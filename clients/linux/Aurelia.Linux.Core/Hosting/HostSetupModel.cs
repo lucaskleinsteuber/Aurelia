@@ -575,7 +575,7 @@ public sealed class HostSetupModel : ObservableObject
             Phase = HostPhase.SignIn;
             return;
         }
-        await session.CompletePairingAsync(saved with { Address = host.SecureAddress }, host.Info?.Capabilities);
+        await session.CompletePairingAsync(saved with { Address = host.SecureAddress, PowerSavingEnabled = host.Info?.PowerSavingEnabled ?? false }, host.Info?.Capabilities);
     });
 
     /// <summary>Reads the server's key over HTTPS on this computer and keeps the owner's device credential with it.</summary>
@@ -594,7 +594,7 @@ public sealed class HostSetupModel : ObservableObject
             }
         }
         var stored = new StoredServer(inspected!.Info.ServerId, inspected.Info.Name, inspected.Address, inspected.Fingerprint,
-            owner.Token, owner.SessionId, owner.ExpiresAt, owner.User, LocallyManaged: true);
+            owner.Token, owner.SessionId, owner.ExpiresAt, owner.User, LocallyManaged: true, PowerSavingEnabled: inspected.Info.PowerSavingEnabled);
         await session.CompletePairingAsync(stored, inspected.Info.Capabilities);
     }
 

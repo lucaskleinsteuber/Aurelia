@@ -18,7 +18,7 @@ using Avalonia.Threading;
 
 namespace Aurelia.Linux.Views;
 
-public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHost, IDisposable
+public sealed partial class MainWindow : Window, IPlayOnTarget, IDisposable
 {
     private readonly AppServices services;
     private LibraryShell? shell;
@@ -64,6 +64,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
             : Task.FromException<byte[]>(new InvalidOperationException("No server is connected."));
         Session.PropertyChanged += (_, e) =>
         {
+            if (e.PropertyName == nameof(AppSession.IsResting)) SyncRestView();
             if (e.PropertyName != nameof(AppSession.Library)) return;
             AttachWishNotifications(Session.Library);
             StartPlayOn();
@@ -89,15 +90,15 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
             Tray().IsVisible = true;
         };
         KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.OemComma, KeyModifiers.Control), Command = new RelayCommand(() => OpenSettings()) });
-        AddHandler(PointerMovedEvent, (_, _) => NoteUse(), Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
-        AddHandler(PointerPressedEvent, (_, _) => NoteUse(), Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
-        AddHandler(KeyDownEvent, (_, _) => NoteUse(), Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
-        Activated += (_, _) =>
+        AddHandler(PointerMovedEvent, (_, _) => NoteUse(wake: IsActive), Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerPressedEvent, (_, _) => NoteUse(wake: true), Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(KeyDownEvent, (_, _) => NoteUse(wake: true), Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(GotFocusEvent, (_, _) => NoteUse(wake: true), Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+        PropertyChanged += (_, change) =>
         {
-            NoteUse();
-            // A server this PC hosts that stopped for being unused starts again when Aurelia is opened.
-            if (hosting?.Host is { State: LocalServerState.Idle } idle) _ = idle.StartAsync();
+            if (change.Property == IsActiveProperty && IsActive) NoteUse(wake: true);
         };
+        Activated += (_, _) => OnWindowActivated();
         Deactivated += (_, _) => lastUse = services.Time.GetUtcNow();
         restCheck = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         restCheck.Tick += (_, _) =>
@@ -403,7 +404,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         if (Remote is not null) created.AttachRemote(Remote);
         created.PlayRequested += (item, resume) => _ = PlayAsync(item, resume);
         created.PlayCollectionRequested += (playlist, target, resume) => _ = PlayAsync(target, resume, playlist: playlist);
-        created.Together = this;
+        created.HostWindow = this;
         // Progress watched offline goes back to the server once a profile is open again.
         if (services.Downloads is { } offline && Session.Library is { } opened)
             _ = Task.Run(() => offline.SyncProgressAsync(new PlaybackClient(Session.Api, opened.Client)));
@@ -470,30 +471,55 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         return installed;
     }
 
-    private void NoteUse()
+    internal void OnWindowActivated()
     {
-        lastUse = services.Time.GetUtcNow();
-        if (Session.IsResting) _ = WakeFromRestAsync();
+        NoteUse(wake: true);
+        // A server this PC hosts that stopped for being unused starts again when Aurelia is opened.
+        if (hosting?.Host is { State: LocalServerState.Idle } idle) _ = idle.StartAsync();
     }
 
-    /// <summary>Lets the server rest when nothing plays and nobody used Aurelia for the chosen minutes, as on the Mac.</summary>
+    private void NoteUse(bool wake = true)
+    {
+        lastUse = services.Time.GetUtcNow();
+        if (wake && Session.IsResting) _ = LeaveRestAsync();
+    }
+
+    private void SyncRestView()
+    {
+        if (Session.IsResting)
+        {
+            RestHost.Content ??= RestView();
+            RestHost.IsVisible = true;
+        }
+        else
+        {
+            RestHost.IsVisible = false;
+            RestHost.Content = null;
+        }
+    }
+
+    /// <summary>Lets a remote power-saving server rest when nothing plays and nobody used Aurelia for the chosen minutes.</summary>
     internal void CheckRest()
     {
         var prefs = Session.Preferences;
         var withoutUse = services.Time.GetUtcNow() - lastUse;
         if (Session.IsResting || Session.Library is null) return;
-        if (!Core.Settings.GeneralPreferences.ShouldRest(prefs.RestsWhenUnused, prefs.RestMinutes, withoutUse, Player is not null, Session.ConnectedElsewhere)) return;
+        if (!Core.Settings.GeneralPreferences.ShouldRest(prefs.RestsWhenUnused, prefs.RestMinutes, withoutUse, Player is not null,
+            Session.ConnectedElsewhere, Session.Server?.PowerSavingEnabled == true))
+        {
+            return;
+        }
         playOn?.Cancel();
         Session.Rest();
-        RestHost.Content = RestView();
-        RestHost.IsVisible = true;
+        SyncRestView();
     }
 
-    private async Task WakeFromRestAsync()
+    public async Task LeaveRestAsync()
     {
+        lastUse = services.Time.GetUtcNow();
         RestHost.IsVisible = false;
         RestHost.Content = null;
-        await Session.ResumeFromRestAsync();
+        await Session.LeaveRestAsync();
     }
 
     private Panel RestView()
@@ -501,7 +527,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         var name = Session.Server?.Name ?? "your server";
         var minutes = Session.Preferences.RestMinutes;
         var resume = new Button { Content = "Continue", Classes = { "primary" }, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center };
-        resume.Click += async (_, _) => await WakeFromRestAsync();
+        resume.Click += async (_, _) => await LeaveRestAsync();
         return ScreenParts.Backdrop(new StackPanel
         {
             Spacing = 14,
@@ -511,7 +537,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
                 ScreenParts.Symbol("IconSleep", 46),
                 ScreenParts.Title("Aurelia Is Resting"),
                 ScreenParts.Detail($"Nothing played and no one used Aurelia for {minutes} minutes, so it let go of {name}. The server can save power now."),
-                ScreenParts.Detail("Click anywhere or press a key to continue."),
+                ScreenParts.Detail("Switching back to Aurelia, clicking or pressing any key continues automatically."),
                 resume,
             },
         });
@@ -758,68 +784,6 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         await player.StartOfflineAsync(title, downloads);
     }
 
-    /// <summary>This computer's Watch Together party, if any.</summary>
-    public WatchTogetherSession? WatchParty { get; private set; }
-
-    public event Action? WatchPartyChanged;
-
-    private WatchTogetherSession? NewWatchParty()
-    {
-        if (Session.Library is not { } library) return null;
-        var party = new WatchTogetherSession(library.Client, services.DeviceName, services.Time, action => Dispatcher.UIThread.Post(action));
-        party.PropertyChanged += (_, _) => WatchPartyChanged?.Invoke();
-        party.OpenTitle = async mediaId =>
-        {
-            try
-            {
-                var item = await library.Client.SummaryAsync(mediaId, CancellationToken.None);
-                await PlayAsync(item, resume: false, startAt: party.State?.PositionMilliseconds ?? 0);
-            }
-            catch (AureliaApiException failure)
-            {
-                library.Report(failure);
-            }
-        };
-        return party;
-    }
-
-    public async Task StartWatchTogetherAsync(PlaybackController controller)
-    {
-        await LeaveWatchTogetherAsync();
-        if (controller.Item is not { } item || NewWatchParty() is not { } party) return;
-        WatchParty = party;
-        WatchPartyChanged?.Invoke();
-        if (await party.StartAsync(item.Id, controller.Position, controller.IsPlaying)) party.Attach(controller);
-    }
-
-    /// <summary>Joins a party and opens its title; the player then follows the others.</summary>
-    public async Task JoinWatchTogetherAsync(Aurelia.Contracts.WatchPartySummary summary)
-    {
-        await LeaveWatchTogetherAsync();
-        if (Session.Library is not { } library || NewWatchParty() is not { } party) return;
-        WatchParty = party;
-        WatchPartyChanged?.Invoke();
-        if (!await party.JoinAsync(summary.Id) || party.State is not { } state) return;
-        try
-        {
-            var item = await library.Client.SummaryAsync(state.MediaId, CancellationToken.None);
-            await PlayAsync(item, resume: false, startAt: state.PositionMilliseconds);
-        }
-        catch (AureliaApiException failure)
-        {
-            library.Report(failure);
-        }
-    }
-
-    public async Task LeaveWatchTogetherAsync()
-    {
-        if (WatchParty is not { } party) return;
-        WatchParty = null;
-        WatchPartyChanged?.Invoke();
-        await party.LeaveAsync();
-        party.Dispose();
-    }
-
     /// <summary>The player while a title plays, else null.</summary>
     public PlaybackController? Player { get; private set; }
 
@@ -832,18 +796,11 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         var player = new PlaybackController(new PlaybackClient(Session.Api, library.Client), services.Engines, services.Settings, outbox,
             services.Time, action => Dispatcher.UIThread.Post(action), services.PlaybackSystem);
         Player = player;
-        var view = new PlayerView(player, this, this) { Store = library };
+        var view = new PlayerView(player, this) { Store = library };
         // Watch Now on a suggestion: the closed player hands over to the suggested title.
         player.SuggestionChosen += next => Dispatcher.UIThread.Post(() => _ = PlayAsync(next, resume: false));
-        // A party this computer is in follows into the new player before it starts.
-        WatchParty?.Attach(player);
         player.Closed += () => Dispatcher.UIThread.Post(() =>
         {
-            if (WatchParty is { } party && party.IsFollowing(player))
-            {
-                // Closing the player leaves the party; opening its next title does not.
-                if (party.IsChangingTitle) party.Detach(); else _ = LeaveWatchTogetherAsync();
-            }
             if (Player != player) return;
             Player = null;
             PlayerHost.Content = null;
@@ -862,7 +819,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
             : player.StartAsync(item, resume, startAt);
         // Cinema mode: an ad, trailers and the curtain before a film that starts from its beginning.
         var preShow = await CinemaPreShow.PrepareAsync(player.Client, services.Engines, services.Time, action => Dispatcher.UIThread.Post(action),
-            item, resume, startAt, PlaybackPreferences.Load(services.Settings), services.Settings, WatchParty is not null);
+            item, resume, startAt, PlaybackPreferences.Load(services.Settings), services.Settings);
         if (preShow is null || Player != player)
         {
             await StartChosen();

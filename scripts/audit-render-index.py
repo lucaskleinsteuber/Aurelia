@@ -10,14 +10,12 @@ NOT_COVERED = {
     "Downloads with titles": "Offline downloads live in the app's own container; the render "
     "build's container has none, so only the empty Downloads page is drawn.",
     "Offline mode (Watch Downloads Offline)": "Needs downloaded titles on this Mac (see above).",
-    "Movie Night deck, match and voting": "Starting a night is a POST the fixture does not "
-    "answer; the picture shows the start or error state only.",
     "Download quality sheet": "Needs download options from a server; not faked.",
     "Artwork crop sheet": "Needs a picked image file (open panel); not reachable offscreen.",
     "Segment trim editor, subtitle download panel, import preview": "Need media analysis or "
     "server import data the fixture does not invent.",
-    "Watch Together, scene notes popover, remote (Mac mini) control": "Need a running party, "
-    "notes or another device; popovers are separate windows.",
+    "Scene notes popover, remote (Mac mini) control": "Need notes or another device; popovers "
+    "are separate windows.",
     "Alerts, confirmation dialogs, context menus, popovers, tooltips": "Separate windows that "
     "only appear on interaction; not captured by drawing a window's content view.",
     "Sheets in place": "Sheets are drawn on their own at their natural size (size label "

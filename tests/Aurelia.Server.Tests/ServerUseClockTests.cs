@@ -41,11 +41,10 @@ public sealed class ServerUseClockTests
     [InlineData("GET", "/api/v1/some/later/watch", "?waitMs=10000", false)]
     [InlineData("POST", "/api/v1/devices/players/synthetic/commands", "?waitMs=10000", true)]
     [InlineData("GET", "/api/v1/server/security/devices", "", true)]
-    // Home on the Mac, iPhone and Apple TV asks every 15 seconds whether a night or a party is on.
+    // Home in older Mac, iPhone and Apple TV apps still asks every 15 seconds whether a night or a party is on.
     [InlineData("GET", "/api/v1/movie-night", "", false)]
     [InlineData("GET", "/api/v1/watch-together", "", false)]
     [InlineData("GET", "/api/v1/watch-together", "?mediaId=00000000-0000-0000-0000-000000000001", false)]
-    [InlineData("POST", "/api/v1/movie-night", "", true)]
     public void AnAppThatWaitsForNewsDoesNotCountAsUse(string method, string path, string query, bool expected)
     {
         var context = new DefaultHttpContext();

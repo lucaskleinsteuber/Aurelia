@@ -76,6 +76,51 @@ struct ServerUpdateStatus: Decodable, Equatable, Sendable {
   let state: String
   let checkedAt: String?
   let message: String?
+  var progressPercent: Int? = nil
+  var phase: String? = nil
+
+  /// Clamped 0...100 progress percentage when the server reports one.
+  var clampedPercent: Int? {
+    progressPercent.map { min(max($0, 0), 100) }
+  }
+
+  /// Display fraction (0.0...1.0) while checking, installing, or waiting for restart.
+  func progressFraction(reconnecting: Bool = false) -> Double? {
+    if reconnecting { return 0.95 }
+    guard let percent = clampedPercent else { return nil }
+    return Double(percent) / 100.0
+  }
+
+  /// Displayed percentage (0...100) matching `progressFraction`.
+  func displayPercent(reconnecting: Bool = false) -> Int? {
+    if reconnecting { return 95 }
+    return clampedPercent
+  }
+
+  /// Human-readable step description for the current phase and state.
+  func phaseText(reconnecting: Bool = false) -> String {
+    if reconnecting { return "Waiting for server to restart…" }
+    let percent = clampedPercent
+    switch phase {
+    case "starting":
+      return state == "checking" ? "Starting update check…" : "Preparing server update…"
+    case "checking":
+      return "Checking GitHub for updates…"
+    case "verifying":
+      return "Verifying release signature…"
+    case "downloading":
+      if let percent { return "Downloading server update… \(percent)%" }
+      return "Downloading server update…"
+    case "unpacking":
+      return "Verifying checksum and unpacking…"
+    case "restarting":
+      return "Installing and restarting server…"
+    default:
+      if state == "checking" { return "Checking GitHub for updates…" }
+      if let newest { return "Installing \(newest)… The server restarts by itself." }
+      return "Installing server update…"
+    }
+  }
 
   /// When the server last looked for a new version.
   var checkedDate: Date? {

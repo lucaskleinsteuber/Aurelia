@@ -371,7 +371,7 @@ public sealed class SettingsView : UserControl
         minutes.IsEnabled = prefs.RestsWhenUnused;
         page.Children.Add(Section("Server",
             Toggle("Let the Server Rest When Unused",
-                "When nothing plays and nobody uses Aurelia, it lets go of a server on another computer so the server can save power.",
+                "When nothing plays and nobody uses Aurelia, it lets go of a server on another computer that has power saving on.",
                 prefs.RestsWhenUnused, value => { prefs.RestsWhenUnused = value; minutes.IsEnabled = value; }),
             minutes));
         if (shell?.Client?.SupportsWishes == true)

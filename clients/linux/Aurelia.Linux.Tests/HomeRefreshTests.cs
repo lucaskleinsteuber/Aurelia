@@ -134,7 +134,7 @@ public sealed class HomeRefreshTests
     public void RecommendationsRefreshAtTheirDeadlineWithoutASyncChangeAndStopAtRest()
     {
         var time = new ManualTime();
-        var server = FakeLibrary.Create(pictures: false).Replace("GET", "/api/v1/home", Home(time.GetUtcNow().AddSeconds(10)));
+        var server = FakeLibrary.Create(pictures: false, powerSaving: true).Replace("GET", "/api/v1/home", Home(time.GetUtcNow().AddSeconds(10)));
         var window = FakeLibrary.ShowLibrary(server, time: time);
         var before = server.Requests.Count(r => r == "GET /api/v1/home");
         var next = time.GetUtcNow().AddHours(1);
@@ -157,7 +157,7 @@ public sealed class HomeRefreshTests
     public void AHomeChangeReschedulesAnEarlierRecommendationDeadline()
     {
         var time = new ManualTime();
-        var server = FakeLibrary.Create(pictures: false).Replace("GET", "/api/v1/home", Home(time.GetUtcNow().AddHours(1)));
+        var server = FakeLibrary.Create(pictures: false, powerSaving: true).Replace("GET", "/api/v1/home", Home(time.GetUtcNow().AddHours(1)));
         var window = FakeLibrary.ShowLibrary(server, time: time);
         server.Replace("GET", "/api/v1/home", Home(time.GetUtcNow().AddSeconds(5)));
         var refresh = window.Session.Library!.RefreshHomeAsync(TestContext.Current.CancellationToken);

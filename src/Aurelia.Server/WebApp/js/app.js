@@ -6,8 +6,6 @@ import { createApi, ApiError } from "./api.js";
 import { createCatalogView } from "./catalog-view.js";
 import * as logic from "./logic.js";
 import { PROFILE_SYMBOL_PATHS } from "./profile-symbols.js";
-import { createWatchTogether } from "./watch-together.js";
-import { createMovieNightView } from "./movie-night-view.js";
 import { createWishesView } from "./wishes-view.js";
 import { supportsSecurity } from "./security.js";
 import { createSecurityAlerts } from "./security-view.js";
@@ -208,14 +206,6 @@ const catalog = createCatalogView({ api, navigate, artwork: (...args) => artwork
   replaceRoute: (route) => { state.route = route; history.replaceState(null, "", logic.routePath(route)); },
   onChanged: () => renderRoute({ quiet: true }),
   showsTitle: (item) => visibleTitles([item], loadGeneral(), { keepWatched: true }).length > 0,
-});
-
-const movieNight = createMovieNightView({
-  api,
-  artwork: (...args) => artwork(...args),
-  playTitle: (item) => playTitle(item),
-  navigate: (route) => navigate(route),
-  deviceName: logic.deviceName(navigator.userAgent, navigator.maxTouchPoints),
 });
 
 const wishes = createWishesView({
@@ -799,7 +789,6 @@ async function signOut() {
   stopSync();
   closeMiniRemote();
   closePlayer();
-  await movieNight.leave();
   try {
     await api.signOut();
   } catch {
@@ -819,7 +808,6 @@ async function switchProfile() {
   closePlayer();
   state.wishSummary = null;
   wishes.reset();
-  await movieNight.leave();
   try {
     await api.endProfile();
   } catch {
@@ -946,11 +934,11 @@ function saveSidebarLayout(layout) {
 document.documentElement.style.setProperty("--sidebar", `${sidebarLayout().width}px`);
 
 const SIDEBAR_SYMBOLS = { home: "home", search: "search", library: "library", watchlist: "bookmark", recent: "clock", shows: "tv", movies: "film",
-  collections: "collections", people: "people", wishes: "gift", history: "history", statistics: "chart", "movie-night": "cards" };
+  collections: "collections", people: "people", wishes: "gift", history: "history", statistics: "chart" };
 
 /**
  * The Mac app's sidebar (audit D1): Search and Home, the library's sections in the order chosen in
- * Settings › General, Wishes, then History, Statistics and Movie Night; the profile and Settings at
+ * Settings › General, Wishes, then History and Statistics; the profile and Settings at
  * its foot. Below 760 px it is a drawer that the round button at the top left opens.
  */
 function shell(content) {
@@ -962,7 +950,7 @@ function shell(content) {
   if (supportsPeople(state.server)) places.push(["people", "People", "/people"]);
   const hasWishes = supportsWishes(state.server);
   if (hasWishes) places.push(["wishes", "Wishes", "/wishes"]);
-  const yours = [["history", "History", "/history"], ["statistics", "Statistics", "/statistics"], ["movie-night", "Movie Night", "/movie-night"]];
+  const yours = [["history", "History", "/history"], ["statistics", "Statistics", "/statistics"]];
   const badgeCount = hasWishes ? wishBadgeCount(state.wishSummary, state.profile) : 0;
   const wishBadge = () => h("span", { class: "nav-badge", "data-wish-badge": true, hidden: badgeCount <= 0 }, badgeCount > 0 ? String(badgeCount) : "");
   const current = state.route.name === "person" || state.route.name === "title" || state.route.name === "collection" ? null : state.route.name;
@@ -1214,7 +1202,7 @@ async function renderRoute({ quiet = false, restoreScroll = false, resetScroll =
   const hasHomeTitles = Boolean(content.querySelector?.(".hero, .poster-card, .continue-card"));
   if (route.name === "home" && hasHomeTitles && !quiet && logic.tourPending(safeStorage())) setTimeout(() => startTour(), 600);
   // The tab's title is set only for the page that is really shown (audit L13).
-  const label = { home: "Home", library: "Library", watchlist: "Watchlist", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", history: "Watch History", statistics: "Statistics", settings: "Settings", "movie-night": "Movie Night", wishes: "Wishes", people: "People" }[route.name];
+  const label = { home: "Home", library: "Library", watchlist: "Watchlist", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", history: "Watch History", statistics: "Statistics", settings: "Settings", wishes: "Wishes", people: "People" }[route.name];
   const named = content.dataset?.pageTitle ?? label;
   if (named) document.title = `${named} · Aurelia`;
 }
@@ -1343,8 +1331,6 @@ function screenFor(route, token) {
       return historyScreen();
     case "statistics":
       return statisticsScreen();
-    case "movie-night":
-      return movieNight.screen();
     case "wishes":
       return supportsWishes(state.server) ? wishes.screen() : homeScreen();
     case "welcome":
@@ -1386,7 +1372,7 @@ async function homeScreen() {
       )
       : emptyState("search", empty.title, empty.text);
   }
-  return h("div", { class: "home" }, hero ? heroBanner(hero) : null, h("div", { class: "sections" }, monthIsNew() ? monthlyWrappedLaunch({ compact: true }) : null, movieNight.homeStrip(), sections));
+  return h("div", { class: "home" }, hero ? heroBanner(hero) : null, h("div", { class: "sections" }, monthIsNew() ? monthlyWrappedLaunch({ compact: true }) : null, sections));
 }
 
 function heroBanner(item) {
@@ -1532,11 +1518,10 @@ function openMenu(anchor, items) {
 // MARK: Title details (the Mac app's detail page)
 
 async function titleScreen(id) {
-  // Parties and watchlist are asked for alongside the title, while playback-plan waits until the
+  // Watchlist is asked for alongside the title, while playback-plan waits until the
   // title is known to exist for this profile so invisible/missing titles don't trigger a second 404.
   const detailRead = cached.detail(id);
   const watchlistRead = cached.watchlist().catch(() => null);
-  const partiesRead = watchPartiesNow();
   let detail;
   try {
     detail = await detailRead;
@@ -1552,10 +1537,9 @@ async function titleScreen(id) {
     }
     throw error;
   }
-  const [plan, watchlistSnapshot, parties] = await Promise.all([
+  const [plan, watchlistSnapshot] = await Promise.all([
     cached.playbackPlan(id).catch(() => null),
     watchlistRead,
-    partiesRead,
   ]);
   if (watchlistSnapshot?.mediaIds) state.watchlistIds = new Set(watchlistSnapshot.mediaIds);
   const item = detail.item;
@@ -1594,12 +1578,6 @@ async function titleScreen(id) {
       }
     });
   }
-
-  // Parties others started for this title or one of its episodes, to join with one click.
-  const partyIds = new Set([item.id, ...seasons.flatMap((season) => (season.episodes ?? []).map((episode) => episode.item.id))]);
-  const joinButtons = parties.filter((party) => partyIds.has(party.mediaId) && party.id !== state.watchParty?.state?.id).map((party) =>
-    h("button", { class: "secondary-button large", title: `Watch ${party.title} together with ${party.hostName}`, onclick: () => joinWatchTogether(party) },
-      icon("people", { size: 17 }), `Join ${party.hostName}`));
 
   let isFavorite = item.isFavorite;
   const favoriteButton = h("button", { class: "secondary-button large favorite-button" });
@@ -1662,7 +1640,7 @@ async function titleScreen(id) {
       h("h1", { class: "hero-title rise", style: { "--rise": 1 } }, metadata.title ?? item.title),
       (metadata.genres ?? item.genres ?? []).length ? h("div", { class: "hero-genres rise", style: { "--rise": 2 } }, (metadata.genres ?? item.genres).slice(0, 3).join("  ·  ")) : null,
       metadata.overview ?? item.overview ? h("p", { class: "hero-overview rise", style: { "--rise": 3 } }, metadata.overview ?? item.overview) : null,
-      h("div", { class: "button-row rise", style: { "--rise": 4 } }, playButton, ...joinButtons, playOnButton, favoriteButton, watchlistButton,
+      h("div", { class: "button-row rise", style: { "--rise": 4 } }, playButton, playOnButton, favoriteButton, watchlistButton,
         logic.isTitleOffline(item, target) ? h("span", { class: "detail-offline-notice" }, icon("warning", { size: 14 }), logic.OFFLINE_FILE_NOTICE) : null,
         item.watchState === "completed" ? h("span", { class: "watched-label" }, icon("checkCircle", { size: 15 }), "Watched") : null),
       target ? progressLine(target) : null),
@@ -1675,15 +1653,6 @@ async function titleScreen(id) {
     castRail(metadata.credits),
     aboutSection(detail));
   return h("div", { class: "detail page-enter", dataset: { pageTitle: metadata.title ?? item.title } }, hero, body);
-}
-
-// Parties are asked for at most every 15 seconds while titles are opened one after another.
-let partiesRead = null;
-function watchPartiesNow() {
-  if (partiesRead && Date.now() - partiesRead.at < 15_000) return partiesRead.answer;
-  const answer = api.watchParties().then((list) => list ?? [], () => []);
-  partiesRead = { at: Date.now(), answer };
-  return answer;
 }
 
 /** The season each series' page shows, so a page built again keeps it (audit L4). */
@@ -2475,13 +2444,9 @@ async function playTitle(item, seasons, { intent = "play", skipCinema = false, o
     if (!handleError(error)) toast(error.message);
     return;
   }
-  // The next title of a party (N, Up Next, the end of an episode) keeps the party: the party lets
-  // go of the old player before it closes, and follows the new one, which tells the others
-  // (audit X1). Only closing the player leaves it.
-  if (state.player && state.watchParty?.isFollowing(state.player.partyPlayer)) state.watchParty.detach();
   closePlayer();
   if (!skipCinema && !onFinished && cinemaWanted({ item: target, intent, preferences: loadPreferences(),
-    capabilities: state.server?.capabilities ?? [], watchingTogether: Boolean(state.watchParty) })) {
+    capabilities: state.server?.capabilities ?? [] })) {
     if (await runCinema(target, seasons, intent)) return;
   }
   const player = new Player({
@@ -2511,22 +2476,9 @@ async function playTitle(item, seasons, { intent = "play", skipCinema = false, o
     canConvert: Boolean(state.server?.capabilities?.includes(LIVE_FEATURE)),
     canStreamAdaptive: Boolean(state.server?.capabilities?.includes(ADAPTIVE_FEATURE)),
     canScrubPreview: Boolean(state.server?.capabilities?.includes("scrub-previews-v1") || state.server?.capabilities?.includes(LIVE_FEATURE)),
-    together: { session: () => state.watchParty, start: (current) => startWatchTogether(current), leave: () => leaveWatchTogether() },
   });
-  const close = player.onClose;
-  player.onClose = () => {
-    const party = state.watchParty;
-    if (party?.isFollowing(player.partyPlayer)) {
-      // Closing the player leaves the party; opening its next title does not.
-      if (party.isChangingTitle) party.detach();
-      else leaveWatchTogether();
-    }
-    close();
-  };
   state.player = player;
   player.open(document.body);
-  // A party this browser is in follows into the new player.
-  state.watchParty?.attach(player.partyPlayer);
 }
 
 // MARK: Cinema mode
@@ -2641,56 +2593,6 @@ async function runCinema(film, seasons, intent) {
     }
   }
   return true;
-}
-
-// MARK: Watch Together
-
-function newWatchParty() {
-  return createWatchTogether({
-    api,
-    deviceName: logic.deviceName(navigator.userAgent, navigator.maxTouchPoints),
-    onChange: (session) => {
-      if (state.watchParty === session) state.player?.showPartyNotice(session);
-    },
-    openTitle: async (mediaId) => {
-      try {
-        const detail = await api.detail(mediaId);
-        playTitle(detail.item, detail.seasons?.length ? detail.seasons : undefined);
-      } catch (error) {
-        if (!handleError(error)) toast(error.message);
-      }
-    },
-  });
-}
-
-async function startWatchTogether(player) {
-  await leaveWatchTogether();
-  const session = newWatchParty();
-  state.watchParty = session;
-  const video = player.video;
-  if (await session.start(player.item.id, Math.round(video.currentTime * 1000), !video.paused)) session.attach(player.partyPlayer);
-  else toast(session.error ?? "Watch Together isn’t available right now.");
-}
-
-async function joinWatchTogether(party) {
-  await leaveWatchTogether();
-  const session = newWatchParty();
-  state.watchParty = session;
-  if (!(await session.join(party.id)) || !session.state) return toast(session.error ?? "Watch Together isn’t available right now.");
-  try {
-    const detail = await api.detail(session.state.mediaId);
-    playTitle(detail.item, detail.seasons?.length ? detail.seasons : undefined);
-  } catch (error) {
-    if (!handleError(error)) toast(error.message);
-  }
-}
-
-async function leaveWatchTogether() {
-  const session = state.watchParty;
-  if (!session) return;
-  state.watchParty = null;
-  state.player?.showPartyNotice(null);
-  await session.leave();
 }
 
 function closePlayer() {

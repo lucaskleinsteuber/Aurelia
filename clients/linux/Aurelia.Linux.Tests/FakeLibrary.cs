@@ -38,7 +38,7 @@ internal static class FakeLibrary
             position > 0 ? new PlaybackProgressResponse(id, position, 3_600_000, false, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 1) : null,
             DateTimeOffset.UtcNow.AddDays(-2), kind == MediaKind.Episode ? "Cobalt Station" : null, season, episode, parent, state);
 
-    public static FakeServer Create(bool watchlist = true, bool pictures = true, bool wishes = false, bool people = false)
+    public static FakeServer Create(bool watchlist = true, bool pictures = true, bool wishes = false, bool people = false, bool powerSaving = false)
     {
         artworkCount = 0;
         var series = Item(SeriesId, MediaKind.Series, "Cobalt Station", 2024, ["Science Fiction", "Drama"]);
@@ -81,10 +81,11 @@ internal static class FakeLibrary
         if (wishes) caps.Add("\"wishes-v1\"");
         if (people) caps.Add("\"people-v1\"");
         var capabilities = string.Join(",", caps);
+        var powerFlag = powerSaving ? "true" : "false";
         var server = new FakeServer()
             .Answer("GET", "/api/v1/server/info", $$"""
                 {"serverId":"{{FakeServer.ServerId}}","name":"Living Room Server","version":"1.26.3","isSetup":true,"lanAccessEnabled":true,
-                 "lanHttpsPort":43111,"publicKeyFingerprint":"{{FakeServer.Fingerprint}}","capabilities":[{{capabilities}}]}
+                 "lanHttpsPort":43111,"publicKeyFingerprint":"{{FakeServer.Fingerprint}}","capabilities":[{{capabilities}}],"powerSavingEnabled":{{powerFlag}}}
                 """)
             .Answer("GET", "/api/v1/home", Json(home))
             .Answer("GET", "/api/v1/catalog/items", Json(new PagedResponse<CatalogItemSummary>(catalog, 0, 100, catalog.Length, "r1")))
@@ -121,7 +122,7 @@ internal static class FakeLibrary
             .Answer("POST", "/api/v1/profile/end", "{}")
             .Answer("DELETE", "/api/v1/device", "{}")
             .Answer("GET", "/api/v1/profiles", $$"""
-                {"formatVersion":2,"minimumClientVersion":"1.0","managementSetupRequired":false,"profiles":[
+                {"formatVersion":2,"minimumClientVersion":"1.0","managementSetupRequired":false,"powerSavingEnabled":{{powerFlag}},"profiles":[
                   {"id":"{{OwnerId}}","name":"Lucas","role":"owner","needsPinSetup":false,"pinProtectionEnabled":true}]}
                 """)
             .Answer("GET", "/api/v1/statistics/year/2026", Json(new YearInReview(2026, 31.5, 12, 7, 18, "Science Fiction", "Cobalt Station", "Saturday", 4.5)));
@@ -145,7 +146,7 @@ internal static class FakeLibrary
                 null,
                 "PG",
                 6,
-                "Weekend movie night!",
+                "For the weekend!",
                 WishState.Open,
                 null,
                 null,

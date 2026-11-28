@@ -25,10 +25,10 @@ export function nextAd(last) {
 
 /**
  * Whether a title gets a pre-show: a film, cinema mode on with ads or trailers, the server can
- * list trailers, nobody is watching along, and the film starts at its beginning.
+ * list trailers, and the film starts at its beginning.
  */
-export function cinemaWanted({ item, intent, preferences, capabilities = [], watchingTogether = false }) {
-  if (item?.kind !== "movie" || watchingTogether || !preferences?.cinemaMode) return false;
+export function cinemaWanted({ item, intent, preferences, capabilities = [] }) {
+  if (item?.kind !== "movie" || !preferences?.cinemaMode) return false;
   if (!preferences.cinemaAds && !(preferences.cinemaTrailers > 0)) return false;
   if (!capabilities.includes("cinema-trailers-v1")) return false;
   const position = item.progress?.isCompleted ? 0 : item.progress?.positionMilliseconds ?? 0;

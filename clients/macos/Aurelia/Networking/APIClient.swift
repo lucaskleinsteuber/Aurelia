@@ -175,7 +175,8 @@ struct APIClient: Sendable {
       token: authentication.token,
       sessionId: authentication.sessionId,
       expiresAt: authentication.expiresAt,
-      user: authentication.user)
+      user: authentication.user,
+      powerSavingEnabled: inspected.info.powerSavingEnabled ?? false)
   }
 
   static func setupOwner(
@@ -226,7 +227,8 @@ struct APIClient: Sendable {
       token: authentication.token,
       sessionId: authentication.sessionId,
       expiresAt: authentication.expiresAt,
-      user: authentication.user)
+      user: authentication.user,
+      powerSavingEnabled: inspected.info.powerSavingEnabled ?? false)
   }
 
   func serverInfo() async throws -> ServerInfoResponse {
@@ -693,119 +695,6 @@ struct APIClient: Sendable {
   func removeMetadataToken() async throws -> MetadataProviderStatus {
     let data = try await perform(path: "/api/v1/metadata/provider/token", method: "DELETE")
     return try Self.decode(MetadataProviderStatus.self, from: data)
-  }
-
-  func watchParties(mediaId: UUID? = nil) async throws -> [WatchPartySummary] {
-    try await get(
-      "/api/v1/watch-together" + (mediaId.map { "?mediaId=\($0.uuidString.lowercased())" } ?? ""))
-  }
-
-  func createWatchParty(_ request: CreateWatchPartyRequest) async throws -> WatchPartyState {
-    let data = try await perform(
-      path: "/api/v1/watch-together", method: "POST", body: try JSONEncoder().encode(request))
-    return try Self.decode(WatchPartyState.self, from: data)
-  }
-
-  func joinWatchParty(id: UUID, _ request: JoinWatchPartyRequest) async throws -> WatchPartyState {
-    let data = try await perform(
-      path: "/api/v1/watch-together/\(id.uuidString.lowercased())/join", method: "POST",
-      body: try JSONEncoder().encode(request))
-    return try Self.decode(WatchPartyState.self, from: data)
-  }
-
-  /// The party once its revision is newer than `after`, or after up to `waitMilliseconds`.
-  func watchParty(id: UUID, after: Int64?, waitMilliseconds: Int) async throws -> WatchPartyState {
-    var path = "/api/v1/watch-together/\(id.uuidString.lowercased())"
-    if let after { path += "?after=\(after)&waitMs=\(waitMilliseconds)" }
-    let data = try await perform(
-      path: path, method: "GET", timeout: TimeInterval(waitMilliseconds) / 1000 + 10)
-    return try Self.decode(WatchPartyState.self, from: data)
-  }
-
-  func sendWatchPartyCommand(id: UUID, _ request: WatchPartyCommandRequest) async throws
-    -> WatchPartyState
-  {
-    let data = try await perform(
-      path: "/api/v1/watch-together/\(id.uuidString.lowercased())/commands", method: "POST",
-      body: try JSONEncoder().encode(request))
-    return try Self.decode(WatchPartyState.self, from: data)
-  }
-
-  func leaveWatchParty(id: UUID) async throws {
-    _ = try await perform(
-      path: "/api/v1/watch-together/\(id.uuidString.lowercased())/members/me", method: "DELETE")
-  }
-
-  // MARK: Movie Night (see MovieNight.swift)
-
-  private struct MovieNightJoinBody: Encodable {
-    let deviceName: String
-    let isVoting: Bool
-  }
-
-  private struct MovieNightRoleBody: Encodable { let isVoting: Bool }
-
-  private static func movieNightPath(_ id: UUID, _ tail: String = "") -> String {
-    "/api/v1/movie-night/\(id.uuidString.lowercased())\(tail)"
-  }
-
-  private func movieNightPost(_ path: String, _ body: some Encodable) async throws
-    -> MovieNightState
-  {
-    let data = try await perform(path: path, method: "POST", body: try JSONEncoder().encode(body))
-    return try Self.decode(MovieNightState.self, from: data)
-  }
-
-  func movieNights() async throws -> [MovieNightSummary] { try await get("/api/v1/movie-night") }
-
-  func createMovieNight(deviceName: String, voting: Bool) async throws -> MovieNightState {
-    try await movieNightPost(
-      "/api/v1/movie-night", MovieNightJoinBody(deviceName: deviceName, isVoting: voting))
-  }
-
-  func joinMovieNight(id: UUID, deviceName: String, voting: Bool) async throws -> MovieNightState {
-    try await movieNightPost(
-      Self.movieNightPath(id, "/join"), MovieNightJoinBody(deviceName: deviceName, isVoting: voting)
-    )
-  }
-
-  /// The night once its revision is newer than `after`, or after up to `waitMilliseconds`.
-  func movieNight(id: UUID, after: Int64?, deckVersion: Int?, waitMilliseconds: Int) async throws
-    -> MovieNightState
-  {
-    var path = Self.movieNightPath(id)
-    if let after {
-      path += "?after=\(after)&waitMs=\(waitMilliseconds)"
-      if let deckVersion { path += "&deckVersion=\(deckVersion)" }
-    }
-    let data = try await perform(
-      path: path, method: "GET", timeout: TimeInterval(waitMilliseconds) / 1000 + 10)
-    return try Self.decode(MovieNightState.self, from: data)
-  }
-
-  func movieNightSettings(id: UUID, program: MovieNightProgram) async throws -> MovieNightState {
-    try await movieNightPost(Self.movieNightPath(id, "/settings"), program)
-  }
-
-  func dealMovieNight(id: UUID) async throws -> MovieNightState {
-    try await movieNightPost(Self.movieNightPath(id, "/deal"), [String: String]())
-  }
-
-  func voteMovieNight(id: UUID, mediaID: UUID, like: Bool) async throws -> MovieNightState {
-    try await movieNightPost(
-      Self.movieNightPath(id, "/votes"), MovieNightVote(mediaId: mediaID, like: like))
-  }
-
-  func keepSwiping(id: UUID) async throws -> MovieNightState {
-    try await movieNightPost(Self.movieNightPath(id, "/keep-swiping"), [String: String]())
-  }
-
-  func movieNightRole(id: UUID, voting: Bool) async throws -> MovieNightState {
-    try await movieNightPost(Self.movieNightPath(id, "/role"), MovieNightRoleBody(isVoting: voting))
-  }
-
-  func leaveMovieNight(id: UUID) async throws {
-    _ = try await perform(path: Self.movieNightPath(id, "/members/me"), method: "DELETE")
   }
 
   func subtitleProviderStatus() async throws -> SubtitleProviderStatus {

@@ -122,4 +122,3 @@ the same with its *VPN On Demand* setting on Apple devices.
   device that is always on.
 - **The Apple TV** usually stays at home and needs none of this.
 - **Browsers** work the same way: with the VPN on, open the server's usual address.
-- **Watch Together across homes** works too, as long as every device is connected to the same VPN.

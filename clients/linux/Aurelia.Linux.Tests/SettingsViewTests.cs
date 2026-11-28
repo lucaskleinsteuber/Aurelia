@@ -210,8 +210,9 @@ public sealed class SettingsViewTests
     public void TheServerRestsWhenUnusedAndAnyInputContinues()
     {
         var time = new ManualTime();
-        var server = FakeLibrary.Create();
+        var server = FakeLibrary.Create(powerSaving: true);
         var window = FakeLibrary.ShowLibrary(server, time: time);
+        Assert.True(window.Session.Server!.PowerSavingEnabled);
         window.Session.Preferences.RestMinutes = 5;
         time.Advance(TimeSpan.FromMinutes(4), TimeSpan.FromMinutes(1));
         window.CheckRest();
@@ -229,14 +230,53 @@ public sealed class SettingsViewTests
         Assert.Equal(AppScreen.Library, window.Flow.Screen);
     }
 
+    [AvaloniaFact]
+    public void NeverRestsWithoutServerPowerSavingAndLeavesRestOnFocusOrPointer()
+    {
+        var time = new ManualTime();
+        var withoutPowerSaving = FakeLibrary.ShowLibrary(FakeLibrary.Create(powerSaving: false), time: time);
+        Assert.False(withoutPowerSaving.Session.Server!.PowerSavingEnabled);
+        withoutPowerSaving.Session.Preferences.RestMinutes = 5;
+        time.Advance(TimeSpan.FromHours(1), TimeSpan.FromMinutes(1));
+        withoutPowerSaving.CheckRest();
+        withoutPowerSaving.Session.Rest();
+        Assert.False(withoutPowerSaving.Session.IsResting);
+        withoutPowerSaving.Close();
+
+        var powerServer = FakeLibrary.Create(powerSaving: true);
+        var withPowerSaving = FakeLibrary.ShowLibrary(powerServer, time: time);
+        withPowerSaving.Session.Preferences.RestMinutes = 5;
+        time.Advance(TimeSpan.FromMinutes(6), TimeSpan.FromMinutes(1));
+        withPowerSaving.CheckRest();
+        Assert.True(withPowerSaving.Session.IsResting);
+
+        // Switching back to the Aurelia window leaves rest automatically without needing Continue.
+        withPowerSaving.OnWindowActivated();
+        FakeLibrary.Pump(() => !withPowerSaving.Session.IsResting && withPowerSaving.Session.Library?.Home is not null);
+        Assert.False(withPowerSaving.Session.IsResting);
+        Assert.Equal(AppScreen.Library, withPowerSaving.Flow.Screen);
+
+        // Clicking anywhere on the window also leaves rest automatically.
+        time.Advance(TimeSpan.FromMinutes(6), TimeSpan.FromMinutes(1));
+        withPowerSaving.CheckRest();
+        Assert.True(withPowerSaving.Session.IsResting);
+        HostOf(withPowerSaving).MouseDown(new Point(40, 40), MouseButton.Left);
+        HostOf(withPowerSaving).MouseUp(new Point(40, 40), MouseButton.Left);
+        FakeLibrary.Pump(() => !withPowerSaving.Session.IsResting && withPowerSaving.Session.Library?.Home is not null);
+        Assert.False(withPowerSaving.Session.IsResting);
+        withPowerSaving.Close();
+    }
+
     [Fact]
     public void RestFollowsTheMacRules()
     {
-        Assert.True(GeneralPreferences.ShouldRest(true, 15, TimeSpan.FromMinutes(15), playing: false, connectedElsewhere: true));
-        Assert.False(GeneralPreferences.ShouldRest(true, 15, TimeSpan.FromMinutes(14), false, true));
-        Assert.False(GeneralPreferences.ShouldRest(true, 15, TimeSpan.FromHours(1), playing: true, connectedElsewhere: true));
-        Assert.False(GeneralPreferences.ShouldRest(true, 15, TimeSpan.FromHours(1), false, connectedElsewhere: false));
-        Assert.False(GeneralPreferences.ShouldRest(false, 15, TimeSpan.FromHours(1), false, true));
+        Assert.True(GeneralPreferences.ShouldRest(true, 15, TimeSpan.FromMinutes(15), playing: false, connectedElsewhere: true, powerSavingEnabled: true));
+        Assert.False(GeneralPreferences.ShouldRest(true, 15, TimeSpan.FromHours(1), playing: false, connectedElsewhere: true));
+        Assert.False(GeneralPreferences.ShouldRest(true, 15, TimeSpan.FromHours(1), playing: false, connectedElsewhere: true, powerSavingEnabled: false));
+        Assert.False(GeneralPreferences.ShouldRest(true, 15, TimeSpan.FromMinutes(14), false, true, true));
+        Assert.False(GeneralPreferences.ShouldRest(true, 15, TimeSpan.FromHours(1), playing: true, connectedElsewhere: true, powerSavingEnabled: true));
+        Assert.False(GeneralPreferences.ShouldRest(true, 15, TimeSpan.FromHours(1), false, connectedElsewhere: false, powerSavingEnabled: true));
+        Assert.False(GeneralPreferences.ShouldRest(false, 15, TimeSpan.FromHours(1), false, true, true));
         var prefs = new GeneralPreferences(new MemorySettingsStore());
         Assert.True(prefs.RestsWhenUnused);
         Assert.Equal(15, prefs.RestMinutes);

@@ -102,10 +102,8 @@ export class Player {
    * @param {boolean} [options.canConvert]  the server reports live conversion
    * @param {boolean} [options.canStreamAdaptive]  the server streams in several qualities over HLS
    */
-  constructor({ api, item, next, previous, intent = "play", suggestions, onPlaySuggestion, onPlayNext, onMediaMenu, onShowShortcuts, onClose, onSessionEnded, onFinished, profileName = "", onGoodNight, canConvert = false, canScrubPreview = canConvert, canStreamAdaptive = false, preferenceScope, together }) {
+  constructor({ api, item, next, previous, intent = "play", suggestions, onPlaySuggestion, onPlayNext, onMediaMenu, onShowShortcuts, onClose, onSessionEnded, onFinished, profileName = "", onGoodNight, canConvert = false, canScrubPreview = canConvert, canStreamAdaptive = false, preferenceScope }) {
     this.api = api;
-    // Watch Together: { session(), start(player), leave() } from the app, or undefined.
-    this.together = together;
     this.item = item;
     this.next = next;
     this.previous = previous;
@@ -171,9 +169,6 @@ export class Player {
     this.subtitleButton = this.menuButton("Subtitles", icon("captions", { size: 18 }), () => this.subtitleMenu());
     this.sleepButton = this.menuButton("Sleep Timer", icon("moon", { size: 18 }), () => this.sleepMenu());
     this.notesButton = this.menuButton("Scene Notes", icon("bookmark", { size: 18 }), () => this.notesPanel());
-    // Watch Together sits with the window controls below, not among the menus used while watching.
-    this.togetherButton = this.menuButton("Watch Together", icon("people", { size: 18 }), () => this.togetherMenu());
-    this.togetherButton.className = "player-icon";
     this.qualityLabel = h("span", { class: "rate-label" }, this.quality === "original" ? "Orig" : this.quality === "auto" ? "Auto" : this.quality);
     this.qualityButton = this.menuButton("Streaming Quality", this.qualityLabel, () => this.qualityMenu());
     this.top = h("div", { class: "player-top" }, this.backButton,
@@ -199,7 +194,7 @@ export class Player {
     this.pipButton = h("button", { class: "player-icon", "aria-label": "Enter Picture in Picture", hidden: !document.pictureInPictureEnabled, onclick: () => this.togglePictureInPicture() }, icon("pip", { size: 18 }));
     this.airplayButton = h("button", { class: "player-icon airplay-btn", "aria-label": "AirPlay", hidden: true, onclick: () => this.showAirPlayPicker() }, icon("airplay", { size: 18 }));
     this.fullscreenButton = h("button", { class: "player-icon", "aria-label": "Enter Full Screen", onclick: () => this.toggleFullscreen() }, icon("fullscreen", { size: 18 }));
-    this.trailing = h("div", { class: "player-trailing glass" }, this.muteButton, this.volume, this.together ? this.togetherButton : null, this.airplayButton, this.pipButton, this.fullscreenButton);
+    this.trailing = h("div", { class: "player-trailing glass" }, this.muteButton, this.volume, this.airplayButton, this.pipButton, this.fullscreenButton);
     this.timeline = h("input", { class: "timeline", type: "range", min: "0", max: "1000", value: "0", step: "1", "aria-label": "Playback Position", "aria-valuetext": timelineValueText(0, 0) });
     this.noteMarks = h("div", { class: "note-marks", "aria-hidden": "true" });
     this.previewImg = h("img", { class: "scrub-preview-img", alt: "" });
@@ -232,20 +227,9 @@ export class Player {
       icon("next", { size: 18 }), h("span", {}, "Skip Intro"), h("kbd", { "aria-hidden": "true" }, "↩ Return"));
     this.cue = h("div", { class: "note-cue glass", hidden: true, "aria-live": "polite" });
     this.notice = h("div", { class: "player-notice glass", role: "status", hidden: true });
-    this.togetherNotice = h("div", { class: "together-notice glass", role: "status", hidden: true });
 
     this.element = h("div", { class: "player controls-visible paused", role: "dialog", "aria-modal": "true", "aria-label": `Playing ${this.item.title}`, tabindex: "-1" },
-      this.video, this.startScreen, this.controls, this.cue, this.skipIntroButton, this.upNext, this.suggestionCard, this.endScreen, this.popover, this.notice, this.togetherNotice);
-    // What a Watch Together party sees of this player.
-    this.partyPlayer = {
-      mediaId: this.item.id,
-      position: () => Math.round(this.video.currentTime * 1000),
-      playing: () => !this.video.paused && !this.video.ended,
-      ready: () => Boolean(this.source) && !this.closed && this.video.readyState >= 3 && !this.element.classList.contains("waiting"),
-      play: () => this.video.play().catch(() => {}),
-      pause: () => this.video.pause(),
-      seek: (milliseconds) => { this.video.currentTime = milliseconds / 1000; },
-    };
+      this.video, this.startScreen, this.controls, this.cue, this.skipIntroButton, this.upNext, this.suggestionCard, this.endScreen, this.popover, this.notice);
   }
 
   menuButton(label, content, open) {
@@ -282,7 +266,6 @@ export class Player {
           const target = Math.min(Math.max(0, seconds), this.video.duration);
           this.movedTo(target);
           this.video.currentTime = target;
-          this.reportToParty("seek");
         },
         previous: () => this.navigateEpisode("previous"),
         next: () => this.navigateEpisode("next"),
@@ -539,27 +522,22 @@ export class Player {
     on(video, "pause", () => {
       this.updatePlayState();
       this.saveNow();
-      // Pausing during a stall ends the waiting: the ring goes, the stall timer stops (a pause is
-      // not a slow connection) and a party stops waiting for this viewer (audit X11).
+      // Pausing during a stall ends the waiting: the ring goes and the stall timer stops (a pause is
+      // not a slow connection).
       this.element.classList.remove("waiting");
       this.waitingSince = null;
       clearTimeout(this.stallTimer);
-      this.together?.session()?.playerChanged();
     });
     on(video, "playing", () => {
       this.startScreen.hidden = true;
       this.element.classList.remove("waiting");
       this.endStall();
       this.checkAudio();
-      this.together?.session()?.playerChanged();
     });
-    on(video, "canplay", () => this.together?.session()?.playerChanged());
     on(video, "waiting", () => {
       this.element.classList.add("waiting");
       this.beginStall();
-      this.together?.session()?.playerChanged();
     });
-    on(this.timeline, "change", () => this.reportToParty("seek"));
     on(video, "seeked", () => this.saveNow());
     on(video, "volumechange", () => this.updateVolume());
     on(video, "ratechange", () => this.updateRate());
@@ -739,10 +717,8 @@ export class Player {
     if (!this.source) return;
     if (this.video.paused || this.video.ended) {
       this.video.play().catch(() => {});
-      this.reportToParty("play");
     } else {
       this.video.pause();
-      this.reportToParty("pause");
     }
     this.showControls();
   }
@@ -753,43 +729,7 @@ export class Player {
     const target = Math.min(Math.max(0, video.currentTime + seconds), video.duration);
     this.movedTo(target);
     video.currentTime = target;
-    this.reportToParty("seek");
     this.showControls();
-  }
-
-  /** Sends play, pause or seek done here to the Watch Together party, if this browser is in one. */
-  reportToParty(action) {
-    const session = this.together?.session();
-    if (session?.isFollowing(this.partyPlayer)) session.userAction(action, this.video.currentTime * 1000);
-  }
-
-  /** Watch Together: start a party for this title, or see who watches along and leave. */
-  togetherMenu() {
-    const session = this.together?.session();
-    const state = session?.state;
-    const content = [h("div", { class: "popover-title" }, "Watch Together")];
-    if (state) {
-      for (const member of state.members ?? []) {
-        content.push(h("div", { class: "together-member" },
-          h("div", {}, member.isYou ? `${member.name} (You)` : member.name, member.isHost ? " · Host" : "", member.isBuffering ? " · Loading…" : ""),
-          h("div", { class: "muted" }, member.deviceName)));
-      }
-      if (state.isWaiting) content.push(h("div", { class: "muted" }, "Waiting until everyone is ready…"));
-      content.push(h("button", { class: "secondary-button", onclick: async () => { this.closePopover(); await this.together.leave(); } }, "Leave Watch Together"));
-    } else {
-      content.push(h("p", { class: "muted together-hint" }, "Watch this title in step with other devices at home. They join from the title’s page, and play, pause and jumps apply to everyone."));
-      content.push(h("button", { class: "primary-button", onclick: async () => { this.closePopover(); await this.together.start(this); } }, "Start Watch Together"));
-      if (session?.error) content.push(h("div", { class: "muted" }, session.error));
-    }
-    this.openPopover(this.togetherButton, h("div", { class: "together-panel" }, ...content));
-  }
-
-  /** "Mia paused" and similar, shown briefly at the top of the picture. */
-  showPartyNotice(session) {
-    const text = session?.notice ?? (session?.state?.isWaiting ? "Waiting until everyone is ready…" : null);
-    clear(this.togetherNotice);
-    if (text) this.togetherNotice.append(icon("people", { size: 18 }), h("span", {}, text));
-    this.togetherNotice.hidden = !text;
   }
 
   toggleMute() {
@@ -1315,14 +1255,13 @@ export class Player {
     this.skipIntroButton.hidden = !shown || !this.upNext.hidden;
   }
 
-  /** Jumps to the end of the intro; Watch Together follows like any other seek. */
+  /** Jumps to the end of the intro. */
   skipIntro(automatic = false) {
     const intro = this.intro();
     if (!intro || (!automatic && this.skipIntroButton.hidden)) return;
     this.introSkipped = true;
     this.skipIntroButton.hidden = true;
     this.video.currentTime = intro.end;
-    this.reportToParty("seek");
   }
 
   /** After a movie or a series' last episode: the server's suggestion from the credits on, without a countdown. */

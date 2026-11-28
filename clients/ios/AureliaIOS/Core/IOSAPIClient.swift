@@ -899,24 +899,6 @@ struct IOSAPIClient: Sendable {
     return response.body
   }
 
-  // Watch Together requests (see IOSWatchTogether.swift).
-  func getWatchTogether<Value: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws
-    -> Value
-  {
-    try Self.decode(Value.self, data: await send(path, query: query))
-  }
-
-  func postWatchTogether<Value: Decodable>(_ path: String, _ payload: some Encodable) async throws
-    -> Value
-  {
-    try Self.decode(
-      Value.self, data: await send(path, method: "POST", body: try JSONEncoder().encode(payload)))
-  }
-
-  func deleteWatchTogether(_ path: String) async throws {
-    _ = try await send(path, method: "DELETE")
-  }
-
   // Server administration (see IOSAdminAPI.swift). A protected change is refused with
   // `approval_required` before anything happens; the app then gets a one-time approval for exactly
   // this method, address and body and sends it once more. `longRunning` uses its own connection

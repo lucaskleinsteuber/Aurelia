@@ -30,11 +30,10 @@ struct CinemaPreShowTests {
     #expect(!PlaybackPreferences.defaultValue.cinemaMode)
     #expect(
       !CinemaPreShowPlan.wanted(
-        preferences: .defaultValue, presentation: film, capabilities: features,
-        watchingTogether: false))
+        preferences: .defaultValue, presentation: film, capabilities: features))
     #expect(
       CinemaPreShowPlan.wanted(
-        preferences: cinema, presentation: film, capabilities: features, watchingTogether: false))
+        preferences: cinema, presentation: film, capabilities: features))
 
     let episode = PlaybackPresentation(
       mediaId: UUID(), title: "Pilot", subtitle: nil, trackScope: UUID())
@@ -45,22 +44,16 @@ struct CinemaPreShowTests {
     nothingToShow.cinemaTrailers = 0
     #expect(
       !CinemaPreShowPlan.wanted(
-        preferences: cinema, presentation: episode, capabilities: features,
-        watchingTogether: false))
+        preferences: cinema, presentation: episode, capabilities: features))
     #expect(
       !CinemaPreShowPlan.wanted(
-        preferences: cinema, presentation: download, capabilities: features,
-        watchingTogether: false))
+        preferences: cinema, presentation: download, capabilities: features))
     #expect(
       !CinemaPreShowPlan.wanted(
-        preferences: cinema, presentation: film, capabilities: features, watchingTogether: true))
+        preferences: cinema, presentation: film, capabilities: []))
     #expect(
       !CinemaPreShowPlan.wanted(
-        preferences: cinema, presentation: film, capabilities: [], watchingTogether: false))
-    #expect(
-      !CinemaPreShowPlan.wanted(
-        preferences: nothingToShow, presentation: film, capabilities: features,
-        watchingTogether: false))
+        preferences: nothingToShow, presentation: film, capabilities: features))
   }
 
   @Test func aFilmPickedUpInTheMiddleStartsWithoutAPreShow() {

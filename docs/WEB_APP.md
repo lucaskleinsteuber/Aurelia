@@ -200,8 +200,8 @@ F switches full screen, M mutes and Escape closes a menu or the player.
 
 The browser has the Mac app's sidebar (since server 2.21.0): a dark, blurred panel at the left
 with Search, Home, the library's sections (Library, Watchlist, Recently Added, TV Shows, Movies,
-Collections, in the order chosen in Settings › General), Wishes, then History, Statistics and
-Movie Night, and the profile and Settings at its foot. It can be hidden, its width dragged
+Collections, in the order chosen in Settings › General), Wishes, then History and Statistics,
+and the profile and Settings at its foot. It can be hidden, its width dragged
 (210–300) and, below 760 px, it opens as a drawer. Pages change at once with a short fade, a
 slow page shows a small ring after 350 ms, and `/` starts a search. The look follows the Mac's
 design: system blue, rounded rectangles (a capsule only for the main action and the search
@@ -406,24 +406,7 @@ Apple TV, iPhone or another browser) and starts the title there. While the brows
 reports itself as a player too, so the others can start, pause, seek or stop it. Safari shows an AirPlay button where the video can be
 sent to an Apple TV or AirPlay receiver; other browsers do not offer it.
 
-## Watch Together
-
-The player's **Watch Together** menu starts a party for the title; a title's page shows **Join …**
-for parties others started for it or one of its episodes. Play, pause, jumps and the next title
-then apply to everyone, a short notice says who did what, and closing the player leaves the
-party. The rules live in `js/watch-together.js` and are tested in
-`tests/WebApp/watch-together.test.mjs`; see [Watch Together](CLIENT_PROTOCOL.md#watch-together).
-
-## Movie Night and Wrapped
-
-**Movie Night** (`/movie-night`, from Home or the sidebar under **Yours**) lets anyone at home swipe on a
-phone, Android included: right for yes, left for nope, or the buttons and arrow keys. The lobby's
-*Tonight's program* card lets the host choose movies or also shows, a genre, an era (2020s,
-2010s, 2000s, older) and a length (up to 1 h 40 m or 2 h 10 m) right there. The match
-shows as a ticket with **Play**. The page covers the whole window; ✕ returns to Home and keeps
-the browser in the night. A browser can also start a night as the lobby screen without
-swiping. The rules live in `js/movie-night.js`, the page in `js/movie-night-view.js`, tested in
-`tests/WebApp/movie-night.test.mjs`; see [Movie Night](CLIENT_PROTOCOL.md#movie-night).
+## Wrapped
 
 **Wrapped** starts from **Statistics › Year in Review**: the year as full-screen slides; on a
 wide screen the poster stands beside the words. From the 2nd of a month, **Your October Wrapped

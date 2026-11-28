@@ -42,8 +42,7 @@ public sealed class SheetHost : Panel
 
     internal Control? Current => open.Count > 0 ? open.Peek().Frame : null;
 
-    /// <param name="fullWindow">Covers the whole window instead of floating as a card, for Movie
-    /// Night and Wrapped.</param>
+    /// <param name="fullWindow">Covers the whole window instead of floating as a card, as for Wrapped.</param>
     public Task<bool> ShowAsync(Control sheet, bool fullWindow = false)
     {
         if (open.Count > 0) open.Peek().Frame.IsVisible = false;

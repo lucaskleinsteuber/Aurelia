@@ -30,7 +30,9 @@ public sealed record ServerInfoResponse(
     // "linuxServer" for the Linux package, "server" otherwise.
     string? Hosting = null,
     // Hash of the server's bundled browser app assets, so open tabs notice an update on reconnect.
-    string? WebVersion = null);
+    string? WebVersion = null,
+    // True only when the server has an active idle power-saving mode (sleep, shutdown or stop).
+    bool PowerSavingEnabled = false);
 
 public sealed record SetupOwnerRequest(
     string Username,

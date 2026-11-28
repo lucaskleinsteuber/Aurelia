@@ -94,7 +94,7 @@ public sealed class ServerWakeUp(AureliaApi api, IWakeOnLan wakeOnLan, Func<IRea
                 var hosting = info.Hosting ?? server.Hosting;
                 var wake = hosting is "macApp" or "linuxApp" ? null
                     : info.WakeOnLanAddresses is { Count: > 0 } known ? known : server.WakeOnLanAddresses;
-                return (new ReachedServer(at with { WakeOnLanAddresses = wake, Hosting = hosting }, info), moved, false);
+                return (new ReachedServer(at with { WakeOnLanAddresses = wake, Hosting = hosting, PowerSavingEnabled = info.PowerSavingEnabled }, info), moved, false);
             }
             catch (AureliaApiException error) when (error.IsUnreachable)
             {

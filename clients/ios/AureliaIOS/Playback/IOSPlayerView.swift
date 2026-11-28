@@ -86,9 +86,6 @@ struct IOSPlayerView: View {
       {
         skipIntroButton
       }
-      if !controller.isOffline, let party = model.watchParty {
-        IOSWatchTogetherNotice(session: party)
-      }
       if let preShow {
         ZStack {
           IOSCinemaPreShowView(show: preShow, reduceMotion: reduceMotion)
@@ -141,8 +138,7 @@ struct IOSPlayerView: View {
     }
     .onAppear {
       keyboard = true
-      // A party this device is in follows into the player before it starts.
-      if !controller.isOffline { model.attachWatchParty(to: controller) }
+      if !controller.isOffline { model.playerOpened(controller) }
       configurePreviews()
     }
     .task { await startWithPreShow() }
@@ -197,7 +193,7 @@ struct IOSPlayerView: View {
     var count = 3  // rate, audio, sleep
     if !controller.chapters.isEmpty { count += 1 }
     if notes != nil { count += 1 }
-    if !controller.isOffline { count += 2 }  // watchTogether, AirPlay
+    if !controller.isOffline { count += 1 }  // AirPlay
     if controller.canPictureInPicture { count += 1 }
     return count
   }
@@ -246,10 +242,6 @@ struct IOSPlayerView: View {
             }
             if notes != nil {
               glassButton("Scene Notes", symbol: "bookmark", id: "notes") { open(.notes) }
-            }
-            // Watch Together: start a party for this title, or leave the one this device is in.
-            if !controller.isOffline {
-              watchTogetherButton
             }
             if controller.canPictureInPicture {
               glassButton("Picture in Picture", symbol: "pip.enter", id: "pip") {
@@ -314,21 +306,6 @@ struct IOSPlayerView: View {
           Label("Scene Notes", systemImage: "bookmark")
         }
       }
-      if !controller.isOffline {
-        Button {
-          Task {
-            if model.watchParty?.state != nil {
-              await model.leaveWatchTogether()
-            } else {
-              await model.startWatchTogether(with: controller)
-            }
-          }
-        } label: {
-          Label(
-            model.watchParty?.state != nil ? "Leave Watch Together" : "Start Watch Together",
-            systemImage: model.watchParty?.state != nil ? "person.2.fill" : "person.2")
-        }
-      }
     } label: {
       Image(systemName: "ellipsis").font(.system(size: 16, weight: .semibold))
         .frame(width: 44, height: 44).contentShape(Circle())
@@ -337,22 +314,6 @@ struct IOSPlayerView: View {
     .glassEffect(.regular.interactive(), in: Circle())
     .accessibilityLabel("More playback controls")
     .accessibilityIdentifier("player-more")
-  }
-
-  private var watchTogetherButton: some View {
-    glassButton(
-      model.watchParty?.state != nil ? "Leave Watch Together" : "Start Watch Together",
-      symbol: model.watchParty?.state != nil ? "person.2.fill" : "person.2",
-      id: "watch-together"
-    ) {
-      Task {
-        if model.watchParty?.state != nil {
-          await model.leaveWatchTogether()
-        } else {
-          await model.startWatchTogether(with: controller)
-        }
-      }
-    }
   }
 
   private var transport: some View {
@@ -623,8 +584,7 @@ struct IOSPlayerView: View {
   private func startWithPreShow() async {
     guard
       let show = await controller.cinemaPreShow(
-        capabilities: model.capabilities?.capabilities ?? [],
-        watchingTogether: model.watchParty != nil),
+        capabilities: model.capabilities?.capabilities ?? []),
       !Task.isCancelled
     else {
       controller.start()
@@ -1151,32 +1111,6 @@ private struct IOSStartRing: View {
         }
       }
     }
-  }
-}
-
-/// A short notice at the top of the picture when someone in the party acts, such as "Mia paused".
-private struct IOSWatchTogetherNotice: View {
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @ObservedObject var session: IOSWatchTogetherSession
-
-  var body: some View {
-    let text =
-      session.notice
-      ?? (session.state?.isWaiting == true ? "Waiting until everyone is ready…" : nil)
-    VStack {
-      if let text {
-        Label(text, systemImage: "person.2.fill")
-          .font(.subheadline.weight(.semibold))
-          .padding(.horizontal, 16).padding(.vertical, 9)
-          .glassEffect(.regular, in: Capsule())
-          .transition(.opacity)
-          .accessibilityIdentifier("watch-together-notice")
-      }
-      Spacer()
-    }
-    .padding(.top, 64)
-    .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: text)
-    .allowsHitTesting(false)
   }
 }
 

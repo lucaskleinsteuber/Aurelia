@@ -8,7 +8,7 @@ final class IOSPlaybackController: ObservableObject {
   enum TrackMenu: Equatable { case audio, rate, sleep, chapters, notes }
 
   let engine: any IOSPlaybackEngine
-  /// Plays a download from this device with no server; Watch Together and Play On are off.
+  /// Plays a download from this device with no server; Play On is off.
   let isOffline: Bool
   private let runtime: IOSPlaybackRuntime
   @Published private(set) var isScrubbing = false
@@ -20,13 +20,7 @@ final class IOSPlaybackController: ObservableObject {
   @Published private(set) var isClosing = false
   @Published private(set) var canRetry = true
   @Published private(set) var isPlaying = false
-  @Published private(set) var isLoading = true {
-    didSet { if isLoading != oldValue { watchStateObserver?() } }
-  }
-  /// Watch Together listens here for play, pause and seek done on this device.
-  var userActionObserver: (@MainActor (IOSPlaybackUserAction) -> Void)?
-  /// Watch Together listens here when the title opens, loads again or moves on.
-  var watchStateObserver: (@MainActor () -> Void)?
+  @Published private(set) var isLoading = true
   @Published private(set) var position: Int64 = 0
   @Published private(set) var duration: Int64 = 0
   @Published private(set) var canSeek = false
@@ -73,9 +67,7 @@ final class IOSPlaybackController: ObservableObject {
   /// Whether the title plays in VLC or, for Picture in Picture or AirPlay, in Apple's player.
   @Published private(set) var systemPhase: IOSSystemPlaybackPhase = .vlc
   @Published private(set) var canPictureInPicture = false
-  @Published private(set) var currentMediaID: UUID {
-    didSet { if currentMediaID != oldValue { watchStateObserver?() } }
-  }
+  @Published private(set) var currentMediaID: UUID
   @Published var trackMenu: TrackMenu? {
     didSet { userInteracted() }
   }
@@ -200,13 +192,13 @@ final class IOSPlaybackController: ObservableObject {
   }
 
   /// Cinema mode's pre-show before this title, or nil when it gets none: only a film (no series
-  /// queue) on a live player, with cinema mode on and nobody watching along. The server says
-  /// whether the title is a film by listing trailers for it.
-  func cinemaPreShow(capabilities: [String], watchingTogether: Bool) async -> IOSCinemaPreShow? {
+  /// queue) on a live player, with cinema mode on. The server says whether the title is a film
+  /// by listing trailers for it.
+  func cinemaPreShow(capabilities: [String]) async -> IOSCinemaPreShow? {
     guard runtime.managesAudioSession, !isOffline, !started, !closed,
       IOSCinemaPlan.wanted(
         preferences: preferences, isEpisode: seriesID != nil || !queue.isEmpty,
-        capabilities: capabilities, watchingTogether: watchingTogether)
+        capabilities: capabilities)
     else { return nil }
     return await IOSCinemaPreShow.prepare(
       api: api, film: mediaID, title: title, preferences: preferences, startOver: startOver,
@@ -246,7 +238,6 @@ final class IOSPlaybackController: ObservableObject {
     wantsPlayback.toggle()
     if !wantsPlayback { isStarting = false }
     if wantsPlayback { engine.play() } else { engine.pause() }
-    userActionObserver?(wantsPlayback ? .play(position) : .pause(position))
     if !wantsPlayback { Task { await saveProgress(finished: false) } }
     userInteracted()
   }
@@ -261,7 +252,6 @@ final class IOSPlaybackController: ObservableObject {
     let target = IOSPlayerPolicy.seekPosition(current: position, offset: offset, duration: duration)
     noteMove(to: target)
     engine.seek(to: target)
-    userActionObserver?(.seek(target))
     if revealControls { userInteracted() }
   }
 
@@ -293,14 +283,13 @@ final class IOSPlaybackController: ObservableObject {
     seek(to: chapter.timeOffsetMilliseconds)
   }
 
-  /// Jumps to the end of the intro; Watch Together follows like any other seek.
+  /// Jumps to the end of the intro.
   func skipIntro() {
     guard showsSkipIntro, let intro = currentSegments?.intro, canSeek, !closed else { return }
     introSkipped = true
     showsSkipIntro = false
     watchdog.noteSeek(at: ProcessInfo.processInfo.systemUptime)
     engine.seek(to: intro.end)
-    userActionObserver?(.seek(intro.end))
   }
 
   private func updateSkipIntro() {
@@ -321,7 +310,6 @@ final class IOSPlaybackController: ObservableObject {
       assignIfChanged(&showsSkipIntro, false)
       watchdog.noteSeek(at: ProcessInfo.processInfo.systemUptime)
       engine.seek(to: intro.end)
-      userActionObserver?(.seek(intro.end))
       return
     }
     assignIfChanged(&showsSkipIntro, shown && upNext == nil && !introDeclined)
@@ -333,7 +321,6 @@ final class IOSPlaybackController: ObservableObject {
     let target = IOSPlayerPolicy.seekPosition(current: 0, offset: milliseconds, duration: duration)
     noteMove(to: target)
     engine.seek(to: target)
-    userActionObserver?(.seek(target))
     userInteracted()
   }
 
@@ -1251,11 +1238,6 @@ final class IOSPlaybackController: ObservableObject {
     if value != updated { value = updated }
   }
 
-  /// Watch Together moved to another title: it opens in this player; this title is not marked watched.
-  func switchTitle(to item: IOSCatalogItem) {
-    Task { [weak self] in await self?.advance(to: item, markFinished: false) }
-  }
-
   private func advance(to next: IOSCatalogItem, markFinished: Bool = true) async {
     guard !closed else { return }
     await saveProgress(finished: markFinished)
@@ -1421,32 +1403,4 @@ struct IOSUpNext: Equatable {
   let seconds: Int
   /// The card appeared with the credits: its second button keeps watching them.
   var duringCredits = false
-}
-
-/// Watch Together drives the player through these, without showing the controls.
-extension IOSPlaybackController: IOSWatchTogetherPlayer {
-  var watchMediaID: UUID { currentMediaID }
-  var watchPosition: Int64 { position }
-  var watchIsPlaying: Bool { isPlaying }
-  var watchIsReady: Bool { !isLoading && canSeek && errorMessage == nil && !closed }
-
-  func watchPlay() {
-    guard !closed, errorMessage == nil, !wantsPlayback else { return }
-    wantsPlayback = true
-    engine.play()
-  }
-
-  func watchPause() {
-    guard !closed, wantsPlayback else { return }
-    wantsPlayback = false
-    isStarting = false
-    engine.pause()
-  }
-
-  func watchSeek(to milliseconds: Int64) {
-    guard canSeek, !closed else { return }
-    watchdog.noteSeek(at: ProcessInfo.processInfo.systemUptime)
-    engine.seek(
-      to: IOSPlayerPolicy.seekPosition(current: 0, offset: milliseconds, duration: duration))
-  }
 }

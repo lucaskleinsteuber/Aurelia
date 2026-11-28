@@ -284,38 +284,19 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
     public void PlayCollection(IReadOnlyList<CatalogItemSummary> playlist, CatalogItemSummary target, bool fromLastPosition) =>
         PlayCollectionRequested?.Invoke(playlist, target, fromLastPosition);
 
-    /// <summary>The window that keeps this computer's Watch Together party.</summary>
-    public MainWindow? Together { get; set; }
-
-    public async Task<IReadOnlyList<WatchPartySummary>> WatchPartiesAsync()
-    {
-        if (context is null) return [];
-        try { return await context.Store.Client.WatchPartiesAsync(CancellationToken.None); }
-        catch (Exception failure) when (failure is Aurelia.Linux.Core.Api.AureliaApiException or HttpRequestException or TaskCanceledException) { return []; }
-    }
-
-    public Task JoinWatchTogetherAsync(WatchPartySummary party) => Together?.JoinWatchTogetherAsync(party) ?? Task.CompletedTask;
-
-    public async Task ShowMovieNightAsync(MovieNightSummary? joining)
-    {
-        if (context is null) return;
-        using var sheet = new MovieNightSheet(context, Sheets, joining);
-        await Sheets.ShowAsync(sheet, fullWindow: true);
-        // Closing the sheet leaves the night; the match plays once it has closed.
-        await sheet.LeaveAsync();
-        if (sheet.PlayRequested is { } item) Play(item, fromLastPosition: false);
-    }
+    /// <summary>The window that hosts offline downloads for the library.</summary>
+    public MainWindow? HostWindow { get; set; }
 
     public Task ShowWrappedAsync(int year, int? month = null) =>
         context is null ? Task.CompletedTask : Sheets.ShowAsync(new WrappedSheet(context, Sheets, year, month), fullWindow: true);
 
-    public Aurelia.Linux.Core.Playback.OfflineDownloads? Downloads => Together?.Downloads;
+    public Aurelia.Linux.Core.Playback.OfflineDownloads? Downloads => HostWindow?.Downloads;
 
-    public void Download(CatalogItemSummary item) => Together?.Download(item);
+    public void Download(CatalogItemSummary item) => HostWindow?.Download(item);
 
-    public void DownloadAll(IReadOnlyList<CatalogItemSummary> items) => Together?.DownloadAll(items);
+    public void DownloadAll(IReadOnlyList<CatalogItemSummary> items) => HostWindow?.DownloadAll(items);
 
-    public void PlayOffline(Aurelia.Linux.Core.Playback.OfflineTitle title) => Together?.PlayOffline(title);
+    public void PlayOffline(Aurelia.Linux.Core.Playback.OfflineTitle title) => HostWindow?.PlayOffline(title);
 
     public void EditCollection(CollectionSummary? collection, CatalogItemSummary? preselected) =>
         EditCollection(collection, preselected, null);
@@ -386,7 +367,7 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
 
     /// <summary>The first title card that is on screen, for the tour.</summary>
     private Button? FirstTitle() => PageHost.GetVisualDescendants().OfType<Button>()
-        // A title, not the Movie Night card or another button styled as a card (audit Linux W3).
+        // A title card, not another button styled as a card (audit Linux W3).
         .FirstOrDefault(button => button.Classes.Contains("titleCard") && button.IsEffectivelyVisible
             && button.TranslatePoint(new Point(0, 0), PageHost) is { } at && at.X >= 0 && at.Y >= 0
             && at.X + button.Bounds.Width <= PageHost.Bounds.Width && at.Y + button.Bounds.Height <= PageHost.Bounds.Height);

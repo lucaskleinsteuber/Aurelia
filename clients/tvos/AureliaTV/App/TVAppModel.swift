@@ -40,7 +40,6 @@ final class TVAppModel: ObservableObject {
 
   var supportsWatchlist: Bool { capabilities?.supportsWatchlistAndPeople ?? false }
   var supportsScrubPreviews: Bool { capabilities?.supportsScrubPreviews ?? false }
-  var supportsMovieNight: Bool { capabilities?.supportsMovieNight ?? false }
   var supportsSuggestions: Bool { capabilities?.supportsSuggestions ?? false }
   var supportsAdaptiveStreaming: Bool { capabilities?.supportsAdaptiveStreaming ?? false }
   var supportsCollectionsV3: Bool { capabilities?.supportsCollectionsV3 ?? false }
@@ -77,10 +76,6 @@ final class TVAppModel: ObservableObject {
   @Published private(set) var remoteStopRequests = 0
   /// The player on screen, so the heartbeat can tell other devices what plays.
   private weak var openPlayer: TVPlaybackController?
-  /// The Watch Together party this Apple TV is in, if any.
-  @Published private(set) var watchParty: TVWatchTogetherSession?
-  /// Parties others started on the server, offered on Home and title pages.
-  @Published private(set) var watchParties: [TVWatchPartySummary] = []
   private var syncTask: Task<Void, Never>?
   private var progressObserver: Task<Void, Never>?
   private var refreshTask: Task<Void, Never>?
@@ -673,93 +668,16 @@ final class TVAppModel: ObservableObject {
     task = nil
     isBusy = false
   }
-  // MARK: Watch Together
-
-  private func watchClient() -> TVAPIClient? {
-    guard let connection, let session else { return nil }
-    return makeClient(connection: connection, session: session)
-  }
-
-  /// Refreshes the parties others started, for Home and title pages.
-  func refreshWatchParties() async {
-    guard let api = watchClient() else {
-      watchParties = []
-      return
-    }
-    // A failed try keeps the known parties, and a late answer for another profile is dropped.
-    guard let all = try? await api.watchParties(), !Task.isCancelled,
-      session?.sessionId == api.session?.sessionId
-    else { return }
-    watchParties = all.filter { $0.id != watchParty?.partyID }
-  }
-
-  /// Joins a party and opens its title; the player then follows the others.
-  func joinWatchTogether(_ party: TVWatchPartySummary) async {
-    await leaveWatchTogether()
-    guard let api = watchClient() else { return }
-    let joined = TVWatchTogetherSession(api: api, deviceName: deviceName)
-    watchParty = joined
-    guard await joined.join(party), let state = joined.state,
-      let item = try? await api.summary(id: state.mediaId)
-    else {
-      // Usually the party ended meanwhile: drop it and show the parties that are left.
-      if watchParty === joined { await leaveWatchTogether() }
-      await refreshWatchParties()
-      return
-    }
-    remotePlaybackItem = item
-  }
-
-  /// Starts a party for the title the player shows.
-  func startWatchTogether(with controller: TVPlaybackController) async {
-    await leaveWatchTogether()
-    guard let api = watchClient() else { return }
-    let started = TVWatchTogetherSession(api: api, deviceName: deviceName)
-    watchParty = started
-    if await started.start(
-      mediaID: controller.currentMediaID, position: controller.position,
-      playing: controller.isPlaying)
-    {
-      attachWatchParty(to: controller)
-    }
-  }
-
-  /// A player opened: a party this Apple TV is in follows it.
-  func attachWatchParty(to controller: TVPlaybackController) {
+  /// A player opened: the heartbeat tells other devices what it plays.
+  func playerOpened(_ controller: TVPlaybackController) {
     openPlayer = controller
-    guard let party = watchParty, let api = watchClient() else { return }
-    party.openTitle = { [weak controller] mediaID in
-      Task {
-        guard let item = try? await api.summary(id: mediaID) else { return }
-        controller?.switchTitle(to: item)
-      }
-    }
-    controller.userActionObserver = { [weak party] action in party?.userAction(action) }
-    controller.watchStateObserver = { [weak party] in party?.playerChanged() }
-    party.attach(controller)
   }
 
-  /// The player closed: closing it leaves the party.
   func playerClosed(_ controller: TVPlaybackController) {
     if openPlayer === controller { openPlayer = nil }
-    controller.userActionObserver = nil
-    controller.watchStateObserver = nil
-    guard let party = watchParty, party.isFollowing(controller) else { return }
-    Task { await leaveWatchTogether() }
-  }
-
-  func leaveWatchTogether() async {
-    guard let party = watchParty else { return }
-    watchParty = nil
-    await party.leave()
   }
 
   private func clearPersonalState() {
-    if let party = watchParty {
-      watchParty = nil
-      Task { await party.leave() }
-    }
-    watchParties = []
     expiry?.cancel()
     expiry = nil
     session = nil

@@ -32,14 +32,14 @@ enum CinemaPreShowPlan {
   static let trailerLongestSeconds: Double = 300
   static let lastAdKey = "AureliaCinemaLastAd"
 
-  /// Whether a title may get a pre-show: not an episode or a download, with cinema mode on and
-  /// no one watching along. The server then says whether it is a film.
+  /// Whether a title may get a pre-show: not an episode or a download, with cinema mode on.
+  /// The server then says whether it is a film.
   static func wanted(
     preferences: PlaybackPreferences, presentation: PlaybackPresentation,
-    capabilities: Set<String>, watchingTogether: Bool
+    capabilities: Set<String>
   ) -> Bool {
     preferences.cinemaMode && (preferences.cinemaAds || preferences.cinemaTrailers > 0)
-      && presentation.offlineID == nil && presentation.trackScope == nil && !watchingTogether
+      && presentation.offlineID == nil && presentation.trackScope == nil
       && capabilities.contains(ServerFeatureNames.cinemaTrailers)
   }
 
@@ -113,14 +113,13 @@ final class CinemaPreShow: ObservableObject {
   /// few seconds, so a slow answer never holds up the film.
   static func prepare(
     profile: StoredServerProfile, presentation: PlaybackPresentation,
-    preferences: PlaybackPreferences, capabilities: Set<String>, watchingTogether: Bool,
+    preferences: PlaybackPreferences, capabilities: Set<String>,
     defaults: UserDefaults = .standard
   ) async -> CinemaPreShow? {
     let preferences = preferences.normalized
     guard
       CinemaPreShowPlan.wanted(
-        preferences: preferences, presentation: presentation, capabilities: capabilities,
-        watchingTogether: watchingTogether)
+        preferences: preferences, presentation: presentation, capabilities: capabilities)
     else { return nil }
     let api = APIClient(profile: profile)
     let trailers = await withTaskGroup(of: [CinemaTrailer]?.self) { group in

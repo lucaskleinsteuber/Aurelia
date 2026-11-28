@@ -955,7 +955,6 @@ export function parseRoute(pathname = "/", search = "") {
   if (parts.length === 1 && parts[0] === "collections") return { name: "collections" };
   if (parts.length === 1 && parts[0] === "history") return { name: "history" };
   if (parts.length === 1 && parts[0] === "statistics") return { name: "statistics" };
-  if (parts.length === 1 && parts[0] === "movie-night") return { name: "movie-night" };
   if (parts.length === 1 && parts[0] === "wishes") return { name: "wishes" };
   if (parts.length === 1 && parts[0] === "people") return { name: "people", query: query.get("q") ?? "" };
   if (parts.length === 1 && parts[0] === "welcome") return { name: "welcome" };
@@ -990,8 +989,6 @@ export function routePath(route) {
       return `/title/${route.id}`;
     case "watchlist":
       return "/watchlist";
-    case "movie-night":
-      return "/movie-night";
     case "wishes":
       return "/wishes";
     case "people":

@@ -185,7 +185,6 @@ test("cinema mode plans an ad, the other films' trailers and the curtain, only f
   const capabilities = ["cinema-trailers-v1"];
   assert.equal(cinemaWanted({ item: film, intent: "play", preferences, capabilities }), true);
   assert.equal(cinemaWanted({ item: { ...film, kind: "episode" }, intent: "play", preferences, capabilities }), false);
-  assert.equal(cinemaWanted({ item: film, intent: "play", preferences, capabilities, watchingTogether: true }), false);
   assert.equal(cinemaWanted({ item: film, intent: "play", preferences, capabilities: [] }), false);
   assert.equal(cinemaWanted({ item: film, intent: "play", preferences: { ...preferences, cinemaMode: false }, capabilities }), false);
   assert.equal(cinemaWanted({ item: film, intent: "play", preferences: { ...preferences, cinemaAds: false, cinemaTrailers: 0 }, capabilities }), false);

@@ -45,7 +45,7 @@ enum AureliaKeyboardShortcuts {
       entries: [
         Entry(label: "Save Power Settings", keys: ["⌘S"]),
         Entry(label: "Undo / Redo Artwork Crop", keys: ["⌘Z", "⇧⌘Z"]),
-        Entry(label: "Previous / Next in Wrapped or Movie Night", keys: ["←", "→"]),
+        Entry(label: "Previous / Next in Wrapped", keys: ["←", "→"]),
         Entry(label: "Pause or Resume Wrapped", keys: ["Space"]),
       ]),
   ]
