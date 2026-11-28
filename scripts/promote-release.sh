@@ -35,6 +35,8 @@ if [[ "$tag" == linux-app-* ]]; then
   . "$repository_root/scripts/workspace-paths.sh"
   command -v minisign >/dev/null || { echo "Install minisign to promote a Linux app release." >&2; exit 1; }
   signing_key="${TARVEN_MINISIGN_SECRET_KEY:-$HOME/.minisign/tarven-linux.key}"
+  # The same key, under the name it was created with before the rename to Tarven.
+  [ -n "${TARVEN_MINISIGN_SECRET_KEY:-}" ] || [ -s "$signing_key" ] || signing_key="$HOME/.minisign/aurelia-linux.key"
   [ -s "$signing_key" ] || { echo "Missing the minisign secret key $signing_key." >&2; exit 1; }
   public_key=$(sed -n 's/.*SigningPublicKey = "\([A-Za-z0-9+\/=]*\)";.*/\1/p' \
     "$repository_root/clients/linux/Tarven.Linux.Core/Updates/UpdateFeed.cs")

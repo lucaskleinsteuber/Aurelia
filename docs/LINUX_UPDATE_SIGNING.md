@@ -36,7 +36,7 @@ While `SigningPublicKey` is empty, a build installs no update at all and says so
 ## Every release
 
 `scripts/publish-linux-app-release.sh` signs `SHA256SUMS` with the secret key
-(`TARVEN_MINISIGN_SECRET_KEY`, default `~/.minisign/tarven-linux.key`, asks for its password),
+(`TARVEN_MINISIGN_SECRET_KEY`, default `~/.minisign/tarven-linux.key`, or `~/.minisign/aurelia-linux.key` from before the rename; asks for its password),
 checks the signature against the public key in `UpdateFeed.cs`, and only then uploads
 `SHA256SUMS.minisig` with the packages. A release without a valid signature is shown in the app
 but never installed.

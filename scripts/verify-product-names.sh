@@ -8,6 +8,9 @@ set -eu
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repository_root"
 allowed='
+  docs/LINUX_UPDATE_SIGNING.md
+  scripts/publish-linux-app-release.sh
+  scripts/promote-release.sh
   scripts/test-linux-server-takeover.sh
   scripts/test-linux-server-install.sh
   docs/README.md
