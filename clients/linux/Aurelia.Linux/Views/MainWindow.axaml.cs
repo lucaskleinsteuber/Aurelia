@@ -259,15 +259,17 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IDisposable
     /// Starts the version just installed and quits this one; the new one waits until this one has
     /// ended (audit Linux S2: "Quit and reopen" was left to the person).
     /// </summary>
-    public void RestartAfterUpdate() => Restart(edition: null);
+    public void RestartAfterUpdate() => Restart(edition: null, program: services.Updater?.RestartProgram);
 
     /// <summary>
     /// Quits and opens Aurelia again; the new process waits until this one has quit, so it never meets
     /// this instance and hands over to it.
     /// </summary>
-    private void Restart(string? edition)
+    private void Restart(string? edition, string? program = null)
     {
-        if (Environment.ProcessPath is { Length: > 0 } program)
+        // After Tarven (Aurelia's new name) replaced this package, its own program is started instead.
+        program ??= Environment.ProcessPath;
+        if (program is { Length: > 0 } && File.Exists(program))
         {
             var start = new System.Diagnostics.ProcessStartInfo(program) { UseShellExecute = false };
             if (edition is not null) start.Environment["AURELIA_EDITION"] = edition;

@@ -147,6 +147,17 @@ final class AppUpdater: ObservableObject {
       return
     }
     state = .checking
+    // Aurelia's new name is Tarven, a new app the updater can't install in its place: once Tarven
+    // has a Mac release, point there instead of looking for Aurelia updates.
+    if repository == TarvenHandover.previousRepository,
+      let page = await TarvenHandover.releasePage()
+    {
+      TarvenHandover.exportPreferences()
+      defaults.set(Date(), forKey: AppUpdatePreferences.checkKey(repository))
+      state = .failed(TarvenHandover.noticeMessage)
+      if !onPage { TarvenHandover.announce(page) }
+      return
+    }
     let beta = AppUpdatePreferences.betaUpdates(in: defaults)
     do {
       let result = try await client.catalog(

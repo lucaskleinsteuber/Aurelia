@@ -14,6 +14,8 @@ namespace Aurelia.Linux.Core.Updates;
 public interface IReleaseSource
 {
     Task<JsonArray> ReleasesAsync(CancellationToken cancellation);
+    /// <summary>The feed the last release list came from, when the source chose among several.</summary>
+    string? FeedRepository => null;
     Task<string> ChecksumsAsync(AppRelease release, CancellationToken cancellation);
     Task<string> SignatureAsync(AppRelease release, CancellationToken cancellation);
     Task DownloadAsync(AppRelease release, Stream destination, CancellationToken cancellation);
@@ -25,15 +27,34 @@ public sealed class GitHubReleaseSource(HttpMessageHandler? handler = null,
 {
     private readonly HttpClient client = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }) { Timeout = TimeSpan.FromMinutes(30) };
 
+    public string? FeedRepository { get; private set; }
+
+    /// <summary>
+    /// Asks Tarven's repository first (Aurelia's new name) and the old one while the rename has not
+    /// happened yet; a feed that does not exist is skipped, every other failure is reported.
+    /// </summary>
     public async Task<JsonArray> ReleasesAsync(CancellationToken cancellation)
     {
-        var repository = UpdateFeed.Repository(settings);
+        var feeds = UpdateFeed.Repositories(settings);
+        for (var index = 0; index < feeds.Count; index++)
+        {
+            var releases = await ReleasesAsync(feeds[index], skipMissing: index < feeds.Count - 1, cancellation);
+            if (releases is null) continue;
+            FeedRepository = feeds[index];
+            return releases;
+        }
+        throw new IOException("GitHub could not read the releases. Try again later.");
+    }
+
+    private async Task<JsonArray?> ReleasesAsync(string repository, bool skipMissing, CancellationToken cancellation)
+    {
         var first = $"https://api.github.com/repos/{repository}/releases?per_page=100";
         Uri? next = new(first);
         var results = new JsonArray();
         for (var page = 1; page <= 10 && next is not null; page++)
         {
             using var response = await GetAsync(next, false, cancellation);
+            if (page == 1 && skipMissing && response.StatusCode == HttpStatusCode.NotFound) return null;
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.NotFound)
                 throw new IOException(repository == UpdateFeed.PublicTestRepository
                     ? "The public update test feed is unavailable. Turn off Public Update Test to use the normal release feed."
@@ -73,7 +94,7 @@ public sealed class GitHubReleaseSource(HttpMessageHandler? handler = null,
 
     public async Task<string> ChecksumsAsync(AppRelease release, CancellationToken cancellation)
     {
-        if (release.SourceRepository != UpdateFeed.Repository(settings) || !AppRelease.IsAssetUrl(release.Checksums.AbsoluteUri, release.SourceRepository)) throw new IOException("The checksum address is invalid.");
+        if (!UpdateFeed.Serves(settings, release.SourceRepository) || !AppRelease.IsAssetUrl(release.Checksums.AbsoluteUri, release.SourceRepository)) throw new IOException("The checksum address is invalid.");
         using var response = await GetAsync(release.Checksums, true, cancellation);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellation);
@@ -84,7 +105,7 @@ public sealed class GitHubReleaseSource(HttpMessageHandler? handler = null,
 
     public async Task<string> SignatureAsync(AppRelease release, CancellationToken cancellation)
     {
-        if (release.Signature is not { } address || release.SourceRepository != UpdateFeed.Repository(settings)
+        if (release.Signature is not { } address || !UpdateFeed.Serves(settings, release.SourceRepository)
             || !AppRelease.IsAssetUrl(address.AbsoluteUri, release.SourceRepository)) throw new IOException("The signature address is invalid.");
         using var response = await GetAsync(address, true, cancellation);
         response.EnsureSuccessStatusCode();
@@ -96,7 +117,7 @@ public sealed class GitHubReleaseSource(HttpMessageHandler? handler = null,
 
     public async Task DownloadAsync(AppRelease release, Stream destination, CancellationToken cancellation)
     {
-        if (release.SourceRepository != UpdateFeed.Repository(settings) || !AppRelease.IsAssetUrl(release.Download.AbsoluteUri, release.SourceRepository)) throw new IOException("The package address is invalid.");
+        if (!UpdateFeed.Serves(settings, release.SourceRepository) || !AppRelease.IsAssetUrl(release.Download.AbsoluteUri, release.SourceRepository)) throw new IOException("The package address is invalid.");
         using var response = await GetAsync(release.Download, true, cancellation);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength is { } length && length != release.Bytes)
@@ -187,7 +208,9 @@ public sealed class LinuxPackageInstaller : IPackageInstaller
 
     public static (string Executable, string[] Arguments) Command(LinuxPackageKind kind, string path, bool zypper = false) => kind switch
     {
-        LinuxPackageKind.Arch => ("/usr/bin/pkexec", ["/usr/bin/pacman", "-U", "--noconfirm", path]),
+        // --ask 4 lets Tarven (Aurelia's new name) replace the conflicting aurelia-desktop package;
+        // --noconfirm alone would answer that question with no.
+        LinuxPackageKind.Arch => ("/usr/bin/pkexec", ["/usr/bin/pacman", "-U", "--noconfirm", "--ask", "4", path]),
         LinuxPackageKind.Debian => ("/usr/bin/pkexec", ["/usr/bin/apt-get", "install", "-y", path]),
         LinuxPackageKind.Rpm when zypper => ("/usr/bin/pkexec", ["/usr/bin/zypper", "--non-interactive", "install", "--allow-unsigned-rpm", path]),
         LinuxPackageKind.Rpm => ("/usr/bin/pkexec", ["/usr/bin/dnf", "install", "-y", path]),
@@ -238,6 +261,12 @@ public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installe
     /// </summary>
     public bool CanRestart => installer.Kind != LinuxPackageKind.Flatpak;
     public bool RestartRequired { get; private set; }
+
+    /// <summary>The installed update was Tarven, Aurelia's new name, so the program to start is another one.</summary>
+    public bool SwitchedToTarven { get; private set; }
+
+    /// <summary>The program to start after the update; null means this one again.</summary>
+    public string? RestartProgram => SwitchedToTarven ? "/usr/bin/tarven-desktop" : null;
     public bool PublicUpdateTestEnabled => UpdateFeed.IsPublicTest(settings);
     public const string BetaUpdatesKey = "betaUpdates";
     /// <summary>Off by default: only test computers see pre-releases.</summary>
@@ -284,11 +313,15 @@ public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installe
         try
         {
             Available = null;
-            Available = AppRelease.Newest(await source.ReleasesAsync(cancellation), installer.Kind, currentVersion, currentBuild, UpdateFeed.Repository(settings), BetaUpdatesEnabled, IsArm64);
+            var releases = await source.ReleasesAsync(cancellation);
+            Available = AppRelease.Newest(releases, installer.Kind, currentVersion, currentBuild,
+                source.FeedRepository ?? UpdateFeed.Repository(settings), BetaUpdatesEnabled, IsArm64);
             // Only a completed check waits a day; a failed automatic one is tried again next time.
             settings.Write(CheckKey, clock.GetUtcNow());
             Status = Available is { } release
-                ? $"Aurelia {release.Version} ({release.Build}){(release.IsBeta ? " Beta" : "")} is available."
+                ? release.SwitchesToTarven
+                    ? $"Tarven {release.Version} ({release.Build}){(release.IsBeta ? " Beta" : "")} is available: Aurelia's new name. Installing it replaces Aurelia and keeps your settings."
+                    : $"Aurelia {release.Version} ({release.Build}){(release.IsBeta ? " Beta" : "")} is available."
                 : "Aurelia is up to date.";
         }
         catch (PlatformNotSupportedException error)
@@ -353,7 +386,12 @@ public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installe
             Status = "Waiting for the package manager…";
             Notify();
             await installer.InstallAsync(path, cancellation);
-            Status = installer.Kind == LinuxPackageKind.Flatpak ? "The update is installed. Quit and reopen Aurelia to use it." : "The update is installed. Restart Aurelia to use it.";
+            SwitchedToTarven = release.SwitchesToTarven;
+            Status = SwitchedToTarven
+                ? installer.Kind == LinuxPackageKind.Flatpak
+                    ? "Tarven is installed. Quit Aurelia and open Tarven; it takes over your server connection and removes Aurelia."
+                    : "Tarven is installed and replaced Aurelia. Restart to open Tarven."
+                : installer.Kind == LinuxPackageKind.Flatpak ? "The update is installed. Quit and reopen Aurelia to use it." : "The update is installed. Restart Aurelia to use it.";
             Available = null;
             RestartRequired = true;
             return true;

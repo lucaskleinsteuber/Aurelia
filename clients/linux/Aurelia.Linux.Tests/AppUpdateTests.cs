@@ -62,10 +62,10 @@ public sealed class AppUpdateTests
     [Fact]
     public async Task ReleaseSearchLimitFailsInsteadOfReportingUpToDate()
     {
-        var handler = new FeedHandler((_, index) =>
+        var handler = new FeedHandler((request, index) =>
         {
             var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("[]") };
-            response.Headers.Add("Link", $"<https://api.github.com/repos/{AppRelease.Repository}/releases?per_page=100&page={index + 1}>; rel=\"next\"");
+            response.Headers.Add("Link", $"<https://api.github.com{request.RequestUri!.AbsolutePath}?per_page=100&page={index + 1}>; rel=\"next\"");
             return response;
         });
         using var source = new GitHubReleaseSource(handler);
@@ -201,12 +201,17 @@ public sealed class AppUpdateTests
         using var source = new GitHubReleaseSource(handler);
 
         var releases = await source.ReleasesAsync(TestContext.Current.CancellationToken);
-        Assert.Equal("https://api.github.com/repos/lucaskleinsteuber/Aurelia/releases?per_page=100", Assert.Single(handler.Requests));
+        // Tarven's repository (Aurelia's new name) does not exist yet, so the old one answers.
+        Assert.Equal(
+            ["https://api.github.com/repos/lucaskleinsteuber/Tarven/releases?per_page=100",
+             "https://api.github.com/repos/lucaskleinsteuber/Aurelia/releases?per_page=100"], handler.Requests);
+        Assert.Equal(UpdateFeed.StandardRepository, source.FeedRepository);
         var release = AppRelease.Newest(releases, LinuxPackageKind.Arch, new Version(0, 3, 0), 4);
         Assert.NotNull(release);
+        Assert.False(release.SwitchesToTarven);
         Assert.Equal("https://api.github.com/repos/lucaskleinsteuber/Aurelia/releases/assets/10", release.Download.AbsoluteUri);
         Assert.Equal("synthetic-checksums", await source.ChecksumsAsync(release, TestContext.Current.CancellationToken));
-        Assert.Equal("https://api.github.com/repos/lucaskleinsteuber/Aurelia/releases/assets/11", handler.Requests[1]);
+        Assert.Equal("https://api.github.com/repos/lucaskleinsteuber/Aurelia/releases/assets/11", handler.Requests[2]);
     }
 
     [Theory]
@@ -400,6 +405,78 @@ public sealed class AppUpdateTests
         Assert.Equal("/usr/bin/pkexec", command.Executable);
         Assert.Equal(manager, command.Arguments[0]);
         Assert.Equal(path, command.Arguments[^1]);
+    }
+
+    /// <summary>
+    /// After the repository is renamed to Tarven (Aurelia's new name), this version reads the new
+    /// feed directly, takes the Tarven package and installs it in Aurelia's place.
+    /// </summary>
+    [Fact]
+    public async Task AfterTheRenameTheTarvenPackageReplacesAurelia()
+    {
+        var handler = new FeedHandler((request, index) =>
+        {
+            Assert.StartsWith("/repos/" + UpdateFeed.RenamedRepository + "/", request.RequestUri!.AbsolutePath, StringComparison.Ordinal);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(index == 1 ? new JsonArray(TarvenReleaseNode()).ToJsonString() : "synthetic-checksums"),
+            };
+        });
+        using var source = new GitHubReleaseSource(handler);
+        var releases = await source.ReleasesAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(UpdateFeed.RenamedRepository, source.FeedRepository);
+        Assert.Null(AppRelease.Newest(releases, LinuxPackageKind.Arch, new Version(0, 3, 0), 4));
+        var release = AppRelease.Newest(releases, LinuxPackageKind.Arch, new Version(0, 3, 0), 4, UpdateFeed.RenamedRepository);
+        Assert.NotNull(release);
+        Assert.True(release.SwitchesToTarven);
+        Assert.Equal("Tarven", release.ProductName);
+        Assert.Equal("Tarven-Desktop-1.0.0-5-x86_64.pkg.tar.zst", release.FileName);
+        Assert.Equal("synthetic-checksums", await source.ChecksumsAsync(release, TestContext.Current.CancellationToken));
+
+        // pacman must be allowed to remove the conflicting aurelia-desktop package.
+        Assert.Equal(["/usr/bin/pacman", "-U", "--noconfirm", "--ask", "4", "/tmp/p"],
+            LinuxPackageInstaller.Command(LinuxPackageKind.Arch, "/tmp/p").Arguments);
+    }
+
+    [Fact]
+    public async Task InstallingTarvenStartsTarvenAfterwards()
+    {
+        var sums = Convert.ToHexStringLower(SHA256.HashData(Package)) + "  Tarven-Desktop-1.0.0-5-x86_64.pkg.tar.zst";
+        var source = new TarvenSource(sums);
+        var installer = new FakeInstaller { Prepared = true };
+        var cache = Path.Combine(Path.GetTempPath(), "aurelia-tarven-switch-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var updater = new AppUpdater(source, installer, new MemorySettingsStore(), cache, new Version(0, 3, 0), 4,
+                architecture: System.Runtime.InteropServices.Architecture.X64, signingKey: TestSigning.PublicKey);
+            await updater.CheckAsync(true, TestContext.Current.CancellationToken);
+            Assert.Contains("Aurelia's new name", updater.Status, StringComparison.Ordinal);
+            Assert.Null(updater.RestartProgram);
+            Assert.True(await updater.InstallAsync(cancellation: TestContext.Current.CancellationToken));
+            Assert.True(installer.Installed);
+            Assert.True(updater.SwitchedToTarven);
+            Assert.Equal("/usr/bin/tarven-desktop", updater.RestartProgram);
+        }
+        finally { if (Directory.Exists(cache)) Directory.Delete(cache, true); }
+    }
+
+    private static JsonObject TarvenReleaseNode()
+    {
+        var release = ReleaseNode("linux-app-1.0.0-5");
+        foreach (var asset in release["assets"]!.AsArray().OfType<JsonObject>())
+            asset["url"] = asset["url"]!.GetValue<string>().Replace(UpdateFeed.StandardRepository, UpdateFeed.RenamedRepository, StringComparison.Ordinal);
+        release["assets"]![0]!["name"] = "Tarven-Desktop-1.0.0-5-x86_64.pkg.tar.zst";
+        return release;
+    }
+
+    private sealed class TarvenSource(string sums) : IReleaseSource
+    {
+        public string? FeedRepository => UpdateFeed.RenamedRepository;
+        public Task<JsonArray> ReleasesAsync(CancellationToken cancellation) => Task.FromResult(new JsonArray(TarvenReleaseNode()));
+        public Task<string> ChecksumsAsync(AppRelease release, CancellationToken cancellation) => Task.FromResult(sums);
+        public Task<string> SignatureAsync(AppRelease release, CancellationToken cancellation) =>
+            Task.FromResult(TestSigning.Sign(sums, $"Tarven for Linux 1.0.0 (5) channel=stable repository={UpdateFeed.RenamedRepository}"));
+        public async Task DownloadAsync(AppRelease release, Stream destination, CancellationToken cancellation) => await destination.WriteAsync(Package, cancellation);
     }
 
     private const string FileName = "Aurelia-Desktop-1.0.0-5-x86_64.pkg.tar.zst";
@@ -652,9 +729,11 @@ public sealed class AppUpdateTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
         {
             Requests.Add(request.RequestUri!.AbsoluteUri);
+            if (request.RequestUri.AbsolutePath.StartsWith("/repos/" + UpdateFeed.RenamedRepository + "/", StringComparison.Ordinal))
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(Requests.Count == 1
+                Content = new StringContent(Requests.Count == 2
                     ? new JsonArray(ReleaseNode("linux-app-1.0.0-5")).ToJsonString()
                     : "synthetic-checksums"),
             });

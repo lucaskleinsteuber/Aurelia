@@ -14,6 +14,14 @@ public sealed record AppRelease(string Tag, Version Version, int Build, string N
     public const string TagPrefix = "linux-app-";
     /// <summary>The owner's minisign signature of SHA256SUMS; without it nothing is installed.</summary>
     public const string SignatureFile = "SHA256SUMS.minisig";
+    /// <summary>The package name prefix of Aurelia's new name; such a release replaces this app.</summary>
+    public const string RenamedProduct = "Tarven";
+
+    /// <summary>A release of Tarven, Aurelia's new name: installing it replaces aurelia-desktop.</summary>
+    public bool SwitchesToTarven => FileName.StartsWith(RenamedProduct + "-", StringComparison.Ordinal);
+
+    /// <summary>The product name to show for this release.</summary>
+    public string ProductName => SwitchesToTarven ? RenamedProduct : "Aurelia";
 
     public static (Version Version, int Build)? ParseTag(string tag)
     {
@@ -31,8 +39,8 @@ public sealed record AppRelease(string Tag, Version Version, int Build, string N
     /// The package for this kind and processor, named as each distribution names it: amd64/arm64
     /// for Debian, x86_64/aarch64 for the others. 64-bit ARM (arm64) has every format except Flatpak.
     /// </summary>
-    public static string PackageName(Version version, int build, LinuxPackageKind kind, bool arm64 = false) =>
-        $"Aurelia-Desktop-{version}-{build}-" + (kind switch
+    public static string PackageName(Version version, int build, LinuxPackageKind kind, bool arm64 = false, string product = "Aurelia") =>
+        $"{product}-Desktop-{version}-{build}-" + (kind switch
         {
             LinuxPackageKind.Debian => arm64 ? "arm64.deb" : "amd64.deb",
             LinuxPackageKind.Rpm => arm64 ? "aarch64.rpm" : "x86_64.rpm",
@@ -51,9 +59,15 @@ public sealed record AppRelease(string Tag, Version Version, int Build, string N
             if (node["draft"]?.GetValue<bool>() == true || (beta && !includeBeta)
                 || node["tag_name"]?.GetValue<string>() is not { } tag || ParseTag(tag) is not { } parsed
                 || parsed.Build <= currentBuild || parsed.Version < currentVersion || node["assets"] is not JsonArray assets) continue;
-            var name = PackageName(parsed.Version, parsed.Build, kind, arm64);
             JsonObject? Asset(string file) => assets.OfType<JsonObject>().FirstOrDefault(a => a["name"]?.GetValue<string>() == file && a["state"]?.GetValue<string>() == "uploaded");
+            // A Tarven release (Aurelia's new name) is preferred over an Aurelia package of the same release.
+            var name = PackageName(parsed.Version, parsed.Build, kind, arm64, RenamedProduct);
             var package = Asset(name);
+            if (package is null)
+            {
+                name = PackageName(parsed.Version, parsed.Build, kind, arm64);
+                package = Asset(name);
+            }
             var sums = Asset("SHA256SUMS");
             if (package?["url"]?.GetValue<string>() is not { } address || sums?["url"]?.GetValue<string>() is not { } checksums
                 || !IsAssetUrl(address, repository) || !IsAssetUrl(checksums, repository) || package["size"]?.GetValue<long>() is not > 0) continue;

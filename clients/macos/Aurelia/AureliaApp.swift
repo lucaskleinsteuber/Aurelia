@@ -156,9 +156,14 @@ final class AureliaAppDelegate: NSObject, NSApplicationDelegate {
       AppModel.active?.openWishes()
     }
     NSApplication.shared.activate()
+    // Kept current for Tarven, Aurelia's new name, which takes the settings over once.
+    TarvenHandover.exportPreferences()
     AppUpdater.shared.checkInBackgroundIfDue()
     let timer = Timer.scheduledTimer(withTimeInterval: 3_600, repeats: true) { _ in
-      Task { @MainActor in AppUpdater.shared.checkInBackgroundIfDue() }
+      Task { @MainActor in
+        TarvenHandover.exportPreferences()
+        AppUpdater.shared.checkInBackgroundIfDue()
+      }
     }
     timer.tolerance = 300
     updateCheckTimer = timer

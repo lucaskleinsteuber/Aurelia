@@ -831,7 +831,7 @@ public sealed class SettingsView : UserControl
                 check.IsEnabled = !updater.IsBusy && !updater.RestartRequired;
                 install.IsEnabled = !updater.IsBusy;
                 install.IsVisible = updater.Available is not null || updater.RestartRequired;
-                install.Content = !updater.RestartRequired ? "Download & Install…" : updater.CanRestart ? "Restart Aurelia" : "Quit Aurelia";
+                install.Content = !updater.RestartRequired ? "Download & Install…" : updater.CanRestart ? updater.SwitchedToTarven ? "Open Tarven" : "Restart Aurelia" : "Quit Aurelia";
             }
             System.ComponentModel.PropertyChangedEventHandler changed = (_, _) => Dispatcher.UIThread.Post(RefreshUpdate);
             updater.PropertyChanged += changed;
@@ -846,8 +846,10 @@ public sealed class SettingsView : UserControl
                     else QuitAfterUpdate?.Invoke();
                     return;
                 }
-                if (updater.Available is not { } release || !await sheets.ConfirmAsync("Install Aurelia " + release.Version + "?",
-                    "Aurelia downloads the package and checks its SHA-256 checksum. Your package manager then asks for authorization. Playback and this computer's server stop before installation; your library and settings stay. Afterwards Aurelia starts again.", "Install Update", false)) return;
+                if (updater.Available is not { } release || !await sheets.ConfirmAsync("Install " + release.ProductName + " " + release.Version + "?",
+                    release.SwitchesToTarven
+                        ? "Aurelia is now called Tarven. Tarven replaces this app and takes over your server connection, settings and this computer's server. It is downloaded and checked like any update; your package manager then asks for authorization. Playback and this computer's server stop before installation. Afterwards Tarven starts."
+                        : "Aurelia downloads the package and checks its SHA-256 checksum. Your package manager then asks for authorization. Playback and this computer's server stop before installation; your library and settings stay. Afterwards Aurelia starts again.", "Install Update", false)) return;
                 if (InstallUpdate is { } action) await action();
                 else await updater.InstallAsync();
             };
