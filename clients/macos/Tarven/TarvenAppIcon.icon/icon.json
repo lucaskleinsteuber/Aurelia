@@ -17,11 +17,11 @@
   },
   "groups": [
     {
-      "name": "Tarven A",
+      "name": "Tarven T",
       "layers": [
         {
-          "image-name": "a.svg",
-          "name": "Tarven A",
+          "image-name": "t.svg",
+          "name": "Tarven T",
           "glass": true
         }
       ],

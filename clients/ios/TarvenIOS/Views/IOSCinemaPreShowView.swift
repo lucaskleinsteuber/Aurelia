@@ -643,7 +643,7 @@ enum IOSCinemaBrand {
   static let echoBottom = Color(red: 0x5B / 255, green: 0x4F / 255, blue: 0xE0 / 255)
 }
 
-/// The A of Tarven's icon with its light echo, drawn from the icon's own outline.
+/// The T of Tarven's icon with its light echo, drawn from the icon's own outline.
 struct IOSCinemaMark: View {
   var body: some View {
     ZStack {
@@ -665,15 +665,15 @@ struct IOSCinemaMark: View {
   }
 }
 
-/// The A's outline, from the app icon (a 1024-unit square), cropped to the letter.
+/// The T's outline, from the app icon (a 1024-unit square), cropped to the letter.
 struct IOSCinemaLetter: Shape {
-  /// The light echo: the same A, 34 and 30 icon units to the lower right.
+  /// The light echo: the same T, 34 and 30 icon units to the lower right.
   let echo: Bool
 
   private static let outline =
-    "M329.3 792.0 Q296.8 792.0 278.0 774.3 Q259.2 756.7 259.2 726.0 Q259.2 706.7 268.8 680.8 L402.9 312.8 Q417.9 271.2 443.8 251.6 Q469.6 232.0 510.0 232.0 Q552.8 232.0 579.0 251.1 Q605.2 270.2 620.7 312.7 L755.8 680.8 Q764.8 705.6 764.8 725.7 Q764.8 754.6 745.3 773.3 Q725.7 792.0 695.8 792.0 Q665.8 792.0 648.9 777.3 Q631.9 762.6 623.0 729.2 L604.5 669.2 L418.6 669.2 L400.1 727.2 Q390.3 761.7 373.7 776.9 Q357.1 792.0 329.3 792.0 Z M446.2 564.8 L574.3 564.8 L510.7 355.6 L507.9 355.6 Z"
+    "M328 232 L696 232 Q762 232 762 298 L762 306 Q762 372 696 372 L610 372 Q580 372 580 402 L580 724 Q580 792 512 792 Q444 792 444 724 L444 402 Q444 372 414 372 L328 372 Q262 372 262 306 L262 298 Q262 232 328 232 Z"
   /// The letter and its echo in icon units, so together they fill the frame.
-  private static let bounds = CGRect(x: 259.2, y: 232, width: 539.6, height: 590)
+  private static let bounds = CGRect(x: 262, y: 232, width: 534, height: 590)
 
   func path(in rect: CGRect) -> Path {
     let scale = min(rect.width / Self.bounds.width, rect.height / Self.bounds.height)
@@ -770,7 +770,7 @@ private struct IOSCinemaCurtain: View {
     .accessibilityLabel("Feature presentation: \(title)")
   }
 
-  /// Tarven presents: the A with its light echo, then the film's name in Tarven's own type.
+  /// Tarven presents: the T with its light echo, then the film's name in Tarven's own type.
   private func titleCard(height: CGFloat) -> some View {
     VStack(spacing: height * 0.022) {
       ZStack {
