@@ -15,7 +15,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
-- Server, Mac, Linux and browser: updating a Linux package server shows a progress bar and the current step (checking, verifying, downloading, unpacking, restarting) in Settings › Server › Updates on the Mac, in the Linux app and in the browser, as well as in the terminal during `sudo aurelia update`.
+- Server and all apps: updating a Linux package server shows a progress bar and the current step (checking, verifying, downloading, unpacking, restarting) in Server Updates on the Mac, in the Linux app, in the browser, on iPhone and iPad and on Apple TV, as well as in the terminal during `sudo aurelia update`; on the Mac, iPhone, iPad and Apple TV the page waits through the restart instead of showing an error.
 - Server and all apps: Edit Profile › Screen Time has Allow Offline Downloads (off by default). While screen time rules apply to a profile, new offline downloads are refused unless the owner turns this switch on; titles already downloaded on a device stay.
 - Apple TV: the player has Chapters (a menu and marks on the timeline) and shows the profile's Scene Notes at their moment, with a list to jump to them. Administrators find Subtitles… in a title's More menu: the downloaded subtitles, an OpenSubtitles search by language, Download and Remove.
 - Apple TV: a People tab lists everyone in the library's credits with a search, and a person's page shows their life and Known For with Wish or Me Too. Wishes has Make a Wish (a TMDB search by keyboard or dictation), Me Too and Remove My Wish, and for administrators In Library and Decline with a short answer. Home shows “Your wish is here” when a wish arrived, and the owner hears about a new device with That Was Me or Block.

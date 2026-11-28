@@ -851,6 +851,46 @@ struct IOSServerUpdateStatus: Codable, Equatable, Sendable {
   let state: String
   let checkedAt: String?
   let message: String?
+  /// From newer servers, while checking or installing: 0–100 and the current step ("starting",
+  /// "checking", "verifying", "downloading", "unpacking" or "restarting"). Older servers send neither.
+  var progressPercent: Int? = nil
+  var phase: String? = nil
+
+  /// The server is checking or installing right now.
+  var isBusy: Bool { state == "checking" || state == "installing" }
+}
+
+/// What Server Updates shows while the server checks or installs, worded as on the Mac.
+/// `reconnecting` is the moment the server restarts with the new version and does not answer.
+enum IOSServerUpdateProgress {
+  /// 0–100, or nil when the server reports no percentage (the bar then runs without one).
+  static func percent(_ status: IOSServerUpdateStatus, reconnecting: Bool) -> Int? {
+    if reconnecting { return 95 }
+    return status.progressPercent.map { min(max($0, 0), 100) }
+  }
+
+  static func fraction(_ status: IOSServerUpdateStatus, reconnecting: Bool) -> Double? {
+    percent(status, reconnecting: reconnecting).map { Double($0) / 100 }
+  }
+
+  static func text(_ status: IOSServerUpdateStatus, reconnecting: Bool) -> String {
+    if reconnecting { return "Waiting for server to restart…" }
+    switch status.phase {
+    case "starting":
+      return status.state == "checking" ? "Starting update check…" : "Preparing server update…"
+    case "checking": return "Checking GitHub for updates…"
+    case "verifying": return "Verifying release signature…"
+    case "downloading": return "Downloading server update…"
+    case "unpacking": return "Verifying checksum and unpacking…"
+    case "restarting": return "Installing and restarting server…"
+    default:
+      if status.state == "checking" { return "Checking GitHub for updates…" }
+      if let newest = status.newest {
+        return "Installing \(newest)… The server restarts by itself."
+      }
+      return "Installing server update…"
+    }
+  }
 }
 
 struct IOSServerPower: Codable, Equatable, Sendable {

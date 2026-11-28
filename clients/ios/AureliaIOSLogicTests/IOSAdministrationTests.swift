@@ -149,6 +149,54 @@ struct IOSAdministrationTests {
     #expect(decoded["c"] == .number(2.5))
   }
 
+  @Test func serverUpdateShowsTheStepAndPercentageWhileItInstalls() throws {
+    let older = try updateStatus()
+    #expect(older.isBusy)
+    #expect(older.progressPercent == nil)
+    #expect(UpdateProgress.fraction(older, reconnecting: false) == nil)
+    #expect(
+      UpdateProgress.text(older, reconnecting: false)
+        == "Installing 2.25.0 (179)… The server restarts by itself.")
+
+    let downloading = try updateStatus(#","progressPercent":42,"phase":"downloading""#)
+    #expect(UpdateProgress.percent(downloading, reconnecting: false) == 42)
+    #expect(UpdateProgress.fraction(downloading, reconnecting: false) == 0.42)
+    #expect(UpdateProgress.text(downloading, reconnecting: false) == "Downloading server update…")
+    // While the server restarts it does not answer; the page waits instead of showing an error.
+    #expect(UpdateProgress.percent(downloading, reconnecting: true) == 95)
+    #expect(
+      UpdateProgress.text(downloading, reconnecting: true) == "Waiting for server to restart…")
+
+    var odd = downloading
+    odd.progressPercent = 140
+    #expect(UpdateProgress.percent(odd, reconnecting: false) == 100)
+    odd.progressPercent = -3
+    #expect(UpdateProgress.percent(odd, reconnecting: false) == 0)
+
+    var preparing = downloading
+    preparing.phase = "starting"
+    #expect(UpdateProgress.text(preparing, reconnecting: false) == "Preparing server update…")
+    let check = IOSServerUpdateStatus(
+      available: true, installed: "2.24.0 (178)", newest: nil, updateAvailable: false,
+      state: "checking", checkedAt: nil, message: nil, progressPercent: 10, phase: "starting")
+    #expect(UpdateProgress.text(check, reconnecting: false) == "Starting update check…")
+    let idle = IOSServerUpdateStatus(
+      available: true, installed: "2.25.0 (179)", newest: nil, updateAvailable: false,
+      state: "idle", checkedAt: nil, message: nil)
+    #expect(!idle.isBusy)
+  }
+
+  private typealias UpdateProgress = IOSServerUpdateProgress
+
+  /// A server installing 2.25.0; `extra` adds fields, as a newer server sends them.
+  private func updateStatus(_ extra: String = "") throws -> IOSServerUpdateStatus {
+    let json =
+      #"{"available":true,"installed":"2.24.0 (178)","newest":"2.25.0 (179)","#
+      + #""updateAvailable":true,"state":"installing","checkedAt":null,"message":null"#
+      + extra + "}"
+    return try JSONDecoder().decode(IOSServerUpdateStatus.self, from: Data(json.utf8))
+  }
+
   @Test func powerOffersOnlyWhatTheComputerCanDo() throws {
     let linux = IOSServerPower(
       available: true, mode: "sleep", idleMinutes: 30, awakeFrom: nil, awakeUntil: nil,

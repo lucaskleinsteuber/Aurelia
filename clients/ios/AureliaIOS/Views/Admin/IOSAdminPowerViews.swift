@@ -201,7 +201,6 @@ private struct IOSAdminPowerForm: View {
   }
 }
 
-/// Settings › Server Updates: a Linux server installed from the package updates itself.
 /// Settings › Power › Right Now for the owner: Sleep, Turn Off or Stop Now, without waiting for the
 /// unused minutes ("power-now-v1").
 private struct IOSAdminPowerNowSection: View {
@@ -280,6 +279,7 @@ private struct IOSAdminPowerNowSection: View {
   }
 }
 
+/// Settings › Server Updates: a Linux server installed from the package updates itself.
 struct IOSAdminUpdatesView: View {
   var body: some View {
     IOSAdminLoader {
@@ -294,9 +294,17 @@ struct IOSAdminUpdatesView: View {
 
 private struct IOSAdminUpdatesForm: View {
   @EnvironmentObject private var admin: IOSAdministrationModel
+  @Environment(\.scenePhase) private var scenePhase
   let status: IOSServerUpdateStatus
   let reload: @MainActor @Sendable () async -> Void
   @State private var confirmation: IOSAdminConfirmation?
+  /// The newest status read while the server checks or installs.
+  @State private var live: IOSServerUpdateStatus?
+  /// The server restarts with the new version and does not answer for a moment.
+  @State private var reconnecting = false
+
+  private var shown: IOSServerUpdateStatus { live ?? status }
+  private var idle: Bool { shown.state == "idle" || shown.state == "failed" }
 
   var body: some View {
     Form {
@@ -311,22 +319,22 @@ private struct IOSAdminUpdatesForm: View {
         }
       }
       Section {
-        LabeledContent("Installed", value: status.installed)
-        LabeledContent("Newest", value: status.newest ?? "—")
-        LabeledContent("Last Checked", value: IOSAdminFormat.relative(status.checkedAt))
-        if status.state == "checking" || status.state == "installing" {
-          ProgressView(status.state == "checking" ? "Checking…" : "Installing…")
+        LabeledContent("Installed", value: shown.installed)
+        LabeledContent("Newest", value: shown.newest ?? "—")
+        LabeledContent("Last Checked", value: IOSAdminFormat.relative(shown.checkedAt))
+        if shown.isBusy || reconnecting {
+          IOSServerUpdateProgressView(status: shown, reconnecting: reconnecting)
         }
-        if let message = status.message { Text(message).foregroundStyle(.secondary) }
+        if let message = shown.message { Text(message).foregroundStyle(.secondary) }
       }
       if status.available {
         Section {
           Button("Check for Updates") {
             Task { await admin.perform("Checking…") { _ = try await $0.checkServerUpdates() } }
           }
-          .disabled(status.state != "idle" && status.state != "failed")
-          if status.updateAvailable {
-            Button("Install \(status.newest ?? "Update")…") {
+          .disabled(!idle)
+          if shown.updateAvailable {
+            Button("Install \(shown.newest ?? "Update")…") {
               confirmation = IOSAdminConfirmation(
                 title: "Install the update?",
                 message: "The server restarts once it is installed. Playback stops for a moment.",
@@ -340,7 +348,7 @@ private struct IOSAdminUpdatesForm: View {
                 }
               }
             }
-            .disabled(status.state != "idle" && status.state != "failed")
+            .disabled(!idle)
           }
         } footer: {
           Text("Your library, profiles and settings stay as they are.")
@@ -351,8 +359,61 @@ private struct IOSAdminUpdatesForm: View {
     .background(IOSDesign.canvas.ignoresSafeArea())
     .refreshable { await reload() }
     .adminConfirmation($confirmation)
-    .adminPolling(
-      every: 3, while: status.state == "checking" || status.state == "installing", reload: reload)
+    .onChange(of: status) { _, _ in live = nil }
+    .task(id: status.isBusy && scenePhase == .active) { await follow() }
+  }
+
+  /// Reads the status every 1.5 seconds while the server checks or installs. While it restarts
+  /// with the new version it does not answer; that is waiting, not an error. Once it is done the
+  /// page loads again, now with the installed version.
+  private func follow() async {
+    guard status.isBusy, scenePhase == .active else { return }
+    defer { reconnecting = false }
+    while !Task.isCancelled {
+      do { try await Task.sleep(for: .milliseconds(1500)) } catch { return }
+      do {
+        let read = try await IOSAPIClient.withBackgroundRequests {
+          try await admin.run { try await $0.serverUpdates() }
+        }
+        reconnecting = false
+        live = read
+        if !read.isBusy {
+          await reload()
+          return
+        }
+      } catch is CancellationError {
+        return
+      } catch {
+        reconnecting = true
+      }
+    }
+  }
+}
+
+/// The bar with the current step and percentage while the server checks or installs.
+private struct IOSServerUpdateProgressView: View {
+  let status: IOSServerUpdateStatus
+  let reconnecting: Bool
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      if let fraction = IOSServerUpdateProgress.fraction(status, reconnecting: reconnecting) {
+        ProgressView(value: fraction)
+      } else {
+        ProgressView().progressViewStyle(.linear)
+      }
+      HStack(spacing: 8) {
+        Text(IOSServerUpdateProgress.text(status, reconnecting: reconnecting))
+          .font(.subheadline).foregroundStyle(.secondary)
+        Spacer(minLength: 8)
+        if let percent = IOSServerUpdateProgress.percent(status, reconnecting: reconnecting) {
+          Text("\(percent)%").font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
+        }
+      }
+    }
+    .padding(.vertical, 4)
+    .accessibilityElement(children: .combine)
+    .accessibilityIdentifier("server-update-progress")
   }
 }
 

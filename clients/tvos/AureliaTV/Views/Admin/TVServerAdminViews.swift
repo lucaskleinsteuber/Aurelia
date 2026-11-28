@@ -534,8 +534,11 @@ struct TVServerPowerPage: View {
 
 struct TVServerUpdatesPage: View {
   @ObservedObject var admin: TVAdministrationModel
+  @Environment(\.scenePhase) private var scenePhase
   @State private var status: TVServerUpdateStatus?
   @State private var confirmInstall = false
+  /// The server restarts with the new version and does not answer for a moment.
+  @State private var reconnecting = false
 
   var body: some View {
     TVSettingsPage(
@@ -553,15 +556,19 @@ struct TVServerUpdatesPage: View {
             title: "Newest",
             value: status.newest ?? (status.updateAvailable ? "—" : status.installed))
           TVSettingsRow(title: "Checked", value: TVAdminFormat.date(status.checkedAt))
+          if status.isBusy || reconnecting {
+            TVServerUpdateProgressView(status: status, reconnecting: reconnecting)
+          }
           if let message = status.message { TVSettingsNote(text: message) }
           TVSettingsRow(title: "Check Now", id: "updates-check") {
+            guard !status.isBusy, !reconnecting else { return }
             Task {
               if let value = await admin.value({ try await $0.checkServerUpdates() }) {
                 self.status = value
               }
             }
           }
-          if status.updateAvailable {
+          if status.updateAvailable, !status.isBusy, !reconnecting {
             TVSettingsRow(
               title: "Install \(status.newest ?? "Update")", id: "updates-install",
               role: .destructive
@@ -571,6 +578,7 @@ struct TVServerUpdatesPage: View {
       }
     }
     .task { status = await admin.value { try await $0.serverUpdates() } }
+    .task(id: status?.isBusy == true && scenePhase == .active) { await follow() }
     .confirmationDialog(
       "Install the update?", isPresented: $confirmInstall, titleVisibility: .visible
     ) {
@@ -585,5 +593,54 @@ struct TVServerUpdatesPage: View {
     } message: {
       Text("The server restarts with the new version; whoever is watching stops for a moment.")
     }
+  }
+
+  /// Reads the status every 1.5 seconds while the server checks or installs. While it restarts
+  /// with the new version it does not answer; that is waiting, not an error.
+  private func follow() async {
+    guard status?.isBusy == true, scenePhase == .active else { return }
+    defer { reconnecting = false }
+    while !Task.isCancelled {
+      do { try await Task.sleep(for: .milliseconds(1500)) } catch { return }
+      do {
+        let read = try await TVAPIClient.withBackgroundRequests {
+          try await admin.run { try await $0.serverUpdates() }
+        }
+        reconnecting = false
+        status = read
+        if !read.isBusy { return }
+      } catch is CancellationError {
+        return
+      } catch {
+        reconnecting = true
+      }
+    }
+  }
+}
+
+/// The bar with the current step and percentage while the server checks or installs.
+private struct TVServerUpdateProgressView: View {
+  let status: TVServerUpdateStatus
+  let reconnecting: Bool
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      if let fraction = TVServerUpdateProgress.fraction(status, reconnecting: reconnecting) {
+        ProgressView(value: fraction)
+      } else {
+        ProgressView().progressViewStyle(.linear)
+      }
+      HStack(spacing: 20) {
+        Text(TVServerUpdateProgress.text(status, reconnecting: reconnecting))
+        Spacer(minLength: 20)
+        if let percent = TVServerUpdateProgress.percent(status, reconnecting: reconnecting) {
+          Text("\(percent)%").monospacedDigit()
+        }
+      }
+      .font(.system(size: 24)).foregroundStyle(.secondary)
+    }
+    .padding(.horizontal, 10)
+    .accessibilityElement(children: .combine)
+    .accessibilityIdentifier("server-update-progress")
   }
 }
